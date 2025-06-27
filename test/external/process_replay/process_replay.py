@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
+import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools
 from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.kernelize.kernelize import get_kernelize_map
@@ -49,7 +49,7 @@ replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_ke
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int) -> None:
+def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
@@ -64,8 +64,10 @@ def diff(offset:int) -> None:
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
-      if (replayer:=replayers.get(name)) is None: continue
-      with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
+      if (replayer:=fxns.get(name)) is None: continue
+      with Context(**ctx_vars):
+        if (ret:=replayer(ret, *args, **kwargs)) is None: continue
+        good, compare, metadata = ret
       if good != compare:
         for m in metadata: trunc_log(m)
         logging.info(loc)
@@ -79,6 +81,25 @@ def diff(offset:int) -> None:
   conn.commit()
   cur.close()
 
+# *** generic runner to map rows of a table to a function in parallel
+
+def _pmap(fxns:dict[str, Callable]) -> None:
+  conn = db_connection()
+  cur = conn.cursor()
+  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  except sqlite3.OperationalError:
+    raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+  finally:
+    conn.commit()
+    cur.close()
+
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
+    inputs = list(range(0, row_count, PAGE_SIZE))
+    list(tqdm(pool.imap_unordered(functools.partial(diff, fxns=fxns), inputs), total=len(inputs)))
+    pool.close()
+    pool.join()
+    pool.terminate()
+
 # *** main loop
 
 if __name__ == "__main__":
@@ -86,20 +107,8 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
-  conn = db_connection()
-  cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-  except sqlite3.OperationalError:
-    warnings.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?", ProcessReplayWarning)
-    exit(int(ASSERT_DIFF))
-  finally:
-    conn.commit()
-    cur.close()
-
   logging.info(f"running process replay with {ASSERT_DIFF=}")
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
-    inputs = list(range(0, row_count, PAGE_SIZE))
-    list(tqdm(pool.imap_unordered(diff, inputs), total=len(inputs)))
-    pool.close()
-    pool.join()
-    pool.terminate()
+  try: _pmap(replayers)
+  except Exception as e:
+    logging.info("process replay err", e)
+    exit(int(ASSERT_DIFF))

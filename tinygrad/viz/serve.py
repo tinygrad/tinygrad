@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, decimal, socketserver, functools
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -92,33 +92,45 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
-devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
-def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
-def dev_to_pid(device:str, is_copy=False): return {"pid": devices[device][2], "tid": int(is_copy)}
-def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
-  devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff, len(devices))
-  return [{"name": "process_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "args": {"name": ev.device}},
-          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 0, "args": {"name": "COMPUTE"}},
-          {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 1, "args": {"name": "COPY"}}]
-def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
-  return [{"name": ev.name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": float(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
-def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
-  ret = []
-  for i,e in enumerate(ev.ents):
-    st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
-    ret += [{"name": e.name, "ph": "X", "ts": prep_ts(e.device, st, e.is_copy), "dur": float(en-st), **dev_to_pid(e.device, e.is_copy)}]
-    for dep in ev.deps[i]:
-      d = ev.ents[dep]
-      ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
-      ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
-  return ret
-def to_perfetto(profile:list[ProfileEvent]):
-  # Start json with devices.
-  prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
-  for ev in tqdm(profile, desc="preparing profile"):
-    if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
-    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
-  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
+
+DevEvent = ProfileRangeEvent|ProfileGraphEntry
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
+    if isinstance(e, ProfileGraphEvent):
+      for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
+
+# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+  shapes:list[dict] = []
+  levels:list[int] = []
+  for st,et,dur,e in events:
+    if dur == 0: continue
+    # find a free level to put the event
+    depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
+    if depth < len(levels): levels[depth] = et
+    else: levels.append(et)
+    shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
+  return {"shapes":shapes, "maxDepth":len(levels)}
+
+def get_profile(profile:list[ProfileEvent]):
+  # start by getting the time diffs
+  devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  # map events per device
+  dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
+  min_ts:int|None = None
+  max_ts:int|None = None
+  for ts,en,e in flatten_events(profile):
+    time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
+    st = int(ts+time_diff)
+    et = st if en is None else int(en+time_diff)
+    dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
+    if min_ts is None or st < min_ts: min_ts = st
+    if max_ts is None or et > max_ts: max_ts = et
+  # return layout of per device events
+  for events in dev_events.values(): events.sort(key=lambda v:v[0])
+  dev_layout = {k:{"timeline":timeline_layout(v)} for k,v in dev_events.items()}
+  return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
 
@@ -126,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (fn:={"/":"index", "/profiler":"perfetto"}.get((url:=urlparse(self.path)).path)):
+    if (fn:={"/":"index"}.get((url:=urlparse(self.path)).path)):
       with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
@@ -151,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
         # pass if client closed connection
         except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
-    elif url.path == "/get_profile" and perfetto_profile is not None: ret, content_type = perfetto_profile, "application/json"
+    elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
 
     # send response
@@ -197,7 +209,7 @@ if __name__ == "__main__":
   # NOTE: this context is a tuple of list[keys] and list[values]
   ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
 
-  perfetto_profile = to_perfetto(profile) if profile is not None else None
+  profile_ret = get_profile(profile) if profile is not None else None
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
