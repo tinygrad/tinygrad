@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
-from tinygrad.codegen.lowerer import get_grouped_dims
+from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -780,7 +780,6 @@ class TestFloat4(unittest.TestCase):
     k.shift_to(0, 2, insert_before=k.shape_len-1)
     k.upcast()
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (4, 2)
@@ -798,7 +797,6 @@ class TestFloat4(unittest.TestCase):
       k.shift_to(0, shift, insert_before=k.shape_len-1)
       k.upcast()
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
@@ -835,7 +833,6 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 2)
@@ -853,7 +850,6 @@ class TestFloat4(unittest.TestCase):
       k.upcast()
       k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
