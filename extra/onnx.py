@@ -51,16 +51,15 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   shape = tuple(onnx_tensor.dims)
   keys = ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
   data = next((val for k in keys if (val := getattr(onnx_tensor, k)) is not None), None)
-  if data is not None:
-    if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
-    assert data.dtype is dtypes.uint8 and isinstance(data.device, str) and data.device.startswith("DISK:"), data
-    data = data.bitcast(true_dtype).reshape(shape)
-    data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
-    if shape == ():
-      if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-      return Tensor(data.item(), dtype=to_dtype).reshape(shape)
-    return data
-  raise Exception("empty buffer")
+  if data is None: raise RuntimeError("empty buffer")
+  if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
+  assert isinstance(data, Tensor) and data.dtype is dtypes.uint8 and isinstance(data.device, str) and data.device.startswith("DISK:"), data
+  data = data.bitcast(true_dtype).reshape(shape)
+  data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
+  if shape == ():
+    if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
+    return Tensor(data.item(), dtype=to_dtype).reshape(shape)
+  return data
 
 def type_parse(onnx_type: TypeProto):
   elem_type = onnx_type

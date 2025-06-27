@@ -5,16 +5,20 @@ from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
 
+def create_model_with_initializer(inp, onnx_data_type:onnx.TensorProto.DataType):
+  initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (len(inp),), inp)
+  input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
+  output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
+  node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
+  graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor], [initializer])
+  return onnx.helper.make_model(graph)
+
 device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
 device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_input_spec_dtype(self, onnx_data_type, tinygrad_dtype):
-    input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
-    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
-    node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
-    graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor])
-    model = onnx.helper.make_model(graph)
+    model = create_model_with_initializer((), onnx_data_type)
     tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
     onnx.save(model, tmp.name)
     tmp.flush()
@@ -24,12 +28,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
   def _test_initializer_dtype(self, onnx_data_type, tinygrad_dtype):
-    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (), [1])
-    input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
-    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
-    node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
-    graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor], [initializer])
-    model = onnx.helper.make_model(graph)
+    model = create_model_with_initializer([1, 2], onnx_data_type)
     tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
     onnx.save(model, tmp.name)
     tmp.flush()
