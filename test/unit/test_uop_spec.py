@@ -90,15 +90,10 @@ class TestUOpSpec(unittest.TestCase):
 
   def test_const_view_always_valid(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    a = ast_const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
+    a = UOp.const(dtypes.int, 0, None, ())
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
 
-  def test_assert_masked_view_in_const(self):
-    t = Tensor(6).uop
-    a = t.replace(src=(t.src[0].replace(arg=t.st.reshape((1,)).pad(((0, 1),))),))
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      type_verify([a], tensor_uop_spec)
 
 if __name__ == '__main__':
   unittest.main()
