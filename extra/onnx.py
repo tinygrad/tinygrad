@@ -53,7 +53,6 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   data = next((val for k in keys if (val := getattr(onnx_tensor, k)) is not None), None)
   if data is not None:
     if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
-    # must be disk tensor
     assert data.dtype is dtypes.uint8 and data.device.startswith("DISK"), data
     data = data.bitcast(true_dtype)
     data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)

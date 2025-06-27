@@ -6,7 +6,6 @@ from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
 import numpy as np
 
-data_types.pop(16) # TODO: this is bf16, need to support double parsing first.
 device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
 device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
 
@@ -26,8 +25,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
   def _test_initializer_dtype(self, onnx_data_type, tinygrad_dtype):
-    arr = np.array([0, 1], dtype=onnx.helper.tensor_dtype_to_np_dtype(onnx_data_type))
-    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, arr.shape, arr.tobytes(), raw=True)
+    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (), [1])
     input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
     output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
     node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
@@ -42,9 +40,8 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_values['initializer'].dtype, tinygrad_dtype)
 
   def _test_node_attribute_dtype(self, onnx_data_type, tinygrad_dtype):
-    arr = np.array([0, 1], dtype=onnx.helper.tensor_dtype_to_np_dtype(onnx_data_type))
-    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, arr.shape)
-    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, arr.shape, arr.tobytes(), raw=True)
+    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
+    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, (), [1])
     node = onnx.helper.make_node('Constant', inputs=[], outputs=['output'], value=value_tensor)
     graph = onnx.helper.make_graph([node], 'attribute_test', [], [output_tensor])
     model = onnx.helper.make_model(graph)
