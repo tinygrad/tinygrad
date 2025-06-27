@@ -141,8 +141,8 @@ class Tensor(MathTrait):
       if data.op is Ops.BIND:
         var, val = data.unbind()
         # give the bound constant a device
-        const = UOp.const(var.dtype, val, device, ())
-        data = data.replace(src=(var.replace(src=const.src), const))
+        const = UOp.const(var.dtype, val, device, ())  # this is now a VIEW(CONST)
+        data = data.replace(src=(var.replace(src=const.src[0].src), const.src[0])).view(const.st_arg)  # move the view from const to bound op
     elif data is None: data = UOp.const(dtype or dtypes.default_float, 0, device, ())
     elif isinstance(data, get_args(ConstType)): data = UOp.const(dtype or dtypes.from_py(data), data, device, ())
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
