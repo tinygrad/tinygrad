@@ -400,7 +400,7 @@ x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86
           dtypes.void:x86_branch_ops}
 
 gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
-#bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
+bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
 vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
 #size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
@@ -415,32 +415,56 @@ def float_cast(x:DType, s:DType) -> str:
   if cto == "si": cfrom = "t" + cfrom
   return f"cvt{cfrom}2{cto}"
 
+def x86_cast(y:UOp, x:UOp): return x86_int_suf[y.dtype.scalar().itemsize] + x86_int_suf[x.dtype.scalar().itemsize]
+
+x86_vec_rewrite = PatternMatcher([
+  # broadcast
+  (UPat(Ops.NOOP, name="y").broadcast(name="x"), lambda ctx,y,x: f"vpshufd {ctx[x]}, {ctx[y]}, {bcast_imm[y.arg[0]]}"),
+  (UPat.var("y").broadcast(name="x"), lambda ctx,y,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[y]}"),
+  # vectorize
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
+  # cast to > int
+  (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"),
+   lambda ctx,y,x: f"vpmovsx{x86_cast(y,x)} {ctx[x]}, {ctx[y]}" if y.dtype < x.dtype else None),
+  (UPat.var("y", dtypes.uints).cast(dtypes.ints, name="x"),
+   lambda ctx,y,x: f"vpmovzx{x86_cast(y,x)} {ctx[x]}, {ctx[y]}" if y.dtype < x.dtype else None),
+  # cast to < int
+  (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"),
+   lambda ctx,y,x: f"vpackss{x86_cast(y,x)} {ctx[x]}, {ctx[y]}" if y.dtype > x.dtype else None),
+  (UPat.var("y", dtypes.uints).cast(dtypes.ints, name="x"),
+   lambda ctx,y,x: f"vpackus{x86_cast(y,x)} {ctx[x]}, {ctx[y]}" if y.dtype > x.dtype else None),
+  # cmove
+  (UPat.var("m").where(UPat.var("a"), UPat.var("b")).named("x"),
+   lambda ctx,m,a,b,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[b]}, {ctx[a]}, {ctx[m]}"),
+  # compare, no cmplt for vec int, use cmpgt and invert operands
+  (UPat(Ops.CMPLT, src=(UPat.var("x", dtypes.ints), UPat.var("y")), name="lt"),
+   lambda ctx,x,y,lt: f"{ctx.ops[x.dtype][lt.op]} {ctx[lt]}, {ctx[y]}, {ctx[x]}"),
+  (UPat((Ops.CMPNE, Ops.CMPLT), src=(UPat.var("x", dtypes.floats), UPat.var("y")), name="cmp"),
+   lambda ctx,x,y,cmp: f"{ctx.ops[x.dtype][cmp.op]} {ctx[cmp]}, {ctx[x]}, {ctx[y]}"),
+]) + base_rewrite
+
 x86_rewrite = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_rewrite.rewrite(x, ctx) if x.dtype.count > 1 else None),
   # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
   # const load
-  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[idx]}"),
+  (UPat.cvar("c").load(name="x"), lambda ctx,c,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[c]}"),
   # gated load
-  (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{ctx.two_address(x, alt)}test {ctx[mask]}, 1\n"
-   f"je .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+  (UPat.var("a").load(UPat.var("b"), UPat.var("m"), name="x"), lambda ctx,x,a,b,m:
+   f"{ctx.two_address(x, b)}test {ctx[m]}, 1\nje .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[a]}]\n.L{ctx.uops.index(x)}:"),
   # local/global store
-  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx.mem[x]}], {ctx[x]}"),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{ctx.ops[x.src[1].dtype][x.op]} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+  (UPat.var("y").store(name="x"), lambda ctx,y,x: f"{ctx.ops[y.dtype][x.op]} [{ctx.mem[y]}], {ctx[y]}"),
+  (UPat.var("y").store(UPat.var("z"), name="x"), lambda ctx,y,z,x: f"{ctx.ops[z.dtype][x.op]} [{ctx[y]}], {ctx[z]}"),
   # devectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
-  # broadcast
-  #(UPat(Ops.VECTORIZE, src=UPat(Ops.NOOP, name="g"), name="x"), lambda ctx,g,x: f"vpshufd {ctx[x]}, {ctx[g]}, {bcast_imm[g.arg[0]]}"),
-  #(UPat(Ops.VECTORIZE, src=UPat(Ops.LOAD, name="g"), name="x"), lambda ctx,g,x: f"vpshufd {ctx[x]}, {ctx[g]}, {bcast_imm[0]}"),
-  # vectorize
-  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
-  # casting
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
-   lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.CAST, dtype=dtypes.float16, name="x"), lambda ctx,x: f"vcvtps2ph {ctx[x]}, {ctx[x.src[0]]}, 0x4"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"vmov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
+  # casts to > int (to <= int is a noop)
+  (UPat.var("y", (dtypes.bool,)+dtypes.uints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movzx {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movs{'x' if y.dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[y]}"),
+  # casts with floats, float16 cast src must be float32
+  (UPat.var("y").cast(dtypes.float16, name="x"), lambda ctx,y,x: f"vcvtps2ph {ctx[x]}, {ctx[y]}, 0x4"),
+  (UPat.var("y").cast(name="x"), lambda ctx,y,x: f"{float_cast(x.dtype, y.dtype)} {ctx[x]}, {ctx[y]}"),
+  # bitcast, only between 32bit and 64bit
+  (UPat.var("y").bitcast().named("x"), lambda ctx,y,x: f"vmov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[y]}"),
   # ternary ops (no cmov for floats)
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[1])}test {ctx[x.src[0]]}, 1\n"
@@ -528,7 +552,7 @@ x86_matcher = asm_matcher + PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
    lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # no int8 mul or cmove, casted to int16
+  # no int8 mul or cmove, cast to int16
   (UPat.var("a", (dtypes.uint8, dtypes.int8)) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool, dtypes.uint8, dtypes.int8)), UPat.var("b")),
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype)),
