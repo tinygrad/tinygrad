@@ -249,7 +249,7 @@ class Tensor(MathTrait):
     sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # remove all ASSIGNs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
+    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.STORE}
     _apply_map_to_tensors(remove_assign_map, name="Remove Assigns")
 
     # create the schedule

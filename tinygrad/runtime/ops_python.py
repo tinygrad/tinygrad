@@ -111,7 +111,7 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is Ops.ASSIGN:
+        elif uop is Ops.STORE:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]

@@ -52,7 +52,6 @@ class Ops(FastEnum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
-  ASSIGN = auto()
   BIND = auto()
 
   # control flow ops
