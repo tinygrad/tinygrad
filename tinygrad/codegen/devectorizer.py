@@ -295,6 +295,25 @@ devectorize = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
 ])
 
+def split_vectorized_alu(alu:UOp):
+  if alu.dtype.count <= 4: return None
+  l = next(x for x in [4,2] if alu.dtype.count % x == 0)
+  alus = tuple(UOp(alu.op, alu.dtype.scalar().vec(l), tuple(s.gep(tuple(range(i, i+l)) if s.dtype.count == alu.dtype.count else i//l)
+                                                             for s in alu.src), alu.arg) for i in range(0, alu.dtype.count, l))
+  return UOp(Ops.CAT, alu.dtype, alus)
+
+def split_vectorized_acc(acc:UOp):
+  if acc.dtype.count <= 4: return None
+  l = next(x for x in [4,2] if acc.dtype.count % x == 0)
+  accs = tuple(UOp(acc.op, acc.dtype.scalar().vec(l),
+    tuple(s.gep(tuple(range(i, i+l))) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(0, acc.dtype.count, l))
+  return UOp(Ops.CAT, acc.dtype, accs)
+
+split_vectorize = PatternMatcher([
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
+  (UPat(Ops.DEFINE_REG, name="acc"), split_vectorized_acc),
+])
+
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
