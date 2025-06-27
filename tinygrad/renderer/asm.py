@@ -68,8 +68,8 @@ asm_matcher = PatternMatcher([
   (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.count > 1 and y.dtype.count > 1 else None),
   # TODO: fold gep in store with vpextrd and arg is imm
   # a gep in a vectorize is folded and its arg is the imm of the instruction
-  #(UPat(Ops.VECTORIZE, name="x"),
-  # lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
+  (UPat(Ops.VECTORIZE, name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
   # rewrite RECIP to FDIV
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # rewrite MAX to CMPLT + WHERE
@@ -399,9 +399,11 @@ x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86
           **x86_vec_bool_ops, **x86_vec_sint_ops, **x86_vec_uint_ops, **x86_vec_float16_ops, **x86_vec_float32_ops, **x86_vec_float64_ops,
           dtypes.void:x86_branch_ops}
 
-gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
 bcast_imm = {0: "0x00", 1: "0x55", 2: "0xAA", 3: "0xFF"}
-vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
+gep_imm = {(0,0): "0x00", (0,1): "0x10", (0,2): "0x20", (0,3): "0x30",
+           (1,0): "0x40", (1,1): "0x50", (1,2): "0x60", (1,3): "0x70",
+           (2,0): "0x80", (2,1): "0x90", (2,2): "0xA0", (2,3): "0xB0",
+           (3,0): "0xC0", (3,1): "0xD0", (3,2): "0xE0", (3,3): "0xF0",}
 #size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
 idiv_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
 def x86_cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
@@ -421,7 +423,8 @@ x86_vec_rewrite = PatternMatcher([
   (UPat(Ops.NOOP, name="y").broadcast(name="x"), lambda ctx,y,x: f"vpshufd {ctx[x]}, {ctx[y]}, {bcast_imm[y.arg[0]]}"),
   (UPat.var("y").broadcast(name="x"), lambda ctx,y,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[y]}"),
   # vectorize
-  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x:
+   "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {gep_imm[(s.arg[0] if isinstance(s.arg, tuple) else 0,i)]}" for i,s in enumerate(x.src))),
   # cast to > int
   (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"),
    lambda ctx,y,x: f"vpmovsx{x86_cast(y,x)} {ctx[x]}, {ctx[y]}" if y.dtype < x.dtype else None),
@@ -455,8 +458,9 @@ x86_rewrite = PatternMatcher([
   (UPat.var("y").store(name="x"), lambda ctx,y,x: f"{ctx.ops[y.dtype][x.op]} [{ctx.mem[y]}], {ctx[y]}"),
   (UPat.var("y").store(UPat.var("z"), name="x"), lambda ctx,y,z,x: f"{ctx.ops[z.dtype][x.op]} [{ctx[y]}], {ctx[z]}"),
   # devectorize
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
-  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[(x.arg[0],0)]}"),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x:
+   "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {gep_imm[(s.arg[0] if isinstance(s.arg, tuple) else 0,i)]}" for i,s in enumerate(x.src))),
   # casts to > int (to <= int is a noop)
   (UPat.var("y", (dtypes.bool,)+dtypes.uints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movzx {ctx[x]}, {ctx[y]}"),
   (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movs{'x' if y.dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[y]}"),
