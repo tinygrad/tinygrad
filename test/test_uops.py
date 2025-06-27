@@ -4,18 +4,18 @@ import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
+from tinygrad.helpers import CI, DEBUG, getenv, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.grouper import fix_kernel_ops
-from tinygrad.engine.realize import CompiledRunner, get_kernel
+from tinygrad.kernelize.kernelize import fix_kernel_ops
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.opt.kernel import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -361,15 +361,16 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MUL, ops)
 
   def test_division_power_of_two(self):
-    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 2)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
-    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    for dt in (dtypes.int32, dtypes.uint32):
+      g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
+      c = UOp(Ops.CONST, dt, (), 2)
+      l = UOp(Ops.LOAD, dt, (g.index(c),))
+      a = UOp(Ops.IDIV, dt, (l, c))
+      uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+      Device[Device.DEFAULT].renderer.render(uops)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
@@ -408,9 +409,11 @@ class TestAssembly(unittest.TestCase):
     a = Tensor.empty(1024)
     b = Tensor.empty(1024)
     c = (a*b).sum()
-    k = Kernel(c.schedule()[-1].ast)
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-    uops = k.linearize().uops
+    ast = c.schedule()[-1].ast
+    opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(ast, Device[Device.DEFAULT].renderer)
+    uops = program.uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
 class TestUOpMethod(unittest.TestCase):
@@ -459,13 +462,6 @@ class TestUOpStr(unittest.TestCase):
     for _ in range(20): a = a + a
     assert len(str(a)) < 10_000, "exponential string growth"
     assert str(eval(str(a))) == str(a)
-
-    t = Tensor.arange(10)
-    t = t + t * Tensor.rand(10)
-    # nice big complicated uop
-    with Context(NOOPT=1):
-      sink = UOp(Ops.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
-    self.assertEqual(sink, eval(str(sink)))
 
   def test_vectorized_str(self):
     vec = UOp(Ops.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
@@ -522,7 +518,7 @@ class TestIndexingOrdering(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "grouper.py")
+    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "kernelize.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])

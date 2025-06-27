@@ -59,6 +59,7 @@ view_ops = {
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
+  "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
@@ -368,6 +369,7 @@ decomps = [
   aten.threshold,
   aten.nll_loss_forward,
   aten.nll_loss_backward,
+  aten.nll_loss2d_backward,
   # AttributeError: 'int' object has no attribute '_broadcasted'
   aten.sigmoid_backward,
   aten.tanh_backward,
@@ -376,6 +378,7 @@ decomps = [
   aten.softshrink,
   aten.hardshrink,
   aten.log_sigmoid_forward,
+  aten.log_sigmoid_backward,
   aten.isneginf,
   aten.isposinf,
   aten.nan_to_num,

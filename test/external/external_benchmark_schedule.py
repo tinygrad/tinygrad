@@ -3,10 +3,11 @@ from extra.models.resnet import ResNet50
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.uop.ops import Ops
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.heuristic import hand_coded_optimizations
+from tinygrad.opt.kernel import Kernel
+from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.codegen import get_rewrites_for_renderer, apply_rewrites, rewrites_for_linearizer
-from tinygrad.engine.search import beam_search, bufs_from_lin
+from tinygrad.opt.search import beam_search, bufs_from_lin
+from tinygrad.uop.spec import type_verify
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -56,4 +57,6 @@ if __name__ == "__main__":
             uops_line = []
             for u in rewritten_uops:
               uops_line.append(apply_rewrites(u, rewrites_for_linearizer))
+          with Timing("***** model verify in    "):
+            for u in uops_line: type_verify(u.arg.lst)
           print(sum(len(u.arg.lst) for u in uops_line))

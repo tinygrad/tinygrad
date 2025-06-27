@@ -2,12 +2,12 @@ import unittest, struct, array, ctypes
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import to_mv
 from tinygrad.runtime.ops_nv import NVDevice, HWQueue
-from tinygrad.engine.search import Opt, OptOps
+from tinygrad.opt.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from test.external.fuzz_linearizer import get_fuzz_rawbufs
 
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.kernel import Kernel
 from tinygrad.uop.ops import LazyOp, Ops, ReduceOps, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
