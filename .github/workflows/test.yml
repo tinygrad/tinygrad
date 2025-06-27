@@ -483,8 +483,6 @@ jobs:
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX Runner (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
-      - name: Test ONNX Runner (WEBGPU)
-        run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
       - name: Test Additional ONNX Ops (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
@@ -819,6 +817,8 @@ jobs:
       run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
+    - name: Test ONNX Runner (WEBGPU)
+      run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
     - name: Clean npm cache
       run: npm cache clean --force
     - name: Install Puppeteer
