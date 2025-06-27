@@ -44,8 +44,7 @@ def ast_const(dtype:DType, val:ConstType, shape:tuple[sint, ...]=(), st:Optional
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
   st = unwrap(st_src[0].st)
-  if all(v.mask is None for v in st.views): return UOp.const(dtype, val).replace(src=(st.to_uop(),))
-  return graph_rewrite(UOp.const(dtype, val).view(st).valid(), view_left)
+  return UOp.const(dtype, val).view(st)
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   st = time.perf_counter_ns()

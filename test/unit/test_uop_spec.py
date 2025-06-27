@@ -90,7 +90,7 @@ class TestUOpSpec(unittest.TestCase):
 
   def test_const_view_always_valid(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
+    a = ast_const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
 
