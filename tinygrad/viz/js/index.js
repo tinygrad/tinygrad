@@ -51,7 +51,7 @@ async function renderDag(graph, additions, recenter=false) {
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
     }).selectAll("text").data(d => {
-      ret = [[]];
+      const ret = [[]];
       for (const { st, color } of parseColors(d.label)) {
         for (const [i, l] of st.split("\n").entries()) {
           if (i > 0) ret.push([]);
