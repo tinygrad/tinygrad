@@ -412,7 +412,7 @@ class AMDCopyQueue(HWQueue):
     dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
-    if rem_packet_cnt > 0:
+    if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       dev.sdma_queue.ring.view(dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
       dev.sdma_queue.put_value += zero_fill
