@@ -11,6 +11,7 @@ from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
+from tinygrad.shape.shapetracker import ShapeTracker
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
@@ -92,7 +93,7 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
-  bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
+  bufsts: defaultdict[UOp, list[ShapeTracker]] = defaultdict(list)
   for b,st in zip(lin.bufs,lin.sts):
     if b.op is Ops.DEFINE_GLOBAL: bufsts[b].append(st)
   # TODO: Nones are staying in here if buffers are optimized out!
