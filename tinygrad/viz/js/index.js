@@ -295,7 +295,7 @@ async function renderProfiler() {
     const timelineHeight = (levelHeight*timeline.maxDepth)+padding/2;
     const startY = offsetY+timelineHeight;
     let area = 40;
-    if (k === "METAL:4") {
+    if (k === "METAL") {
       const { height:canvasHeight } = rect(".profiler");
       const ys = baseY+padding/2;
       debugLine(ys);
