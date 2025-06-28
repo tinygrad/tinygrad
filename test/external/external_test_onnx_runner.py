@@ -1,24 +1,47 @@
 import unittest, onnx, tempfile
-from tinygrad import dtypes
+import numpy as np
+from tinygrad import dtypes, Tensor
+from tinygrad.uop import Ops
 from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, settings, strategies as st
 
-def create_model_with_initializer(inp, onnx_data_type:onnx.TensorProto.DataType):
-  initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (len(inp),), inp)
-  input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
-  output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
-  node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
-  graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor], [initializer])
-  return onnx.helper.make_model(graph)
+# copied from test_const_folding.py
+def _check_ast_count(desired_count:int, t:Tensor):
+  # NOTE: this has side effect because everything can be scheduled only once
+  schedule = t.schedule()
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
+
+class TestOnnxRunner(unittest.TestCase):
+  def test_const_fold_binary_ops(self):
+    inp_val = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    inp = onnx.helper.make_tensor('inp', onnx.TensorProto.FLOAT, inp_val.shape, inp_val)
+    const = onnx.helper.make_tensor('const', onnx.TensorProto.FLOAT, (), [0])
+    node = onnx.helper.make_node('Add', inputs=['inp', 'const'], outputs=['output'])
+    output_info = onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, inp_val.shape)
+    graph = onnx.helper.make_graph([node], 'const_fold_test', [], [output_info], [inp, const])
+    model = onnx.helper.make_model(graph)
+    onnx.checker.check_model(model)
+    tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
+    onnx.save(model, tmp.name)
+    tmp.flush()
+    model = onnx_load(tmp.name)
+    runner = OnnxRunner(model)
+    out = runner({})['output']
+    _check_ast_count(0, out)
 
 device_supported_dtypes = [odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)]
 device_unsupported_dtypes = [odt for odt, dtype in data_types.items() if not is_dtype_supported(dtype)]
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_input_spec_dtype(self, onnx_data_type, tinygrad_dtype):
-    model = create_model_with_initializer((), onnx_data_type)
+    input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
+    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
+    node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
+    graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor])
+    model = onnx.helper.make_model(graph)
     tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
     onnx.save(model, tmp.name)
     tmp.flush()
@@ -28,7 +51,12 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
   def _test_initializer_dtype(self, onnx_data_type, tinygrad_dtype):
-    model = create_model_with_initializer([1, 2], onnx_data_type)
+    initializer = onnx.helper.make_tensor('initializer', onnx_data_type, (2,), [1, 2])
+    input_tensor = onnx.helper.make_tensor_value_info('input', onnx_data_type, ())
+    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
+    node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
+    graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor], [initializer])
+    model = onnx.helper.make_model(graph)
     tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
     onnx.save(model, tmp.name)
     tmp.flush()
@@ -38,8 +66,8 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     self.assertEqual(runner.graph_values['initializer'].dtype, tinygrad_dtype)
 
   def _test_node_attribute_dtype(self, onnx_data_type, tinygrad_dtype):
-    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, ())
-    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, (), [1])
+    output_tensor = onnx.helper.make_tensor_value_info('output', onnx_data_type, (2,))
+    value_tensor = onnx.helper.make_tensor('value', onnx_data_type, (2,), [1, 2])
     node = onnx.helper.make_node('Constant', inputs=[], outputs=['output'], value=value_tensor)
     graph = onnx.helper.make_graph([node], 'attribute_test', [], [output_tensor])
     model = onnx.helper.make_model(graph)
