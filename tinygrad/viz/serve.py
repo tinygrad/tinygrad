@@ -6,7 +6,7 @@ from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -97,6 +97,7 @@ DevEvent = ProfileRangeEvent|ProfileGraphEntry
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
+    if isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
@@ -112,6 +113,33 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     else: levels.append(et)
     shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
   return {"shapes":shapes, "maxDepth":len(levels)}
+
+def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+  step, peak, mem = 0, 0, 0
+  shps:dict[int, dict] = {}
+  temp:dict[int, dict] = {}
+  timestamps:list[int] = []
+  for st,_,_,e in events:
+    if not isinstance(e, ProfilePointEvent): continue
+    timestamps.append(st)
+    if e.name == "alloc":
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "h":(nbytes:=e.arg["dtype"].itemsize*e.arg["sz"]), "arg":{k:str(v) for k,v in e.arg.items()}}
+      step += 1
+      mem += nbytes
+      if mem > peak: peak = mem
+    if e.name == "free":
+      step += 1
+      mem -= (removed:=temp.pop(e.ref))["h"]
+      removed["x"].append(step)
+      removed["y"].append(removed["y"][-1])
+      for k,v in temp.items():
+        if k > e.ref:
+          v["x"] += [step, step]
+          v["y"] += [v["y"][-1], v["y"][-1]-removed["h"]]
+  for v in temp.values():
+    v["x"].append(step)
+    v["y"].append(v["y"][-1])
+  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -129,7 +157,7 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v)} for k,v in dev_events.items()}
+  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server

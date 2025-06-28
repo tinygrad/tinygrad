@@ -258,8 +258,8 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
-  for (const [k, { timeline }] of Object.entries(layout)) {
-    if (timeline.shapes.length === 0) continue;
+  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.id = k;
     div.innerText = k;
@@ -514,7 +514,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
