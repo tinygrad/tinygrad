@@ -243,6 +243,18 @@ const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244"
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 
+function debugLine(y, color="red") {
+  const line = document.createElement("div")
+  line.style.position = "absolute"
+  line.style.top = y + "px"
+  line.style.left = "0"
+  line.style.width = "100%"
+  line.style.height = "1px"
+  line.style.backgroundColor = color
+  line.style.zIndex = "9999" // optional, ensures it's on top
+  document.body.appendChild(line)
+}
+
 var data, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -278,9 +290,18 @@ async function renderProfiler() {
      // offset y by depth
       data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
+    const focusedDevice = "METAL";
     // position shapes on the canvas and scale to fit fixed area
-    const startY = offsetY+levelHeight*timeline.maxDepth;
-    const area = 40; // this can change
+    const timelineHeight = (levelHeight*timeline.maxDepth)+padding/2;
+    const startY = offsetY+timelineHeight;
+    let area = 40;
+    if (k === "METAL:4") {
+      const { height:canvasHeight } = rect(".profiler");
+      const ys = baseY+padding/2;
+      debugLine(ys);
+      area = canvasHeight-(canvasTop+ys)+padding;
+      debugLine(canvasTop+startY+area);
+    }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
