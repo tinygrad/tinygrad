@@ -15,6 +15,25 @@ def _check_ast_count(desired_count:int, t:Tensor):
   assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestOnnxRunner(unittest.TestCase):
+  def test_const_fold(self):
+    inp_val = 1.0
+    inp_tensor = onnx.helper.make_tensor('inp', onnx.TensorProto.FLOAT, (), [inp_val])
+    shape_val = np.array([5], dtype=np.int64)
+    shape_tensor = onnx.helper.make_tensor('new_shape', onnx.TensorProto.INT64, shape_val.shape, shape_val)
+    expand_node = onnx.helper.make_node('Expand', inputs=['inp', 'new_shape'], outputs=['expanded_tensor'])
+    exp_node = onnx.helper.make_node('Exp', inputs=['expanded_tensor'], outputs=['output'])
+    final_shape = (5,)
+    output_info = onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, final_shape)
+    graph = onnx.helper.make_graph([expand_node, exp_node], 'const_fold_expand_exp_test', [], [output_info], [inp_tensor, shape_tensor])
+    model = onnx.helper.make_model(graph)
+    tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
+    onnx.save(model, tmp.name)
+    tmp.flush()
+    model = onnx_load(tmp.name)
+    runner = OnnxRunner(model)
+    out = runner({})['output']
+    _check_ast_count(0, out)
+
   def test_const_fold_binary_ops(self):
     inp_val = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
     inp = onnx.helper.make_tensor('inp', onnx.TensorProto.FLOAT, inp_val.shape, inp_val)
@@ -23,7 +42,6 @@ class TestOnnxRunner(unittest.TestCase):
     output_info = onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, inp_val.shape)
     graph = onnx.helper.make_graph([node], 'const_fold_test', [], [output_info], [inp, const])
     model = onnx.helper.make_model(graph)
-    onnx.checker.check_model(model)
     tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
     onnx.save(model, tmp.name)
     tmp.flush()
