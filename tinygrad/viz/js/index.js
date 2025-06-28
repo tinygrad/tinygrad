@@ -260,7 +260,7 @@ async function renderProfiler() {
   const { top:canvasTop, height:canvasHeight } = rect(canvas);
   // color by name
   const nameMap = new Map();
-  const data = {shapes:[]};
+  const data = {shapes:[], axes:{}};
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -283,9 +283,13 @@ async function renderProfiler() {
      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // position shapes on the canvas and scale to fit fixed area
-    // if the device is focused memory graph fits all the available screen real estate
-    area = k !== focusedDevice ? 40 : canvasHeight-(baseY);
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+    let area = 40;
+    if (k === focusedDevice) {
+      // expand memory graph for the focused device
+      area = canvasHeight-baseY;
+      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:formatBytes };
+    }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
@@ -308,6 +312,10 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    let yscale = null;
+    if (data.axes.y != null) {
+      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
+    }
     // draw shapes
     for (const e of data.shapes) {
       if (Array.isArray(e.x)) {
@@ -366,6 +374,22 @@ async function renderProfiler() {
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
       ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+    }
+    if (yscale != null) {
+      ctx.beginPath();
+      ctx.moveTo(0, yscale.range()[1]);
+      ctx.lineTo(0, yscale.range()[0]);
+      ctx.stroke();
+      for (const tick of yscale.ticks()) {
+        const y = yscale(tick);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(tickSize, y);
+        ctx.stroke();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(data.axes.y.fmt(tick), tickSize+2, y);
+      }
     }
     ctx.restore();
   }
