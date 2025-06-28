@@ -237,7 +237,7 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
-const formatBytes = (d) => d3.format(".3~s")(d)+"B";
+const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
@@ -266,7 +266,7 @@ async function renderProfiler() {
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    div.onclick = () => { // TODO: make this functionality more visible
+    div.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
       renderProfiler();
     }
@@ -288,7 +288,7 @@ async function renderProfiler() {
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = canvasHeight-baseY;
-      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:formatBytes };
+      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
     }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
@@ -327,7 +327,7 @@ async function renderProfiler() {
         ctx.closePath();
         ctx.fillStyle = e.color;
         ctx.fill();
-        const tooltipText = `${e.arg.dtype} ${formatBytes(e.arg.nbytes)}\ntotalMemory: ${formatBytes(e.arg.totalMem)}`;
+        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
         continue;
       }
@@ -388,7 +388,7 @@ async function renderProfiler() {
         ctx.stroke();
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(data.axes.y.fmt(tick), tickSize+2, y);
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
     }
     ctx.restore();
@@ -570,7 +570,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

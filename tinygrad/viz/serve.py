@@ -122,7 +122,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":{**e.arg,"totalMem":mem+e.arg["nbytes"]}}
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
       step += 1
       mem += e.arg["nbytes"]
@@ -151,6 +151,7 @@ def get_profile(profile:list[ProfileEvent]):
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
+    # ProfilePointEvent records with cpu time
     st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
     dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
