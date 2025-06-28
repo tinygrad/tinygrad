@@ -242,7 +242,6 @@ const formatBytes = (d) => d3.format(".3~s")(d)+"B";
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-
 function debugLine(y, color="red") {
   const line = document.createElement("div")
   line.style.position = "absolute"
@@ -255,22 +254,19 @@ function debugLine(y, color="red") {
   document.body.appendChild(line)
 }
 
-var profileRet, kernelMap, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
-  // fetch data if we need to
-  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json();
-  if (kernelMap == null) {
-    kernelMap = new Map();
-    for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
-  }
-  // place devices on the y axis and scale shapes to pixels
+  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
-  const [tickSize, padding] = [10, 8]; // in px
+  const kernelMap = new Map();
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
+  // place devices on the y axis and set vertical positions
+  const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
   const { top:canvasTop, height:canvasHeight } = rect(canvas);
@@ -296,7 +292,7 @@ async function renderProfiler() {
        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
      }
      // offset y by depth
-      data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+     data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // position shapes on the canvas and scale to fit fixed area
     // if the device is focused memory graph fits all the available screen real estate
