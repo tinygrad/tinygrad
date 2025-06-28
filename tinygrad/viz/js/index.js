@@ -237,8 +237,50 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
+const formatBytes = (d) => d3.format(".3~s")(d)+"B";
 
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+// const colors2 = ["#7aa2f7", "#ff9e64", "#f7768e", "#2ac3de", "#7dcfff", "#1abc9c", "#9ece6a", "#e0af68", "#bb9af7", "#9d7cd8", "#ff007c"];
+//const colors2 = ["#a695ff","#ffcdff","#feaaff","#eadaff","#c9b7fe","#bdc1fe","#e897fe","#baa6ff","#b0bdff"]
+let colors2 = [
+  "#2F5597",
+  "#4C6EB0",
+  "#5078FF",
+  "#5D6ED1",
+  "#6CA0DC",
+  "#6E48AA",
+  "#8A5FBD",
+  "#A084E8"
+];
+/*
+colors2 = [
+  "#172744", "#23314E", "#24356E", "#2A315C",
+  "#304560", "#30224C", "#3C2B54", "#443A65"
+];
+*/
+colors2 = [
+  "#233E6E", "#38507F", "#3A57B7", "#445096",
+  "#4E739E", "#4F357B", "#634588", "#725FA7"
+];
+colors2 = [
+  "#2F3F9F", // deep anchor
+  "#3449AA", // vibrant dark blue
+  "#3A57B7", // original favorite
+  "#5066C1", // bright rich blue
+  "#6376CE", // soft highlight
+  "#5869C0", // consistent cooler tone
+  "#4759B2", // slightly darker sibling
+  "#3B4BA3"  // dark clean base
+];
+colors2 = [
+  "#3A57B7", // signature color
+  "#5066C1", // perfect complement
+  "#6277CD", // upward lift
+  "#7488D8", // soft bright step
+  "#8A9BE3", // highlight
+  "#A3B4F2"  // lightest usable UI tint
+];
+
 
 var data, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -258,13 +300,15 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
+  let i = 0;
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.id = k;
+    i += 1;
+    div.id = `dev-${i}`;
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#${k}`);
+    const { y:baseY, height:baseHeight } = rect(`#dev-${i}`);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
@@ -276,8 +320,17 @@ async function renderProfiler() {
      // offset y by depth
       data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
+    // position shapes on the canvas and scale to fit fixed area
+    const [startY, area] = [offsetY+levelHeight*timeline.maxDepth, 40];
+    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+    for (const [i,e] of mem.shapes.entries()) {
+      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+      const y1 = e.y.map(yscale);
+      const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
+      data.push({ x, y1, y2, arg:e.arg, color:colors2[i%colors2.length] });
+    }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
+    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -313,6 +366,19 @@ async function renderProfiler() {
     }
     // programs
     for (const e of data) {
+      if (Array.isArray(e.x)) {
+        const x = e.x.map(scale);
+        ctx.beginPath();
+        ctx.moveTo(x[0], e.y1[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
+        ctx.closePath();
+        ctx.fillStyle = e.color;
+        ctx.fill();
+        const tooltipText = `${e.arg.dtype} ${formatBytes(e.arg.nbytes)}\ntotalMemory: ${formatBytes(e.arg.totalMem)}`;
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        continue;
+      }
       // zoom only changes x and width
       const x = scale(e.x);
       const width = scale(e.x+e.dur)-x;
@@ -324,7 +390,7 @@ async function renderProfiler() {
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of e.label.entries()) {
+      for (const [i,l] of (e.label ?? []).entries()) {
         if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
@@ -379,7 +445,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.textContent = foundRect.tooltipText;
+      tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");

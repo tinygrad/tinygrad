@@ -121,21 +121,22 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   timestamps:list[int] = []
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
-    timestamps.append(st)
     if e.name == "alloc":
-      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "h":(nbytes:=e.arg["dtype"].itemsize*e.arg["sz"]), "arg":{k:str(v) for k,v in e.arg.items()}}
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":{**e.arg,"totalMem":mem+e.arg["nbytes"]}}
+      timestamps.append(int(e.st))
       step += 1
-      mem += nbytes
+      mem += e.arg["nbytes"]
       if mem > peak: peak = mem
     if e.name == "free":
+      timestamps.append(int(e.st))
       step += 1
-      mem -= (removed:=temp.pop(e.ref))["h"]
+      mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
         if k > e.ref:
           v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["h"]]
+          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
