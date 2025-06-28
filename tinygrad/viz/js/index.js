@@ -237,10 +237,12 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
+const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-var profileRet, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -255,15 +257,19 @@ async function renderProfiler() {
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
-  const canvasTop = rect(canvas).top;
+  const { top:canvasTop, height:canvasHeight } = rect(canvas);
   // color by name
   const nameMap = new Map();
-  const data = {shapes:[]};
-  for (const [k, { timeline }] of Object.entries(layout)) {
-    if (timeline.shapes.length === 0) continue;
+  const data = {shapes:[], axes:{}};
+  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
     div.style.padding = `${padding}px`;
+    div.onclick = () => { // TODO: make this feature more visible
+      focusedDevice = k === focusedDevice ? null : k;
+      renderProfiler();
+    }
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
@@ -276,8 +282,23 @@ async function renderProfiler() {
      // offset y by depth
      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
+    // position shapes on the canvas and scale to fit fixed area
+    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+    let area = 40;
+    if (k === focusedDevice) {
+      // expand memory graph for the focused device
+      area = canvasHeight-baseY;
+      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
+    }
+    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+    for (const [i,e] of mem.shapes.entries()) {
+      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+      const y1 = e.y.map(yscale);
+      const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
+      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+    }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
+    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -291,8 +312,25 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    let yscale = null;
+    if (data.axes.y != null) {
+      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
+    }
     // draw shapes
     for (const e of data.shapes) {
+      if (Array.isArray(e.x)) {
+        const x = e.x.map(xscale);
+        ctx.beginPath();
+        ctx.moveTo(x[0], e.y1[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
+        ctx.closePath();
+        ctx.fillStyle = e.color;
+        ctx.fill();
+        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        continue;
+      }
       // zoom only changes x and width
       const x = xscale(e.x);
       const width = xscale(e.x+e.dur)-x;
@@ -336,6 +374,22 @@ async function renderProfiler() {
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
       ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+    }
+    if (yscale != null) {
+      ctx.beginPath();
+      ctx.moveTo(0, yscale.range()[1]);
+      ctx.lineTo(0, yscale.range()[0]);
+      ctx.stroke();
+      for (const tick of yscale.ticks()) {
+        const y = yscale(tick);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(tickSize, y);
+        ctx.stroke();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
+      }
     }
     ctx.restore();
   }
