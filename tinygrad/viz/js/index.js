@@ -255,30 +255,38 @@ function debugLine(y, color="red") {
   document.body.appendChild(line)
 }
 
-var data, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, kernelMap, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
-  if (data != null) return;
-  const { layout, st, et } = await (await fetch("/get_profile")).json();
-  const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
-  // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = document.getElementById("device-list");
+  const profiler = d3.select(".profiler").html("");
+  const deviceList = profiler.append("div").attr("id", "device-list").node();
+  const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // fetch data if we need to
+  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json();
+  if (kernelMap == null) {
+    kernelMap = new Map();
+    for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
+  }
+  // place devices on the y axis and scale shapes to pixels
+  const { layout, st, et } = profileRet;
+  const [tickSize, padding] = [10, 8]; // in px
   deviceList.style.paddingTop = `${tickSize+padding}px`;
-  const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
-  const canvasTop = rect(canvas).top;
+  const { top:canvasTop, height:canvasHeight } = rect(canvas);
   // color by name
   const nameMap = new Map();
-  data = [];
+  const data = [];
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = div.getBoundingClientRect();
+    div.onclick = () => { // TODO: make this functionality more visible
+      focusedDevice = k === focusedDevice ? null : k;
+      renderProfiler();
+    }
+    const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
@@ -290,18 +298,10 @@ async function renderProfiler() {
      // offset y by depth
       data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
-    const focusedDevice = "METAL";
     // position shapes on the canvas and scale to fit fixed area
-    const timelineHeight = (levelHeight*timeline.maxDepth)+padding/2;
-    const startY = offsetY+timelineHeight;
-    let area = 40;
-    if (k === "METAL") {
-      const { height:canvasHeight } = rect(".profiler");
-      const ys = baseY+padding/2;
-      debugLine(ys);
-      area = canvasHeight-(canvasTop+ys)+padding;
-      debugLine(canvasTop+startY+area);
-    }
+    // if the device is focused memory graph fits all the available screen real estate
+    area = k !== focusedDevice ? 40 : canvasHeight-(baseY);
+    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
