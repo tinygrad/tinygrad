@@ -242,18 +242,6 @@ const formatBytes = (d) => d3.format(".3~s")(d)+"B";
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-function debugLine(y, color="red") {
-  const line = document.createElement("div")
-  line.style.position = "absolute"
-  line.style.top = y + "px"
-  line.style.left = "0"
-  line.style.width = "100%"
-  line.style.height = "1px"
-  line.style.backgroundColor = color
-  line.style.zIndex = "9999" // optional, ensures it's on top
-  document.body.appendChild(line)
-}
-
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -366,7 +354,7 @@ async function renderProfiler() {
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of (e.label ?? []).entries()) {
+      for (const [i,l] of e.label.entries()) {
         if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
