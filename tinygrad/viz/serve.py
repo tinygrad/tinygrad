@@ -151,7 +151,7 @@ def get_profile(profile:list[ProfileEvent]):
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
-    st = int(ts+time_diff)
+    st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
     dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
