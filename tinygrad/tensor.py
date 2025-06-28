@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional, TYPE_CHECKING
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -15,6 +15,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.kernelize.kernelize import get_kernelize_map
+if TYPE_CHECKING: import numpy as np
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 

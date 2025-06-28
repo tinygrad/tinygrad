@@ -10,6 +10,7 @@ from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcac
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
+  # from tinygrad.engine.realize import CompiledRunner
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -625,7 +626,7 @@ class UPat(MathTrait):
   def var(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.cache
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
+  def cvar(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
   @staticmethod
   def const(dtype:Optional[Union[DType, tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -723,7 +724,7 @@ class PatternMatcher:
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
+  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:#|bool|str|tuple[UOp, ...]|tuple[CompiledRunner, list[Buffer]]:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue

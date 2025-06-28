@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Union, Callable, Literal, TYPE_CHECKING
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
+if TYPE_CHECKING: import numpy as np, torch
 
 ConstType = Union[float, int, bool]
 
