@@ -260,7 +260,7 @@ async function renderProfiler() {
   const { top:canvasTop, height:canvasHeight } = rect(canvas);
   // color by name
   const nameMap = new Map();
-  const data = [];
+  const data = {shapes:[]};
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -280,7 +280,7 @@ async function renderProfiler() {
        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
      }
      // offset y by depth
-     data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+     data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // position shapes on the canvas and scale to fit fixed area
     // if the device is focused memory graph fits all the available screen real estate
@@ -291,7 +291,7 @@ async function renderProfiler() {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -305,33 +305,13 @@ async function renderProfiler() {
     rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    // time axis
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(canvas.clientWidth, 0);
-    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    // xticks
-    const scale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
-    scale.domain(scale.range().map(zoomLevel.invertX, zoomLevel).map(scale.invert, scale));
-    const ticks = scale.ticks();
-    for (const [i, tick] of ticks.entries()) {
-      ctx.beginPath();
-      const x = (i/(ticks.length-1))*canvas.clientWidth;
-      ctx.moveTo(x, ctx.lineWidth);
-      ctx.lineTo(x, tickSize+ctx.lineWidth);
-      ctx.stroke();
-      ctx.fontSize = "10px";
-      ctx.textBaseline = "top";
-      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
-      const padding = i === ticks.length-1 ? -1 : 1;
-      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
-    }
-    // programs
-    for (const e of data) {
+    // rescale to match current zoom
+    const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
+    xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    // draw shapes
+    for (const e of data.shapes) {
       if (Array.isArray(e.x)) {
-        const x = e.x.map(scale);
+        const x = e.x.map(xscale);
         ctx.beginPath();
         ctx.moveTo(x[0], e.y1[0]);
         for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
@@ -344,8 +324,8 @@ async function renderProfiler() {
         continue;
       }
       // zoom only changes x and width
-      const x = scale(e.x);
-      const width = scale(e.x+e.dur)-x;
+      const x = xscale(e.x);
+      const width = xscale(e.x+e.dur)-x;
       ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
@@ -365,6 +345,28 @@ async function renderProfiler() {
         labelX += l.width;
       }
     }
+    // draw axes
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(canvas.clientWidth, 0);
+    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    const ticks = xscale.ticks();
+    for (const [i, tick] of ticks.entries()) {
+      ctx.beginPath();
+      // tick line
+      const x = xscale(tick);
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, tickSize);
+      ctx.stroke();
+      // tick label
+      ctx.fontSize = "10px";
+      ctx.textBaseline = "top";
+      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
+      const padding = i === ticks.length-1 ? -1 : 1;
+      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+    }
     ctx.restore();
   }
 
@@ -383,7 +385,7 @@ async function renderProfiler() {
   window.addEventListener("resize", resize);
   canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
-  d3.select(canvas).call(canvasZoom);
+  d3.select(canvas).call(canvasZoom).call(canvasZoom.transform, zoomLevel);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   function findRectAtPosition(x, y) {
