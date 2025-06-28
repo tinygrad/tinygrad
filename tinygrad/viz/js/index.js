@@ -262,10 +262,9 @@ async function renderProfiler() {
   for (const [k, { timeline }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.id = k;
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#${k}`);
+    const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
