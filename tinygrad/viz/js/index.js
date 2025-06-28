@@ -240,24 +240,25 @@ function formatTime(ts, dur=ts) {
 
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 
-var data, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
-  if (data != null) return;
-  const { layout, st, et } = await (await fetch("/get_profile")).json();
+  const profiler = d3.select(".profiler").html("");
+  const deviceList = profiler.append("div").attr("id", "device-list").node();
+  const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
+  const { layout, st, et } = profileRet;
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
-  const deviceList = document.getElementById("device-list");
   deviceList.style.paddingTop = `${tickSize+padding}px`;
-  const canvas = document.getElementById("timeline");
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
   // color by name
   const nameMap = new Map();
-  data = [];
+  const data = [];
   for (const [k, { timeline }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -274,7 +275,7 @@ async function renderProfiler() {
        nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
      }
      // offset y by depth
-      data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+     data.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${levelHeight*timeline.maxDepth+padding}px`;
