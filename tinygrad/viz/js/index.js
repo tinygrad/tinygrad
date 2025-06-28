@@ -379,7 +379,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.textContent = foundRect.tooltipText;
+      tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
