@@ -300,15 +300,12 @@ async function renderProfiler() {
   // color by name
   const nameMap = new Map();
   data = [];
-  let i = 0;
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    i += 1;
-    div.id = `dev-${i}`;
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    const { y:baseY, height:baseHeight } = rect(`#dev-${i}`);
+    const { y:baseY, height:baseHeight } = div.getBoundingClientRect();
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
