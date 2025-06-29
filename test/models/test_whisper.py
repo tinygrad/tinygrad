@@ -1,9 +1,12 @@
 import unittest
 import pathlib
-from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform, stft_full, hann_window
 from tinygrad.helpers import CI, fetch
-from tinygrad import Device, dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
+import torch
+import numpy as np
+import librosa
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -66,6 +69,44 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(2, len(trancriptions))
     self.assertEqual(TRANSCRIPTION_3, trancriptions[0])
     self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
+
+class TestSample(unittest.TestCase):
+  def test_hann(self):
+    ref = torch.hann_window(256, False)
+    result = hann_window(256, False)
+    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-6, rtol=1e-5)
+
+  def test_hann_periodic(self):
+    ref = torch.hann_window(256)
+    result = hann_window(256)
+    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-6, rtol=1e-5)
+
+  def test_stft(self):
+    N_FFT = 400
+    HOP_LENGTH = 160
+    BS = 16
+
+    Tensor.manual_seed(42)
+    X = Tensor.rand(BS, 2400).realize()
+    reference = torch.stft(torch.Tensor(X.numpy()), N_FFT, HOP_LENGTH, center=False, return_complex=True, window=torch.hann_window(N_FFT))
+    reference = reference.abs()
+    result = stft_full(X, N_FFT, HOP_LENGTH, (0, 0), "hann")
+    np.testing.assert_allclose(result.numpy(), reference.numpy(), atol=1e-4, rtol=1e-2)
+
+  # @unittest.skipUnless(importlib.util.find_spec("librosa") is not None, "test needs librosa")
+  def test_stft_librosa(self):
+    # import librosa
+    N_FFT = 400
+    HOP_LENGTH = 160
+    BS = 16
+
+    Tensor.manual_seed(42)
+    X = Tensor.rand(BS, 2400).realize()
+    reference = librosa.stft(X.numpy(), n_fft=N_FFT, hop_length=HOP_LENGTH, center=False, window="hann", dtype=np.csingle)
+    reference = np.abs(reference)
+    result = stft_full(X, N_FFT, HOP_LENGTH, (0, 0), "hann")
+    # NOTE(irwin): why do we pass at atol=1e-7 here? it's much lower with librosa than torch.stft
+    np.testing.assert_allclose(result.numpy(), reference, atol=1e-7, rtol=1e-2)
 
 if __name__ == '__main__':
   unittest.main()
