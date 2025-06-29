@@ -2,7 +2,7 @@ from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx import OnnxValue
-import tempfile
+import tempfile, os
 import numpy as np
 import onnx
 import onnxruntime as ort
@@ -52,6 +52,14 @@ def modelproto_to_runner(model:onnx.ModelProto) -> OnnxRunner:
   onnx.save(model, f.name)
   f.flush()
   return OnnxRunner(f.name)
+
+def run_modelproto(model:onnx.ModelProto, inp:dict, debug:int=0):
+  with tempfile.NamedTemporaryFile(suffix=".onnx") as f:
+    onnx.save(model, f.name)
+    runner = OnnxRunner(f.name)
+    out = runner(inp, debug)
+  assert not os.path.exists(f.name), f"Temporary file {f.name} was not deleted"
+  return out
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx_file)
