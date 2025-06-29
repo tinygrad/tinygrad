@@ -42,7 +42,7 @@ def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
   return canonicalize_strides(shape, strides)
 
 @functools.cache
-def merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:Optional[tuple[tuple[int, int], ...]]=None) -> tuple[tuple[int, int, int], ...]:
+def merge_dims(shape:tuple[sint, ...], strides:tuple[sint, ...], mask:Optional[tuple[tuple[int, int], ...]]=None) -> tuple[tuple[sint, sint, sint], ...]:
   # merge contiguous sub-parts or zero strided dims
   # any stride 0, masked from dim=1, or contiguous part is merged into next dim.
   # stride != 0 to stride == 0 starts a new merging block
@@ -297,7 +297,7 @@ class View:
                        tuple(self.mask[a] for a in axis) if self.mask is not None else None)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def flip(self, arg: tuple[bool, ...]) -> View:
+  def flip(self, arg: tuple[bool|UOp, ...]) -> View:
     offset = sum((s-1)*z for s,z,f in zip(self.shape, self.strides, arg) if f)
     mask = tuple((s-my,s-mx) if f else (mx,my) for (mx,my),s,f in zip(self.mask, self.shape, arg)) if self.mask is not None else None
     return View.create(self.shape, tuple(-z if f else z for z,f in zip(self.strides, arg)), self.offset+offset, mask)
