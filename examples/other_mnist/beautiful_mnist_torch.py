@@ -27,7 +27,6 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
-    import tinygrad.frontend.torch
     device = torch.device("tiny")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
