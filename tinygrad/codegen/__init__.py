@@ -37,6 +37,17 @@ def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[Rewri
   # cache with the values of the context vars
   return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
+# tensor cores
+
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp
+
+def tensor_cores(a:UOp, b:UOp, r:UOp):
+  print("use tensor cores")
+
+pm_tensor_cores = PatternMatcher([
+  ((UPat.var().gep(name='a') * UPat.var().gep(name='b')).reduce(name='r', allow_any_len=True), tensor_cores),
+])
+
 @functools.cache
 def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
@@ -50,9 +61,15 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # expand
   ret.append(RewriteStep(sym+expander, name="expander"))
 
+  # use tensor cores
+  ret.append(RewriteStep(pm_tensor_cores, name="tensor cores"))
+
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # factorize warp (before gpu dims)
+  #ret.append(RewriteStep(pm_warp, name="warpcast"))
 
   # add gpu dims (late)
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
