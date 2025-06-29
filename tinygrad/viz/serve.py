@@ -242,7 +242,7 @@ if __name__ == "__main__":
   print("*** viz is starting")
 
   all_ctxs, profile = load_pickle(args.kernels), load_pickle(args.profile)
-  contexts = [[], [], {}]
+  contexts:list = [[], [], {}]
   for proc in all_ctxs:
     contexts[0] += proc[0]
     contexts[1] += proc[1]
