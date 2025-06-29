@@ -6,9 +6,33 @@ from tinygrad.opt.kernel import OptOps, Opt
 from tinygrad.engine.realize import get_program
 
 if __name__ == "__main__":
+
   renderer = Device.default.renderer
   N = 64
   a = Tensor.empty(N,N)
+
+  out = a.sum(axis=1)
+  ast = out.schedule()[-1].ast
+  opts = tuple()
+  opts += (Opt(OptOps.UPCAST, 0, 8),)
+  opts += (Opt(OptOps.UNROLL, 0, 8),)
+  ast = ast.replace(arg=KernelInfo(opts_to_apply=opts))
+  ast = get_optimized_ast(ast, renderer)
+  prg = get_program(ast, renderer)
+  print(prg.src)
+
+  out = a.sum(axis=1)
+  ast = out.schedule()[-1].ast
+  opts = tuple()
+  opts += (Opt(OptOps.UNROLL, 0, 8),)
+  opts += (Opt(OptOps.UPCAST, 0, 8),)
+  ast = ast.replace(arg=KernelInfo(opts_to_apply=opts))
+  ast = get_optimized_ast(ast, renderer)
+  prg = get_program(ast, renderer)
+  print(prg.src)
+
+  # gemm
+  """
   b = Tensor.empty(N,N)
   # metal TC
   #opts = (Opt(OptOps.UPCAST, 0, 2), # not the warp
@@ -22,3 +46,4 @@ if __name__ == "__main__":
   ast = get_optimized_ast(ast, renderer)
   prg = get_program(ast, renderer)
   print(prg.src)
+  """
