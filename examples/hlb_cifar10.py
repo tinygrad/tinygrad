@@ -81,7 +81,7 @@ class ConvGroup:
 
   def __call__(self, x):
     x = self.conv1(x)
-    x = x.max_pool2d(2)
+    x = x.max_pool2d((2,))
     x = x.float()
     x = self.norm1(x)
     x = x.cast(dtypes.default_float)

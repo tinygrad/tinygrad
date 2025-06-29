@@ -181,7 +181,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 # torch support!
 
 @accept_filename
-def torch_load(t:Tensor) -> dict[str, Tensor]:
+def torch_load(t:Tensor) -> dict[str, Tensor|dict[str, int]]:
   """
   ```python
   torch_load(fn: Tensor | str | Path) -> dict[str, Tensor]

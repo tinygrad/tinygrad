@@ -8,6 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
 if TYPE_CHECKING:
+  from tinygrad.engine.realize import CompiledRunner
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -625,7 +626,7 @@ class UPat(MathTrait):
   def var(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.cache
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
+  def cvar(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
   @staticmethod
   def const(dtype:Optional[Union[DType, tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -723,7 +724,7 @@ class PatternMatcher:
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
+  def rewrite(self, uop:UOp, ctx=None) -> UOp|bool|str|tuple[CompiledRunner, list[Buffer]]|tuple[UOp|None, ...]|None:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
@@ -733,7 +734,7 @@ class PatternMatcher:
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
     # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
     new_n: UOp|None = uop
-    while new_n is not None: last_n, new_n = new_n, self.rewrite(new_n, ctx)
+    while new_n is not None: last_n, new_n = new_n, cast(UOp|None, self.rewrite(new_n, ctx))
     return last_n
 
 # *** non-blocking UOp tracker ***
@@ -877,7 +878,7 @@ class RewriteContext:
       elif stage == 1:
         if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
           # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+          if bottom_up or (new_src_n:=cast(UOp|None, self.pm.rewrite(new_n, self.ctx))) is None:
             self.replace[n] = new_n
             continue
         else:

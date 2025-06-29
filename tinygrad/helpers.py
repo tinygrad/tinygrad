@@ -45,7 +45,7 @@ def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
 # cstyle div and mod
-def cdiv(x:int, y:int) -> int: return abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0
+def cdiv(x:int|float, y:int|float) -> int: return int(abs(x)//abs(y)*(1,-1)[x*y<0]) if y != 0 else 0
 def cmod(x:int, y:int) -> int: return x-cdiv(x,y)*y
 def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
 def hi32(x:Any) -> Any: return x >> 32 # Any is sint
