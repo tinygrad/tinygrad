@@ -58,7 +58,7 @@ def run_modelproto(model:onnx.ModelProto, inp:dict, debug:int=0):
     onnx.save(model, f.name)
     runner = OnnxRunner(f.name)
     out = runner(inp, debug)
-  assert not os.path.exists(f.name), f"Temporary file {f.name} was not deleted"
+  assert not os.path.exists(f.name)
   return out
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
