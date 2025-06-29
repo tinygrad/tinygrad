@@ -1,4 +1,4 @@
-import tempfile, unittest
+import unittest
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
@@ -30,11 +30,8 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    with tempfile.NamedTemporaryFile(suffix='.onnx') as f:
-      onnx.save(model, f.name)
-      f.flush()
-      new_model = onnx_load(f.name)
-    run_onnx = OnnxRunner(new_model)
+    model = Tensor(model.SerializeToString(), device="PYTHON")
+    run_onnx = OnnxRunner(onnx_load(model))
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
@@ -43,9 +40,6 @@ class TinygradBackend(Backend):
     return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
-
-# BUG: segfaults
-backend_test.exclude('test_MaxPool1d_stride_padding_dilation_cpu')
 
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
