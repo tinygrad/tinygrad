@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
-from tinygrad.codegen.lowerer import get_grouped_dims
+from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -12,7 +12,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
 from tinygrad.dtype import DType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
@@ -109,7 +109,7 @@ class TestLinearizer(unittest.TestCase):
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
-      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_ACC])
+      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_REG])
       ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.ENDRANGE and u.src[0] in range_in_acc)]
       for i,u in enumerate(ranges):
         if skip and i in skip: continue
@@ -255,7 +255,7 @@ class TestLinearizer(unittest.TestCase):
     k.upcast()
     k.upcast()
     k.linearize()
-    accs = [u for u in k.uops if u.op is Ops.DEFINE_ACC]
+    accs = [u for u in k.uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in k.uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
@@ -310,7 +310,7 @@ class TestLinearizer(unittest.TestCase):
         realized_ast = a.schedule()[-1].ast
         realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
         program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
+        local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
         assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
@@ -318,7 +318,7 @@ class TestLinearizer(unittest.TestCase):
       realized_ast = c.schedule()[-1].ast
       realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
       program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_ACC]
+      local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
       assert local[0].dtype == expected_dtype
 
     tests = (
@@ -367,14 +367,14 @@ class TestLinearizer(unittest.TestCase):
       prg = kernel.to_program()
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
-      elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
+      elif Device.DEFAULT == "AMD" and AMD_LLVM:
         assert "@llvm.amdgcn.wmma" in prg.src
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src
       else:
         assert "__WMMA_" in prg.src
 
-  @unittest.skipIf(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "broken for AMD")
+  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "broken for AMD")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -383,7 +383,7 @@ class TestLinearizer(unittest.TestCase):
 
   # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
   # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
-  @unittest.skipUnless(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
+  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.expectedFailure
   def test_tensor_cores_padded_amd(self):
@@ -780,7 +780,6 @@ class TestFloat4(unittest.TestCase):
     k.shift_to(0, 2, insert_before=k.shape_len-1)
     k.upcast()
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (4, 2)
@@ -798,7 +797,6 @@ class TestFloat4(unittest.TestCase):
       k.shift_to(0, shift, insert_before=k.shape_len-1)
       k.upcast()
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
@@ -835,7 +833,6 @@ class TestFloat4(unittest.TestCase):
     k.upcast()
     k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
     k.upcast()
-    k.local_dims += 1
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 2)
@@ -853,7 +850,6 @@ class TestFloat4(unittest.TestCase):
       k.upcast()
       k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
       k.upcast()
-      k.local_dims += 1
       k.linearize()
       return k
 
@@ -997,7 +993,7 @@ class TestFloat4(unittest.TestCase):
     ]:
       ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
       program = get_program(ast, Device[Device.DEFAULT].renderer)
-      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(4)])
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_REG and uop.dtype == dtypes.float.vec(4)])
       assert count == expected, f"{count=}, {expected=}"
 
   @unittest.skip("this doesn't happen anymore")
@@ -1019,7 +1015,7 @@ class TestFloat4(unittest.TestCase):
     ]:
       ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
       program = get_program(ast, Device[Device.DEFAULT].renderer)
-      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_ACC and uop.dtype == dtypes.float.vec(2)])
+      count = len([uop for uop in program.uops if uop.op is Ops.DEFINE_REG and uop.dtype == dtypes.float.vec(2)])
       assert count == expected, f"{count=}, {expected=}"
 
 class TestHandCodedOpts(unittest.TestCase):

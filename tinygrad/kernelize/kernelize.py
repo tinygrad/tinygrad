@@ -470,7 +470,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   # display the final graph
   sched_sink = tensor_map[sink]
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
-  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
