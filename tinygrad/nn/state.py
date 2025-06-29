@@ -244,7 +244,6 @@ def torch_load(t:Tensor) -> dict[str, Tensor|dict[str, int]]:
         with myzip.open(n) as myfile:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
-      print(myfile, type(myfile))
       return TorchPickle(myfile).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
     with tarfile.open(fileobj=fobj, mode="r") as tar:
