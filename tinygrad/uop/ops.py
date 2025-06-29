@@ -831,14 +831,15 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit
+  import atexit, time
+  os.makedirs(dest_dir:=temp("rewrites", append_user=True), exist_ok=True)
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
+      with open(fn:=os.path.join(dest_dir, "main" if VIZ else f"ts_{time.time()}_pid_{os.getpid()}"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ: launch_viz("VIZ", dest_dir)
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
