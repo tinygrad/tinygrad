@@ -107,18 +107,13 @@ def benchmark_model(m, devices, validate_outs=False):
     for device in devices:
       rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
       Device.DEFAULT = device
-<<<<<<< HEAD
-      inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(fn)
-=======
       # force half inputs to float for numerical stability when validating
       # this will reply on automatic dtype promotion for converting half weights inside the graph
       if m in half_models:
-        inputs = {k:Tensor(inp, dtype=dtypes.float32) if inp.dtype == np.float16 else Tensor(inp) for k,inp in np_inputs.items()}
+        inputs = {k:Tensor(inp, dtype=dtypes.float32) if inp.dtype == np.float16 else Tensor(inp) for k, inp in np_inputs.items()}
       else:
         inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(onnx_model)
->>>>>>> master
+      tinygrad_model = OnnxRunner(fn)
       tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
