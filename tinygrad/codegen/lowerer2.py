@@ -14,7 +14,9 @@ def _count_ranges(lst:list[UOp]): return sum([1 for x in lst if x.op is Ops.RANG
 def add_store_indexing(ctx:LowererContext, store:UOp, buf:UOp, v:UOp):
   if not len(ctx.current_range):
     # create the output range
-    ctx.current_range = [UOp.range(dtypes.int, s, i) for i,s in enumerate(v.arg.shape)]
+    ctx.current_range = [UOp.range(dtypes.int, s, i) if i < (len(v.arg.shape)-ctx.kernel_info.upcasted) else \
+                         UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)) \
+                         for i,s in enumerate(v.arg.shape)]
     ctx.range_number = _count_ranges(ctx.current_range)
   idx, valid = v.arg.to_indexed_uops(ctx.current_range)
   return store.replace(src=(buf.index(idx, valid),)+store.src[1:])
@@ -24,9 +26,14 @@ def add_reduce_indexing(ctx:LowererContext, red:UOp):
   reduce_range = ctx.current_range[:]
   final_reduce_ranges = []
   for i,axis in enumerate(red.arg[1]):
-    final_reduce_ranges.append(UOp.range(dtypes.int, red.src[0].shape[axis], ctx.range_number+i))
-    reduce_range[axis] = final_reduce_ranges[-1]
-  lc = LowererContext(reduce_range, ctx.range_number+len(final_reduce_ranges))
+    # TODO: this logic is similar to the UNROLL logic in add_store_indexing
+    if i < (len(red.src[0].shape)-ctx.kernel_info.upcasted):
+      final_reduce_ranges.append(UOp.range(dtypes.int, red.src[0].shape[axis], ctx.range_number+i))
+      reduce_range[axis] = final_reduce_ranges[-1]
+    else:
+      s = red.src[0].shape[i]
+      reduce_range[axis] = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((ctx.range_number+i,s),))
+  lc = LowererContext(reduce_range, ctx.range_number+len(red.arg[1]))
   from tinygrad.codegen.lowerer2 import pm_lowerer  # TODO: better way to do this?
   ret = graph_rewrite(red.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
   ctx.range_number = lc.range_number
