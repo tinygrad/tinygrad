@@ -724,7 +724,7 @@ class PatternMatcher:
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|bool|str|tuple[CompiledRunner, list[Buffer]]|tuple[UOp, ...]|None:
+  def rewrite(self, uop:UOp, ctx=None) -> UOp|bool|str|tuple[CompiledRunner, list[Buffer]]|tuple[UOp|None, ...]|None:
     ler = {u.op for u in uop.src}
     for _,match,early_reject in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
