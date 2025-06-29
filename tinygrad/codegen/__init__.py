@@ -7,7 +7,6 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-#from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.lowerer2 import pm_lowerer, LowererContext
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -43,8 +42,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-  #ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer"))
-  ret.append(RewriteStep(pm_lowerer, lambda _: LowererContext(), name="lowerer", bottom_up=True))
+  ret.append(RewriteStep(pm_lowerer, lambda ast: LowererContext(kernel_info=ast.arg), name="lowerer", bottom_up=True))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
