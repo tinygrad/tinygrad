@@ -87,6 +87,7 @@ class GroupOp:
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Ptr = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
