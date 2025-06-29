@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, graph_rewrite, KernelInfo, GroupOp
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, graph_rewrite, KernelInfo, GroupOp, prod
 
 @dataclass
 class LowererContext:
@@ -25,6 +24,7 @@ def add_reduce_indexing(ctx:LowererContext, red:UOp):
   # NOTE: should never be range 1 by earlier rule
   reduce_range = ctx.current_range[:]
   final_reduce_ranges = []
+  contract_axis = []
   for i,axis in enumerate(red.arg[1]):
     # TODO: this logic is similar to the UNROLL logic in add_store_indexing
     if i < (len(red.src[0].shape)-ctx.kernel_info.upcasted):
@@ -33,11 +33,13 @@ def add_reduce_indexing(ctx:LowererContext, red:UOp):
     else:
       s = red.src[0].shape[i]
       reduce_range[axis] = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((ctx.range_number+i,s),))
+      contract_axis.append((ctx.range_number+i,s))
   lc = LowererContext(reduce_range, ctx.range_number+len(red.arg[1]))
   from tinygrad.codegen.lowerer2 import pm_lowerer  # TODO: better way to do this?
   ret = graph_rewrite(red.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
   ctx.range_number = lc.range_number
-  return ret.reduce(*final_reduce_ranges, arg=red.arg[0])
+  if len(contract_axis): ret = UOp(Ops.CONTRACT, red.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+  return ret.reduce(*final_reduce_ranges, dtype=red.dtype, arg=red.arg[0])
 
 def view_const(ctx:LowererContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
