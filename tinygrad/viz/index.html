@@ -203,6 +203,28 @@
     color: #ffd230;
     display: none;
   }
+  #tooltip {
+    position: absolute;
+    z-index: 4;
+    background-color: #1e2029;
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    display: none;
+    font-size: 10px;
+  }
+  #device-list > div {
+    min-height: 32px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: flex;
+    cursor: pointer;
+  }
+  #device-list > div:hover {
+    background-color: rgba(20, 23, 35, 0.3);
+  }
   </style>
 </head>
 <body>
@@ -218,10 +240,7 @@
       </button>
     </div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="view profiler">
-      <div id="device-list"></div>
-      <canvas id="timeline"></canvas>
-    </div>
+    <div class="view profiler"></div>
     <div class="view graph">
       <div class="progress-message">Rendering new layout...</div>
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
@@ -229,7 +248,6 @@
           <g id="edges"></g>
           <g id="nodes"></g>
           <g id="edge-labels"></g> <!-- NOTE: this ensures edge labels are always on top -->
-          <g id="bars"></g>
         </g>
         <defs>
           <marker id="arrowhead" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="6" markerHeight="6" orient="auto">

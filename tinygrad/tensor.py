@@ -14,7 +14,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.engine.kernelize import get_kernelize_map
+from tinygrad.kernelize.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -2080,7 +2080,7 @@ class Tensor(MathTrait):
     The log-cumsum-exp function is a numerically stable way to compute the logarithm of the cumulative sum of exponentials.
 
     You can pass in the `axis` keyword argument to control the axis along which
-    the log-cum-sum-exp is computed.
+    the log-cumsum-exp is computed.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -2098,15 +2098,13 @@ class Tensor(MathTrait):
     ```
     """
     if self.ndim == 0: return self
-    axis = self._resolve_dim(axis)
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
-    x_reshaped = x.reshape(-1, last_dim_size)
-    x_cummax = x_reshaped.cummax(-1).unsqueeze(-1)
-    x_expand = x_reshaped.unsqueeze(1).expand(*x_reshaped.shape, last_dim_size)
-    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril().unsqueeze(0)
-    ret = ((x_expand - x_cummax).exp() * mask).sum(-1).log() + x_cummax.squeeze(-1)
-    return ret.reshape(*x.shape).transpose(-1, axis)
+    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
+    x_cummax = x.cummax(-1)
+    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
+    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), dtypes.min(self.dtype)).exp().sum(-1).log() + x_cummax
+    return ret.transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False) -> Tensor:
     """
@@ -2958,6 +2956,18 @@ class Tensor(MathTrait):
     ```
     """
     return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
+  def logsigmoid(self) -> Tensor:
+    """
+    Applies the LogSigmoid function element-wise.
+
+    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
+    ```
+    """
+    return -(-self).softplus()
 
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5) -> Tensor:
     """
@@ -3878,7 +3888,7 @@ class Tensor(MathTrait):
     """
     return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
 
-  def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
+  def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean", pos_weight:Tensor|None=None) -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
 
@@ -3890,7 +3900,8 @@ class Tensor(MathTrait):
     print(t.binary_crossentropy_logits(Y).item())
     ```
     """
-    return (self.maximum(0) - Y * self + (1 + self.abs().neg().exp()).log())._do_reduction(reduction)
+    log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
+    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
     """
@@ -3937,10 +3948,12 @@ class Tensor(MathTrait):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    Y = Y.one_hot(num_classes=cast(int, self.shape[1])) if Y.ndim < 2 else Y
-    Y = (1 - label_smoothing)*Y + label_smoothing / cast(int, Y.shape[1])
-    ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
-    return ret._do_reduction(reduction)
+    classes_dim = 0 if self.ndim == 1 else 1
+    if self.shape != Y.shape:
+      if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
+      Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
+    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
+    return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
   def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
     """

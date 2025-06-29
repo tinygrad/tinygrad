@@ -5,7 +5,7 @@ import multiprocessing
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -914,18 +914,26 @@ def train_rnnt():
   pass
 
 @TinyJit
-def train_step_bert(model, optimizer, scheduler, loss_scaler:float, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
-                    masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
-  for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-    if len(GPUS) > 1: t.shard_(GPUS, axis=0)
-    else: t.to_(GPUS[0])
+def train_step_bert(model, optimizer, scheduler, loss_scaler:float, GPUS, grad_acc:int, **kwargs):
   optimizer.zero_grad()
 
-  lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
-  loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
-  (loss * loss_scaler).backward()
+  for i in range(grad_acc):
+    input_ids, segment_ids = kwargs[f"input_ids{i}"], kwargs[f"segment_ids{i}"]
+    # NOTE: these two have different names
+    attention_mask, masked_positions = kwargs[f"input_mask{i}"], kwargs[f"masked_lm_positions{i}"]
+    masked_lm_ids, masked_lm_weights, next_sentence_labels = kwargs[f"masked_lm_ids{i}"], kwargs[f"masked_lm_weights{i}"], kwargs[f"next_sentence_labels{i}"]
 
-  global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device)
+    for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
+      if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+      else: t.to_(GPUS[0])
+
+    lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+    loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
+    (loss * loss_scaler).backward()
+    # TODO: OOM without this realize with large grad_acc
+    Tensor.realize(*[p.grad for p in optimizer.params])
+
+  global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer[0].device)
   for p in optimizer.params:
     p.grad = p.grad / loss_scaler
     global_norm += p.grad.float().square().sum()
@@ -1001,8 +1009,7 @@ def train_bert():
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  # TODO: implement grad accumulation + mlperf logging
-  assert grad_acc == 1
+  # TODO: mlperf logging
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.000175 * math.sqrt(GBS/96))
@@ -1119,7 +1126,7 @@ def train_bert():
   # ** train loop **
   wc_start = time.perf_counter()
 
-  i, train_data = start_step, next(train_it)
+  i, train_data = start_step, [next(train_it) for _ in range(grad_acc)]
 
   if RUNMLPERF:
     if MLLOGGER:
@@ -1132,14 +1139,13 @@ def train_bert():
       st = time.perf_counter()
       GlobalCounters.reset()
       with WallTimeEvent(BenchEvent.STEP):
-        loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler,
-          train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
-          train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"], GPUS)
+        data = {f"{k}{i}":v for i,d in enumerate(train_data) for k,v in d.items()}
+        loss, global_norm, lr = train_step_bert(model, optimizer_group, scheduler_group, loss_scaler, GPUS, grad_acc, **data)
 
         pt = time.perf_counter()
 
         try:
-          next_data = next(train_it)
+          next_data = [next(train_it) for _ in range(grad_acc)]
         except StopIteration:
           next_data = None
 
@@ -1277,6 +1283,76 @@ def train_bert():
         MLLOGGER.end(key="checkpoint_stop", value=None, metadata={"step_num": i})
         MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": i * GBS, "step_num": i, "first_step_num": i+1})
         previous_step = i
+
+def train_llama3():
+  from extra.models.llama import Transformer
+  from examples.llama3 import MODEL_PARAMS
+  from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
+
+  config = {}
+  BS                 = config["BS"]                     = getenv("BS", 4)
+  grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
+  GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
+
+  opt_adamw_beta_1 = 0.9
+  opt_adamw_beta_2 = 0.95
+  opt_adamw_epsilon = 1e-5
+  opt_adamw_weight_decay = 0.1
+
+  opt_gradient_clip_norm = 1.0
+  sequence_length = 8192
+  opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
+  opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
+  opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
+  opt_end_learning_rate = 8e-7
+
+  # TODO: confirm weights are in bf16
+  # vocab_size from the mixtral tokenizer
+  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=sequence_length, jit=False, disable_kv_cache=True)
+
+  optim = AdamW(get_parameters(model), lr=0.0,
+                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
+  scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
+
+  @TinyJit
+  @Tensor.train()
+  def train_step(model, x, y):
+    optim.zero_grad()
+    logits:Tensor = model(x, start_pos=0, temperature=math.nan)
+    loss = logits.cross_entropy(y)
+    loss.backward()
+
+    # L2 norm grad clip
+    # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
+    # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
+    if not getenv("DISABLE_GRAD_CLIP_NORM"):
+      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
+      for p in optim.params:
+        total_norm += p.grad.float().square().sum()
+      total_norm = total_norm.sqrt().contiguous()
+      for p in optim.params:
+        p.grad = p.grad * opt_gradient_clip_norm / (total_norm + 1e-6)
+
+    optim.step()
+    scheduler.step()
+
+    lr = optim.lr
+    loss.realize(lr)
+    return loss, lr
+
+  # overfitting this example should give cross_entropy log(BS)
+  fake_input = Tensor([list(range(getenv("SEQLEN", 10)))], dtype="int16").expand(BS, -1)
+  fake_label = Tensor(list(range(BS)), dtype="int16")
+
+  for _ in range(100):
+    GlobalCounters.reset()
+    loss, lr = train_step(model, fake_input, fake_label)
+    # BS=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
+    # uses 43% ~= 83GB
+    # 8B bf16 = 16GB. model + grad + optim m and v = 64GB
+    # TODO: this OOM
+    # BS=1 SEQLEN=4000 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
+    print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')

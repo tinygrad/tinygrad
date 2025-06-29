@@ -15,7 +15,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.kernelize import view_left, view_right, sym, get_kernelize_map, Kernel, create_ast, merge_views, create_kernels
+from tinygrad.kernelize.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
@@ -66,8 +66,8 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(img.grad.numpy(), ref_img.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
-@track_rewrites(named=True)
-def schedule_graph_rewrite(big_sink:UOp): return graph_rewrite(big_sink, merge_views+sym, {})
+@track_rewrites(name=True)
+def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=2):
@@ -181,20 +181,6 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.rand(32)
     with Context(DONT_GROUP_REDUCES=1):
       check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
-
-  @unittest.skip("TODO: do not divide by zero given x.idiv(VALID)")
-  def test_rand_handcoded(self):
-    Tensor.manual_seed(0)
-    x = Tensor.rand(32)
-    # pre-realize shared seed
-    Tensor._device_rng_counters[x.device].realize()
-    # run custom kernelized kernel
-    sched_sink = graph_rewrite(x.uop, create_kernels, ctx={u:None for u in x.uop.toposort() if u.op is Ops.COPY}, bottom_up=True)
-    y = Tensor(graph_rewrite(sched_sink, create_ast, bottom_up=True))
-    run_schedule(check_schedule(y, 1))
-    # compare against reference
-    run_schedule(check_schedule(x, 3))
-    np.testing.assert_allclose(y.numpy(), x.numpy())
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
@@ -722,7 +708,6 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.arange(4).realize().uop
     kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
-    kernel = graph_rewrite(kernel, create_ast)
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
@@ -1637,7 +1622,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
+  def test_conv2d_fused(self): _test_conv2d(5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
@@ -1646,7 +1631,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
-  @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
@@ -1999,7 +1983,7 @@ class TestIndexing(unittest.TestCase):
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
-    new_uop = swizzle_rewrite(a.uop.reshape((4, 1)))
+    new_uop = a.reshape(4,1).realize().uop
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
@@ -2021,10 +2005,8 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(ast.shape, (32, 1))
     self.assertEqual(a.uop.shape, (32,))
 
-@track_rewrites(named=True)
-def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
 def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL}])
+  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -2360,13 +2342,12 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
   def test_alu_after_copy(self):
-    a = Tensor.ones((4,)).to("CPU").uop
-    b = Tensor.empty(4, device="CPU").uop
+    a = Tensor.ones((4,)).to("CPU")
+    b = Tensor.empty(4, device="CPU")
     add = a+b
-    add = schedule_graph_rewrite(add)
-    assert all_same([x.device for x in add.src]), f"ALU has different devices! {[x.device for x in add.src]}"
+    add.kernelize()
+    assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
-  @unittest.skip("this is just clone now")
   def test_copy_to_same_device(self):
     a = Tensor.empty(4).uop
     b = a.copy_to_device(a.device)
@@ -2376,7 +2357,6 @@ class TestCopyFolding(unittest.TestCase):
     # in the scheduler because buffer already has shape (4,)
     self.assertIs(b, a.base)
 
-  @unittest.skip("this is just clone now")
   def test_copy_to_same_device_alt(self):
     a = Tensor.empty(4, 4).uop
     b = a.copy_to_device(a.device)
@@ -2436,29 +2416,6 @@ class TestCopyFolding(unittest.TestCase):
     b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
-
-class TestTensorUOpSpec(unittest.TestCase):
-  def test_const_must_be_unmasked(self):
-    a = Tensor.ones((4, 4)).pad((2, 2))
-    unsafe_push_views = PatternMatcher([
-      (UPat.cvar("root").view(name="view"), lambda root,view: root.replace(src=tuple(x.view(view.st) for x in root.src))),
-    ])
-    a.uop = graph_rewrite(a.uop.sink(), merge_views+merge_views+unsafe_push_views)
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      a.schedule()
-
-  def test_expanded_const_ok(self):
-    a = Tensor.ones((4, 4))
-    t = graph_rewrite(a.uop.sink(), merge_views+merge_views)
-    create_schedule_with_vars(t)
-
-  # NOTE: changing symbolic CONST VIEWs is not allowed
-  @unittest.expectedFailure
-  def test_symbolic_shape_ok(self):
-    a = Tensor.ones(4)
-    vi = UOp.variable("i", 1, 10).bind(4)
-    a.uop = graph_rewrite(a.reshape(vi).sum().uop, merge_views+merge_views)
-    a.schedule()
 
 class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)

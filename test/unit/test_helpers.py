@@ -1,9 +1,9 @@
-import gzip, unittest
+import ctypes, gzip, unittest
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import get_shape
-from tinygrad.codegen.lowerer import get_contraction, get_contraction_with_reduce
+from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -182,7 +182,7 @@ class TestMemoryview(unittest.TestCase):
   def test_from_mv_to_mv(self):
     base = memoryview(bytearray(b"\x11\x22\x33"*40))
     ct = from_mv(base)
-    mv = to_mv(ct, len(base))
+    mv = to_mv(ctypes.addressof(ct), len(base))
     mv[0] = 2
     assert base[0] == 2
 
