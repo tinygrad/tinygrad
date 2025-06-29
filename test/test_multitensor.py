@@ -1,4 +1,4 @@
-import unittest, functools, random, os
+import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
@@ -1101,7 +1101,6 @@ class TestTensorOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
 
-# TODO: make these tests pass with VIZ=1
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
@@ -1129,13 +1128,11 @@ class TestMultiRamUsage(unittest.TestCase):
 
   def test_zeros_shard(self, devices=(d1, d2)):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices, axis=0).realize()
-    assert int(os.getenv("VIZ", "0")) == 0
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
   def test_zeros_shard_self(self): self.test_zeros_shard((d0, d1))
 
   def test_zeros_contiguous_shard(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
-    assert int(os.getenv("VIZ", "0")) == 0
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
 @unittest.skipIf(not_support_multi_device(), "need multi")

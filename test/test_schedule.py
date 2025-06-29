@@ -1622,7 +1622,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
+  def test_conv2d_fused(self): _test_conv2d(5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
@@ -1631,7 +1631,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
-  @unittest.skipIf(getenv("VIZ"), "TODO: VIZ blocks gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
