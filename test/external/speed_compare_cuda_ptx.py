@@ -33,7 +33,6 @@ if __name__ == "__main__":
     dev.compiler = PTXCompiler(dev.arch)
     lin = ast_str_to_lin(ast, opts=ptx)
     lin.apply_opts(hand_coded_optimizations(lin))
-    lin.linearize()
     ptx_prg = CompiledRunner(lin.to_program())
 
     # warmup

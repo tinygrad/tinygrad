@@ -4,6 +4,8 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
+from tinygrad.helpers import PROFILE
+from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -20,9 +22,14 @@ class TestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
+    Buffer.profile_events.clear()
     self.tms = TRACK_MATCH_STATS.value
+    self.profile = PROFILE.value
     TRACK_MATCH_STATS.value = 2
-  def tearDown(self): TRACK_MATCH_STATS.value = self.tms
+    PROFILE.value = 1
+  def tearDown(self):
+    TRACK_MATCH_STATS.value = self.tms
+    PROFILE.value = self.profile
 
   def test_simple(self):
     a = UOp.variable("a", 0, 10)
@@ -143,7 +150,6 @@ class TestVizTree(TestViz):
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
 
 import gc
-from tinygrad.device import Buffer
 
 def bufs_allocated() -> int:
   gc.collect()
@@ -195,50 +201,32 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[1]["name"], prg.name)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
-from tinygrad.viz.serve import to_perfetto
+from tinygrad.viz.serve import get_profile
 
-class TextVizProfiler(unittest.TestCase):
+class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
-    # Device regs always first
-    self.assertEqual(j['traceEvents'][0]['name'], 'process_name')
-    self.assertEqual(j['traceEvents'][0]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][0]['args']['name'], 'NV')
-
-    self.assertEqual(j['traceEvents'][1]['name'], 'thread_name')
-    self.assertEqual(j['traceEvents'][1]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][1]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][1]['tid'], 0)
-    self.assertEqual(j['traceEvents'][1]['args']['name'], 'COMPUTE')
-
-    self.assertEqual(j['traceEvents'][2]['name'], 'thread_name')
-    self.assertEqual(j['traceEvents'][2]['ph'], 'M')
-    self.assertEqual(j['traceEvents'][2]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][2]['tid'], 1)
-    self.assertEqual(j['traceEvents'][2]['args']['name'], 'COPY')
-
-    self.assertEqual(j['traceEvents'][3]['name'], 'E_2')
-    self.assertEqual(j['traceEvents'][3]['ts'], 0)
-    self.assertEqual(j['traceEvents'][3]['dur'], 10)
-    self.assertEqual(j['traceEvents'][3]['ph'], 'X')
-    self.assertEqual(j['traceEvents'][3]['pid'], j['traceEvents'][0]['pid'])
-    self.assertEqual(j['traceEvents'][3]['tid'], 0)
+    dev_events = j['layout']['NV']['timeline']['shapes']
+    self.assertEqual(len(dev_events), 1)
+    event = dev_events[0]
+    self.assertEqual(event['name'], 'E_2')
+    self.assertEqual(event['st'], 0)
+    self.assertEqual(event['dur'], 10)
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
-    self.assertEqual(j['traceEvents'][3]['name'], 'COPYxx')
-    self.assertEqual(j['traceEvents'][3]['ts'], 900) # diff clock
-    self.assertEqual(j['traceEvents'][3]['dur'], 10)
-    self.assertEqual(j['traceEvents'][3]['ph'], 'X')
-    self.assertEqual(j['traceEvents'][3]['tid'], 1)
+    event = j['layout']['NV']['timeline']['shapes'][0]
+    self.assertEqual(event['name'], 'COPYxx')
+    self.assertEqual(event['st'], 900) # diff clock
+    self.assertEqual(event['dur'], 10)
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -248,25 +236,64 @@ class TextVizProfiler(unittest.TestCase):
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
-    j = json.loads(to_perfetto(prof))
+    j = json.loads(get_profile(prof))
 
-    # Device regs always first
-    self.assertEqual(j['traceEvents'][0]['args']['name'], 'NV')
-    self.assertEqual(j['traceEvents'][1]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['traceEvents'][2]['args']['name'], 'COPY')
-    self.assertEqual(j['traceEvents'][3]['args']['name'], 'NV:1')
-    self.assertEqual(j['traceEvents'][4]['args']['name'], 'COMPUTE')
-    self.assertEqual(j['traceEvents'][5]['args']['name'], 'COPY')
+    devices = list(j['layout'])
+    self.assertEqual(devices[0], 'NV')
+    self.assertEqual(devices[1], 'NV:1')
 
-    self.assertEqual(j['traceEvents'][6]['name'], 'E_25_4n2')
-    self.assertEqual(j['traceEvents'][6]['ts'], 0)
-    self.assertEqual(j['traceEvents'][6]['dur'], 2)
-    self.assertEqual(j['traceEvents'][6]['pid'], j['traceEvents'][0]['pid'])
+    nv_events = j['layout']['NV']['timeline']['shapes']
+    self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
+    self.assertEqual(nv_events[0]['st'], 0)
+    self.assertEqual(nv_events[0]['dur'], 2)
+    #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    self.assertEqual(j['traceEvents'][7]['name'], 'NV -> NV:1')
-    self.assertEqual(j['traceEvents'][7]['ts'], 954)
-    self.assertEqual(j['traceEvents'][7]['dur'], 4)
-    self.assertEqual(j['traceEvents'][7]['pid'], j['traceEvents'][3]['pid'])
+    nv1_events = j['layout']['NV:1']['timeline']['shapes']
+    self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
+    self.assertEqual(nv1_events[0]['st'], 954)
+    #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+
+def _alloc(b:int):
+  a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
+  a.uop.buffer.allocate()
+  return a
+
+class TestVizMemoryLayout(TestViz):
+  def test_double_alloc(self):
+    a = _alloc(1)
+    _b = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][a.device]["mem"]
+    self.assertEqual(ret["peak"], 2)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
+    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+
+  def test_del_once(self):
+    a = _alloc(1)
+    del a
+    b = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][b.device]["mem"]
+    self.assertEqual(ret["peak"], 1)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
+    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
+    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
+    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+
+  def test_alloc_free(self):
+    a = _alloc(1)
+    _b = _alloc(1)
+    del a
+    c = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][c.device]["mem"]
+    self.assertEqual(ret["peak"], 2)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
+    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
+    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
+    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
+    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
+    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
 
 if __name__ == "__main__":
   unittest.main()

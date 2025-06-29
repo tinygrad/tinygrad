@@ -415,6 +415,8 @@ finalize_gbarrier = PatternMatcher([
   (UPat(Ops.GBARRIER, src=(UPat(Ops.VIEW,),), name="x"), lambda x: x.src[0].contiguous().gbarrier()),
   # remove gbarrier on constants without a contiguous
   (UPat(Ops.GBARRIER, src=(UPat(Ops.CONST),), name="x"), lambda x: x.src[0]),
+  # simplify views
+  (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
@@ -468,7 +470,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   # display the final graph
   sched_sink = tensor_map[sink]
   if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Kernel Graph")
-  if getenv("VIZ"): graph_rewrite(sched_sink, PatternMatcher([]), name="View Memory Graph")
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)

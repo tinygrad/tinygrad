@@ -2,26 +2,26 @@ from __future__ import annotations
 import unittest
 
 from tinygrad import Tensor
-from tinygrad.opt.kernel import Kernel
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
 from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
+from tinygrad.engine.realize import get_program
+from tinygrad.device import Device
 
 class InvalidASTException(Exception): pass
-def helper_test_verify_ast(*stores:UOp) -> Kernel:
+def helper_test_verify_ast(*stores:UOp):
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
   try: type_verify(list(sink.toposort()), ast_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
-  k = Kernel(sink)
-  k.linearize()
-  if DEBUG >= 6: print_uops(k.uops)
-  if DEBUG >= 4: print(k.to_program().src)
-  return k
+  program = get_program(sink, Device[Device.DEFAULT].renderer)
+
+  if DEBUG >= 6: print_uops(program.uops)
+  if DEBUG >= 4: print(program.src)
 
 class TestUOpSpec(unittest.TestCase):
   def test_tiny_add(self):
