@@ -865,7 +865,7 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def unified_rewrite(self, root:UOp, bottom_up=False) -> UOp:
+  def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
       n, stage, new_n = stack.pop()
