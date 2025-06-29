@@ -42,7 +42,7 @@ def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
   return canonicalize_strides(shape, strides)
 
 @functools.cache
-def merge_dims(shape:tuple[sint, ...], strides:tuple[sint, ...], Optional[mask:tuple[tuple[int, int], ...]|None]=None) -> tuple[tuple[sint, sint, sint], ...]:
+def merge_dims(shape:tuple[sint, ...], strides:tuple[sint, ...], mask:tuple[tuple[int, int], ...]|None=None) -> tuple[tuple[sint, sint, sint], ...]:
   # merge contiguous sub-parts or zero strided dims
   # any stride 0, masked from dim=1, or contiguous part is merged into next dim.
   # stride != 0 to stride == 0 starts a new merging block
