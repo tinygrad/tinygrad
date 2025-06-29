@@ -787,7 +787,6 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
-        AMD_LLVM: 1
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/test_hcq.py test/test_tiny.py test/test_amd_llvm.py --durations=20
