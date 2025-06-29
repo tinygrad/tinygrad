@@ -318,7 +318,7 @@ d3.select("#graph-svg").call(svgZoom);
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const canvas = d3.select("#timeline");
-  if (rect(canvas.node()).width !== 0) {
+  if (!canvas.empty() && rect(canvas.node()).width !== 0) {
     return canvas.call(canvasZoom.transform, d3.zoomIdentity);
   }
   const svg = d3.select("#graph-svg");
