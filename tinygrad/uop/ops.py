@@ -893,13 +893,14 @@ class RewriteContext:
     return self.replace[root]
 
 @track_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else None, ctx)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.unified_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else None, ctx)
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
+                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   new_map: dict[UOp, UOp] = {}
   for k in sink.toposort():
     new_map[k] = v = rewrite_ctx.unified_rewrite(k)
