@@ -215,12 +215,14 @@ def reloader():
 
 def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
+  print(path)
   if os.path.isdir(path):
+    trace_keys:dict[int,str] = {}
     with os.scandir(path) as it:
-      ret = []
       for e in it:
-        try: ret.append(load_pickle(e.path))
-        except EOFError: continue # skip incomplete files.
+        ts = e.name.split("_", 1)[0]
+        trace_keys.setdefault(ts,[]).append(e.path)
+    ret = [load_pickle(fp) for fp in trace_keys[max(trace_keys)]]
     return ret
   with open(path, "rb") as f: return pickle.load(f)
 

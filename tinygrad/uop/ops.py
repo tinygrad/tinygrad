@@ -839,7 +839,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=os.path.join(dest_dir, f"{TRACING_TIMESTAMP.value}_pid_{os.getpid()}"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
+        pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: launch_viz("VIZ", dest_dir)
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
