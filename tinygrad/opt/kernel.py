@@ -207,6 +207,7 @@ class Kernel:
     self.axes["global"] -= sum(all_ones[:local_offset])
     self.axes["local"] -= sum(all_ones[local_offset:reduce_offset])
     self.axes["reduce"] -= sum(all_ones[reduce_offset:upcast_offset])
+    self.axes["upcast"] -= sum(all_ones[upcast_offset:])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
     return any(all_ones)
 
