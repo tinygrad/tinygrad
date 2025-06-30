@@ -133,7 +133,6 @@ class TestSubBuffer(unittest.TestCase):
     view2.copyout(memoryview(data_out_v2))
     assert data_in == data_out_v2
 
-    expected_base_data = bytearray([0]*10)
     expected_base_data = memoryview(bytearray(range(10)))
     expected_base_data[4:7] = data_in
 
