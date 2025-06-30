@@ -14,12 +14,13 @@ class DiskDevice(Compiled):
 
     self.size: Optional[int] = None
     self.fd: Optional[int] = None
+    self.mem: Optional[mmap.mmap] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
   def _might_open(self, size):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None: return
+    if self.size is not None and self.mem is not None: return
     filename = self.device[len("disk:"):]
     self.size = size
 
