@@ -142,6 +142,7 @@ class ProgramSpec:
 class Renderer:
   device: str = ""
   suffix: str = ""
+  default_name: str = "test"
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
