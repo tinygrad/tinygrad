@@ -227,6 +227,7 @@ jobs:
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
+        IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
       run: |
