@@ -837,12 +837,14 @@ if TRACK_MATCH_STATS or PROFILE:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      fn = os.path.join(dest_dir, f"{TRACING_TIMESTAMP.value}_pid_{os.getpid()}")
-      print("opening", fn)
-      with open(fn, "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
+      with open(tmp_fn:=os.path.join(dest_dir, f"temp_pid_{os.getpid()}"), "wb") as f:
+        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times")
         pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
-      print(fn, os.path.getsize(fn))
+        f.flush()
+        os.fsync(f.fileno())
+      fn = os.path.join(dest_dir, f"{TRACING_TIMESTAMP.value}_pid_{os.getpid()}")
+      print(f"saved to {fn}")
+      os.rename(tmp_fn, fn)
     if VIZ: launch_viz("VIZ", dest_dir)
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]

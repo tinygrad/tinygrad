@@ -216,15 +216,16 @@ def reloader():
 def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
   if os.path.isdir(path):
-    trace_keys:dict[int,str] = {}
+    trace_keys = {}
     with os.scandir(path) as it:
       for e in it:
         ts = e.name.split("_", 1)[0]
-        trace_keys.setdefault(ts,[]).append(e.path)
-    ret = [load_pickle(fp) for fp in trace_keys[max(trace_keys)]]
-    for k,files in trace_keys.items():
-      if k != max(trace_keys):
-        for fp in files: os.remove(fp)
+        trace_keys.setdefault(ts,[]).append(e)
+    load_files = [e.path for e in trace_keys[max(trace_keys)] if not e.name.startswith("temp")]
+    for files in trace_keys.values():
+      for fp in files:
+        if fp.path not in load_files: os.remove(fp)
+    ret = [load_pickle(fp) for fp in load_files]
     return ret
   print("reading", path)
   with open(path, "rb") as f: return pickle.load(f)
