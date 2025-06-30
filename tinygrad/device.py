@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Optional, Any, Generic, TypeVar, Iterator, Generator
 import importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
@@ -60,6 +60,9 @@ class ProfileDeviceEvent(ProfileEvent):
 class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
+class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
+
+@dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
 
 @dataclass(frozen=True)
@@ -105,6 +108,7 @@ class MultiBuffer:
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
+  profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
                uop_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
@@ -150,12 +154,17 @@ class Buffer:
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+      if PROFILE:
+        self._prof_num = num = len(Buffer.profile_events)
+        ts = decimal.Decimal(time.perf_counter_ns())/1000
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", decimal.Decimal(time.perf_counter_ns())/1000, self._prof_num))
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
@@ -388,7 +397,7 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events+Buffer.profile_events, f)
 
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz

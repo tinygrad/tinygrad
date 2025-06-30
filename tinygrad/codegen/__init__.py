@@ -9,6 +9,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
+from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
@@ -41,7 +42,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-  ret.append(RewriteStep(pm_lowerer, lambda ast: get_index(ast, opts), name="lowerer"))
+  ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
@@ -52,6 +53,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # add gpu dims (late)
+  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
