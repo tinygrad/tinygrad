@@ -168,8 +168,8 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (fn:={"/":"index"}.get((url:=urlparse(self.path)).path)):
-      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
+    if (url:=urlparse(self.path)).path == "/":
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
