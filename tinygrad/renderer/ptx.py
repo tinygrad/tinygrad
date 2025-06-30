@@ -6,6 +6,7 @@ from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.helpers import flatten, get_single_element
+from tinygrad.uop.spec import ptx_spec
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -135,6 +136,7 @@ class PTXRenderer(Renderer):
   tc_sm80 = [tc for tc in CUDARenderer.tc_sm80 if tc.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
+  extra_spec = ptx_spec
   def __init__(self, arch:str, device="CUDA"):
     self.device, self.arch = device, arch
     self.tensor_cores = PTXRenderer.tc_sm80 if int(arch[3:]) >= 80 else CUDARenderer.tc_sm75 if int(arch[3:]) >= 75 else []
