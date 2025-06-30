@@ -486,7 +486,7 @@ class Kernel:
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if st == 0 or i < wd or (i >= self.first_reduce and i < tcd) else src_st.shape[i] \
                                   for i,st in enumerate(src_st.real_strides()))
-              st = store_st = ShapeTracker.from_shape(local_shape)
+              st = store_st = ShapeTracker.from_shape(local_shape).expand(self.full_shape[:wd]+local_shape[wd:])
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(size=st.real_size(), local=True), (), f"temp{i}")
               if swizzle: store_st = get_tc_swizzle_st(store_st.shape, *swizzle)
               local_store = UOp.store(local_buffer.view(store_st), srcs[i])
