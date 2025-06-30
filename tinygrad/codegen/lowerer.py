@@ -1,9 +1,8 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
-from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, graph_rewrite
-from tinygrad.helpers import prod, partition, flatten
+from tinygrad.helpers import prod, flatten
 
 # ***** indexing *****
 
@@ -26,23 +25,7 @@ def idxs_from_shape(full_shape, upcasted):
 
 def get_index(ast:UOp) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
-  # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
-  #full_shape = ast.src[0].shape
-
-
-  """
-  # late indexes (group for reduce)
-  # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].base.op is Ops.DEFINE_LOCAL]
-  # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
-  group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
-  ridxs = idxs[:]
-  for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
-  #return IndexContext([], idxs, ranges_used=len(idxs), upcasted=ki.upcasted)
-  """
-  idxs = idxs_from_shape(ast.src[0].shape, ki.upcasted)
+  idxs = idxs_from_shape(ast.src[0].shape, ki.upcasted) if ast.src[0].st is not None else []
   return IndexContext(idxs, ranges_used=len(idxs), upcasted=ki.upcasted)
 
 # ***** lowering (given index) *****
@@ -54,11 +37,12 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ridxs = ctx.idxs[:]
   reduce_range, reduce_expand = [], []
   for i,axis in enumerate(x.axis_arg):
-    s:int = x.src[0].shape[axis]
+    s = x.src[0].shape[axis]
     if axis < (len(x.src[0].shape)-ctx.upcasted):
       ridxs[axis] = UOp.range(dtypes.int, s, ctx.ranges_used+i)
       reduce_range.append(ridxs[axis])
     else:
+      assert isinstance(s, int), "needs to be int to upcast/unroll"
       ridxs[axis] = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((ctx.ranges_used+i,s),), tag=True)
       reduce_expand.append(ridxs[axis])
   subctx = IndexContext(ridxs, ctx.ranges_used + len(x.arg[1]), ctx.upcasted)
