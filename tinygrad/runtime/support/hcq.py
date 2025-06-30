@@ -428,7 +428,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def _select_iface(self, *ifaces:Type):
     errs:str = ""
-    if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val))
+    if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
     for iface_t in ifaces:
       try: return iface_t(self, self.device_id)
       except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
