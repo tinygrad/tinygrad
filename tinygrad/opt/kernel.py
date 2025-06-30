@@ -1,7 +1,7 @@
 from __future__ import annotations
 import itertools, functools, math
 from dataclasses import dataclass
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
@@ -68,7 +68,7 @@ class Kernel:
     self.dont_use_locals: bool = False
 
     reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
-    self.axes = OrderedDict((("global", self.shape_len - len(reduces)), ("local", 0), ("reduce", len(reduces)), ("upcast", 0)))
+    self.axes = {"global": self.shape_len - len(reduces), "local": 0, "reduce": len(reduces), "upcast": 0}
 
     # group simplifies
     self.simplify_ones()
