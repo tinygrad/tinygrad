@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax, PatternMatcher, UPat
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, get_single_element
+from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
@@ -67,6 +68,8 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
+    self.smem_promotion: dict[int, bool] = {x.arg: False for x in self.membufs}
+    self.smem_usage: int = 0
 
     # group simplifies
     self.simplify_ones()
@@ -91,6 +94,7 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.smem_promotion, ret.smem_usage = self.smem_promotion.copy(), self.smem_usage
 
     return ret
 
@@ -156,6 +160,13 @@ class Kernel:
     ret = ' '.join(colored(s, color) for s,color in zip(shape_strs, self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
+
+  def get_smem_buffer_shapetracker(self, buf_st:ShapeTracker) -> ShapeTracker:
+    shape: list[sint] = []
+    for i, st in enumerate(buf_st.real_strides(True)):
+      if i < self.global_dims or self.first_reduce <= i < self.first_upcast or st == 0: shape.append(1)
+      else: shape.append(buf_st.shape[i])
+    return ShapeTracker.from_shape(tuple(shape))
 
   # ******************** base simplifiers ********************
 
@@ -348,7 +359,9 @@ class Kernel:
       return
 
     axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
+    if opt.op is not OptOps.PROMOTE_SMEM:
+      if opt.op != OptOps.SWAP: check(not any(self.smem_promotion.values()), f"can't reshape after SMEM_BUFFER promotion {self.applied_opts=} {opt=}")
+      check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
@@ -419,6 +432,16 @@ class Kernel:
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
       check(padded, "nothing was padded")
+    elif opt.op is OptOps.PROMOTE_SMEM:
+      check(axis in self.smem_promotion and not self.smem_promotion[axis], f"invalid buffer selection for smem promotion ({axis})")
+      buffer, buffer_st = get_single_element([(buf, st) for buf, st in zip(self.bufs, self.sts) if buf.src[0].base.arg == axis])
+      smem_buffer_st = self.get_smem_buffer_shapetracker(buffer_st)
+      smem_buffer_dtype = buffer.src[0].base.dtype
+      check(self.smem_usage + smem_buffer_st.real_size() * smem_buffer_dtype.itemsize <= self.opts.shared_max, "new buffer exceeds max smem size")
+      check(self.group_for_reduces == 0, "can't apply lds with group/grouptop") # TODO: support group/grouptop
+      check(all(not buffer_st.axis_is_masked(i) for i in range(len(buffer_st.shape))), "can't apply lds with masked axis") # TODO: support masked axis
+      self.smem_usage += smem_buffer_st.real_size() * smem_buffer_dtype.itemsize
+      self.smem_promotion[axis] = True
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
@@ -525,7 +548,12 @@ class Kernel:
       return ret
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
+    fixed_ast = graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
+    if any(self.smem_promotion.values()):
+      fixed_ast = graph_rewrite(fixed_ast, PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), name="global_access"), promote)]), ctx=self,
+                                name="smem promotion")
+
+    return fixed_ast
 
   # TODO: update the tests and delete these methods
 
@@ -537,3 +565,21 @@ class Kernel:
     ret = get_program(self.get_optimized_ast(name_override), self.opts)
     self.uops = ret.uops
     return ret
+
+def promote(ctx: Kernel, global_access: UOp):
+  buffer, kernel = global_access.src[0].base, ctx
+  if buffer.op is Ops.DEFINE_GLOBAL and kernel.smem_promotion[buffer.arg] and global_access.tag != "promoted":
+    global_access = global_access.replace(tag="promoted")
+    store_st = load_st = kernel.get_smem_buffer_shapetracker(global_access.st_arg)
+    smem_buffer = UOp(Ops.DEFINE_LOCAL, buffer.dtype.base.ptr(size=store_st.real_size(), local=True), (), f"smem{buffer.arg}")
+
+    if global_access.op is Ops.LOAD:
+      smem_store = smem_buffer.view(store_st).store(global_access)
+      return smem_buffer.view(load_st).load(smem_store)
+
+    if global_access.op is Ops.STORE:
+      smem_store = smem_buffer.view(store_st).store(global_access.src[1])
+      smem_load = smem_buffer.view(load_st).load(smem_store)
+      return global_access.replace(src=(global_access.src[0], smem_load))
+
+  return None
