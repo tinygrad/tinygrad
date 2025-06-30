@@ -290,6 +290,11 @@ class TestRecurse(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm)
 
+  def test_no_inf_loop_bottom_up(self):
+    a = UOp.variable('a', 0, 10)
+    pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
+    graph_rewrite(a, pm, bottom_up=True)
+
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([
