@@ -254,7 +254,7 @@ if __name__ == "__main__":
   pid_map:dict = {}
   keys, vals = [], []
   i = 0
-  for file,(proc_keys, proc_vals , proc_uops) in contexts.items():
+  for file,(proc_keys, proc_vals, proc_uops) in contexts.items():
     pid = int(file.split("pid_")[1])
     pid_uops[pid] = proc_uops
     keys += proc_keys
