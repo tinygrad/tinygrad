@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
@@ -427,6 +427,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return buf, realloced
 
   def _select_iface(self, *ifaces:Type):
+    errs:str = ""
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = [x for x in ifaces if x.__name__.startswith(val)]
     for iface_t in ifaces:
       try: return iface_t(self, self.device_id)
