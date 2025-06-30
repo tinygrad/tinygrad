@@ -290,5 +290,17 @@ class TestRecurse(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm)
 
+def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
+class TestBidirectional(unittest.TestCase):
+  def test_simple(self):
+    a = UOp.const(dtypes.int, 1)
+    b = UOp.const(dtypes.int, 2)
+    c = a + b
+    pm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, False)) ])
+    bpm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, True)) ])
+    ctx_list = []
+    graph_rewrite(c, pm, ctx=ctx_list, bpm=bpm)
+    self.assertListEqual(ctx_list, [('+', True), (1, True), (1, False), (2, True), (2, False), ('+', False)])
+
 if __name__ == '__main__':
   unittest.main()

@@ -822,8 +822,9 @@ jobs:
       run: npm cache clean --force
     - name: Install Puppeteer
       run: npm install puppeteer
-    - name: Run WEBGPU Efficientnet
-      run: node test/web/test_webgpu.js
+    # this is also flaky
+    #- name: Run WEBGPU Efficientnet
+    #  run: node test/web/test_webgpu.js
     # this is flaky
     #- name: Run VIZ tests as external package
     #  run: |

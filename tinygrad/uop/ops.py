@@ -859,25 +859,26 @@ if TRACK_MATCH_STATS or PROFILE:
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
-  def __init__(self, pm, ctx=None):
-    self.pm: PatternMatcher = pm
+  def __init__(self, pm, bpm, ctx=None):
+    self.pm: PatternMatcher|None = pm
+    self.bpm: PatternMatcher|None = bpm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def unified_rewrite(self, root:UOp, bottom_up=False) -> UOp:
+  def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-        if bottom_up: new_n = self.pm.fixed_point_rewrite(new_n, self.ctx)
+        if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src): stack.append((x, 0, x))
       elif stage == 1:
         if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
           # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+          if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
             self.replace[n] = new_n
             continue
         else:
@@ -892,16 +893,17 @@ class RewriteContext:
     return self.replace[root]
 
 @track_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
-  rewrite_ctx = RewriteContext(pm, ctx)
-  return rewrite_ctx.unified_rewrite(sink, bottom_up)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
+  return rewrite_ctx.unified_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm, ctx)
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
+                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   new_map: dict[UOp, UOp] = {}
   for k in sink.toposort():
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k, bottom_up)
+    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
     if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
