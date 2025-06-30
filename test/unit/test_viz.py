@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -119,19 +119,19 @@ class TestViz(unittest.TestCase):
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
-  @unittest.skip("locks up")
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
+    b = a.replace(op=Ops.DEFINE_REG)
     pm = PatternMatcher([
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
       (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
-    g = list(get_details(tracked_ctxs[0][0]))
-    print(g)
-    #assert g["graphs"][0] = uop_to_json(a)
-    #assert g["graphs"][1] = uop_to_json(b)
-    #assert g["graphs"][2] = uop_to_json(UOp(Ops.NOOP))
+    graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
+    self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
+    nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
+    self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
 # VIZ displays nested graph_rewrites in a tree view
 
