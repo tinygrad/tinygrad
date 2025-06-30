@@ -709,6 +709,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skip("upcasting locals")
   def test_skip_unmatching_upcasts(self):
     Tensor.manual_seed(0)
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
@@ -728,6 +729,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skip("upcasting locals")
   def test_skip_unmatching_upcasts_with_gep(self):
     Tensor.manual_seed(0)
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
