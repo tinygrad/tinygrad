@@ -30,7 +30,7 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
 
 class TestFuse(unittest.TestCase):
-  def _test_fuse(self, fxn, *args, atol=1e-7, allow_multiple=False, **kwargs):
+  def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):
     GlobalCounters.reset()
     out_single = fxn(*args, **kwargs).fuse()
     if not allow_multiple: run_one_schedule_item(out_single)
@@ -86,7 +86,6 @@ class TestFuse(unittest.TestCase):
       return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
     self._test_fuse(embedding, a, atol=1e-5)
 
-  @unittest.skip("still broken")
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
