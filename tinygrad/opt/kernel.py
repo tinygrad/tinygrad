@@ -190,7 +190,6 @@ class Kernel:
     if self.shape_len == 0: return False
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
-    self.upcasted -= sum(all_ones[self.first_upcast:]) # TODO: no necessary since upcasted axis can't be un-upcasted
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
     return any(all_ones)
 
