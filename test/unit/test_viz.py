@@ -15,8 +15,10 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 pickles these tracked values
-from tinygrad.viz.serve import get_metadata, uop_to_json
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, active_rewrites, _name_cnt
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
+from tinygrad.viz import serve
+serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
+from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
 class TestViz(unittest.TestCase):
@@ -116,6 +118,20 @@ class TestViz(unittest.TestCase):
     a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+
+  @unittest.skip("locks up")
+  def test_inf_loop(self):
+    a = UOp.variable('a', 0, 10)
+    pm = PatternMatcher([
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
+      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+    ])
+    with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
+    g = list(get_details(tracked_ctxs[0][0]))
+    print(g)
+    #assert g["graphs"][0] = uop_to_json(a)
+    #assert g["graphs"][1] = uop_to_json(b)
+    #assert g["graphs"][2] = uop_to_json(UOp(Ops.NOOP))
 
 # VIZ displays nested graph_rewrites in a tree view
 
