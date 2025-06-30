@@ -53,14 +53,6 @@ def modelproto_to_runner(model:onnx.ModelProto) -> OnnxRunner:
   f.flush()
   return OnnxRunner(f.name)
 
-def run_modelproto(model:onnx.ModelProto, inp:dict, debug:int=0):
-  with tempfile.NamedTemporaryFile(suffix=".onnx") as f:
-    onnx.save(model, f.name)
-    runner = OnnxRunner(f.name)
-    out = runner(inp, debug)
-  assert not os.path.exists(f.name)
-  return out
-
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx_file)
 
