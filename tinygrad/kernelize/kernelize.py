@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
-from tinygrad.uop.symbolic import symbolic_simple, fold_cast
+from tinygrad.uop.symbolic import fold_cast
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.kernelize.multi import multi_pm
