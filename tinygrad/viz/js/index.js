@@ -111,7 +111,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -164,7 +164,7 @@ async function renderProfiler() {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length], key:i });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -197,7 +197,10 @@ async function renderProfiler() {
         ctx.fillStyle = e.color;
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key });
+        ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
+        ctx.lineWidth = 1;
+        ctx.stroke();
         continue;
       }
       // zoom only changes x and width
@@ -305,9 +308,19 @@ async function renderProfiler() {
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
       tooltip.innerText = foundRect.tooltipText;
-    } else tooltip.style.display = "none";
+      if (foundRect.key != null) {
+        focusedShape = foundRect.key;
+        return render();
+      }
+    } else {
+      tooltip.style.display = "none";
+      focusedShape = null;
+    }
   });
-  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
+  canvas.addEventListener("mouseleave", () => {
+    tooltip.style.display = "none";
+    focusedShape = null;
+  });
 }
 
 // ** zoom and recentering
