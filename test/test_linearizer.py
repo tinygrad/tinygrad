@@ -12,7 +12,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
 from tinygrad.dtype import DType, dtypes
 
 def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
@@ -367,14 +367,14 @@ class TestLinearizer(unittest.TestCase):
       prg = kernel.to_program()
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
-      elif Device.DEFAULT == "AMD" and getenv("AMD_LLVM", 0):
+      elif Device.DEFAULT == "AMD" and AMD_LLVM:
         assert "@llvm.amdgcn.wmma" in prg.src
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src
       else:
         assert "__WMMA_" in prg.src
 
-  @unittest.skipIf(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "broken for AMD")
+  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "broken for AMD")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -383,7 +383,7 @@ class TestLinearizer(unittest.TestCase):
 
   # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
   # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
-  @unittest.skipUnless(Device.DEFAULT in ("AMD", "AMD_LLVM") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
+  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.expectedFailure
   def test_tensor_cores_padded_amd(self):
