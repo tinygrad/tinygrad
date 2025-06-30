@@ -217,17 +217,18 @@ def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
   if os.path.isdir(path):
     # group traces by timestamp
-    traces:dict[int, list[str]] = {}
+    traces:dict[int, list[os.DirEntry]] = {}
     with os.scandir(path) as it:
       for e in it:
         if e.name.startswith("temp"): os.remove(e.path)
-        else: traces.setdefault(int(e.name.split("_", 1)[0]), []).append(e.path)
+        else: traces.setdefault(int(e.name.split("_", 1)[0]), []).append(e)
     # load files with the latest timestamp, clean up the rest
     ret:dict[str,Any] = {}
     for ts,files in traces.items():
+      files.sort(key=lambda e:e.stat().st_mtime, reverse=True)
       for fp in files:
-        if ts == max(traces): ret[fp] = load_pickle(fp)
-        else: os.remove(fp)
+        if ts == max(traces): ret[fp.path] = load_pickle(fp.path)
+        else: os.remove(fp.path)
     return ret
   with open(path, "rb") as f: return pickle.load(f)
 
