@@ -174,6 +174,10 @@ class MemoryManager:
     va_pwr2_div, sz_pwr2_div, sz_pwr2_max = va & -(va) if va > 0 else (1 << 63), sz & -(sz), (1 << (sz.bit_length() - 1))
     return (min(va_pwr2_div, sz_pwr2_div) if must_cover else min(va_pwr2_div, sz_pwr2_max)).bit_length() - 1 - 12
 
+  def page_tables(self, vaddr:int, size:int):
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
+    for _ in ctx.next(size): return [pt for pt, _, _ in ctx.pt_stack]
+
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
