@@ -484,18 +484,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
-  def _select_iface(self):
-    if len(nm:=getenv("NV_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
-
-    errs:str = ""
-    for iface_t in (NVKIface, PCIIface):
-      try: return iface_t(self, self.device_id)
-      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
-    raise RuntimeError(f"Cannot find a usable interface for NV:{self.device_id}:\n{errs}")
-
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface()
+    self.iface = self._select_iface(NVKIface, PCIIface)
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)

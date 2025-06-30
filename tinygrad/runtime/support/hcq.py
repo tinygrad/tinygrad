@@ -426,6 +426,13 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
+  def _select_iface(self, *ifaces:Type):
+    if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = [x for x in ifaces if x.__name__.startswith(val)]
+    for iface_t in ifaces:
+      try: return iface_t(self, self.device_id)
+      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
+    raise RuntimeError(f"Cannot find a usable interface for {type(self).__name__[:-6]}:{self.device_id}:\n{errs}")
+
 class HCQBuffer:
   def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None):
     self.va_addr, self.size, self.texture_info, self.meta, self._base, self.view = va_addr, size, texture_info, meta, _base, view
