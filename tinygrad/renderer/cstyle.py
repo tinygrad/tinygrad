@@ -132,9 +132,10 @@ class CStyleLanguage(Renderer):
     kernel = []
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
+    name = self.default_name
     for u in uops:
       if u.op is Ops.SINK:
-        name = u.arg.function_name if u.arg is not None and u.arg.name is not None else self.default_name
+        if u.arg is not None and u.arg.name is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]

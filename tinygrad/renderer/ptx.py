@@ -174,9 +174,10 @@ class PTXRenderer(Renderer):
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 
+    name = self.default_name
     for u in uops:
       if u.op is Ops.SINK:
-        name = u.arg.function_name if u.arg is not None and u.arg.name is not None else self.default_name
+        if u.arg is not None and u.arg.name is not None: name = u.arg.function_name
         continue
       if u.op is Ops.VECTORIZE:
         r[u] = [cast(str,r[x]) for x in u.src]
