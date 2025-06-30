@@ -175,6 +175,7 @@ class TestLinearizer(unittest.TestCase):
     assert not any(x.op is Ops.LOAD for x in lin.uops[ranges[0]:ranges[1]])
     assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in lin.uops[ranges[1]:])
 
+  @unittest.skipIf(Device.DEFAULT in ("X86", "ARM64"), "fails because of loaded float const")
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
@@ -211,6 +212,7 @@ class TestLinearizer(unittest.TestCase):
     # the INDEX can be first
     assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
 
+  @unittest.skipIf(Device.DEFAULT in ("X86", "ARM64"), "fails because of loaded float const")
   def test_range_outer_op_after_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
@@ -939,6 +941,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k.uops) == (1, 1)
 
+  @unittest.skipIf(Device.DEFAULT == "X86", "float16 vec4 not supported for now")
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(

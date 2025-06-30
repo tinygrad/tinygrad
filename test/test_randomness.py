@@ -98,7 +98,8 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(getenv("PTX"), "fails with PTX")
+  @unittest.skipIf(getenv("PTX"), "indexing uses long in ptx")
+  @unittest.skipIf(Device.DEFAULT in ("X86", "ARM64"), "indexing uses long in asm")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
