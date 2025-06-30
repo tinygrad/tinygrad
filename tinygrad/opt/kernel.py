@@ -455,8 +455,6 @@ class Kernel:
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
-        from icecream import ic
-        ic(ret)
         return ret.replace(arg = KernelInfo((ret.arg.name if ret.arg is not None and ret.arg.name is not None else self.name) \
                                             if name_override is None else name_override,
                                             self.global_dims if self.opts.has_local else 0, self.local_dims+self.group_for_reduces,

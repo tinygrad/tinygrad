@@ -760,64 +760,6 @@ class TestLinearizer(unittest.TestCase):
     p = get_program(ast_opt, renderer)
     assert p.name is ast_opt.arg.name
 
-  def test_name_none_5(self):
-    from tinygrad.codegen import full_rewrite
-    t1 = Tensor.arange(100)
-    t2 = t1 + 1
-    schedule = t2.schedule()
-    ast = schedule[-1].ast
-    ic(ast)
-    uops = full_rewrite(ast, Device[Device.DEFAULT].renderer)
-    ic(uops)
-
-  def test_name_none_4(self):
-    from tinygrad.opt import get_optimized_ast
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    ast = r.schedule()[-1].ast
-    ic(ast)
-    ast2 = get_optimized_ast(ast, Device[Device.DEFAULT].renderer)
-    ic(ast2)
-
-  def test_name_none_3(self):
-
-    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
-    r = (x@y).relu()
-    ast = r.schedule()[-1].ast
-    ic(ast)
-    program = get_program(ast, Device[Device.DEFAULT].renderer)
-    ic(program)
-
-
-  def test_name_none_2(self):
-
-
-    from tinygrad.codegen import full_rewrite
-    t = Tensor.arange(10)
-    ast = t.schedule()[-1].ast
-    renderer = Device["METAL"].renderer
-    uops = full_rewrite(ast, renderer)
-    ic(uops)
-    prg = renderer.render(uops)
-    ic(prg)
-    return uops
-
-  def test_name_none(self):
-    t = Tensor.arange(10)
-    ast = t.schedule()[-1].ast
-    print(f'{ast=}')
-    k = Kernel(ast)
-    print(f'{k=}')
-    p = k.to_program()
-    print(f'{p=}')
-    p_hello = k.to_program(name_override="hello")
-    print(p.name, p.src)
-    # ExecItem(CompiledRunner(p), [t.uop.buffer]).run()
-
-    # k = Kernel(ast, opts=Device["METAL"].renderer)
-    # k.apply_opts(opts)
-    # prg = k.to_program()
-
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
