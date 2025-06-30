@@ -5,10 +5,10 @@ from tinygrad.helpers import DEBUG, to_mv, round_up, OSX
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31б max_read_len:int=4096*64):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096*64):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
-    self.max_streams = max_streams
+    self.max_streams, self.max_read_len = max_streams, max_read_len
     self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
 
     if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
@@ -127,7 +127,7 @@ class ASM24Controller:
 
     # Init controller.
     self.exec_ops([WriteOp(0x54b, b' '), WriteOp(0x54e, b'\x04'), WriteOp(0x5a8, b'\x02'), WriteOp(0x5f8, b'\x04'),
-      WriteOp(0x7ec, b'\x01\x00\x00\x00'), WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33')])
+      WriteOp(0x7ec, b'\x01\x00\x00\x00'), WriteOp(0xc422, b'\x02'), WriteOp(0x0, b'\x33'), WriteOp(0x3f00, b'\xf0')])
 
   def exec_ops(self, ops:Sequence[WriteOp|ReadOp|ScsiWriteOp]):
     cdbs:list[bytes] = []
@@ -165,23 +165,20 @@ class ASM24Controller:
 
     for i in range(0, len(buf), 0x10000):
       self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
-      # print(self.read(0xce3a, 2))
-      # print(self.read(0xce60, 1))
-      # print(self.read(0xce6c, 1))
-      # print(self.read(0xce6e, 2))
       self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:
       for i in range(4): self.exec_ops([WriteOp(0xce40 + i, b'\x00', ignore_cache=True)])
 
   def scsi_read(self, sz:int, lba:int=0):
-    self.exec_ops([ScsiReadOp(sz, lba)])
-    self.exec_ops([ScsiReadOp(sz, lba)])
-    self.exec_ops([ScsiReadOp(sz, lba)])
+    self.exec_ops([ReadOp(0xf000, 0x1)])
     x = self.exec_ops([ScsiReadOp(sz, lba)])[0]
-    # self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
-    # self.exec_ops([WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
-    return x
+    x += self.exec_ops([ScsiReadOp(sz, lba)])[0]
+    x += self.exec_ops([ScsiReadOp(sz, lba)])[0]
+    x += self.exec_ops([ScsiReadOp(sz, lba), WriteOp(0xce40, b'\x02\x1f', ignore_cache=True)])[0]
+    self.exec_ops([WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
+    self.exec_ops([ReadOp(0xf000, 0x1)])
+    # return x
     # return self.exec_ops([
     #   # ReadOp(0x3100, 0xff),
     #   # ScsiReadOp(sz, lba), 
@@ -280,6 +277,7 @@ class USBMMIOInterface(MMIOInterface):
   def _acc(self, off, sz, data=None):
     if data is None: # read op
       if not self.pcimem:
+        if self.addr == 0xf000: self.usb.scsi_read(0x400)[:sz]
         return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)

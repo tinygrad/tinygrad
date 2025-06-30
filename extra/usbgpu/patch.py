@@ -68,7 +68,42 @@ asm = bytes([
     0xDE, 0xF2,        # 6016: DJNZ R6,600A        ; outer loop (16 pages)
     0x22               # 6018: RET
 ])
-patches += [(0x6000 + 4, b'\x00' * len(asm), asm)]
+asm2 = bytes([
+    0x90, 0x3F, 0x00,  # 6000: MOV  DPTR,#0x3F00   ; scratch holds DPH
+    0xE0,              # 6003: MOVX A,@DPTR        ; A ← saved DPH
+    0xF5, 0x83,        # 6004: MOV  DPH,A
+    0x75, 0x82, 0x00,  # 6006: MOV  DPL,#0x00
+
+    0x75, 0xA0, 0x80,  # 6009: MOV  P2,#0x80       ; dest-hi = 0x8000
+    0x78, 0x00,        # 600C: MOV  R0,#0x00
+    0x7E, 0x04,        # 600E: MOV  R6,#0x04       ; 4 × 256-byte pages
+    0x7F, 0x00,        # 6010: MOV  R7,#0x00       ; inner loop (256)
+
+    # ----- inner loop -----
+    0xE0,              # 6012: MOVX A,@DPTR
+    0xA3,              # 6013: INC  DPTR
+    0xF2,              # 6014: MOVX @R0,A
+    0x08,              # 6015: INC  R0
+    0xDF, 0xFA,        # 6016: DJNZ R7,6012
+    # ----------------------
+
+    0x78, 0x00,        # 6018: MOV  R0,#0x00
+    0x05, 0xA0,        # 601A: INC  P2
+    0xDE, 0xF2,        # 601C: DJNZ R6,6010
+
+    # ----- save next source page -----
+    0xE5, 0x83,        # 601E: MOV  A,DPH          ; A = new high byte
+    0x60, 0x05,        # 6020: JZ   6027           ; if 0, wrap to F0
+    0x90, 0x3F, 0x00,  # 6022: MOV  DPTR,#0x3F00
+    0xF0,              # 6025: MOVX @DPTR,A        ; save A (F4/F8/FC)
+    0x22,              # 6026: RET
+
+    0x74, 0xF0,        # 6027: MOV  A,#0xF0        ; wrap value
+    0x90, 0x3F, 0x00,  # 6029: MOV  DPTR,#0x3F00
+    0xF0,              # 602C: MOVX @DPTR,A
+    0x22               # 602D: RET
+])
+patches += [(0x6000 + 4, b'\x00' * len(asm2), asm2)]
 
 next_traphandler = 0
 next_iftrap = 0
@@ -157,6 +192,18 @@ traps = [
   # (0x4082, b'\x90\x0a\x7d', "choose path DAT_EXTMEM_0a7d = 0x80"),
   # (0x4089, b'\x90\x0a\x7d', "choose path DAT_EXTMEM_0a7d = 0xf0"),
   # (0x407b, b'\x90\x0a\x7d', "choose path DAT_EXTMEM_0a7d = 0xe8"),
+
+  # Fill scsi resp
+  # (0x1aa4, b'\x12\x02\x06', "fill_scsi_resp1"),
+  # (0x2777, b'\x12\x02\x06', "fill_scsi_resp2"),
+  # (0x2bc7, b'\x12\x02\x06', "fill_scsi_resp3"),
+  # (0x33f2, b'\x12\x02\x06', "fill_scsi_resp4"),
+  # (0x3f12, b'\x12\x02\x06', "fill_scsi_resp5"),
+  # (0x416e, b'\x12\x02\x06', "fill_scsi_resp6"),
+  # (0x47e5, b'\x12\x02\x06', "fill_scsi_resp7"),
+  # (0x4d6b, b'\x12\x02\x06', "fill_scsi_resp8"),
+  # (0x4165, b'\x02\x02\x06', "fill_scsi_resp9"),
+  # (0x425c, b'\x02\x02\x06', "fill_scsi_resp10"),
 ]
 
 if __name__ == "__main__":
