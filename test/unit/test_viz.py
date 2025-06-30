@@ -1,10 +1,11 @@
 import unittest, decimal, json
+from dataclasses import dataclass
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE
+from tinygrad.helpers import PROFILE, colored, ansistrip
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -14,7 +15,7 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 pickles these tracked values
-from tinygrad.viz.serve import get_metadata
+from tinygrad.viz.serve import get_metadata, uop_to_json
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, active_rewrites, _name_cnt
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
@@ -106,6 +107,15 @@ class TestViz(unittest.TestCase):
     name_from_fxn(UOp.variable("a", 1, 10)+1)
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "(a+1) n1")
+
+  def test_colored_label(self):
+    # NOTE: dataclass repr prints literal escape codes instead of unicode chars
+    @dataclass(frozen=True)
+    class TestStruct:
+      colored_field: str
+    a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
+    a2 = uop_to_json(a)[id(a)]
+    self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
 # VIZ displays nested graph_rewrites in a tree view
 

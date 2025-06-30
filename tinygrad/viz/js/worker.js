@@ -11,8 +11,6 @@ onmessage = (e) => {
   if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     const idx = ref ? ctxs.findIndex(k => k.ref === ref) : -1;
-    // replace JSON.parse string literal with real ESC
-    label = label.replace(/\\x1b\r?\n*\[/g, "\u001B[");
     if (idx != -1) label += `\ncodegen@${ctxs[idx].function_name}`;
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
