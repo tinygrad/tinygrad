@@ -18,30 +18,6 @@ def get_index(ast:UOp) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
   return IndexContext([], [], kernel_info=ki)
 
-  # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
-  full_shape = ast.full_shape
-  first_upcasted = len(full_shape)-ki.upcasted
-
-  # all loops are RANGES
-  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_upcasted])]
-
-  # upcast loops
-  for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
-    assert isinstance(g, int), "needs to be int to upcast/unroll"
-    idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
-
-  # late indexes (group for reduce)
-  # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].base.op is Ops.DEFINE_LOCAL]
-  # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
-  group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
-  ridxs = idxs[:]
-  for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
-
-  return IndexContext(idxs, ridxs)
-
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
@@ -101,8 +77,12 @@ def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   return valid.where(c, c.const_like(0))
 
 # restore the index context on the top down pass
-def ctx_restore(ctx: IndexContext): ctx.idxs = ctx.restore_idxs.pop(-1)
-pm_lowerer = PatternMatcher([(UPat((Ops.REDUCE_AXIS, Ops.STORE)), ctx_restore)])
+def ctx_restore(ctx: IndexContext, x):
+  ctx.idxs = ctx.restore_idxs.pop(-1)
+pm_lowerer = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, name="x"), ctx_restore),
+  (UPat(Ops.STORE, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), ctx_restore),
+])
 
 bpm_lowerer = PatternMatcher([
   # TODO: remove these hacks
