@@ -1,7 +1,7 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, graph_rewrite
 from tinygrad.helpers import prod, flatten
 
 # ***** indexing *****
@@ -9,19 +9,19 @@ from tinygrad.helpers import prod, flatten
 @dataclass
 class IndexContext:
   idxs: list[UOp]
-  restore_idxs: list
   ranges_used: int = 0
   #ridxs: list[UOp]
   kernel_info: KernelInfo = KernelInfo()
 
 def get_index(ast:UOp) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
-  return IndexContext([], [], kernel_info=ki)
+  return IndexContext([], kernel_info=ki)
 
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
-  ctx.restore_idxs.append(ctx.idxs[:])
+
+  ctx = IndexContext(ctx.idxs[:], ctx.ranges_used, ctx.kernel_info)
 
   # NOTE: always using ridxs is fine here
   #reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
@@ -40,6 +40,10 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+
+  from tinygrad.codegen.lowerer import bpm_lowerer  # TODO: better way to do this?
+  ret = graph_rewrite(ret, bpm_lowerer, ctx, name="subreduce", bottom_up=True)
+
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
@@ -49,7 +53,7 @@ def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
-  ctx.restore_idxs.append(ctx.idxs[:])
+  #ctx.restore_idxs.append(ctx.idxs[:])
 
   store_shape = x.src[1].shape
   first_upcasted = len(store_shape)-ctx.kernel_info.upcasted
