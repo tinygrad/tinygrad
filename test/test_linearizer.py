@@ -15,7 +15,6 @@ from tinygrad.opt import get_optimized_ast
 from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
 from tinygrad.dtype import DType, dtypes
-from icecream import ic
 
 def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
