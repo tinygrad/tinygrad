@@ -1,7 +1,7 @@
 from __future__ import annotations
 import itertools, functools, math
 from dataclasses import dataclass
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from typing import Optional, cast, Final, Callable, Sequence
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
@@ -9,7 +9,8 @@ from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec, Opt, OptOps
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, get_single_element
+from tinygrad.helpers import DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
@@ -61,12 +62,13 @@ class Kernel:
     # parameters for optimization
     self.applied_opts: list[Opt] = []
     self.group_for_reduces: int = 0
-    self.upcasted: int = 0
-    self.local_dims: int = 0
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
     self.dont_use_locals: bool = False
+
+    reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
+    self.axes = OrderedDict((("global", self.shape_len - len(reduces)), ("local", 0), ("reduce", len(reduces)), ("upcast", 0)))
 
     # group simplifies
     self.simplify_ones()
@@ -76,6 +78,9 @@ class Kernel:
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
     if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
       raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
+
+    self.axes["global"] = self.shape_len - len(final_reduces)
+    self.axes["reduce"] = len(final_reduces)
 
   def copy(self):
     ret = type(self).__new__(type(self))
@@ -88,11 +93,15 @@ class Kernel:
     ret.sts = self.sts[:]
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduces, ret.dont_use_locals = self.applied_opts[:], self.group_for_reduces, self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.axes = self.axes.copy()
 
     return ret
+
+  def get_offset(self, axis_name: str) -> int:
+    offsets = (0,) + tuple(itertools.accumulate(sz for sz in self.axes.values()))
+    return get_single_element([offset for name, offset in zip(self.axes.keys(), offsets) if name == axis_name])
 
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
@@ -104,11 +113,10 @@ class Kernel:
                     [x!=y for x,y in zip(self.sts[0].shape[self.first_upcast:], self.full_shape[self.first_upcast:])]))
 
   @property
-  def first_reduce(self) -> int:
-    return [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+  def first_reduce(self) -> int: return self.get_offset("reduce")
 
   @property
-  def first_upcast(self) -> int: return self.shape_len-self.upcasted
+  def first_upcast(self) -> int: return self.get_offset("upcast")
 
   @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
@@ -126,7 +134,13 @@ class Kernel:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def global_dims(self) -> int: return self.first_reduce-self.local_dims
+  def global_dims(self) -> int: return self.axes["global"]
+
+  @property
+  def local_dims(self) -> int: return self.axes["local"]
+
+  @property
+  def upcasted(self) -> int: return self.axes["upcast"]
 
   # there's eight chunks of the shape
   # blue   -- global dims
@@ -168,7 +182,7 @@ class Kernel:
   # drops the final dimension
   def upcast(self):
     check(self.full_shape[-1] != 1, "can't upcast a dimension with size 1")
-    self.upcasted += 1
+    self.axes["upcast"] += 1
 
   # axis : the axis to pull from
   # amount : the amount to take
@@ -189,8 +203,10 @@ class Kernel:
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return False
     all_ones = [s==1 for s in self.full_shape]
-    self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
-    self.upcasted -= sum(all_ones[self.first_upcast:]) # TODO: no necessary since upcasted axis can't be un-upcasted
+    local_offset, reduce_offset, upcast_offset = self.get_offset("local"), self.get_offset("reduce"), self.get_offset("upcast")
+    self.axes["global"] -= sum(all_ones[:local_offset])
+    self.axes["local"] -= sum(all_ones[local_offset:reduce_offset])
+    self.axes["reduce"] -= sum(all_ones[reduce_offset:upcast_offset])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
     return any(all_ones)
 
@@ -372,7 +388,7 @@ class Kernel:
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
       self.shift_to(axis, amt, insert_before=self.first_reduce)
-      self.local_dims += 1
+      self.axes["local"] += 1
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
@@ -380,13 +396,13 @@ class Kernel:
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
+      self.axes["reduce"] += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.first_upcast, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       # TODO: fix upcast_count to put purples before yellows. broken because of METAL tensor cores
       #upcast_count = sum(x == y for x,y in zip(self.full_shape[-self.upcasted:], self.output_shape[-self.upcasted:])) if self.upcasted else 0
       #self.shift_to(axis, amt, insert_before=None if upcast_count == 0 else self.shape_len-upcast_count)
-      if self.full_shape[axis] == amt and axis == self.first_reduce: self.local_dims += 1 # first_reduce will ++, so offset loss in simplify_ones
       if self.full_shape[axis] == amt and axis < self.first_reduce+self.group_for_reduces: self.group_for_reduces -= 1 # fully unrolling a GROUP
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
