@@ -868,6 +868,7 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
