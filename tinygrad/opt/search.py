@@ -82,7 +82,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
   return x[0], ret
 
 # workers should not open devices and should ignore ctrl c and should not launch VIZ
-def _init_worker(tracing_timestmap:float=0):
+def _init_worker(tracing_timestmap:int):
   Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACING_TIMESTAMP=tracing_timestmap).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 

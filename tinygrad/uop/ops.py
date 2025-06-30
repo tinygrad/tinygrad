@@ -752,7 +752,7 @@ def track_uop(u:UOp):
 # *** tracking pattern matcher ***
 
 VIZ = ContextVar("VIZ", 0)
-TRACING_TIMESTAMP = ContextVar("TRACING_TIMESTAMP", time.monotonic())
+TRACING_TIMESTAMP = ContextVar("TRACING_TIMESTAMP", int(time.monotonic()))
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
