@@ -86,7 +86,6 @@ class TestFuse(unittest.TestCase):
       return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
     self._test_fuse(embedding, a, atol=1e-5)
 
-  @unittest.skip("still broken")
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
