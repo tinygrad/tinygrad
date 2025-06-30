@@ -3,7 +3,6 @@ import time
 from tinygrad import Tensor, TinyJit, nn
 import gymnasium as gym
 from tinygrad.helpers import trange
-import numpy as np  # TODO: remove numpy import
 
 ENVIRONMENT_NAME = 'CartPole-v1'
 #ENVIRONMENT_NAME = 'LunarLander-v2'
@@ -82,34 +81,38 @@ if __name__ == "__main__":
     return ret
 
   st, steps = time.perf_counter(), 0
-  Xn, An, Rn = [], [], []
+  obs_size = env.observation_space.shape[0]
+  Xn, An, Rn = Tensor.empty((REPLAY_BUFFER_SIZE, obs_size)), Tensor.empty((REPLAY_BUFFER_SIZE,)), Tensor.empty((REPLAY_BUFFER_SIZE,))
+  buffer_idx, buffer_size = 0, 0
+
   for episode_number in (t:=trange(EPISODES)):
     get_action.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
 
-    obs:np.ndarray = env.reset()[0]
+    obs = env.reset()[0]
     rews, terminated, truncated = [], False, False
+    ep_start_idx = buffer_idx
+
     # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
     while not terminated and not truncated:
       # pick actions
       # TODO: what's the temperature here?
       act = get_action(Tensor(obs)).item()
 
-      # save this state action pair
-      # TODO: don't use np.copy here on the CPU, what's the tinygrad way to do this and keep on device? need __setitem__ assignment
-      Xn.append(np.copy(obs))
-      An.append(act)
+      Xn[buffer_idx] = Tensor(obs)
+      An[buffer_idx] = act
 
       obs, rew, terminated, truncated, _ = env.step(act)
       rews.append(float(rew))
+
+      buffer_idx = (buffer_idx + 1) % REPLAY_BUFFER_SIZE
+      buffer_size = min(buffer_size + 1, REPLAY_BUFFER_SIZE)
+
     steps += len(rews)
 
-    # reward to go
-    # TODO: move this into tinygrad
-    discounts = np.power(DISCOUNT_FACTOR, np.arange(len(rews)))
-    Rn += [np.sum(rews[i:] * discounts[:len(rews)-i]) for i in range(len(rews))]
-
-    Xn, An, Rn = Xn[-REPLAY_BUFFER_SIZE:], An[-REPLAY_BUFFER_SIZE:], Rn[-REPLAY_BUFFER_SIZE:]
-    X, A, R = Tensor(Xn), Tensor(An), Tensor(Rn)
+    discounts = Tensor([DISCOUNT_FACTOR ** i for i in range(len(rews))])
+    rewards_to_go = [(Tensor(rews[i:]) * discounts[:len(rews)-i]).sum().item() for i in range(len(rews))]
+    [Rn.__setitem__((ep_start_idx + i) % REPLAY_BUFFER_SIZE, rtg) for i, rtg in enumerate(rewards_to_go)]
+    X, A, R = Xn[:buffer_size], An[:buffer_size], Rn[:buffer_size]
 
     # TODO: make this work
     #vsz = Variable("sz", 1, REPLAY_BUFFER_SIZE-1).bind(len(Xn))
@@ -120,7 +123,7 @@ if __name__ == "__main__":
       samples = Tensor.randint(BATCH_SIZE, high=X.shape[0]).realize()  # TODO: remove the need for this
       # TODO: is this recompiling based on the shape?
       action_loss, entropy_loss, critic_loss = train_step(X[samples], A[samples], R[samples], old_log_dist[samples])
-    t.set_description(f"sz: {len(Xn):5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.3f} entropy_loss: {entropy_loss.item():7.3f} critic_loss: {critic_loss.item():8.3f} reward: {sum(rews):6.2f}")
+    t.set_description(f"sz: {buffer_size:5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.3f} entropy_loss: {entropy_loss.item():7.3f} critic_loss: {critic_loss.item():8.3f} reward: {sum(rews):6.2f}")
 
   test_rew = evaluate(model, gym.make(ENVIRONMENT_NAME, render_mode='human'))
   print(f"test reward: {test_rew}")
