@@ -1,4 +1,4 @@
-import sys, time, pickle
+import sys, time
 from tinygrad import TinyJit, GlobalCounters, fetch, getenv
 from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 from extra.onnx_helpers import get_example_inputs, validate
