@@ -266,7 +266,6 @@ if __name__ == "__main__":
   ctxs = get_metadata(keys, vals)
 
   profile_ret = get_profile(profile) if profile is not None else None
-  if not getenv("LAUNCH",1): exit(0)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
