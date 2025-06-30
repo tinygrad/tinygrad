@@ -11,9 +11,11 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
+from tinygrad.opt import get_optimized_ast
 from tinygrad.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
 from tinygrad.dtype import DType, dtypes
+from icecream import ic
 
 def helper_realized_ast(r:Union[Tensor, list[Tensor]]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
@@ -743,6 +745,78 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
+
+  def test_name_none(self):
+    t = Tensor([1,2,3,4]).sum()
+
+    ast = t.schedule()[-1].ast
+    ast = ast.replace(arg=KernelInfo())
+    assert ast.arg.name is None
+
+    renderer = Device[Device.DEFAULT].renderer
+    ast_opt = get_optimized_ast(ast, renderer)
+    assert ast_opt.arg.name is not None
+
+    p = get_program(ast_opt, renderer)
+    assert p.name is ast_opt.arg.name
+
+  def test_name_none_5(self):
+    from tinygrad.codegen import full_rewrite
+    t1 = Tensor.arange(100)
+    t2 = t1 + 1
+    schedule = t2.schedule()
+    ast = schedule[-1].ast
+    ic(ast)
+    uops = full_rewrite(ast, Device[Device.DEFAULT].renderer)
+    ic(uops)
+
+  def test_name_none_4(self):
+    from tinygrad.opt import get_optimized_ast
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    ast = r.schedule()[-1].ast
+    ic(ast)
+    ast2 = get_optimized_ast(ast, Device[Device.DEFAULT].renderer)
+    ic(ast2)
+
+  def test_name_none_3(self):
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    ast = r.schedule()[-1].ast
+    ic(ast)
+    program = get_program(ast, Device[Device.DEFAULT].renderer)
+    ic(program)
+
+
+  def test_name_none_2(self):
+
+
+    from tinygrad.codegen import full_rewrite
+    t = Tensor.arange(10)
+    ast = t.schedule()[-1].ast
+    renderer = Device["METAL"].renderer
+    uops = full_rewrite(ast, renderer)
+    ic(uops)
+    prg = renderer.render(uops)
+    ic(prg)
+    return uops
+
+  def test_name_none(self):
+    t = Tensor.arange(10)
+    ast = t.schedule()[-1].ast
+    print(f'{ast=}')
+    k = Kernel(ast)
+    print(f'{k=}')
+    p = k.to_program()
+    print(f'{p=}')
+    p_hello = k.to_program(name_override="hello")
+    print(p.name, p.src)
+    # ExecItem(CompiledRunner(p), [t.uop.buffer]).run()
+
+    # k = Kernel(ast, opts=Device["METAL"].renderer)
+    # k.apply_opts(opts)
+    # prg = k.to_program()
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):

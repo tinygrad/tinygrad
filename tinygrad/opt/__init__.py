@@ -19,6 +19,8 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
   """
 
   k = Kernel(ast, opts=renderer)
+  from icecream import ic
+  ic(k)
   if ast.arg is not None and ast.arg.opts_to_apply is not None: k.apply_opts(ast.arg.opts_to_apply)
   elif not NOOPT:
     if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
@@ -27,4 +29,4 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
       kb = Kernel(ast, opts=renderer)
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  return k.get_optimized_ast()
+  return ic(k.get_optimized_ast())

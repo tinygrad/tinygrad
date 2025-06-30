@@ -24,6 +24,20 @@ class TestArange(unittest.TestCase):
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.estimates.ops
 
+  def test_name(self):
+    t = Tensor([1,2,3,4,5,6]).reshape(2, 3) @ Tensor([1,2,3,4,5,6]).reshape(3,2)
+    k = Kernel(t.schedule()[-1].ast)
+    p = k.to_program()
+    p_hello = k.to_program(name_override="hello")
+    print(p.name, p.src)
+    ExecItem(CompiledRunner(p), [t.uop.buffer]).run()
+
+    k = Kernel(ast, opts=Device["METAL"].renderer)
+    k.apply_opts(opts)
+    prg = k.to_program()
+
+
+
   def test_complexity(self, opts=None, limit=None):
     f1 = self._get_flops(256, opts)
     f2 = self._get_flops(2560, opts)
