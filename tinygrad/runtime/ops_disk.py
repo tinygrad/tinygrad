@@ -16,7 +16,7 @@ class DiskDevice(Compiled):
     self.fd: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
-  def _might_open(self, size):
+  def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None and hasattr(self.device, "mem"):
       self.count += 1
