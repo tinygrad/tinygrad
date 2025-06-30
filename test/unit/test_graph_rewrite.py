@@ -299,6 +299,15 @@ class TestRecurse(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
 
+  def test_inf_loop_bottom_up(self):
+    a = UOp.variable('a', 0, 10)
+    pm = PatternMatcher([
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
+      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+    ])
+    with self.assertRaises(RuntimeError):
+      graph_rewrite(a, pm, bottom_up=True)
+
 def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
