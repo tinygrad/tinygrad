@@ -52,8 +52,9 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   store_shape = x.src[1].shape
   first_upcasted = len(store_shape)-ctx.upcasted
   ctx.idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(store_shape[:first_upcasted])]
-  ctx.idxs += [UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)) \
+  ctx.idxs += [UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),), tag=True) \
               for i,s in enumerate(store_shape[first_upcasted:], start=first_upcasted) if isinstance(s, int)]
+  assert len(ctx.idxs) == len(store_shape)
   ctx.ranges_used += len(ctx.idxs)
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
