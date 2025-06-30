@@ -215,7 +215,6 @@ def reloader():
 
 def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
-  print(path)
   if os.path.isdir(path):
     trace_keys:dict[int,str] = {}
     with os.scandir(path) as it:
@@ -223,7 +222,11 @@ def load_pickle(path:str):
         ts = e.name.split("_", 1)[0]
         trace_keys.setdefault(ts,[]).append(e.path)
     ret = [load_pickle(fp) for fp in trace_keys[max(trace_keys)]]
+    for k,files in trace_keys.items():
+      if k != max(trace_keys):
+        for fp in files: os.remove(fp)
     return ret
+  print("reading", path)
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
