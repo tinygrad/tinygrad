@@ -6,7 +6,7 @@ from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -93,10 +93,11 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
-DevEvent = ProfileRangeEvent|ProfileGraphEntry
+DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
+    if isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
@@ -113,6 +114,34 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
+def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+  step, peak, mem = 0, 0, 0
+  shps:dict[int, dict] = {}
+  temp:dict[int, dict] = {}
+  timestamps:list[int] = []
+  for st,_,_,e in events:
+    if not isinstance(e, ProfilePointEvent): continue
+    if e.name == "alloc":
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
+      timestamps.append(int(e.st))
+      step += 1
+      mem += e.arg["nbytes"]
+      if mem > peak: peak = mem
+    if e.name == "free":
+      timestamps.append(int(e.st))
+      step += 1
+      mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
+      removed["x"].append(step)
+      removed["y"].append(removed["y"][-1])
+      for k,v in temp.items():
+        if k > e.ref:
+          v["x"] += [step, step]
+          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+  for v in temp.values():
+    v["x"].append(step)
+    v["y"].append(v["y"][-1])
+  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
@@ -122,14 +151,15 @@ def get_profile(profile:list[ProfileEvent]):
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
-    st = int(ts+time_diff)
+    # ProfilePointEvent records perf_counter, offset other events by GPU time diff
+    st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
     dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v)} for k,v in dev_events.items()}
+  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server

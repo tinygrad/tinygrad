@@ -4,6 +4,8 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
+from tinygrad.helpers import PROFILE
+from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -20,9 +22,14 @@ class TestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
+    Buffer.profile_events.clear()
     self.tms = TRACK_MATCH_STATS.value
+    self.profile = PROFILE.value
     TRACK_MATCH_STATS.value = 2
-  def tearDown(self): TRACK_MATCH_STATS.value = self.tms
+    PROFILE.value = 1
+  def tearDown(self):
+    TRACK_MATCH_STATS.value = self.tms
+    PROFILE.value = self.profile
 
   def test_simple(self):
     a = UOp.variable("a", 0, 10)
@@ -143,7 +150,6 @@ class TestVizTree(TestViz):
     self.assertStepEqual(steps[6], {"name":"leaf_right", "depth":2, "match_count":1})
 
 import gc
-from tinygrad.device import Buffer
 
 def bufs_allocated() -> int:
   gc.collect()
@@ -246,6 +252,48 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+
+def _alloc(b:int):
+  a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
+  a.uop.buffer.allocate()
+  return a
+
+class TestVizMemoryLayout(TestViz):
+  def test_double_alloc(self):
+    a = _alloc(1)
+    _b = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][a.device]["mem"]
+    self.assertEqual(ret["peak"], 2)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
+    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+
+  def test_del_once(self):
+    a = _alloc(1)
+    del a
+    b = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][b.device]["mem"]
+    self.assertEqual(ret["peak"], 1)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
+    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
+    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
+    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+
+  def test_alloc_free(self):
+    a = _alloc(1)
+    _b = _alloc(1)
+    del a
+    c = _alloc(1)
+    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    ret = profile_ret["layout"][c.device]["mem"]
+    self.assertEqual(ret["peak"], 2)
+    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
+    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
+    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
+    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
+    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
+    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
 
 if __name__ == "__main__":
   unittest.main()
