@@ -1,7 +1,8 @@
 import time, sys, hashlib
 from pathlib import Path
 from onnx.helper import tensor_dtype_to_np_dtype
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from extra.onnx_parser import onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
@@ -12,7 +13,7 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 
 if __name__ == "__main__":
   onnx_model = onnx_load(onnx_path := fetch(OPENPILOT_MODEL))
-  run_onnx = OnnxRunner(onnx_model)
+  run_onnx = OnnxRunner(onnx_path)
 
   Tensor.manual_seed(100)
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
