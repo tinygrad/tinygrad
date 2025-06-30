@@ -1,9 +1,8 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
-from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, GroupOp
-from tinygrad.helpers import prod, partition, flatten
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop
+from tinygrad.helpers import prod, flatten
 
 # ***** indexing *****
 
@@ -53,11 +52,11 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   #assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   reduce_range, reduce_expand = [], []
   for i,axis in enumerate(x.arg[1]):
+    s = x.src[0].shape[axis]
     if axis < (len(x.src[0].shape)-ctx.kernel_info.upcasted):
-      ctx.idxs[axis] = UOp.range(dtypes.int, x.src[0].shape[axis], ctx.ranges_used+i)
+      ctx.idxs[axis] = UOp.range(dtypes.int, s, ctx.ranges_used+i)
       reduce_range.append(ctx.idxs[axis])
     else:
-      s = x.src[0].shape[axis]
       ctx.idxs[axis] = UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((ctx.ranges_used+i,s),))
       reduce_expand.append(ctx.idxs[axis])
   ctx.ranges_used += len(x.arg[1])
@@ -69,21 +68,19 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
-  #idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
-  idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
+  idx, valid = x.src[0].st.to_indexed_uops(ctx.idxs)
   barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[1],)),) if buf.op is Ops.DEFINE_LOCAL else ()
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   ctx.restore_idxs.append(ctx.idxs[:])
-  store_shape = x.src[0].arg.shape
-  first_upcasted = len(store_shape)-ctx.kernel_info.upcasted
 
+  store_shape = x.src[1].shape
+  first_upcasted = len(store_shape)-ctx.kernel_info.upcasted
   ctx.idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(store_shape[:first_upcasted])]
   ctx.idxs += [UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)) \
-               for i,s in enumerate(store_shape[first_upcasted:], start=first_upcasted)]
+              for i,s in enumerate(store_shape[first_upcasted:], start=first_upcasted)]
   ctx.ranges_used += len(ctx.idxs)
-
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
 
   """
@@ -103,10 +100,9 @@ def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   _, valid = view.arg.to_indexed_uops(ctx.idxs)
   return valid.where(c, c.const_like(0))
 
+# restore the index context on the top down pass
 def ctx_restore(ctx: IndexContext): ctx.idxs = ctx.restore_idxs.pop(-1)
-pm_lowerer = PatternMatcher([
-  (UPat((Ops.REDUCE_AXIS, Ops.STORE)), ctx_restore)
-])
+pm_lowerer = PatternMatcher([(UPat((Ops.REDUCE_AXIS, Ops.STORE)), ctx_restore)])
 
 bpm_lowerer = PatternMatcher([
   # TODO: remove these hacks
