@@ -2,7 +2,7 @@ from typing import cast, Optional, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, TRACING_TIMESTAMP
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
@@ -82,8 +82,8 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
   return x[0], ret
 
 # workers should not open devices and should ignore ctrl c and should not launch VIZ
-def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0, VIZ=0).__enter__()
+def _init_worker(tracing_timestmap:float=0):
+  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACING_TIMESTAMP=tracing_timestmap).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
@@ -150,7 +150,7 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
   if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
-    beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
+    beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (TRACING_TIMESTAMP.value,), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
     @atexit.register
     def close_pool(): beam_pool.close()
 
