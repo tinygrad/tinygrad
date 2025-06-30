@@ -415,16 +415,20 @@ class Tensor(MathTrait):
     """
     assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
     h = self.contiguous().flatten()
-    assert h.shape[0] % 16 == 0, "expected hashes"
+    assert h.shape[0] == 16, "expected hash"
 
-    # pad size to a multiple of 1mb and larger than size
-    if (tsize := h.shape[0]) < size: h = h.pad((0, size - tsize))
-    if size % 2**20 != 0: h = h.pad((0, 2**20 - size % 2**20))
+    base_chunks = math.ceil(size / 2**20)
+    tree_depth = math.ceil(math.log(base_chunks, 65536))
+    data = h
+    level_chunks = 1
+    for _ in reversed(range(tree_depth + 1)):
+      print(data.shape)
+      if (tsize := data.shape[0]) < 2**20 * level_chunks: data = data.pad((0, 2**20 * level_chunks - tsize))
+      data = data.to("tinyfs:load")[:2**20 * level_chunks].contiguous().to(self.device)
+      level_chunks = level_chunks * 65536
+    print(data.shape)
 
-    # load the tensor from tinyfs
-    data = h.to("tinyfs:load")[:size].contiguous().to(self.device)
-
-    return data
+    return data[:size]
 
   def cloud_store(self) -> Tensor:
     """
