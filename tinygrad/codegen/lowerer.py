@@ -18,7 +18,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   if x.tag: return None
   ridxs = ctx.idxs[:]
   reduce_range, reduce_expand = [], []
-  for i,axis in enumerate(x.arg[-1]):
+  for i,axis in enumerate(x.axis_arg):
     s = x.src[0].shape[axis]
     if axis < (len(x.src[0].shape)-ctx.upcasted):
       ridxs[axis] = UOp.range(dtypes.int, s, ctx.ranges_used+i)
