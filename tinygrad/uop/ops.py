@@ -733,7 +733,11 @@ class PatternMatcher:
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
     # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
     new_n: UOp|None = uop
-    while new_n is not None: last_n, new_n = new_n, self.rewrite(new_n, ctx)
+    seen = set()
+    while new_n is not None:
+      if new_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+      seen.add(new_n)
+      last_n, new_n = new_n, self.rewrite(new_n, ctx)
     return last_n
 
 # *** non-blocking UOp tracker ***
