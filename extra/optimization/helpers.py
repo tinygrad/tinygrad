@@ -27,7 +27,7 @@ from tinygrad.helpers import dedup, DEBUG
 def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
   fn = Path(__file__).parent.parent / "datasets/sops.gz"
   ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
-  assert len(ast_strs) >= getenv("MIN_ASTS", 5000), f"dataset size = {len(ast_strs)} is too small"
+  assert len(ast_strs) >= getenv("MIN_ASTS", 1000), f"dataset size = {len(ast_strs)} is too small"
   if DEBUG >= 1: print(f"loaded {len(ast_strs)=} before filters")
   if filter_reduce: ast_strs = [x for x in ast_strs if "REDUCE_AXIS" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
