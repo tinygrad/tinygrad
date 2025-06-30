@@ -434,7 +434,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
 
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, do_fuse+merge_views+sym+multi_pm+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
