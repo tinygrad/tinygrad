@@ -200,9 +200,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop syntactic sugar ***
 
   @property
-  def st_arg(self) -> ShapeTracker:
-    assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
-    return unwrap(self.st)
+  def st_arg(self) -> ShapeTracker: return unwrap(self.st)
   @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"

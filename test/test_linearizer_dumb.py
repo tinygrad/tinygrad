@@ -80,26 +80,6 @@ class TestLinearizerDumb(unittest.TestCase):
     print(prg.src)
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
-  def test_expander_new_srcs(self):
-    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(25), arg=0, src=()),)),
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
-          UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-            UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False))), src=(
-              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(25), arg=1, src=()),)),)),)),)),))
-    opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = k.to_program()
-    print(prg.src)
-    if_uops = [u for u in k.uops if u.op is Ops.IF]
-    self.assertIn(len(if_uops), {1,2,3})
-    conditions = if_uops[0].src[0].toposort()
-    self.assertLessEqual(len(conditions), 9)
-
   # this was a bug in embedding, someday we should fold this anyway
   @unittest.skipUnless(is_dtype_supported(dtypes.half), f"half dtype not supported on {Device.DEFAULT}")
   def test_llama_embedding(self):

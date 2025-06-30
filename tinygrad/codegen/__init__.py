@@ -7,7 +7,7 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_lowerer, get_index, bpm_lowerer
+from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
@@ -18,13 +18,12 @@ from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_me
 
 @dataclass
 class RewriteStep:
-  pm: PatternMatcher|None = None
+  pm: PatternMatcher
   ctx: Callable[[UOp], Any]|None = None
   name: str|None = None
   bottom_up: bool = False
-  bpm: PatternMatcher|None = None
   def __call__(self, sink:UOp):
-    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up, bpm=self.bpm)
+    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
@@ -43,7 +42,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-  ret.append(RewriteStep(bpm_lowerer, get_index, name="lowerer", bottom_up=True))
+  ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
