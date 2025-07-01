@@ -73,6 +73,8 @@ sym = symbolic_simple+PatternMatcher([
    lambda cast,base,vm: base.view(vm.st) if isinstance(cast.dtype, ImageDType) and isinstance(base.dtype, ImageDType) else None),
   # CAST before masking constants
   (UPat.cvar("x").view().cast(name="c"), lambda x,c: x.cast(c.dtype).view(c.src[0].arg)),
+  (UPat.cvar("x").view().named("v").alu(GroupOp.Unary).named('a'), lambda x,v,a: x.alu(a.op).view(v.arg) if v.arg.views[0].mask is None else None),
+  (UPat.cvar("x").view().named("v").alu(GroupOp.Unary-GroupOp.UnsafePad).named('a'), lambda x,v,a: x.alu(a.op).view(v.arg)),
   # make things that can't be images not images
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.VIEW, Ops.CONST, Ops.DEVICE}, name="u"), lambda u: u.replace(dtype=dt.base) if isinstance(dt:=u.dtype,ImageDType)
    and (prod(u.shape) != prod(dt.shape) or not any(u.shape[x]%4 == 0 for x in u.st.unit_stride_axes())) else None),
