@@ -6,6 +6,7 @@ from tinygrad.runtime.autogen import webgpu
 from typing import List, Any, TypeAlias
 import ctypes
 import os
+import sys
 
 WGPUDevPtr: TypeAlias = webgpu.WGPUDevice # type: ignore
 WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer # type: ignore
@@ -16,26 +17,29 @@ backend_types = {v: k for k, v in webgpu.WGPUBackendType__enumvalues.items() }
 # use dxc instead of fxc. fxc doesn't support fp16, while dxc does - depending on
 # hardware support. @ShadersF16_On_Windows
 # rewritten from C++ based on https://github.com/shader-slang/slang-rhi/pull/115/files
-toggle_str = ctypes.create_string_buffer(b"use_dxc")
-toggle_str_ptr = ctypes.cast(ctypes.pointer(toggle_str), ctypes.POINTER(ctypes.c_char))
+if sys.platform == "win32":
+  toggle_str = ctypes.create_string_buffer(b"use_dxc")
+  toggle_str_ptr = ctypes.cast(ctypes.pointer(toggle_str), ctypes.POINTER(ctypes.c_char))
 
-# Prepare pointer-to-pointer for enabledToggles
-enabled_toggles_array = (ctypes.POINTER(ctypes.c_char) * 1)(toggle_str_ptr)
+  # Prepare pointer-to-pointer for enabledToggles
+  enabled_toggles_array = (ctypes.POINTER(ctypes.c_char) * 1)(toggle_str_ptr)
 
-# Build the WGPUDawnTogglesDescriptor
-toggles_desc = webgpu.WGPUDawnTogglesDescriptor()
-toggles_desc.chain.sType = webgpu.WGPUSType_DawnTogglesDescriptor
-toggles_desc.chain.next = None
-toggles_desc.enabledToggleCount = 1
-toggles_desc.enabledToggles = enabled_toggles_array
-toggles_desc.disabledToggleCount = 0
-toggles_desc.disabledToggles = None
+  # Build the WGPUDawnTogglesDescriptor
+  toggles_desc = webgpu.WGPUDawnTogglesDescriptor()
+  toggles_desc.chain.sType = webgpu.WGPUSType_DawnTogglesDescriptor
+  toggles_desc.chain.next = None
+  toggles_desc.enabledToggleCount = 1
+  toggles_desc.enabledToggles = enabled_toggles_array
+  toggles_desc.disabledToggleCount = 0
+  toggles_desc.disabledToggles = None
 
-# Build the InstanceDescriptor
-# instance_desc = webgpu.WGPUInstanceDescriptor()
-# instance_desc.nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct))
-# instance_desc.features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)
-instance_desc = webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True), nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)))
+  # Build the InstanceDescriptor
+  # instance_desc = webgpu.WGPUInstanceDescriptor()
+  # instance_desc.nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct))
+  # instance_desc.features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)
+  instance_desc = webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True), nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)))
+else:
+  instance_desc = webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True))
 
 instance = webgpu.wgpuCreateInstance(instance_desc)
 
@@ -219,7 +223,7 @@ class WebGpuAllocator(Allocator['WGPUDevPtr']):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
-    if True:
+    if sys.platform == "win32":
       # NOTE(irwin): this seems to be required @ShadersF16_On_Windows
       adapter_options = webgpu.WGPURequestAdapterOptions(nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)),
         powerPreference=webgpu.WGPUPowerPreference_HighPerformance,
@@ -245,8 +249,8 @@ class WebGpuDevice(Compiled):
     supported_features_names = [webgpu.WGPUFeatureName__enumvalues[s] for s in supported]
     print('\n'.join(backend_types))
     print('\n'.join(supported_features_names))
-    if False:
-      # NOTE(irwin): this seems to be optional? @ShadersF16_On_Windows
+    if sys.platform == "win32" and False:
+      # NOTE(irwin): this seems to be optional? Turning off for now @ShadersF16_On_Windows
       dev_desc = webgpu.WGPUDeviceDescriptor(nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)), requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
     else:
       dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
