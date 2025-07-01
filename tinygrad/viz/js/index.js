@@ -114,7 +114,7 @@ const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").html("");
+  d3.select(".metadata-parenr").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -385,7 +385,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
-  const { currentCtx:prevCtx, currentStep:prevStep } = state;
+  const { currentCtx:prevCtx, currentStep:prevStep, currentRewrite:prevRewrite } = state;
   Object.assign(state, ns);
   // update element styles if needed
   document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
@@ -396,6 +396,10 @@ function setState(ns) {
   if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
     document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
     setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
+  }
+  if (state.currentRewrite != prevRewrite) {
+    document.getElementById(`rewrite-${prevRewrite}`)?.classList.remove("active");
+    setActive(document.getElementById(`rewrite-${state.currentRewrite}`));
   }
   // re-render
   main();
@@ -477,30 +481,35 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
   // ** right sidebar code blocks
-  const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  // ** rewrite steps
-  if (step.match_count >= 1) {
-    const rewriteList = metadata.appendChild(document.createElement("div"));
-    rewriteList.className = "rewrite-list";
-    for (let s=0; s<=step.match_count; s++) {
-      const ul = rewriteList.appendChild(document.createElement("ul"));
-      ul.innerText = s;
-      ul.id = `rewrite-${s}`;
-      ul.onclick = () => setState({ currentRewrite:s });
-      ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
-      if (s > 0 && s === currentRewrite) {
-        const { upat, diff } = ret[s];
-        metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
-        const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
-        for (const line of diff) {
-          const span = diffCode.appendChild(document.createElement("span"));
-          span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-          span.innerText = line;
-          diffCode.appendChild(document.createElement("br"));
+  const sidebar = document.querySelector(".metadata-parent");
+  if (document.getElementById(ckey) == null) {
+    const metadata = document.createElement("div");
+    metadata.id = ckey;
+    metadata.className = "metadata";
+    sidebar.replaceChildren(metadata);
+    const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+    metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+    if (step.match_count >= 1) {
+      const rewriteList = metadata.appendChild(document.createElement("div"));
+      rewriteList.className = "rewrite-list";
+      for (let s=0; s<=step.match_count; s++) {
+        const ul = rewriteList.appendChild(document.createElement("ul"));
+        ul.innerText = s;
+        ul.id = `rewrite-${s}`;
+        ul.onclick = () => setState({ currentRewrite:s });
+        ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
+        if (s > 0 && s === currentRewrite) {
+          const { upat, diff } = ret[s];
+          metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
+          const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
+          for (const line of diff) {
+            const span = diffCode.appendChild(document.createElement("span"));
+            span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+            span.innerText = line;
+            diffCode.appendChild(document.createElement("br"));
+          }
+          diffCode.className = "wrap";
         }
-        diffCode.className = "wrap";
       }
     }
   }
