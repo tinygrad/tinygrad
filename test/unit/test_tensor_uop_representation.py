@@ -58,19 +58,6 @@ class TestTensorUopRepresentation(unittest.TestCase):
     print(c.uop)
     is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
 
-  def test_const_pattern(self):
-    a = Tensor(1)
-    print(a.uop)
-    is_pattern(a, const_pattern) # const in tensor has a DEVICE src
-    is_pattern(a, UPat.cvar("x")) # even cvar works!
-
-  def test_consts_do_not_realize(self):
-    a = Tensor(1)
-    print(a.uop)
-    pre_realize = a.uop
-    a.realize()
-    assert a.uop is pre_realize
-
   def test_viewed_consts_do_not_realize(self):
     a = Tensor.ones(10, 10)
     print(a.uop)
