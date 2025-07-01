@@ -118,7 +118,12 @@ async function renderProfiler() {
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
-  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
+  if (profileRet == null) {
+    profileRet = await (await fetch("/get_profile")).json()
+    // default focus on first device
+    const devs = Object.keys(profileRet.layout);
+    focusedDevice = devs[0];
+  }
   const { layout, st, et } = profileRet;
   const kernelMap = new Map();
   for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
@@ -452,7 +457,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
