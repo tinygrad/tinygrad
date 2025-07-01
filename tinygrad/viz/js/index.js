@@ -201,7 +201,7 @@ async function renderProfiler() {
         ctx.closePath();
         ctx.fillStyle = e.color;
         ctx.fill();
-        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
+        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} ${e.arg.uop_ref}`;
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key });
         ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
         ctx.lineWidth = 1;

@@ -155,9 +155,17 @@ class Buffer:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
       if PROFILE and self.device != "PYTHON":
+        from tinygrad.uop.ops import buffers
+        # backtrack to the buffer uop
+        uop_ref = None
+        for k,v in buffers.items():
+          if v is self:
+            uop_ref = k
+            break
         self._prof_num = num = len(Buffer.profile_events)
         ts = decimal.Decimal(time.perf_counter_ns())/1000
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes, \
+            "uop_ref":uop_ref.src[0].arg if uop_ref is not None else None}))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
