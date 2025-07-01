@@ -322,7 +322,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
     else:
       return arr[:target_len]
 
-  waveforms = [np.array(resample_batched(Tensor(wv), sr, RATE)).flatten()[:wv.shape[-1]] for wv in waveforms]
+  waveforms = [np.array(resample_batched(Tensor(wv), sr, RATE) if sr != RATE else wv).flatten()[:wv.shape[-1]] for wv in waveforms]
 
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
