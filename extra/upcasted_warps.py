@@ -11,6 +11,25 @@ if __name__ == "__main__":
   N = 64
   a = Tensor.empty(N,N)
 
+  out = a + 1
+  ast = out.schedule()[-1].ast
+  opts = tuple()
+  opts += (Opt(OptOps.UPCAST, 0, 32),)
+  ast = ast.replace(arg=KernelInfo(opts_to_apply=opts))
+  ast = get_optimized_ast(ast, renderer)
+  prg = get_program(ast, renderer)
+  print(prg.src)
+
+  # how you split the store determines everything if you don't allow cross warp comms.
+  # actually not everything, there's also the split before the horizontal (unrolled) reduces
+
+  # new flow
+  #  - pull out any dimensions from the store that you want to upcast.
+  #  - decide how you want to assign them to registers. GPUs have a 128-byte memory LOAD/STORE which loads into 4 regs. see BUFFER_LOAD_B128
+  #    - the loads and stores can be shuffled, but only in restrictive ways. in kernels without reduces, the store determines everything
+  #  - in kernels with reduces, you now have more flexibility
+
+  """
   out = a.sum(axis=1)
   ast = out.schedule()[-1].ast
   opts = tuple()
@@ -30,6 +49,7 @@ if __name__ == "__main__":
   ast = get_optimized_ast(ast, renderer)
   prg = get_program(ast, renderer)
   print(prg.src)
+  """
 
   # gemm
   """
