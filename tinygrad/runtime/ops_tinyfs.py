@@ -29,6 +29,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     del opaque.sock
 
   def _copyin(self, dest:TinyFSBuffer, src:memoryview):
+    if DEBUG >= 2: print(f"Copying in {dest.size} bytes to {dest.device.op}")
     dest.sock.send(f"{dest.device.op}_IN {dest.size}\r\n".encode())
 
     # read the response uuid
@@ -38,6 +39,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     dest.sock.sendall(src)
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
+    if DEBUG >= 2: print(f"Copying out {src.size} bytes from {src.device.op}")
     src.sock.send(f"{src.device.op}_OUT {src.size} {src.request_id}\r\n".encode())
 
     src.request_id = uuid.UUID(bytes=src.sock.recv(16))
