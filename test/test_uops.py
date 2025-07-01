@@ -573,12 +573,12 @@ class TestShapeSpec(unittest.TestCase):
     t = Tensor(vv).uop
     self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
-  # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
+  # ** assign is STORE(VIEW(BUFFER), new_val)
 
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
+    assign_pattern = UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()))
     assert assign_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
@@ -592,7 +592,7 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
+    assign_pattern = UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
     assert assign_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
@@ -601,9 +601,9 @@ class TestShapeSpec(unittest.TestCase):
   def test_setitem(self):
     a = Tensor.ones((4,)).contiguous().realize()
     assign = a.shrink(((1, 2),)).assign(Tensor.zeros((1,)))
-    # the ASSIGN UOp has size=1
+    # the STORE UOp has size=1
     self.assertEqual(assign.uop.size, 1)
-    # the ASSIGN views the buffer with a shrunk st
+    # the STORE views the buffer with a shrunk st
     self.assertEqual(assign.uop.src[0].st, ShapeTracker.from_shape((4,)).shrink(((1, 2),)))
     # the underlying BUFFER has a size=4
     self.assertEqual(assign.uop.buf_uop.size, 4)

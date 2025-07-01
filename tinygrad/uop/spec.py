@@ -50,11 +50,11 @@ buffer_spec = PatternMatcher([
 ])
 
 assign_spec = PatternMatcher([
-  # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK))), lambda: True),
+  # KERNEL can attach to an STORE to describe the compute required to realize a BUFFER
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.MSELECT, Ops.MSTACK))), lambda: True),
 
-  # ASSIGN has a target and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+  # STORE has a target and a value. It can also optionally depend on other assigns
+  (UPat(Ops.STORE, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.STORE for s in x.src[2:])),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
