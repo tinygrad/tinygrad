@@ -733,7 +733,11 @@ class PatternMatcher:
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
     # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
     new_n: UOp|None = uop
-    while new_n is not None: last_n, new_n = new_n, self.rewrite(new_n, ctx)
+    seen = set()
+    while new_n is not None:
+      if new_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+      seen.add(new_n)
+      last_n, new_n = new_n, self.rewrite(new_n, ctx)
     return last_n
 
 # *** non-blocking UOp tracker ***
@@ -837,7 +841,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
+        pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
@@ -868,6 +872,7 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:

@@ -6,12 +6,13 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
-from extra.onnx_helpers import modelproto_to_runner
+from tinygrad.frontend.onnx import OnnxRunner
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
 class TinygradModel(BackendRep):
+
   def __init__(self, run_onnx, input_names):
     super().__init__()
     self.fxn = run_onnx
@@ -29,7 +30,8 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    run_onnx = modelproto_to_runner(model)
+    model = Tensor(model.SerializeToString(), device="PYTHON")
+    run_onnx = OnnxRunner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
@@ -38,9 +40,6 @@ class TinygradBackend(Backend):
     return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
-
-# BUG: segfaults
-backend_test.exclude('test_MaxPool1d_stride_padding_dilation_cpu')
 
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')

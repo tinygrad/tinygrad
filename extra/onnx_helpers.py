@@ -47,12 +47,6 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
     ret.update({name:value})
   return ret
 
-def modelproto_to_runner(model:onnx.ModelProto) -> OnnxRunner:
-  f = tempfile.NamedTemporaryFile(suffix='.onnx')
-  onnx.save(model, f.name)
-  f.flush()
-  return OnnxRunner(f.name)
-
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   run_onnx = OnnxRunner(onnx_file)
 
