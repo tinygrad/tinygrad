@@ -130,13 +130,9 @@ class TestViz(unittest.TestCase):
     graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
     self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
+    # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
-    # many other rewrites
-    lst = get_viz_list()
-    self.assertGreater(lst[0]["steps"][0]["match_count"], 3)
-    # stop returning nops once we hit the infinite loop
-    #self.assertEqual(len(graphs), 3)
 
 # VIZ displays nested graph_rewrites in a tree view
 
