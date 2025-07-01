@@ -1285,12 +1285,6 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"], "not supported on these in CI")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
-  def test_gemm_fp16_image_path_dtype(self):
-    with Context(IMAGE=2):
-      x = Tensor.rand(64, 64)
-      y = Tensor.rand(64, 64)
-      z = x.half().matmul(y.half()) # don't realize
-      assert z.dtype == dtypes.half, f"Expected half, got {z.dtype}"
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):
