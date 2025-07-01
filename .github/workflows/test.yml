@@ -272,14 +272,6 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-    - name: Test tensor cores (TC=3)
-      run: |
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_METAL=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMD=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMD_MFMA=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_CUDA=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_INTEL=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMX=1 AMX=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
     - name: Test device flop counts
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf

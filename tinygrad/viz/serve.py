@@ -86,7 +86,7 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
   for u0_num,u1_num,upat in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
-    except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
+    except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat.location, upat.printable())}
     if not ctx.bottom_up: next_sink = new_sink
