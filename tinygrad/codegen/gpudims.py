@@ -57,6 +57,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
   ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg < (ki.global_dims+ki.local_dims)], key=lambda x: x.arg)
+  if not len(ranges): return None
   global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg < ki.global_dims])
   local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg >= ki.global_dims])
   if ki.dont_use_locals:
