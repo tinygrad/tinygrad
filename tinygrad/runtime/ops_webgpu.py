@@ -246,9 +246,9 @@ class WebGpuDevice(Compiled):
     webgpu.wgpuAdapterGetFeatures(adapter_res, supported_features)
     supported = [supported_features.features[i] for i in range(supported_features.featureCount)]
     features = [feat for feat in [webgpu.WGPUFeatureName_TimestampQuery, webgpu.WGPUFeatureName_ShaderF16] if feat in supported]
-    supported_features_names = [webgpu.WGPUFeatureName__enumvalues[s] for s in supported]
-    print('\n'.join(backend_types))
-    print('\n'.join(supported_features_names))
+    # supported_features_names = [webgpu.WGPUFeatureName__enumvalues[s] for s in supported]
+    # print('\n'.join(backend_types))
+    # print('\n'.join(supported_features_names))
     if sys.platform == "win32" and False:
       # NOTE(irwin): this seems to be optional? Turning off for now @ShadersF16_On_Windows
       dev_desc = webgpu.WGPUDeviceDescriptor(nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)), requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
