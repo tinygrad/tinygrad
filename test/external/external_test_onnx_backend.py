@@ -12,7 +12,6 @@ from tinygrad.frontend.onnx import OnnxRunner
 pytest_plugins = 'onnx.backend.test.report',
 
 class TinygradModel(BackendRep):
-
   def __init__(self, run_onnx, input_names):
     super().__init__()
     self.fxn = run_onnx
