@@ -36,7 +36,7 @@ def nms(boxes, scores, thresh=0.5):
     to_process = to_process[np.where(iou <= thresh)[0]]
   return keep
 
-def nms2(img_boxes:Tensor, img_scores:Tensor, thresh=0.5):
+def nms2(img_boxes:Tensor, img_scores:Tensor, thresh=0.5) -> Tensor:
   x1, y1, x2, y2 = img_boxes.permute(1, 0)
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
   to_process, keep = (img_scores.sort()[1] if img_scores.numel() > 1 else img_scores)[::-1].cast(dtypes.int), []
@@ -51,7 +51,7 @@ def nms2(img_boxes:Tensor, img_scores:Tensor, thresh=0.5):
     iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
     if (mask:=iou <= thresh).numel() > 0:
       to_process = to_process.masked_select(mask)
-  return keep
+  return Tensor.stack(*keep)
 
 def decode_bbox(offsets, anchors):
   dx, dy, dw, dh = np.rollaxis(offsets, 1)
@@ -74,17 +74,16 @@ def decode_bbox2(offsets, anchors):
   return Tensor.stack(pred_x1, pred_y1, pred_x2, pred_y2, dim=1)
 
 def batched_nms(img_boxes:Tensor, img_scores:Tensor, img_labels:Tensor) -> Tensor:
-  keep_mask = Tensor.zeros_like(img_scores, dtype=dtypes.bool)
+  keep_mask = Tensor.zeros_like(img_scores, dtype=dtypes.bool).contiguous()
   res = []
   for class_id in _unique(img_labels):
-    # curr_mask = (img_labels == class_id).reshape(-1, 1).repeat(1, img_boxes.shape[-1])
     curr_indices = _masked_indices(img_labels == class_id)
     curr_keep_indices = nms2(img_boxes[curr_indices], img_scores[curr_indices])
-        # curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-    res.append(curr_keep_indices)
-  #   keep_mask[curr_indices[curr_keep_indices]] = True
-  # keep = np.where(keep_mask)[0]
-  # keep = keep[image_scores[keep].argsort()[::-1]]
+    keep_mask[curr_indices[curr_keep_indices]] = True
+
+  keep = _masked_indices(keep_mask)
+  keep = keep[img_scores[keep].sort(descending=True)[1]]
+  res.append(keep)
   return res
 
 class RetinaNet:
@@ -227,10 +226,10 @@ class RetinaNet:
       for class_id in np.unique(image_labels):
         curr_indices = np.where(image_labels == class_id)[0]
         curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-        detections.append(curr_keep_indices)
-      #   keep_mask[curr_indices[curr_keep_indices]] = True
-      # keep = np.where(keep_mask)[0]
-      # keep = keep[image_scores[keep].argsort()[::-1]]
+        keep_mask[curr_indices[curr_keep_indices]] = True
+      keep = np.where(keep_mask)[0]
+      keep = keep[image_scores[keep].argsort()[::-1]]
+      detections.append(keep)
 
       # # resize bboxes back to original size
       # image_boxes = image_boxes[keep]
