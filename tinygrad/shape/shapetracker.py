@@ -79,6 +79,9 @@ class ShapeTracker:
   def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
 
   @property
+  def is_masked(self) -> bool: return any(v.mask is not None for v in self.views)
+
+  @property
   def shape(self) -> tuple[sint, ...]: return self.views[-1].shape
 
   @property
