@@ -88,6 +88,19 @@ class TestOuterworldRange(unittest.TestCase):
       losses.append(loss)
     self._compare(Tensor.stack(*losses).tolist())
 
+  @Tensor.train()
+  def test_model_scheduled_setitem(self):
+    m, opt = get_model_and_opt()
+    losses = Tensor.empty(self.STEPS)
+    for i in range(self.STEPS):
+      opt.zero_grad()
+      loss = (m(self.X[i]) - self.Y[i]).square().mean()
+      loss.backward()
+      opt.schedule_step()
+      # TODO: this shouldn't realize
+      losses[i] = loss.requires_grad_(False)
+    self._compare(losses.tolist())
+
   @unittest.expectedFailure
   @Tensor.train()
   def test_model_scheduled_variable(self):
@@ -105,6 +118,21 @@ class TestOuterworldRange(unittest.TestCase):
 
   @unittest.expectedFailure
   @Tensor.train()
+  def test_model_scheduled_variable_setitem(self):
+    m, opt = get_model_and_opt()
+    losses = Tensor.empty(self.STEPS)
+    vi = Variable('i', 0, self.STEPS-1)
+    for i in range(self.STEPS):
+      vib = vi.bind(i)
+      opt.zero_grad()
+      loss = (m(self.X[vib]) - self.Y[vib]).square().mean()
+      loss.backward()
+      opt.schedule_step()
+      losses[vib] = loss.requires_grad_(False)
+    self._compare(losses.tolist())
+
+  @unittest.expectedFailure
+  @Tensor.train()
   def test_model_bound_range(self):
     m, opt = get_model_and_opt()
     # TODO: should ranges be unique so you don't have to pass in the -1?
@@ -112,10 +140,9 @@ class TestOuterworldRange(unittest.TestCase):
     vib = Variable('i', 0, self.STEPS-1).bind(rng)
     loss = (m(self.X[vib]) - self.Y[vib]).square().mean()
     loss.backward()
-    opt.schedule_step()
-    loss.realize()
-    # TODO: what should this be to concat the losses?
-    #losses = loss.endrange(rng)
+    losses = Tensor.empty(self.STEPS)
+    losses[vib] = loss
+    losses.realize(*opt.schedule_step())
 
 if __name__ == "__main__":
   unittest.main()
