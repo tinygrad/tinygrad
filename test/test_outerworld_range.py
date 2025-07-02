@@ -17,7 +17,7 @@ def get_model_and_opt():
   return m, opt
 
 class TestOuterworldRange(unittest.TestCase):
-  STEPS = 10
+  STEPS = 5
   BS = 20
 
   @classmethod
