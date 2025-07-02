@@ -174,7 +174,14 @@ async function renderProfiler() {
       const kernel = kernelMap.get(e.name);
       let colorKey = e.name;
       if (k === "TINY") colorKey = e.name.split(" ")[0];
-      const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      // first split by colors
+      let parts = parseColors(kernel?.name ?? e.name);
+      // if it's only one color, split by whitespace
+      if (parts.length == 1) {
+        const { st, color } = parts[0];
+        parts = st.split(" ").map((s,i) => ({ st:(i === 0 ? "" : " ")+s, color }));
+      }
+      const label = parts.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (!nameMap.has(colorKey)) {
         let colorsList = colors;
         if (k === "TINY") colorsList = ["#1B5745", "#1D2E62"];
