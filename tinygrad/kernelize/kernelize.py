@@ -51,8 +51,7 @@ def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
 
 sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
-  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 \
-    and not (root.base.op is Ops.CONST and root.base.arg == 0) else None),
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
   # reduce of size 0 is the identity element
