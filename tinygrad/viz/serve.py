@@ -162,12 +162,28 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
+def find_kernel(steps, i, unique):
+  for j,step in enumerate(steps):
+    if step["name"] == "create_ast":
+      kernel_graph = _reconstruct(contexts[1][i][j].sink)
+      for u in kernel_graph.toposort():
+        if u.op is Ops.ASSIGN and u.src[0].src[0].arg == unique:
+          kernel = u.src[1]
+          assert kernel.op is Ops.KERNEL
+          return kernel
+
 # map Ops.UNIQUE to locations in viz
 def get_buffer_refs(unique:int):
   found = []
+  look_for_kernel = None
   for i,c in enumerate(ctxs):
     if not c["name"].startswith("Schedule"): continue
+    if look_for_kernel is None: look_for_kernel = find_kernel(c["steps"], i, unique)
     for j,step in enumerate(c["steps"]):
+      if step["name"] == "replace globals" and look_for_kernel is not None:
+        uop = _reconstruct(contexts[1][i][j].sink)
+        if uop is look_for_kernel.arg.ast:
+          found.append((i, j))
       if step["name"] == "replace buffer":
         uop = _reconstruct(contexts[1][i][j].sink)
         for u in uop.toposort():
