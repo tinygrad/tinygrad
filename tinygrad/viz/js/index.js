@@ -356,7 +356,7 @@ async function renderProfiler() {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
     if (foundRect?.arg?.uop_ref != null) {
-      fetchedRefs = foundRect.arg.fetchedRefs;
+      fetchedRefs = foundRect.arg.found;
       if (!(fetchedRefs.length)) return;
       floating.style.display = "flex";
       setRef(currRef);

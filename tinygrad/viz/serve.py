@@ -166,36 +166,36 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
-def find_kernel(steps, i, unique):
-  for j,step in enumerate(steps):
-    if step["name"] == "create_ast":
-      kernel_graph = _reconstruct(contexts[1][i][j].sink)
-      for u in kernel_graph.toposort():
-        if u.op is Ops.ASSIGN and u.src[0].src[0].arg == unique:
-          kernel = u.src[1]
-          assert kernel.op is Ops.KERNEL
-          return kernel
-
 # map Ops.UNIQUE to locations in viz
-def get_buffer_refs(unique:int) -> dict:
-  found = []
-  look_for_kernel = None
+kmap:dict[int, dict] = {}
+revmap:dict[UOp, int] = {}
+def build_kmap():
   for i,c in enumerate(ctxs):
     if not c["name"].startswith("Schedule"): continue
-    if look_for_kernel is None: look_for_kernel = find_kernel(c["steps"], i, unique)
+    # *** 1. map all buffers to kernels in the large graph
     for j,step in enumerate(c["steps"]):
-      if step["name"] == "replace globals" and look_for_kernel is not None:
+      if step["name"] == "create_ast":
+        kernel_graph = _reconstruct(contexts[1][i][j].sink)
+        for u in kernel_graph.toposort():
+          if u.op is Ops.ASSIGN:
+            kernel = u.src[1]
+            unique = u.src[0].src[0].arg
+            kmap[unique] = {"metadata":str(kernel.arg.metadata), "found":[]}
+            revmap.setdefault(kernel.arg.ast, []).append(unique)
+    # *** 2. find asts (small graphs)
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "replace globals":
         uop = _reconstruct(contexts[1][i][j].sink)
-        if uop is look_for_kernel.arg.ast:
-          found.append((i, j))
+        for buf in revmap.get(uop, []):
+          kmap[buf]["found"].append((i, j))
+      # *** 3. find children (small asts)
       if step["name"] == "replace buffer":
         uop = _reconstruct(contexts[1][i][j].sink)
         for u in uop.toposort():
-          if u.op is Ops.BUFFER and u.src[0].arg == unique:
-            found.append((i,j))
-            break
-  metadata = str(look_for_kernel.arg.metadata) if look_for_kernel is not None else None
-  return {"fetchedRefs":found, "metadata":metadata}
+          if u.op is Ops.BUFFER: kmap.setdefault(buf, {"found":[], "metadata":None})["found"].append((i, j))
+def get_buffer_refs(unique:int) -> dict:
+  if not kmap: build_kmap()
+  return kmap.get(unique, {"found":[], "metadata":None})
 
 # ** HTTP server
 
