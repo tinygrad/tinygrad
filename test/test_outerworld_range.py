@@ -1,9 +1,9 @@
 import unittest
-from tinygrad import Tensor, nn, Variable
+from tinygrad import Tensor, nn, Variable, UOp, dtypes
 
 # outerworld range should support three things
-# 1. full optimizer steps
-# 2. gradient accumulation
+# 1. full optimizer steps (test_model_bound_range)
+# 2. gradient accumulation (you want to end the range before running the optimizer)
 # 3. stacked linear layers
 
 class Model:
@@ -68,7 +68,7 @@ class TestOuterworldRange(unittest.TestCase):
       loss.backward()
       opt.schedule_step()
       losses.append(loss)
-    self._compare([x.item() for x in losses])
+    self._compare(Tensor.stack(*losses).tolist())
 
   @unittest.expectedFailure
   @Tensor.train()
@@ -83,7 +83,21 @@ class TestOuterworldRange(unittest.TestCase):
       loss.backward()
       opt.schedule_step()
       losses.append(loss)
-    self._compare([x.item() for x in losses])
+    self._compare(Tensor.stack(*losses).tolist())
+
+  @unittest.expectedFailure
+  @Tensor.train()
+  def test_model_bound_range(self):
+    m, opt = get_model_and_opt()
+    # TODO: should ranges be unique?
+    rng = UOp.range(dtypes.int, self.STEPS, -1)
+    vib = Variable('i', 0, self.STEPS-1).bind(rng)
+    loss = (m(self.X[vib]) - self.Y[vib]).square().mean()
+    loss.backward()
+    opt.schedule_step()
+    loss.realize()
+    # TODO: what should this be to concat the losses?
+    #losses = loss.endrange(rng)
 
 if __name__ == "__main__":
   unittest.main()
