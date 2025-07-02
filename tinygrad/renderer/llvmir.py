@@ -151,10 +151,10 @@ class LLVMRenderer(Renderer):
     local_args: list[str] = []
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_ACC:
+      if u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG:
         vc += 1
         r[u] = r[u.src[1]] = f"%assign{vc}"
-        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
+        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_REG twice"
         acc_to_assign[u.src[0]] = u.src[1]
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
