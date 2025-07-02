@@ -399,6 +399,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
+    if PROFILE and isinstance(ret, Buffer): ret._uop_ref = self.src[0].arg
     buffers[self] = ret
     return ret
   @property
