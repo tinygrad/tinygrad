@@ -113,6 +113,7 @@ const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 var currRef = 0;
 var fetchedRefs = null;
+var currMetadata = null;
 const floating = document.getElementById("floating");
 floating.querySelector(".x-btn").addEventListener("click", () => {
   currRef = 0;
@@ -215,6 +216,11 @@ async function renderProfiler() {
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
       const color = bufColors[i%bufColors.length];
+      if (e.arg.uop_ref != null) {
+        const refsRet = await (await fetch(`/get_buffer_refs?buf_id=${e.arg.uop_ref}`)).json();
+        e.arg.fetchedRefs = refsRet.found;
+        e.arg.metadata = refsRet.metadata;
+      }
       data.shapes.push({ x, y1, y2, arg:e.arg, color, key:i });
     }
     // lastly, adjust device rect by number of levels
@@ -247,7 +253,13 @@ async function renderProfiler() {
         ctx.closePath();
         ctx.fillStyle = e.color;
         ctx.fill();
-        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} ${e.arg.uop_ref}`;
+        let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`;
+        if (e.arg.uop_ref != null) {
+          tooltipText += ` ${e.arg.uop_ref}`
+        }
+        if (e.arg.metadata != null && e.arg.metadata !== "()") {
+          tooltipText += `\n${e.arg.metadata}`
+        }
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key, arg:e.arg });
         // ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
         // ctx.lineWidth = 1;
@@ -349,7 +361,7 @@ async function renderProfiler() {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
     if (foundRect?.arg?.uop_ref != null) {
-      fetchedRefs = await (await fetch(`/get_buffer_refs?buf_id=${foundRect.arg.uop_ref}`)).json();
+      fetchedRefs = foundRect.arg.fetchedRefs;
       if (!(fetchedRefs.length)) return;
       floating.style.display = "flex";
       setRef(currRef);
