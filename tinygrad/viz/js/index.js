@@ -111,6 +111,30 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
+var currRef = 0;
+var fetchedRefs = null;
+const floating = document.getElementById("floating");
+floating.querySelector(".x-btn").addEventListener("click", () => {
+  currRef = 0;
+  floating.style.display = "none";
+});
+const bw = floating.querySelector(".back-btn");
+const fw = floating.querySelector(".forward-btn");
+bw.addEventListener("click", () => setRef(currRef-1));
+fw.addEventListener("click", () => setRef(currRef+1));
+function setRef(newRef) {
+  if (newRef > fetchedRefs.length-1) newRef = fetchedRefs.length-1;
+  if (newRef < 0) newRef = 0;
+  fw.classList.remove("disabled");
+  bw.classList.remove("disabled");
+  if (newRef == 0) bw.classList.add("disabled");
+  if (newRef == fetchedRefs.length-1) fw.classList.add("disabled");
+  currRef = newRef;
+  floating.querySelector("p").innerText = `${currRef+1}/${fetchedRefs.length}`;
+  const [i, j] = fetchedRefs[newRef];
+  setCtxWithHistory(i+1, j, { currentCtx:0, currentStep:0 });
+}
+
 var profileRet, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -308,55 +332,12 @@ async function renderProfiler() {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
     if (foundRect?.arg?.uop_ref != null) {
-      // const fetchedRefs = await (await fetch(`/get_buffer_refs?buf_id=${foundRect.arg.uop_ref}`)).json();
-      const fetchedRefs = [[0, 18], [0, 22]];
+      fetchedRefs = await (await fetch(`/get_buffer_refs?buf_id=${foundRect.arg.uop_ref}`)).json();
       if (!(fetchedRefs.length)) return;
-      const floated = document.body.appendChild(document.createElement("div"));
-      floated.style = "position: fixed; top: 10px; right: 10px; z-index: 9999; background: red;";
-      for (const ref of fetchedRefs) {
-      }
+      floating.style.display = "flex";
+      setRef(currRef);
     }
   });
-
-  const fetchedRefs = [[0, 18], [0, 22]];
-  const floated = document.body.appendChild(document.createElement("div"));
-  floated.style = "position: fixed; top: 10px; right: 10px; z-index: 9999; background-color: #1a1b26; color: #f0f0f5; padding: 8px; border-radius: 4px; display: flex; align-items: center; justify-items: center; width: auto";
-  var refIdx = 0;
-  const floatedText = floated.appendChild(document.createElement("p"));
-  floatedText.textContent = `${refIdx+1}/${fetchedRefs.length}`;
-  function setRef(newRef) {
-    const fw = document.getElementById("fw-btn");
-    const bw = document.getElementById("bw-btn");
-    fw.classList.remove("disabled")
-    bw.classList.remove("disabled")
-    if (newRef == fetchedRefs.length-1) {
-      fw.classList.add("disabled");
-    }
-    if (newRef === 0) {
-      bw.classList.add("disabled");
-    }
-    refIdx = newRef;
-    const [i, j] = fetchedRefs[refIdx]
-    setState({ currentCtx:i+1, currentStep:j});
-    floatedText.textContent = `${refIdx+1}/${fetchedRefs.length}`;
-  }
-  const backBtn = floated.appendChild(document.createElement("button"));
-  backBtn.id = "bw-btn";
-  backBtn.className = "btn";
-  backBtn.style = "margin-left: 8px";
-  backBtn.onclick = (e) => {
-    setRef(Math.max(0, refIdx-1));
-  }
-  d3.select(backBtn).append("svg").attr("width", "20").append("use").attr("xlink:href", "#arrow");
-
-  const forwardBtn = floated.appendChild(document.createElement("button"));
-  forwardBtn.id = "fw-btn";
-  forwardBtn.className = "btn";
-  forwardBtn.style = "margin-left: 8px";
-  forwardBtn.onclick = (e) => {
-    setRef(Math.min(refIdx+1, fetchedRefs.length-1));
-  }
-  d3.select(forwardBtn).append("svg").attr("width", "20").attr("style", "transform: rotate(180deg)").append("use").attr("xlink:href", "#arrow");
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";
@@ -474,12 +455,13 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, newStep=0, prevState=null) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
-  history.replaceState(state, "");
-  history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+  const backState = prevState != null ? prevState : state;
+  history.replaceState(backState, "");
+  history.pushState(backState, "");
+  setState({ expandSteps:true, currentCtx:newCtx, currentStep:newStep, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {

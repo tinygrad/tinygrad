@@ -793,7 +793,7 @@ def track_rewrites(name:Callable|bool|None=None):
         from tinygrad.device import Compiled, ProfileRangeEvent
         from tinygrad.renderer import ProgramSpec
         import decimal
-        if isinstance(tracked_keys[-1], ProgramSpec): name_str += f" {tracked_keys[-1].name}"
+        if isinstance(tracked_keys[-1], ProgramSpec): name_str = f"{fn} for {tracked_keys[-1].name}"
         en = time.perf_counter_ns()
         Compiled.profile_events.append(ProfileRangeEvent("TINY", name_str, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=False))
       if getenv("CAPTURE_PROCESS_REPLAY"):

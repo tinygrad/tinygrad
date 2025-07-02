@@ -232,6 +232,27 @@
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
   }
+  #floating {
+    position: fixed;
+    top: 10px;
+    right: 20px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    background-color: #1a1b26;
+    padding: 4px 8px;
+    border-radius: 8px;
+    display: none;
+  }
+  #floating > .btn {
+    border: none;
+  }
+  #floating > p {
+    margin-right: 12px;
+  }
+  .forward-btn > svg {
+    transform: rotate(180deg);
+  }
   </style>
 </head>
 <body>
@@ -239,11 +260,26 @@
     <symbol id="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M15 19l-7-7 7-7" />
     </symbol>
+    <symbol id="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M18 6L6 18M6 6l12 12" />
+    </symbol>
   </svg>
+  <div id="floating">
+    <p></p>
+    <button class="btn back-btn">
+      <svg width="20" height="20"><use href="#arrow"/></svg>
+    </button>
+    <button class="btn forward-btn">
+      <svg width="20" height="20"><use href="#arrow"/></svg>
+    </button>
+    <button class="btn x-btn">
+      <svg width="20" height="20"><use href="#x"/></svg>
+    </button>
+  </div>
   <div class="main-container">
     <div class="floating-container">
       <button class="btn collapse-btn">
-        <svg width="20"><use href="#arrow"/></svg>
+        <svg width="20" height="20"><use href="#arrow"/></svg>
       </button>
       <button class="btn" id="zoom-to-fit-btn" aria-label="Fit graph">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20">
