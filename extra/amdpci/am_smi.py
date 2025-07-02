@@ -78,7 +78,9 @@ class AMSMI(AMDev):
 
     self.is_booting, self.smi_dev = True, True
     self.partial_boot = True # do not init anything
-    self.mm = AMMemoryManager(self, self.vram_size)
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
+      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
+      va_base=AMMemoryManager.va_allocator.base)
 
     # Initialize IP blocks
     self.soc:AM_SOC = AM_SOC(self)
