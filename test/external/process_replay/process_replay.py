@@ -48,7 +48,7 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, 
     # PYTHON renderer pickles UOps, first unpickle and decode here
     if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
     return ret.src
-  return to_str(p2), to_str(p), (input_ast, renderer)
+  return to_str(p2), to_str(p), (codecs.decode(str(input_ast), "unicode_escape"), renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
 
