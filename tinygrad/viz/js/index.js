@@ -121,8 +121,7 @@ async function renderProfiler() {
   if (profileRet == null) {
     profileRet = await (await fetch("/get_profile")).json()
     // default focus on first device
-    const devs = Object.keys(profileRet.layout);
-    focusedDevice = devs[0];
+    // focusedDevice = Object.keys(profileRet.layout)[0];
   }
   const { layout, st, et } = profileRet;
   const kernelMap = new Map();
@@ -148,13 +147,18 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
-     const kernel = kernelMap.get(e.name);
-     if (!nameMap.has(e.name)) {
-       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-     }
-     // offset y by depth
-     data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+      const kernel = kernelMap.get(e.name);
+      let colorKey = e.name;
+      if (k === "TINY") colorKey = e.name.split(" ")[0];
+      const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      if (!nameMap.has(colorKey)) {
+        let colorsList = colors;
+        if (k === "TINY") colorsList = ["#1B5745", "#1D2E62"];
+        let fillColor = colorsList[i%colors.length];
+        nameMap.set(colorKey, { fillColor });
+      }
+      // offset y by depth
+      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(colorKey), label });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -169,7 +173,8 @@ async function renderProfiler() {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length], key:i });
+      const color = bufColors[i%bufColors.length];
+      data.shapes.push({ x, y1, y2, arg:e.arg, color, key:i });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -203,9 +208,9 @@ async function renderProfiler() {
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} ${e.arg.uop_ref}`;
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key });
-        ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        // ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
+        // ctx.lineWidth = 1;
+        // ctx.stroke();
         continue;
       }
       // zoom only changes x and width
