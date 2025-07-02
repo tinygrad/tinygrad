@@ -789,7 +789,7 @@ def track_rewrites(name:Callable|bool|None=None):
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
         tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
-        if isinstance(name_ret, str): name_str = name_ret
+        if isinstance(name_ret, str): name_str = tracked_keys[-1].replace(fn, name_ret)
         from tinygrad.device import Compiled, ProfileRangeEvent
         from tinygrad.renderer import ProgramSpec
         import decimal

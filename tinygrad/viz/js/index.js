@@ -144,12 +144,12 @@ async function renderProfiler() {
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   if (profileRet == null) {
     profileRet = await (await fetch("/get_profile")).json()
-    // default focus on first device
+    // default focus on first device?
     // focusedDevice = Object.keys(profileRet.layout)[0];
   }
   const { layout, st, et } = profileRet;
   const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
+  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name ?? c.name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
@@ -171,11 +171,21 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
-      const kernel = kernelMap.get(e.name);
+      let kernel = kernelMap.get(e.name);
+      let name = kernel?.name ?? e.name;
+      if (k === "TINY") {
+        name = e.name;
+        for (const [k,v] of kernelMap) {
+          if (v.name == e.name.split("for ")[1]) {
+            kernel = v
+            break;
+          }
+        }
+      }
       let colorKey = e.name;
       if (k === "TINY") colorKey = e.name.split(" ")[0];
       // first split by colors
-      let parts = parseColors(kernel?.name ?? e.name);
+      let parts = parseColors(name);
       // if it's only one color, split by whitespace
       if (parts.length == 1) {
         const { st, color } = parts[0];
