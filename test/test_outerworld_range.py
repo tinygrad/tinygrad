@@ -28,6 +28,10 @@ class TestOuterworldRange(unittest.TestCase):
     cls.Y = cls.X.reshape(cls.STEPS, cls.BS, 8, 8).mean(axis=-1).contiguous().realize()
     cls.losses = cls._get_model_baseline()
 
+  def _compare(self, losses):
+    for i,(x,y) in enumerate(zip(self.losses, losses)):
+      self.assertAlmostEqual(x, y, places=5, msg=f"mismatch at {i} in {self.losses} vs {losses}")
+
   @classmethod
   @Tensor.train()
   def _get_model_baseline(self):
@@ -41,8 +45,22 @@ class TestOuterworldRange(unittest.TestCase):
       losses.append(loss.item())
     return losses
 
-  def _compare(self, losses):
-    for x,y in zip(self.losses, losses): self.assertAlmostEqual(x, y, places=5)
+  @Tensor.train()
+  def test_model_grad_acc(self):
+    m, opt = get_model_and_opt()
+    losses = []
+    for i in range(self.STEPS):
+      opt.zero_grad()
+      sub_batch_size = self.BS//2
+      loss = 0
+      scaling_factor = self.BS//sub_batch_size
+      for j in range(0, self.BS, sub_batch_size):
+        sub_loss = (m(self.X[i][j:j+sub_batch_size]) - self.Y[i][j:j+sub_batch_size]).square().mean() / scaling_factor
+        sub_loss.backward()
+        loss += sub_loss
+      loss.realize(*opt.schedule_step())
+      losses.append(loss.item())
+    self._compare(losses)
 
   @Tensor.train()
   def test_model_variable(self):
@@ -89,7 +107,7 @@ class TestOuterworldRange(unittest.TestCase):
   @Tensor.train()
   def test_model_bound_range(self):
     m, opt = get_model_and_opt()
-    # TODO: should ranges be unique?
+    # TODO: should ranges be unique so you don't have to pass in the -1?
     rng = UOp.range(dtypes.int, self.STEPS, -1)
     vib = Variable('i', 0, self.STEPS-1).bind(rng)
     loss = (m(self.X[vib]) - self.Y[vib]).square().mean()
