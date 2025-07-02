@@ -207,7 +207,7 @@ async function renderProfiler() {
         ctx.fillStyle = e.color;
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} ${e.arg.uop_ref}`;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key });
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key, arg:e.arg });
         // ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
         // ctx.lineWidth = 1;
         // ctx.stroke();
@@ -303,11 +303,60 @@ async function renderProfiler() {
     }
   }
 
-  canvas.addEventListener("click", e => {
+  canvas.addEventListener("click", async (e) => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
+    if (foundRect?.arg?.uop_ref != null) {
+      // const fetchedRefs = await (await fetch(`/get_buffer_refs?buf_id=${foundRect.arg.uop_ref}`)).json();
+      const fetchedRefs = [[0, 18], [0, 22]];
+      if (!(fetchedRefs.length)) return;
+      const floated = document.body.appendChild(document.createElement("div"));
+      floated.style = "position: fixed; top: 10px; right: 10px; z-index: 9999; background: red;";
+      for (const ref of fetchedRefs) {
+      }
+    }
   });
+
+  const fetchedRefs = [[0, 18], [0, 22]];
+  const floated = document.body.appendChild(document.createElement("div"));
+  floated.style = "position: fixed; top: 10px; right: 10px; z-index: 9999; background-color: #1a1b26; color: #f0f0f5; padding: 8px; border-radius: 4px; display: flex; align-items: center; justify-items: center; width: auto";
+  var refIdx = 0;
+  const floatedText = floated.appendChild(document.createElement("p"));
+  floatedText.textContent = `${refIdx+1}/${fetchedRefs.length}`;
+  function setRef(newRef) {
+    const fw = document.getElementById("fw-btn");
+    const bw = document.getElementById("bw-btn");
+    fw.classList.remove("disabled")
+    bw.classList.remove("disabled")
+    if (newRef == fetchedRefs.length-1) {
+      fw.classList.add("disabled");
+    }
+    if (newRef === 0) {
+      bw.classList.add("disabled");
+    }
+    refIdx = newRef;
+    const [i, j] = fetchedRefs[refIdx]
+    setState({ currentCtx:i+1, currentStep:j});
+    floatedText.textContent = `${refIdx+1}/${fetchedRefs.length}`;
+  }
+  const backBtn = floated.appendChild(document.createElement("button"));
+  backBtn.id = "bw-btn";
+  backBtn.className = "btn";
+  backBtn.style = "margin-left: 8px";
+  backBtn.onclick = (e) => {
+    setRef(Math.max(0, refIdx-1));
+  }
+  d3.select(backBtn).append("svg").attr("width", "20").append("use").attr("xlink:href", "#arrow");
+
+  const forwardBtn = floated.appendChild(document.createElement("button"));
+  forwardBtn.id = "fw-btn";
+  forwardBtn.className = "btn";
+  forwardBtn.style = "margin-left: 8px";
+  forwardBtn.onclick = (e) => {
+    setRef(Math.min(refIdx+1, fetchedRefs.length-1));
+  }
+  d3.select(forwardBtn).append("svg").attr("width", "20").attr("style", "transform: rotate(180deg)").append("use").attr("xlink:href", "#arrow");
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";

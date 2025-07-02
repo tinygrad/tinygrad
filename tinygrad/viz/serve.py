@@ -162,6 +162,20 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
+# map Ops.UNIQUE to locations in viz
+def get_buffer_refs(unique:int):
+  found = []
+  for i,c in enumerate(ctxs):
+    if not c["name"].startswith("Schedule"): continue
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "replace buffer":
+        uop = _reconstruct(contexts[1][i][j].sink)
+        for u in uop.toposort():
+          if u.op is Ops.BUFFER and u.src[0].arg == unique:
+            found.append((i,j))
+            break
+  return json.dumps(found).encode("utf-8")
+
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
@@ -194,6 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
+    elif url.path == "/get_buffer_refs": ret, content_type = get_buffer_refs(int(parse_qs(url.query)["buf_id"][0])), "application/json"
     else: status_code = 404
 
     # send response
