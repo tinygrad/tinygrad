@@ -187,7 +187,7 @@ def build_kmap():
       if step["name"] == "replace globals":
         uop = _reconstruct(contexts[1][i][j].sink)
         for buf in revmap.get(uop, []):
-          kmap[buf]["found"].append((i, j))
+          kmap[buf]["found"].append((i, j+1))
       # *** 3. find children (small asts)
       if step["name"] == "replace buffer":
         uop = _reconstruct(contexts[1][i][j].sink)
