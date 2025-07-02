@@ -483,6 +483,8 @@ function setCtxWithHistory(newCtx, newStep=0, prevState=null) {
 
 window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
+  currRef = 0;
+  floating.style.display = "none";
 });
 
 async function main() {
