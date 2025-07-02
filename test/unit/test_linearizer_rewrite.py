@@ -28,5 +28,19 @@ class TestLinearizerRewrite(unittest.TestCase):
       prg = get_program(ast, Device["CPU"].renderer)
       print(prg.src)
 
+  def test_kernel_info(self):
+    out = Tensor.arange(4, device="NULL")
+    si = out.schedule()[-1]
+
+    ast = si.ast.replace(arg=KernelInfo(opts_to_apply=()))
+    prg = get_program(ast, Device["CPU"].renderer)
+    assert prg.applied_opts == (), f"expected no opts, got {prg}"
+
+    prg = get_program(ast.replace(arg=None), Device["CPU"].renderer)
+    assert prg.applied_opts != (), f"expected opts to apply, got {prg.applied_opts}"
+
+    prg = get_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
+    self.assertEqual(prg.name, "custom")
+
 if __name__ == '__main__':
   unittest.main()
