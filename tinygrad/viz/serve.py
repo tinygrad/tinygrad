@@ -122,6 +122,10 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
+      refs = None
+      if e.arg["uop_ref"] != None:
+        for k,v in get_buffer_refs(e.arg["uop_ref"]).items():
+          e.arg[k] = v
       shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
       step += 1
@@ -173,7 +177,7 @@ def find_kernel(steps, i, unique):
           return kernel
 
 # map Ops.UNIQUE to locations in viz
-def get_buffer_refs(unique:int):
+def get_buffer_refs(unique:int) -> dict:
   found = []
   look_for_kernel = None
   for i,c in enumerate(ctxs):
@@ -191,7 +195,7 @@ def get_buffer_refs(unique:int):
             found.append((i,j))
             break
   metadata = str(look_for_kernel.arg.metadata) if look_for_kernel is not None else None
-  return json.dumps({"found":found, "metadata":metadata}).encode("utf-8")
+  return {"fetchedRefs":found, "metadata":metadata}
 
 # ** HTTP server
 
@@ -225,7 +229,6 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError): return
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
-    elif url.path == "/get_buffer_refs": ret, content_type = get_buffer_refs(int(parse_qs(url.query)["buf_id"][0])), "application/json"
     else: status_code = 404
 
     # send response

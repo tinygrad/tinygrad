@@ -137,7 +137,6 @@ function setRef(newRef) {
 }
 
 var profileRet, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
-const refsCache = new Map();
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -217,15 +216,6 @@ async function renderProfiler() {
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
       const color = bufColors[i%bufColors.length];
-      if (e.arg.uop_ref != null) {
-        let refsRet = refsCache.get(e.arg.uop_ref);
-        if (refsRet == null) {
-          refsRet = await (await fetch(`/get_buffer_refs?buf_id=${e.arg.uop_ref}`)).json();
-          refsCache.set(e.arg.uop_ref, refsRet);
-        }
-        e.arg.fetchedRefs = refsRet.found;
-        e.arg.metadata = refsRet.metadata;
-      }
       data.shapes.push({ x, y1, y2, arg:e.arg, color, key:i });
     }
     // lastly, adjust device rect by number of levels
