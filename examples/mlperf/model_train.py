@@ -933,7 +933,7 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, GPUS, grad_a
     # TODO: OOM without this realize with large grad_acc
     Tensor.realize(*[p.grad for p in optimizer.params])
 
-  global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer[0].device)
+  global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer[0].device)
   for p in optimizer.params:
     p.grad = p.grad / loss_scaler
     global_norm += p.grad.float().square().sum()
@@ -1299,7 +1299,7 @@ def train_llama3():
   opt_adamw_epsilon = 1e-5
   opt_adamw_weight_decay = 0.1
 
-  # opt_gradient_clip_norm = 1.0
+  opt_gradient_clip_norm = 1.0
   sequence_length = 8192
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
   opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
@@ -1322,7 +1322,17 @@ def train_llama3():
     loss = logits.cross_entropy(y)
     loss.backward()
 
-    # TODO: grad clip
+    # L2 norm grad clip
+    # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
+    # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
+    if not getenv("DISABLE_GRAD_CLIP_NORM"):
+      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
+      for p in optim.params:
+        total_norm += p.grad.float().square().sum()
+      total_norm = total_norm.sqrt().contiguous()
+      for p in optim.params:
+        p.grad = p.grad * opt_gradient_clip_norm / (total_norm + 1e-6)
+
     optim.step()
     scheduler.step()
 
@@ -1335,6 +1345,7 @@ def train_llama3():
   fake_label = Tensor(list(range(BS)), dtype="int16")
 
   for _ in range(100):
+    GlobalCounters.reset()
     loss, lr = train_step(model, fake_input, fake_label)
     # BS=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
     # uses 43% ~= 83GB

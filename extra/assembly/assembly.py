@@ -156,7 +156,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [tmp], args))
       else:
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[x] for x in vin], args))
-    elif uop == Ops.DEFINE_ACC:
+    elif uop == Ops.DEFINE_REG:
       reg = lang.newreg(u, dtype=dtype)
       lang.ins.append(AssemblyInstruction(Ops.LOAD, reg, [], args))
     elif uop == Ops.SPECIAL:

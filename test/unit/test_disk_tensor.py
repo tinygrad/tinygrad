@@ -1,4 +1,4 @@
-import pathlib, tempfile, unittest
+import os, pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
@@ -410,5 +410,13 @@ class TestPathTensor(unittest.TestCase):
     self.assertEqual(t_cpu.device, "CPU")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
+  def test_path_tensor_disk_device_bug(self):
+    test_file = pathlib.Path(self.temp_dir.name) / "disk_device_bug"
+    with open(test_file, "wb") as f: f.write(bytes(range(10)))
+    os.chmod(test_file, 0o000)
+    with self.assertRaises(PermissionError):
+      Tensor(pathlib.Path(test_file)).tolist()
+    os.chmod(test_file, 0o644)
+    assert Tensor(pathlib.Path(test_file)).tolist(), list(range(10))
 if __name__ == "__main__":
   unittest.main()

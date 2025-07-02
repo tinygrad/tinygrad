@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal, codecs
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
+               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
@@ -53,7 +53,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
-    argst = str(u.arg)
+    argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+("" if v.offset == 0 else f" / {srender(v.offset)}")+
                           (f"\nMASK {mask_to_str(v.mask)}" if v.mask is not None else "") for v in unwrap(u.st).views]))
@@ -86,17 +86,18 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
   for u0_num,u1_num,upat in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
-    except RecursionError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
+    except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat.location, upat.printable())}
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
 
-DevEvent = ProfileRangeEvent|ProfileGraphEntry
+DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
+    if isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
@@ -113,6 +114,34 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
+def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+  step, peak, mem = 0, 0, 0
+  shps:dict[int, dict] = {}
+  temp:dict[int, dict] = {}
+  timestamps:list[int] = []
+  for st,_,_,e in events:
+    if not isinstance(e, ProfilePointEvent): continue
+    if e.name == "alloc":
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
+      timestamps.append(int(e.st))
+      step += 1
+      mem += e.arg["nbytes"]
+      if mem > peak: peak = mem
+    if e.name == "free":
+      timestamps.append(int(e.st))
+      step += 1
+      mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
+      removed["x"].append(step)
+      removed["y"].append(removed["y"][-1])
+      for k,v in temp.items():
+        if k > e.ref:
+          v["x"] += [step, step]
+          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+  for v in temp.values():
+    v["x"].append(step)
+    v["y"].append(v["y"][-1])
+  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
@@ -122,14 +151,15 @@ def get_profile(profile:list[ProfileEvent]):
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
-    st = int(ts+time_diff)
+    # ProfilePointEvent records perf_counter, offset other events by GPU time diff
+    st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
     dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v)} for k,v in dev_events.items()}
+  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server
@@ -138,8 +168,8 @@ class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
-    if (fn:={"/":"index"}.get((url:=urlparse(self.path)).path)):
-      with open(os.path.join(os.path.dirname(__file__), f"{fn}.html"), "rb") as f: ret = f.read()
+    if (url:=urlparse(self.path)).path == "/":
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
