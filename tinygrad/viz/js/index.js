@@ -246,7 +246,7 @@ async function renderProfiler() {
         for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
         for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
         ctx.closePath();
-        ctx.fillStyle = e.key === focusedShape ? "#664282" : e.color;
+        ctx.fillStyle = e.key === focusedShape ? "#D6409F" : e.color;
         ctx.fill();
         let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`;
         if (e.arg.uop_ref != null) {
