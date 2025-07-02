@@ -790,12 +790,12 @@ def track_rewrites(name:Callable|bool|None=None):
         name_ret = name(*args, **kwargs, ret=ret)
         tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
         if isinstance(name_ret, str): name_str = name_ret
-      from tinygrad.device import Compiled, ProfileRangeEvent
-      from tinygrad.renderer import ProgramSpec
-      import decimal
-      if isinstance(tracked_keys[-1], ProgramSpec): name_str += f" {tracked_keys[-1].name}"
-      en = time.perf_counter_ns()
-      Compiled.profile_events.append(ProfileRangeEvent("TINY", name_str, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=False))
+        from tinygrad.device import Compiled, ProfileRangeEvent
+        from tinygrad.renderer import ProgramSpec
+        import decimal
+        if isinstance(tracked_keys[-1], ProgramSpec): name_str += f" {tracked_keys[-1].name}"
+        en = time.perf_counter_ns()
+        Compiled.profile_events.append(ProfileRangeEvent("TINY", name_str, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=False))
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
