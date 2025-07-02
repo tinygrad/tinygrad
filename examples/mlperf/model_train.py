@@ -1354,6 +1354,44 @@ def train_llama3():
     # BS=1 SEQLEN=4000 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
+def train_stable_diffusion():
+  config = {}
+  # ** hyperparameters **
+  BS                 = config["BS"]                     = getenv("BS", 1)
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
+  lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
+
+  BASEDIR = getenv("BASEDIR", "")
+  assert BASEDIR, "set BASEDIR to path of datasets"
+
+  """
+  opt = torch.optim.AdamW(params, lr=lr)
+  AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 1.25e-07
+    maximize: False
+    weight_decay: 0.01
+)
+  """
+  #optimizer = AdamW(get_parameters(model), lr=lr)
+
+  @TinyJit
+  @Tensor.train()
+  def train_step(model, optimizer, scheduler): pass
+    #optimizer.zero_grad()
+
+    #optimizer.step()
+    #scheduler.step()
+    #Tensor.realize(loss, optimizer.optimizers[0].lr)
+    #return loss, optimizer.optimizers[0].lr
+
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
 
@@ -1362,7 +1400,7 @@ if __name__ == "__main__":
   else: bench_log_manager = contextlib.nullcontext()
 
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
