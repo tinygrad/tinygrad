@@ -190,7 +190,8 @@ def get_buffer_refs(unique:int):
           if u.op is Ops.BUFFER and u.src[0].arg == unique:
             found.append((i,j))
             break
-  return json.dumps({"found":found, "metadata":str(look_for_kernel.arg.metadata)}).encode("utf-8")
+  metadata = str(look_for_kernel.arg.metadata) if look_for_kernel is not None else None
+  return json.dumps({"found":found, "metadata":metadata}).encode("utf-8")
 
 # ** HTTP server
 
