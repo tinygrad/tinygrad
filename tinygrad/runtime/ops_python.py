@@ -24,6 +24,8 @@ def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
 
+def is_void_op(u): return u[1] == dtypes.void and u[0] in {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
+
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
     self.uops: list[tuple[Ops, Optional[DType], list[int], Any]] = pickle.loads(lib)
@@ -40,10 +42,9 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
         if uop is Ops.DEFINE_REG: idp = [idp[0]]
-        inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
-        dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
+        inp = [ul[v] for v in idp if not is_void_op(self.uops[v])]
+        dtp = [dl[v] for v in idp if not is_void_op(self.uops[v])]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.STORE and dtype != dtypes.void:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
