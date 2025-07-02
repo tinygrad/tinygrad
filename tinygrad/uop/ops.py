@@ -527,7 +527,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
 @dataclass(frozen=True)
 class KernelInfo:
-  name: str = "test"            # name of the kernel
+  name: str|None = None         # name of the kernel
   global_dims: int = 0          # number of global dimensions (this is remapping RANGE to SPECIAL)
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
   upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
