@@ -47,7 +47,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted("bidx"), UPat.var("var")), allow_any_len=True),
    lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"*{ctx[bidx]}"),
-  (UPat(Ops.STORE, src=(UPat.var('dst'), UPat.var("var")), allow_any_len=True), lambda ctx,dst,var: f"{'' if dst.op in (Ops.DEFINE_REG, Ops.DEFINE_GLOBAL) else '*'}{ctx[dst]} = {ctx[var]};"),
+  (UPat(Ops.STORE, src=(UPat.var('dst'), UPat.var("var")), allow_any_len=True),
+    lambda ctx,dst,var: f"{'' if dst.op in (Ops.DEFINE_REG, Ops.DEFINE_GLOBAL) else '*'}{ctx[dst]} = {ctx[var]};"),
   # alu/gep
   # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
