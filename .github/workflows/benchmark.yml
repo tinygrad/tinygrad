@@ -67,11 +67,11 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
-      run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+      run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test AMX tensor cores
       run: |
-        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
-        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Run Tensor Core GEMM (float)
       run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (half)
@@ -123,7 +123,7 @@ jobs:
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - name: UsbGPU openpilot test
-      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB AMD_LLVM=1 NOLOCALS=0 IMAGE=0 GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB NOLOCALS=0 IMAGE=0 GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -196,8 +196,8 @@ jobs:
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
       run: |
-        NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
-        PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -396,8 +396,8 @@ jobs:
       run: AMD=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
-        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
-        AMD=1 AMD_LLVM=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_emulation TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+        AMD=1 AMD_LLVM=0 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
         AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt

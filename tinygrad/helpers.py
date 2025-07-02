@@ -73,7 +73,11 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
+def word_wrap(x, wrap=80):
+  if len(ansistrip(x)) <= wrap: return x
+  i = 0
+  while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
+  return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
@@ -124,7 +128,7 @@ DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
 DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
 QUANTIZE, VALIDATE_WITH_CPU = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
-ALLOW_DEVICE_USAGE = ContextVar("ALLOW_DEVICE_USAGE", 1)
+ALLOW_DEVICE_USAGE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("AMD_LLVM", 1)
 
 @dataclass(frozen=True)
 class Metadata:
