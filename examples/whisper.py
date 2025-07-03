@@ -283,13 +283,12 @@ def resample2(samples, source, target):
   return resample(samples, L, M, taps)
 
 def resample_batched(samples, source, target):
-  result = []
-  vi = Variable("bs", 0, len(samples)//(source*10)*source*10)
-  for i in range(0, len(samples), source*10):
-    vib = vi.bind(i)
-    chunk = resample2(samples[vib:vib+(source*10)], source, target)
-    result.append(chunk.numpy())
-  return result
+  count = samples.shape[-1]
+  rbs = source*10
+  samples = samples.pad(((0, math.ceil(count / rbs) * rbs - count))).reshape(-1, rbs)
+  resampled = resample2(samples, source, target)
+
+  return resampled[:int((count / source) * target)]
 
 RATE = 16000
 SEGMENT_SECONDS=30
