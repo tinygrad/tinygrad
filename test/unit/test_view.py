@@ -185,8 +185,6 @@ class TestMergeViews(unittest.TestCase):
     self.assertIsNotNone(v)
     self.assertEqual(v, target)
 
-  # infinite loops
-  @unittest.expectedFailure
   def test_merge_views_variable(self):
     from tinygrad import Variable
     N = 100
