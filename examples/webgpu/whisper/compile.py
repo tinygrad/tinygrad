@@ -12,7 +12,9 @@ Device.DEFAULT = "WEBGPU"
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import safe_save, safe_load, load_state_dict, get_state_dict
 from extra.export_model import export_model
-from examples.whisper import MODEL_URLS, get_encoding, init_whisper, MultiHeadAttention, ResidualAttentionBlock, TextDecoder, AudioEncoder, Whisper
+from examples.whisper import MODEL_URLS, get_encoding, hann_window, init_whisper, MultiHeadAttention, ResidualAttentionBlock, TextDecoder, AudioEncoder, Whisper, make_stft_basis_buffers, stft
+from examples.whisper import resample_batched, RATE, SAMPLES_PER_SEGMENT, stft_full, mel, N_FFT, HOP_LENGTH, N_MELS
+import math
 
 
 if __name__ == '__main__':
@@ -27,6 +29,48 @@ if __name__ == '__main__':
     # loading the state dict from a safetensor file changes the generated kernels
     safe_save(tofull(get_state_dict(model)), (dirname / "net.safetensors").as_posix())
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
+
+    def export_audio_prep():
+        class AudioPrep:
+            def __init__(self, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant"):
+                assert window == "hann", "other window types not implemented yet"
+                self.n_fft = n_fft
+                self.stride = stride
+                self.pad = pad
+                self.pad_mode = pad_mode
+                self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
+                self.mel = mel(sr=RATE, n_fft=self.n_fft, n_mels=N_MELS).realize()
+
+
+            def stft_full(self, x:Tensor) -> Tensor:
+                res = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
+                return res
+
+            def __call__(self, waveforms):
+                return self.forward(waveforms)
+
+            def forward(self, waveforms):
+                spec = self.stft_full(waveforms.reshape(-1, waveforms.shape[-1]))
+                magnitudes = (spec[..., :-1] ** 2)
+                mel_spec = self.mel @ magnitudes
+
+                def log10(x:Tensor):
+                    return x.log2() * (math.log(2) / math.log(10))
+
+                log_spec = log10(mel_spec.clip(1e-10, None))
+                log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
+                log_spec = (log_spec + 4.0) / 4.0
+
+                return log_spec
+
+        prep_audio = AudioPrep(N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+        safe_save(tofull(get_state_dict(prep_audio)), (dirname / "mel_temp.safetensors").as_posix())
+        load_state_dict(prep_audio, safe_load(str(dirname / "mel_temp.safetensors")))
+
+        prg, inp_sizes, out_sizes, state = export_model(prep_audio, Device.DEFAULT.lower(), Tensor.randn(1, SAMPLES_PER_SEGMENT), model_name="mel")
+        (dirname / 'mel.js').write_text(prg)
+        safe_save(state, (dirname / 'mel.safetensors'))
+        return prg, inp_sizes, out_sizes, state
 
     def export_encoder():
         prg, inp_sizes, out_sizes, state = export_model(model.encoder, Device.DEFAULT.lower(), Tensor.randn(1,80,3000), model_name="encoder")
@@ -61,6 +105,7 @@ if __name__ == '__main__':
         d = enc.decode_batch(np.arange(enc.n_vocab).reshape(-1, 1))
         (dirname / "vocab.json").write_text(json.dumps(d), encoding="utf8")
 
+    export_audio_prep()
     export_encoder()
     export_decoder_2()
     export_vocab()
