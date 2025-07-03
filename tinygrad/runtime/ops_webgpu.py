@@ -34,9 +34,6 @@ if sys.platform == "win32":
   toggles_desc.disabledToggles = None
 
   # Build the InstanceDescriptor
-  # instance_desc = webgpu.WGPUInstanceDescriptor()
-  # instance_desc.nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct))
-  # instance_desc.features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)
   instance_desc = webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True), nextInChain = ctypes.cast(ctypes.pointer(toggles_desc), ctypes.POINTER(webgpu.WGPUChainedStruct)))
 else:
   instance_desc = webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True))
