@@ -5,6 +5,7 @@
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
+from tinygrad.shape.shapetracker import ShapeTracker, apply_mop
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect
@@ -59,6 +60,7 @@ view_ops = {
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
+  "aten.as_strided": Tensor.as_strided,
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
@@ -167,23 +169,6 @@ def cached_to_movement_ops(shape, st) -> list:
   mops = st.to_movement_ops()
   if mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
   return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View, apply_mop
-@torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  storage_offset = storage_offset or tensor.storage_offset()
-  @wrap_view_op
-  def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-    # multiple as_strided do not compound
-    base = canonical_base(tensor)
-    # TODO: this is heavyweight
-    st = ShapeTracker(base.lazydata.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-    ret = base
-    if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-    if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-    for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-    return ret
-  return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):

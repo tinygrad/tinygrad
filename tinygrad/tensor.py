@@ -1286,7 +1286,7 @@ class Tensor(MathTrait):
     if any(s < 0 for s in stride): raise RuntimeError(f"as_strided: negative strides not supported, got {stride}")
     if prod(size) == 1: return self.flatten()[storage_offset].reshape(size)
     from tinygrad.shape.shapetracker import ShapeTracker, View, apply_mop
-    st = ShapeTracker(getattr(self, 'views', ()) + (View.create(size, stride, storage_offset),))
+    st = ShapeTracker(getattr(self, 'views', ()) + (View.create(tuple(size), tuple(stride), storage_offset),))
     mops = st.to_movement_ops()
     if mops and mops[0] == (Ops.RESHAPE, self.shape): mops.pop(0)
     ret: Any = self
