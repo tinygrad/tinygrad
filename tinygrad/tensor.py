@@ -1663,7 +1663,7 @@ class Tensor(MathTrait):
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
     ret = self._apply_uop(UOp.r, op=op, axis=axis)
-    
+
     if keepdim:
       # keepdims=True: Need to undo the axis reordering that UOp.r does internally
       # UOp.r moves non-reduce axes before reduce axes, but keepdim=True should preserve original order
@@ -2303,28 +2303,13 @@ class Tensor(MathTrait):
     def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
     reg_pads = self._resolve_pool_pads(padding, len(k_))
     ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
-    # Temporary compatibility fix: use keepdim=True then manually remove dimensions 
-    # to work around the keepdims=False default change
-    def pool_and_reduce_old_style(x, pads, op='mean'):
-      pooled = pool(x, pads)
-      if op == 'mean':
-        reduced = pooled.mean(axis, keepdim=True)
-      else:  # sum
-        reduced = pooled.sum(axis, keepdim=True)
-      # Remove the keepdim dimensions manually by working from the back
-      for _ in range(len(axis)):
-        reduced = reduced.squeeze(-1)
-      return reduced
-      
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
-      return pool_and_reduce_old_style(self, pads, 'sum') / pool_and_reduce_old_style(self.ones_like(), pads, 'sum')
+      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
     if not ceil_mode: 
-      return pool_and_reduce_old_style(self, reg_pads, 'mean')
-    norm_pooled = pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads)))
-    norm_reduced = norm_pooled.sum(axis, keepdim=True)
-    for _ in range(len(axis)): norm_reduced = norm_reduced.squeeze(-1)
-    return pool_and_reduce_old_style(self, ceil_pads, 'sum') / norm_reduced
+      return pool(self, reg_pads).mean(axis)
+    norm = pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+    return pool(self, ceil_pads).sum(axis) / norm
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, return_indices=False) -> Tensor | tuple[Tensor, Tensor]:
