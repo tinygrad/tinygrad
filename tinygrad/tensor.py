@@ -409,7 +409,7 @@ class Tensor(MathTrait):
 
   def load(self, size:int) -> Tensor:
     """
-    Load a tensor from tinycloud.
+    Load a tensor from storage.
 
     self should be a tensor of the hash to load
     """
@@ -419,20 +419,22 @@ class Tensor(MathTrait):
 
     base_chunks = math.ceil(size / 2**20)
     tree_depth = math.ceil(math.log(base_chunks, 65536))
-    data = h
-    level_chunks = 1
-    for _ in reversed(range(tree_depth + 1)):
-      print(data.shape)
-      if (tsize := data.shape[0]) < 2**20 * level_chunks: data = data.pad((0, 2**20 * level_chunks - tsize))
-      data = data.to("tinyfs:load")[:2**20 * level_chunks].contiguous().to(self.device)
-      level_chunks = level_chunks * 65536
-    print(data.shape)
+    data, level_chunks = h, 0
+    for i in reversed(range(tree_depth + 1)):
+      # if not last level, its still hashes
+      if i > 0:
+        level_chunks = max(1, math.ceil(base_chunks / 65536**(i-1)))
+        pad_amt = 16 * level_chunks
+      else: pad_amt = 2**20 * level_chunks
+
+      if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
+      data = data.to("tinyfs:load")[:pad_amt * level_chunks].contiguous().to(self.device)
 
     return data[:size]
 
   def store(self) -> Tensor:
     """
-    Store a tensor to tinycloud.
+    Store a tensor to storage.
     """
     data = self.contiguous().flatten().bitcast(dtypes.uint8)
 
@@ -445,7 +447,8 @@ class Tensor(MathTrait):
 
     level_chunks = base_chunks
     for _ in range(tree_depth + 1):
-      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(self.device)
+      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous()
+      data = data.to(self.device)
       if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
       level_chunks = math.ceil(data.shape[0] / 2**20)
 
