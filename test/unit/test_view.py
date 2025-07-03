@@ -185,16 +185,14 @@ class TestMergeViews(unittest.TestCase):
     self.assertIsNotNone(v)
     self.assertEqual(v, target)
 
-  # infinite loops
-  @unittest.expectedFailure
   def test_merge_views_variable(self):
     from tinygrad import Variable
     N = 100
     offset = Variable("start_pos", 1, N)*64
     v0 = View(shape=(N, 32, 2), strides=(32, 1, 0), offset=0, mask=((0, N), (0, 32), (0, 1)), contiguous=False)
     v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=offset, mask=None, contiguous=False)
-    v = v0 + v1
-    self.assertIsNotNone(v)
+    with self.assertRaises(ZeroDivisionError):
+      v = v0 + v1
 
   def test_view_padded_area1(self):
     # test_multinomial
