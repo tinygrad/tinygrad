@@ -3,29 +3,25 @@ from tinygrad import Tensor, nn, UOp, getenv
 class SimpleLlamaTokenizer:
   def __init__(self, vocab: list[str]):
     self.vocab: list[str] = vocab
-    self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(self.vocab)}
+    self.biggest_token: int = max([len(x) for x in self.vocab])
+    self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(vocab)}
     self.add_prefix_space = "Ġ"
 
   def encode(self, text:str) -> list[int]:
-    spm_str = text.replace(" ", self.add_prefix_space)
+    s = text.replace(" ", self.add_prefix_space)
 
+    # most basic BPE encoder
     out: list[int] = []
     i = 0
-    while i < len(spm_str):
-      for j in range(len(spm_str), i, -1):
-        tid = self.token_to_id.get(spm_str[i:j])
-        if tid is not None:
-          out.append(tid)
-          i = j
-          break
-      else: raise RuntimeError("unmatched token")
+    while i < len(s):
+      j = min(self.biggest_token, len(s))
+      while (tid:=self.token_to_id.get(s[i:j])) is None: j -= 1
+      out.append(tid)
+      i = j
     return out
 
   def decode(self, ids: list[int]) -> str:
-    ret = ''.join(self.vocab[tid] for tid in ids)
-    ret = ret.replace(self.add_prefix_space, " ")
-    ret = ret.replace("Ċ", "\n")
-    return ret
+    return ''.join(self.vocab[tid] for tid in ids).replace(self.add_prefix_space, " ").replace("Ċ", "\n")
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
@@ -48,19 +44,19 @@ class TransformerBlock:
 
     # --- attention projections (all linear, bias-free) ------------------
     kv_proj_out      = self.head_dim * n_kv_heads    # Llama-3 uses the same dim for K/V
-    self.attn_q      = nn.Linear(dim, dim,            bias=False)
-    self.attn_k      = nn.Linear(dim, kv_proj_out,    bias=False)
-    self.attn_v      = nn.Linear(dim, kv_proj_out,    bias=False)
-    self.attn_output = nn.Linear(dim, dim,            bias=False)
+    self.attn_q      = nn.Linear(dim, dim,         bias=False)
+    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
+    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
+    self.attn_output = nn.Linear(dim, dim,         bias=False)
 
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm  = nn.RMSNorm(dim, norm_eps)
+    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
 
     # --- feed-forward ----------------------------------------------------
-    self.ffn_gate = nn.Linear(dim, hidden_dim, bias=False)
-    self.ffn_up   = nn.Linear(dim, hidden_dim, bias=False)
-    self.ffn_down = nn.Linear(hidden_dim, dim, bias=False)
+    self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
   # ------------------------------------------------------------------ #
   # helpers
