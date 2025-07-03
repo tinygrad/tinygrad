@@ -164,12 +164,12 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
 def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
+  mops = st.to_movement_ops()
+  if mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
   return mops
 
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+from tinygrad.shape.shapetracker import apply_mop
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or tensor.storage_offset()
