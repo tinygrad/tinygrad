@@ -54,8 +54,8 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
       for j, (dim, stride) in enumerate(pairs):
         if j < len(pairs) - 1 and stride < pairs[j + 1][0] * pairs[j + 1][1]:
           remaining = pairs[j - 1][1] if j else buffer
-          ops.extend([(Ops.EXPAND, (dim, *(p[0] for p in pairs[:j]), remaining)), (Ops.PERMUTE, (*range(1, j + 1), 0, j + 1)), 
-                      (Ops.RESHAPE, (*(p[0] for p in pairs[:j]), dim * remaining)), (Ops.PAD, (*((0, 0) for _ in range(j)), (0, dim * stride))), 
+          ops.extend([(Ops.EXPAND, (dim, *(p[0] for p in pairs[:j]), remaining)), (Ops.PERMUTE, (*range(1, j + 1), 0, j + 1)),
+                      (Ops.RESHAPE, (*(p[0] for p in pairs[:j]), dim * remaining)), (Ops.PAD, (*((0, 0) for _ in range(j)), (0, dim * stride))),
                       (Ops.RESHAPE, (*(p[0] for p in pairs[:j + 1]), remaining + stride))])
           pairs[j] = (dim, remaining + stride)
         else: ops.extend([(Ops.SHRINK, (*((0, p[0]) for p in pairs[:j]), (0, dim*stride))), (Ops.RESHAPE, (*[p[0] for p in pairs[:j + 1]], stride))])
