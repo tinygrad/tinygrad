@@ -165,7 +165,7 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 @functools.cache
 def cached_to_movement_ops(shape, st) -> list:
   mops = st.to_movement_ops()
-  if mops and mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
+  if mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
   return mops
 
 from tinygrad.shape.shapetracker import ShapeTracker, View

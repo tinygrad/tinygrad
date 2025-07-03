@@ -53,8 +53,8 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
 
     # collect (dim, stride) pairs for non-zero strides
     strides = [(dim, abs(strd) if isinstance(strd, int) else strd) for dim, strd in zip(shape, view.strides) if strd]
-    buffer = sum((d - 1) * s for d, s in strides) + 1 if strides else 1
-    if i: buffer = (prod(views[i - 1].shape) - pos) if strides else 1
+    buffer = sum((d - 1) * s for d, s in strides) + 1 if strides else (1 if prod(shape) > 0 else 0)
+    if i: buffer = (prod(views[i - 1].shape) - pos) if strides else (1 if prod(shape) > 0 else 0)
 
     # initial reshape + shrink to isolate the relevant window
     ops.extend([(Ops.RESHAPE, (-1,)),
@@ -85,7 +85,16 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
       if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(k) for k in range(len(order)))))
 
     # final reshape to the intended shape
-    ops.append((Ops.RESHAPE, tuple(dim if strd else 1 for dim, strd in zip(shape, view.strides))))
+    final_shape = tuple(dim if strd else 1 for dim, strd in zip(shape, view.strides))
+    # If we have zero dimensions, ensure the reshape preserves zero size
+    if prod(shape) == 0 and prod(final_shape) != 0:
+      # Make dimensions zero where they were zero in the original shape
+      final_shape = list(final_shape)
+      for i, (dim, strd) in enumerate(zip(shape, view.strides)):
+        if strd == 0 and final_shape[i] == 1 and dim == 0:
+          final_shape[i] = 0
+      final_shape = tuple(final_shape)
+    ops.append((Ops.RESHAPE, final_shape))
     # handle negative strides via flip
     if any(strd < 0 for strd in view.strides): ops.append((Ops.FLIP, tuple(-1 if strd < 0 else 1 for strd in view.strides)))
 
