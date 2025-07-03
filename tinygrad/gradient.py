@@ -51,7 +51,7 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   in_target_path: dict[UOp, bool] = {}
   for u in root.toposort(): in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
   # don't flow through DETACH/ASSIGN or anything not in target path
-  return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
+  return list(root.toposort(lambda x: x.op is not Ops.DETACH and (x.op is not Ops.STORE or x.dtype == dtypes.void) and in_target_path[x]))
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
