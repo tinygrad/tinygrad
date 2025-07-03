@@ -122,8 +122,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      refs = None
-      if e.arg["uop_ref"] != None:
+      if e.arg["uop_ref"] is not None:
         for k,v in get_buffer_refs(e.arg["uop_ref"]).items():
           e.arg[k] = v
       shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
