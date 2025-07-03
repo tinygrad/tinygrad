@@ -198,7 +198,7 @@ class View:
     for d1, st in enumerate(vm1.strides):
       if st == 0: continue
       for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
-        if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possible be 0
+        if (s1 := s1 - o) == 0: continue
         terms[d2].append((d1, s1))
         strides[d1] += s1 * vm2.strides[d2]
 
