@@ -1,91 +1,36 @@
-import re, sys
 from tinygrad import Tensor, nn, UOp
-from typing import Dict, List, Sequence, Tuple
 
 class SimpleLlamaTokenizer:
-  BYTE_FALLBACK_OFFSET = 3                    # id 3 → 0x00 … id 258 → 0xFF
-  _ws_re = re.compile(r"\s+")
-
-  # ------------------------------------------------------------------ #
-  # constructor
-  # ------------------------------------------------------------------ #
-  def __init__(self, kv_data: Dict):
-    pieces: Sequence[str] = kv_data["tokenizer.ggml.tokens"]
-
-    # core vocab and lookup table
-    self.vocab: List[str] = list(pieces)
-    self.token_to_id: Dict[str, int] = {tok: i for i, tok in enumerate(self.vocab)}
-
-    # pre-build full byte-fallback maps (robust to sparse token_type vectors)
-    self._byte_to_id = {b: self.BYTE_FALLBACK_OFFSET + b for b in range(256)}
-    self._id_to_byte = {i: b for b, i in self._byte_to_id.items()}
-
-    # SentencePiece inserts a leading underline on each new word
+  def __init__(self, vocab: list[str]):
+    self.vocab: list[str] = vocab
+    self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(self.vocab)}
     self.add_prefix_space = "Ġ"
 
-  # ------------------------------------------------------------------ #
-  # encode
-  # ------------------------------------------------------------------ #
-  def encode(self, text: str) -> List[int]:
-    """
-    Minimal SentencePiece pipeline:
+  def encode(self, text:str) -> list[int]:
+    spm_str = text.replace(" ", self.add_prefix_space)
 
-    1. Collapse all whitespace to single spaces.
-    2. Replace each space with U+2581 “▁”.
-    3. Greedy longest-match over the whole string.
-    4. Byte-fallback for anything unmatched.
-    """
-    # 1) basic pre-tokenisation
-    text = self._ws_re.sub(" ", text).strip()
-    if not text: return []
-
-    # e.g. "▁Hello▁world"
-    spm_str = self.add_prefix_space + text.replace(" ", self.add_prefix_space)
-
-    # 2-4) greedy BPE with byte fallback
-    out: List[int] = []
+    out: list[int] = []
     i = 0
     while i < len(spm_str):
       for j in range(len(spm_str), i, -1):
-        piece = spm_str[i:j]
-        tid = self.token_to_id.get(piece)
-        if tid is not None:            # found a match
+        tid = self.token_to_id.get(spm_str[i:j])
+        if tid is not None:
           out.append(tid)
           i = j
           break
-      else:                              # no match → UTF-8 bytes
-        for b in spm_str[i].encode("utf-8", errors="replace"):
-          out.append(self._byte_to_id[b])
-        i += 1
+      else: raise RuntimeError("unmatched token")
     return out
 
-  # ------------------------------------------------------------------ #
-  # decode
-  # ------------------------------------------------------------------ #
-  def decode(self, ids: Sequence[int]) -> str:
-    pieces: List[str] = []
-    byte_buf: List[int] = []
-
-    def flush_bytes():
-      if byte_buf:
-        pieces.append(bytes(byte_buf).decode("utf-8", "replace"))
-        byte_buf.clear()
-
-    for tid in ids:
-      if tid in self._id_to_byte:          # byte-fallback id
-        byte_buf.append(self._id_to_byte[tid])
-      else:                                # normal vocab id
-        flush_bytes()
-        pieces.append(self.vocab[tid])
-
-    flush_bytes()                            # flush any tail bytes
-
-    # convert SentencePiece underlines back to spaces
-    return "".join(pieces).replace(self.add_prefix_space, " ").lstrip(" ")
+  def decode(self, ids: list[int]) -> str:
+    ret = ''.join(self.vocab[tid] for tid in ids)
+    ret = ret.replace(self.add_prefix_space, " ")
+    ret = ret.replace("Ċ", "\n")
+    return ret
 
 # --------------------------------------------------------------------------- #
 # rotary-embedding helpers
 # --------------------------------------------------------------------------- #
+
 def build_rope_cache(seq_len: int, head_dim: int, base: int = 10000):
   half_dim = head_dim // 2
   freq = base ** (-Tensor.arange(0, half_dim, dtype='float32') / half_dim)
@@ -126,7 +71,7 @@ class TransformerBlock:
     self.ffn_norm  = nn.RMSNorm(dim, norm_eps)
 
     # --- feed-forward ----------------------------------------------------
-    self.ffn_gate = nn.Linear(dim, hidden_dim, bias=False)  # SiLU gate
+    self.ffn_gate = nn.Linear(dim, hidden_dim, bias=False)
     self.ffn_up   = nn.Linear(dim, hidden_dim, bias=False)
     self.ffn_down = nn.Linear(hidden_dim, dim, bias=False)
 
@@ -191,7 +136,7 @@ class Transformer:
 if __name__ == "__main__":
   gguf_tensor = Tensor.from_url("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf").to(None)
   kv, state_dict = nn.state.gguf_load(gguf_tensor)
-  tok = SimpleLlamaTokenizer(kv)
+  tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
 
   model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'],
                       hidden_dim=kv['llama.feed_forward_length'], n_heads=kv['llama.attention.head_count'],
@@ -199,14 +144,13 @@ if __name__ == "__main__":
                       vocab_size=kv['llama.vocab_size'], max_context=kv['llama.context_length'])
   nn.state.load_state_dict(model, state_dict, consume=True, realize=False)
 
-  for k,v in state_dict.items(): print(k, v.shape)
-
-  #print(kv.keys())
+  # rope_freqs.weight (32,) is unused?
+  #for k,v in state_dict.items(): print(k, v.shape)
 
   bos_id = kv.get("tokenizer.ggml.bos_token_id")
   eos_id = kv.get("tokenizer.ggml.eos_token_id")
 
-  prompt_ids = [bos_id] + tok.encode("hello")
+  prompt_ids = [bos_id] + tok.encode("What's the sqrt of 4? Tell a story slowly meandering to the answer.")
 
   max_new_tokens = 256
   ids = prompt_ids.copy()
