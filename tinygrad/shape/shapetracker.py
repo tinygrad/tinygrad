@@ -39,7 +39,8 @@ def apply_mop(st: Any|ShapeTracker, mop_arg: tuple[Ops, tuple]) -> ShapeTracker:
 
 @functools.cache
 def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
-  if 0 in views[-1].shape: return []
+  # Note: Don't early return for shapes with 0 - let the algorithm handle it
+  # This maintains compatibility with previous behavior for torch backend
   ops: list[tuple[Ops, Any]] = []
 
   for i, view in enumerate(views):
