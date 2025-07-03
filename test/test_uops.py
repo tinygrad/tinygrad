@@ -10,12 +10,12 @@ from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.kernelize import fix_kernel_ops
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.kernelize.kernelize import fix_kernel_ops
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.opt.kernel import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -409,9 +409,11 @@ class TestAssembly(unittest.TestCase):
     a = Tensor.empty(1024)
     b = Tensor.empty(1024)
     c = (a*b).sum()
-    k = Kernel(c.schedule()[-1].ast)
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-    uops = k.linearize().uops
+    ast = c.schedule()[-1].ast
+    opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
+    program = get_program(ast, Device[Device.DEFAULT].renderer)
+    uops = program.uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
 class TestUOpMethod(unittest.TestCase):

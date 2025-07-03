@@ -4,9 +4,9 @@ import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item
-from tinygrad.engine.search import bufs_from_lin
+from tinygrad.opt.search import bufs_from_lin
 from tinygrad.shape.shapetracker import ShapeTracker, View # noqa: F401 # pylint: disable=unused-import
 
 N = 512
@@ -78,7 +78,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
       sched = run_onnx({"input":inp})["output"].schedule()
       ei = lower_schedule_item(sched[-2])
-      daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_ACC]
+      daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")

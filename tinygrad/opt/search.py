@@ -7,12 +7,12 @@ from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer import ProgramSpec
 
-actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
+actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, arg=amt) for amt in [2,3,4,8,13,16,29] for axis in range(6)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, arg=amt) for amt in [13,16,28,29,32,49,64,256] for axis in range(3)]
@@ -81,9 +81,9 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
     if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
-# workers should not open devices and should ignore ctrl c
+# workers should not open devices and should ignore ctrl c and should not launch VIZ
 def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0).__enter__()
+  Context(ALLOW_DEVICE_USAGE=0, VIZ=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]

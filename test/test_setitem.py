@@ -176,5 +176,12 @@ class TestWithGrad(unittest.TestCase):
     with self.assertRaises(NotImplementedError):
       z[:3] = x
 
+class TestSetitemLoop(unittest.TestCase):
+  def test_arange(self):
+    N = 10
+    cmp = Tensor.empty(N)
+    for i in range(N): cmp[i] = i
+    self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+
 if __name__ == '__main__':
   unittest.main()

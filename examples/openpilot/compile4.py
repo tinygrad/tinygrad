@@ -1,8 +1,8 @@
 import sys, onnx
-from tinygrad import Tensor, fetch, GlobalCounters
+from tinygrad import Tensor, fetch, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.engine.kernelize import get_kernelize_map
+from tinygrad.kernelize.kernelize import get_kernelize_map
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import run_schedule
 
@@ -17,7 +17,7 @@ if __name__ == "__main__":
   onnx_model = onnx.load(onnx_file)
   run_onnx = OnnxRunner(onnx_model)
 
-  inputs = run_onnx.get_empty_input_data("npy")
+  inputs = run_onnx.get_empty_input_data("npy", dtypes.float32)
   out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')
   root = out.uop
   targets = [x.uop for x in inputs.values()]
