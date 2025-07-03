@@ -43,20 +43,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  after_first_reduce = splitted.r(*reduce.arg)
-  # Find the axis with the split dimension size (should be the one that's not 1 and equals divisor)
-  split_axes = [i for i, s in enumerate(after_first_reduce.shape) if resolve(s != 1) and resolve(s == divisor)]
-  if not split_axes:
-    # Fallback: find any axis that's not 1
-    split_axes = [i for i, s in enumerate(after_first_reduce.shape) if resolve(s != 1)]
-  split_axis = split_axes[0] if split_axes else len(after_first_reduce.shape) - 1
-  final_reduced = after_first_reduce.r(reduce.arg[0], (split_axis,))
-  # Remove extra size-1 dimensions to match reduce.shape  
-  target_shape = tuple(s for s in final_reduced.shape if resolve(s != 1))
-  if len(target_shape) != len(reduce.shape):
-    # If sizes don't match, fall back to the original target
-    target_shape = reduce.shape
-  return final_reduced.reshape(target_shape)
+  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
