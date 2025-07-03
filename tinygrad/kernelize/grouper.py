@@ -1,4 +1,5 @@
 from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternMatcher, graph_rewrite
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import all_int, prod, unwrap, dedup, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, FUSE_CONV_BW
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -61,7 +62,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
-    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
+    if u.op is Ops.STORE and u.dtype != dtypes.void: assigns[u.buf_uop] = None
     for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -85,7 +86,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
+    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.STORE and x.dtype != dtypes.void}):
       parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
