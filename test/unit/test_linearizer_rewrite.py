@@ -42,5 +42,11 @@ class TestLinearizerRewrite(unittest.TestCase):
     prg = get_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
     self.assertEqual(prg.name, "custom")
 
+    opts = (Opt(OptOps.UPCAST, 0, 2),)
+    prg = get_program(ast.replace(arg=KernelInfo(opts_to_apply=opts)), Device["CPU"].renderer)
+    assert prg.uops is not None and prg.uops[-1].arg is not None and isinstance(prg.uops[-1].arg, KernelInfo), "expected uops and kernelinfo"
+    assert prg.applied_opts == opts, f"expected opts to be {opts}, got {prg.applied_opts}"
+    assert prg.uops[-1].arg.opts_to_apply is None, f"expected opts_to_apply to be None, got {prg.uops[-1].arg.opts_to_apply}"
+
 if __name__ == '__main__':
   unittest.main()
