@@ -2306,10 +2306,8 @@ class Tensor(MathTrait):
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
       return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
-    if not ceil_mode: 
-      return pool(self, reg_pads).mean(axis)
-    norm = pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
-    return pool(self, ceil_pads).sum(axis) / norm
+    if not ceil_mode: return pool(self, reg_pads).mean(axis)
+    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, return_indices=False) -> Tensor | tuple[Tensor, Tensor]:
@@ -4003,11 +4001,10 @@ class Tensor(MathTrait):
     for i in range(int(min(m, n))):
       x = R[..., i:m, i]
       s = -x[..., 0].sign()
-      norm_sq = x.square().sum(-1, keepdim=True)
-      u1 = x[..., 0] - s * norm_sq.sqrt().squeeze(-1)
+      u1 = x[..., 0] - s * x.square().sum(-1, keepdim=True).sqrt()
       w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
       w[..., 0, 0] = 1
-      tau = (-s * u1 / norm_sq.sqrt().squeeze(-1)).reshape(b_shape + 2 * (1,)).expand(w.shape)
+      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
       Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
     return Q,R
