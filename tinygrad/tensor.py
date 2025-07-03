@@ -407,7 +407,7 @@ class Tensor(MathTrait):
     """
     return self.replace(self.shard(devices, axis))
 
-  def cloud_load(self, size:int) -> Tensor:
+  def load(self, size:int) -> Tensor:
     """
     Load a tensor from tinycloud.
 
@@ -430,7 +430,7 @@ class Tensor(MathTrait):
 
     return data[:size]
 
-  def cloud_store(self) -> Tensor:
+  def store(self) -> Tensor:
     """
     Store a tensor to tinycloud.
     """
