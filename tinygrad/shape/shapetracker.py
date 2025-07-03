@@ -39,8 +39,6 @@ def apply_mop(st: Any|ShapeTracker, mop_arg: tuple[Ops, tuple]) -> ShapeTracker:
 
 @functools.cache
 def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
-  # Note: Don't early return for shapes with 0 - let the algorithm handle it
-  # This maintains compatibility with previous behavior for torch backend
   ops: list[tuple[Ops, Any]] = []
 
   for i, view in enumerate(views):
@@ -85,16 +83,7 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
       if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(k) for k in range(len(order)))))
 
     # final reshape to the intended shape
-    final_shape = tuple(dim if strd else 1 for dim, strd in zip(shape, view.strides))
-    # If we have zero dimensions, ensure the reshape preserves zero size
-    if prod(shape) == 0 and prod(final_shape) != 0:
-      # Make dimensions zero where they were zero in the original shape
-      final_shape_list = list(final_shape)
-      for i, (dim, strd) in enumerate(zip(shape, view.strides)):
-        if strd == 0 and final_shape_list[i] == 1 and dim == 0:
-          final_shape_list[i] = 0
-      final_shape = tuple(final_shape_list)
-    ops.append((Ops.RESHAPE, final_shape))
+    ops.append((Ops.RESHAPE, tuple((0 if prod(shape)==0 and strd==0 and dim==0 else (dim if strd else 1)) for dim,strd in zip(shape, view.strides))))
     # handle negative strides via flip
     if any(strd < 0 for strd in view.strides): ops.append((Ops.FLIP, tuple(-1 if strd < 0 else 1 for strd in view.strides)))
 
