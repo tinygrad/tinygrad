@@ -169,6 +169,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 1, 7) // -2, -3, 0, "((a//2)*-1)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((a//2)*-1)")
 
+  def test_div_mod_zero(self):
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) // 0).simplify()
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) % 0).simplify()
+
   def test_sum_div_remove(self):
     self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
