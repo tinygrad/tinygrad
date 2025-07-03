@@ -54,7 +54,7 @@
             const response = await fetch(url);
             const arrayBuffer = await response.arrayBuffer();
 
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const audioCtx = new window.AudioContext({ sampleRate: 16000 });
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
             // Downmix to mono by averaging channels
