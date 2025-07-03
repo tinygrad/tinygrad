@@ -2,8 +2,6 @@ from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.uop.ops import UOp
-from tinygrad.engine.jit import TinyJit
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
