@@ -288,7 +288,7 @@ def no_vectorized_acc(acc:UOp):
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.STORE), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
 ])
@@ -309,7 +309,7 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
-# *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***
+# *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.STORE ***
 
 @dataclass
 class ReduceContext:
@@ -333,7 +333,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     lst = [acc] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.assign(ret) if len(reduce_range) != 0 else ret
+  return acc.store(ret, dtype=ret.dtype) if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
