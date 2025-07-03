@@ -1,4 +1,4 @@
-from tinygrad import Tensor, nn, UOp
+from tinygrad import Tensor, nn, UOp, getenv
 
 class SimpleLlamaTokenizer:
   def __init__(self, vocab: list[str]):
@@ -73,7 +73,7 @@ class TransformerBlock:
   # ------------------------------------------------------------------ #
   # helpers
   # ------------------------------------------------------------------ #
-  def _attention(self, x: Tensor, start_pos: UOp | int, freqs_cis: Tensor, mask: Tensor|None) -> Tensor:
+  def _attention(self, x: Tensor, start_pos: int|UOp, freqs_cis: Tensor, mask: Tensor|None) -> Tensor:
     """
     RMS-norm → QKV proj → RoPE → SDPA → output proj
     Returns the *residual-added* tensor (x + attn_out).
@@ -128,9 +128,10 @@ class Transformer:
     self.max_context, self.head_dim = max_context, dim // n_heads
 
   def __call__(self, tokens: Tensor, start_pos: int|UOp = 0):
-    print(tokens.tolist(), start_pos)
+    #print(tokens.tolist(), start_pos)
     B, T = tokens.shape
-    if not hasattr(self, '_rope_cache'): self._rope_cache = build_rope_cache(self.max_context, self.head_dim)  # pre-compute the base RoPE table once
+    if not hasattr(self, '_rope_cache'):
+      self._rope_cache = build_rope_cache(self.max_context, self.head_dim)  # pre-compute the base RoPE table once
     x = self.token_embd(tokens)                           # (B, T, D)
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
     for block in self.blk: x = block(x, start_pos, self._rope_cache, mask)
@@ -159,8 +160,9 @@ if __name__ == "__main__":
   ids = prompt_ids.copy()
 
   start_pos = 0
+  v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
   while len(ids) < model.max_context and max_new_tokens > 0:
-    next_id = model(Tensor(ids[start_pos:], dtype="int32")[None, :], start_pos)
+    next_id = model(Tensor([ids[start_pos:]], dtype="int32"), v_start_pos.bind(start_pos) if getenv("SYM") and start_pos != 0 else start_pos)
     ids.append(next_id)
 
     start_pos = len(ids) - 1
