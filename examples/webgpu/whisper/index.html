@@ -8,6 +8,8 @@
         window.moduleReady = new Promise(resolve => window._resolveModule = resolve);
     </script>
     <script type="module">
+        import mel from "./mel.js"
+        window.mel = mel;
         import encoder from "./encoder.js"
         window.encoder = encoder;
         import decoder from "./decoder.js"
@@ -37,7 +39,7 @@
     <script>
         let net_encoder = null;
         const wgpuError = document.getElementById('wgpu-error');
-
+        const SAMPLES_PER_SEGMENT = 480000;
 
         async function processFrame() {
             if (video.videoWidth == 0 || video.videoHeight == 0) {
@@ -48,6 +50,29 @@
         }
         // requestAnimationFrame(processFrame);
 
+        async function fetchMonoFloat32Array(url) {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+            // Downmix to mono by averaging channels
+            const channels = audioBuffer.numberOfChannels;
+            const length = audioBuffer.length;
+            const mono = new Float32Array(length);
+
+            for (let c = 0; c < channels; c++) {
+                const data = audioBuffer.getChannelData(c);
+                for (let i = 0; i < length; i++) mono[i] += data[i] / channels;
+            }
+
+            return {
+                sampleRate: audioBuffer.sampleRate,
+                samples: mono
+            };
+        }
+
         async function transcribeAudio() {
             if (!net_encoder) {
                 await window.moduleReady;
@@ -57,18 +82,35 @@
                     wgpuError.style.display = "block";
                     // loadingContainer.style.display = "none";
                 }
+                net_mel = await mel.load(device, "./mel.safetensors");
                 net_encoder = await encoder.load(device, "./encoder.safetensors");
                 net_decoder = await decoder.load(device, "./decoder.safetensors");
                 // loadingContainer.style.display = "none";
             }
-            let log_spec = await fetch('log_spec.bin')
-                .then(res => res.arrayBuffer())
-                .then(buf => {
-                    const arr = new Float32Array(buf);
-                    return arr;
-                });
+
+            // let log_spec = await fetch('log_spec.bin')
+            //     .then(res => res.arrayBuffer())
+            //     .then(buf => {
+            //         const arr = new Float32Array(buf);
+            //         return arr;
+            //     });
+
+            let loaded = await fetchMonoFloat32Array('./test2.wav');
+            let samples = loaded.samples;
+            if (samples.length > SAMPLES_PER_SEGMENT) {
+                samples = samples.slice(0, SAMPLES_PER_SEGMENT);
+            } else if (samples.length < SAMPLES_PER_SEGMENT) {
+                let padded = new Float32Array(SAMPLES_PER_SEGMENT);
+                for (var i = 0; i < samples.length; ++i) {
+                    padded[i] = samples[i];
+                }
+                samples = padded;
+            }
+
+            let log_spec = await net_mel(samples);
+
             // const input = await prepareInput(offscreenContext);
-            const output = await net_encoder(log_spec);
+            const output = await net_encoder(log_spec[0]);
             let context = [50257, 50362];
 
             // Load JSON mapping
