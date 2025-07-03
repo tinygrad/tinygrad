@@ -1328,7 +1328,7 @@ class Tensor(MathTrait):
     ```
     """
     # checks for shapes and number of dimensions delegated to cat
-    return Tensor.cat(*[t.unsqueeze(dim) for t in [self, *args]], dim=dim)
+    return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
 
   def repeat_interleave(self, repeats:int, dim:int|None=None) -> Tensor:
     """
