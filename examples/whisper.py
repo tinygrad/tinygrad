@@ -185,13 +185,8 @@ def hz_to_mel(freq:Tensor)->Tensor:
 
   min_log_hz = 1000.0  # beginning of log region (Hz)
 
-  if freq >= min_log_hz:
-    min_log_mel = (min_log_hz - f_min) / f_sp  # same (Mels)
-    logstep = Tensor(6.4).log() / 27.0  # step size for log region
-
-    mels = min_log_mel + Tensor(freq / min_log_hz).log() / logstep
-
-  return mels
+  mask = freq >= min_log_hz
+  return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (Tensor(6.4).log() / 27.0), mels)
 
 def mel_to_hz(mels:Tensor)->Tensor:
   # Fill in the linear scale
@@ -212,11 +207,9 @@ def mel_to_hz(mels:Tensor)->Tensor:
 
 def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025.0)->Tensor:
   # 'Center freqs' of mel bands - uniformly spaced between limits
-  min_mel = hz_to_mel(fmin)
-  max_mel = hz_to_mel(fmax)
+  min_max_mel = hz_to_mel(Tensor([fmin, fmax]))
 
-  mels = Tensor.linspace(min_mel, max_mel, n_mels)
-
+  mels = Tensor.linspace(min_max_mel[0], min_max_mel[1], n_mels)
   hz = mel_to_hz(mels)
   return hz
 
