@@ -1,34 +1,34 @@
-from tinygrad import Tensor, nn, UOp, getenv
+import sys
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 
 class SimpleLlamaTokenizer:
   def __init__(self, vocab: list[str]):
     self.vocab: list[str] = vocab
     self.biggest_token: int = max(map(len, vocab))
     self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(vocab)}
-    self.add_prefix_space = "Ġ"
+    self.replace_space = "Ġ"
+    self.replace_newline = "Ċ"
 
   def encode(self, text:str) -> list[int]:
-    """
-    most basic BPE encoder
-    """
-    s = text.replace(" ", self.add_prefix_space)
+    s = text.replace(" ", self.replace_space).replace("\n", self.replace_newline)
     out: list[int] = []
     i = 0
     while i < len(s):
-      j = min(self.biggest_token, len(s))
-      while (tid:=self.token_to_id.get(s[i:j])) is None: j -= 1
+      j = min(i+self.biggest_token, len(s))
+      while i < j and (tid:=self.token_to_id.get(s[i:j])) is None: j -= 1
+      if tid is None: raise RuntimeError(f"token not found in {s}")
+      assert tid is not None, f"token not found in {s}"
       out.append(tid)
       i = j
     return out
 
   def decode(self, ids: list[int]) -> str:
-    return ''.join(self.vocab[tid] for tid in ids).replace(self.add_prefix_space, " ").replace("Ċ", "\n")
+    return ''.join(self.vocab[tid] for tid in ids).replace(self.replace_space, " ").replace(self.replace_newline, "\n")
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
   # NOTE: this is usually in a RoPE cache, but tinygrad JIT should prune it outside the kernel
-  half_dim = Hd // 2
-  freq = base ** (-Tensor.arange(0, half_dim, dtype='float32') / half_dim)
+  freq = base ** (-Tensor.arange(0, 1, 2/Hd, dtype='float32'))
   angles = Tensor.arange(start_pos, start_pos+T, dtype='float32')[None, None, :, None] * freq
   cos, sin = angles.cos(), angles.sin()
   x = x.reshape(B, H, T, Hd // 2, 2)    # split into pairs
@@ -37,7 +37,7 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   return Tensor.stack(y1, y2, dim=-1).reshape(B, H, T, Hd)
 
 class TransformerBlock:
-  def __init__(self, dim: int, hidden_dim: int, n_heads: int, n_kv_heads: int, norm_eps: float, max_context: int = 0):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = dim // n_heads
@@ -59,11 +59,7 @@ class TransformerBlock:
     self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
     self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
-  def _attention(self, x: Tensor, start_pos: int|UOp) -> Tensor:
-    """
-    RMS-norm → QKV proj → RoPE → SDPA → output proj
-    Returns the *residual-added* tensor (x + attn_out).
-    """
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
 
@@ -97,10 +93,6 @@ class TransformerBlock:
     return x + attn                                   # residual-add
 
   def _feed_forward(self, h: Tensor) -> Tensor:
-    """
-    RMS-norm → gated SiLU MLP → residual add.
-    Accepts and returns shape (B,T,D).
-    """
     h_norm = self.ffn_norm(h)
     gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
     return (h + self.ffn_down(gated)).contiguous()
@@ -113,42 +105,47 @@ class Transformer:
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
+    # JIT is used if T=1 and start_pos is a UOp
+    self.forward_jit = TinyJit(self.forward)
 
-  def __call__(self, tokens: Tensor, start_pos: int|UOp = 0):
+  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
-    for block in self.blk:
-      x = block(x, start_pos)
-    return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax().item()
+    for block in self.blk: x = block(x, start_pos)
+    return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax()
+
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
+    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
 if __name__ == "__main__":
   gguf_tensor = Tensor.from_url("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf")
   kv, state_dict = nn.state.gguf_load(gguf_tensor.to(None))
 
   tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
-  bos_id: int = kv["tokenizer.ggml.bos_token_id"]
-  eos_id: int = kv["tokenizer.ggml.eos_token_id"]
   max_context: int = kv['llama.context_length']
 
-  # NOTE: rope_freqs.weight (32,) is unused?
+  bos_id: int = tok.token_to_id["<|begin_of_text|>"]
+  eos_id: int = tok.token_to_id["<|end_of_text|>"]
+  eot_id: int = tok.token_to_id["<|eot_id|>"]
+
   model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
                       n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
                       norm_eps=kv['llama.attention.layer_norm_rms_epsilon'], vocab_size=kv['llama.vocab_size'], max_context=max_context)
-  nn.state.load_state_dict(model, state_dict, consume=True, realize=False)
+  # NOTE: rope_freqs.weight (32,) is unused?
+  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
 
-  ids: list[int] = [bos_id] + tok.encode("What's the sqrt of 4? Tell a story slowly meandering to the answer.")
-
-  max_new_tokens = 256
+  ids: list[int] = [bos_id]
   v_start_pos = UOp.variable("start_pos", 1, max_context-1)
   start_pos = 0
-  while len(ids) < max_context and max_new_tokens > 0:
-    tids = Tensor([ids[start_pos:]], dtype="int32")
-    next_id = model(tids, v_start_pos.bind(start_pos) if getenv("SYM") and start_pos != 0 else start_pos)
+  while len(ids) < max_context:
+    if ids[start_pos] in [bos_id, eot_id]:
+      # if we are at the start of a stream or end of turn, we fetch something from the user. this is the prompt
+      ids += [t for x in [
+        "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n", f"{input(">>> ")}\n", "<|eot_id|>",
+        "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"] for t in tok.encode(x)]
+    tokens = Tensor([ids[start_pos:]], dtype="int32")
+    next_id = model(tokens, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and tokens.shape[-1] == 1 else start_pos).item()
     ids.append(next_id)
-
     start_pos = len(ids) - 1
-    max_new_tokens -= 1
-
-    # Stream the freshly produced token
-    token_str = tok.decode(ids)
-    print(token_str)
     if next_id == eos_id: break
+    sys.stdout.write(tok.decode([next_id]) if next_id != eot_id else "\n\n")
+    sys.stdout.flush()
