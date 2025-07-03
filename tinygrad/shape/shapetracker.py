@@ -89,11 +89,11 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
     # If we have zero dimensions, ensure the reshape preserves zero size
     if prod(shape) == 0 and prod(final_shape) != 0:
       # Make dimensions zero where they were zero in the original shape
-      final_shape = list(final_shape)
+      final_shape_list = list(final_shape)
       for i, (dim, strd) in enumerate(zip(shape, view.strides)):
-        if strd == 0 and final_shape[i] == 1 and dim == 0:
-          final_shape[i] = 0
-      final_shape = tuple(final_shape)
+        if strd == 0 and final_shape_list[i] == 1 and dim == 0:
+          final_shape_list[i] = 0
+      final_shape = tuple(final_shape_list)
     ops.append((Ops.RESHAPE, final_shape))
     # handle negative strides via flip
     if any(strd < 0 for strd in view.strides): ops.append((Ops.FLIP, tuple(-1 if strd < 0 else 1 for strd in view.strides)))
