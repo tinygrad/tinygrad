@@ -193,6 +193,7 @@ class TestMergeViews(unittest.TestCase):
     v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=offset, mask=None, contiguous=False)
     with self.assertRaises(ZeroDivisionError):
       v = v0 + v1
+      print(v)
 
   def test_view_padded_area1(self):
     # test_multinomial
