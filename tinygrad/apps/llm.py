@@ -3,14 +3,15 @@ from tinygrad import Tensor, nn, UOp, getenv
 class SimpleLlamaTokenizer:
   def __init__(self, vocab: list[str]):
     self.vocab: list[str] = vocab
-    self.biggest_token: int = max([len(x) for x in self.vocab])
+    self.biggest_token: int = max(map(len, vocab))
     self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(vocab)}
     self.add_prefix_space = "Ġ"
 
   def encode(self, text:str) -> list[int]:
+    """
+    most basic BPE encoder
+    """
     s = text.replace(" ", self.add_prefix_space)
-
-    # most basic BPE encoder
     out: list[int] = []
     i = 0
     while i < len(s):
@@ -58,9 +59,6 @@ class TransformerBlock:
     self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
     self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
-  # ------------------------------------------------------------------ #
-  # helpers
-  # ------------------------------------------------------------------ #
   def _attention(self, x: Tensor, start_pos: int|UOp, mask: Tensor|None) -> Tensor:
     """
     RMS-norm → QKV proj → RoPE → SDPA → output proj
@@ -113,7 +111,6 @@ class Transformer:
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
-    self.max_context, self.head_dim = max_context, dim // n_heads
 
   def __call__(self, tokens: Tensor, start_pos: int|UOp = 0):
     _, T = tokens.shape
@@ -125,27 +122,27 @@ class Transformer:
 if __name__ == "__main__":
   gguf_tensor = Tensor.from_url("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf")
   kv, state_dict = nn.state.gguf_load(gguf_tensor.to(None))
-  tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
 
+  tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
+  bos_id: int = kv["tokenizer.ggml.bos_token_id"]
+  eos_id: int = kv["tokenizer.ggml.eos_token_id"]
+  max_context: int = kv['llama.context_length']
+
+  # NOTE: rope_freqs.weight (32,) is unused?
   model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
                       n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
                       norm_eps=kv['llama.attention.layer_norm_rms_epsilon'],
-                      vocab_size=kv['llama.vocab_size'], max_context=kv['llama.context_length'])
+                      vocab_size=kv['llama.vocab_size'], max_context=max_context)
   nn.state.load_state_dict(model, state_dict, consume=True, realize=False)
 
-  # rope_freqs.weight (32,) is unused?
-  #for k,v in state_dict.items(): print(k, v.shape)
-
-  bos_id: int = kv["tokenizer.ggml.bos_token_id"]
-  eos_id: int = kv["tokenizer.ggml.eos_token_id"]
-
   ids: list[int] = [bos_id] + tok.encode("What's the sqrt of 4? Tell a story slowly meandering to the answer.")
-  max_new_tokens = 256
-  start_pos = 0
 
-  v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
-  while len(ids) < model.max_context and max_new_tokens > 0:
-    next_id = model(Tensor([ids[start_pos:]], dtype="int32"), v_start_pos.bind(start_pos) if getenv("SYM") and start_pos != 0 else start_pos)
+  max_new_tokens = 256
+  v_start_pos = UOp.variable("start_pos", 1, max_context-1)
+  start_pos = 0
+  while len(ids) < max_context and max_new_tokens > 0:
+    tids = Tensor([ids[start_pos:]], dtype="int32")
+    next_id = model(tids, v_start_pos.bind(start_pos) if getenv("SYM") and start_pos != 0 else start_pos)
     ids.append(next_id)
 
     start_pos = len(ids) - 1
