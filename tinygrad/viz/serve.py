@@ -75,16 +75,16 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 @functools.cache
-def _reconstruct(a:int):
-  op, dtype, src, arg, tag = contexts[2][a]
-  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag)
+def _reconstruct(a:int, pid:int):
+  op, dtype, src, arg, tag = pid_uops[pid][a]
+  arg = type(arg)(_reconstruct(arg.ast, pid), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s, pid) for s in src), arg, tag)
 
-def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+def get_details(ctx:TrackedGraphRewrite, pid:int) -> Generator[GraphRewriteDetails, None, None]:
+  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink, pid)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat in tqdm(ctx.matches):
-    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
+    replaces[u0:=_reconstruct(u0_num, pid)] = u1 = _reconstruct(u1_num, pid)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -185,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
           self.send_header("Content-Type", "text/event-stream")
           self.send_header("Cache-Control", "no-cache")
           self.end_headers()
-          for r in get_details(contexts[1][kidx][ridx]):
+          for r in get_details(vals[kidx][ridx], pid_map[kidx]):
             self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
             self.wfile.flush()
           self.wfile.write("data: END\n\n".encode("utf-8"))
@@ -215,6 +215,21 @@ def reloader():
 
 def load_pickle(path:str):
   if path is None or not os.path.exists(path): return None
+  if os.path.isdir(path):
+    # group traces by timestamp
+    traces:dict[int, list[os.DirEntry]] = {}
+    with os.scandir(path) as it:
+      for e in it:
+        if e.name.startswith("temp"): os.remove(e.path)
+        else: traces.setdefault(int(e.name.split("_", 1)[0]), []).append(e)
+    # load files with the latest timestamp, clean up the rest
+    ret:dict[str,Any] = {}
+    for ts,files in traces.items():
+      files.sort(key=lambda e:e.stat().st_mtime, reverse=True)
+      for fp in files:
+        if ts == max(traces): ret[fp.path] = load_pickle(fp.path)
+        else: os.remove(fp.path)
+    return ret
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -235,9 +250,21 @@ if __name__ == "__main__":
   print("*** viz is starting")
 
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
+  if contexts is None: contexts = {}
+  pid_uops:dict[int, dict] = {}
+  pid_map:dict = {}
+  keys, vals = [], []
+  i = 0
+  for file,(proc_keys, proc_vals, proc_uops) in contexts.items():
+    pid = int(file.split("pid_")[1])
+    pid_uops[pid] = proc_uops
+    keys += proc_keys
+    vals += proc_vals
+    for kidx in range(i, len(keys)):
+      pid_map[kidx] = pid
+    i += len(proc_keys)
 
-  # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
+  ctxs = get_metadata(keys, vals)
 
   profile_ret = get_profile(profile) if profile is not None else None
 

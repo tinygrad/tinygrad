@@ -757,6 +757,7 @@ def track_uop(u:UOp):
 # *** tracking pattern matcher ***
 
 VIZ = ContextVar("VIZ", 0)
+TRACING_TIMESTAMP = ContextVar("TRACING_TIMESTAMP", int(time.monotonic()))
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
 @dataclass(frozen=True)
@@ -837,13 +838,19 @@ class TrackedPatternMatcher(PatternMatcher):
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit
+  os.makedirs(dest_dir:=temp("rewrites", append_user=True), exist_ok=True)
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
+      with open(tmp_fn:=os.path.join(dest_dir, f"temp_pid_{os.getpid()}"), "wb") as f:
+        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times")
         pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+        f.flush()
+        os.fsync(f.fileno())
+      fn = os.path.join(dest_dir, f"{TRACING_TIMESTAMP.value}_pid_{os.getpid()}")
+      print(f"saved to {fn}")
+      os.rename(tmp_fn, fn)
+    if VIZ: launch_viz("VIZ", dest_dir)
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
