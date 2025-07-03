@@ -68,7 +68,8 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
     if view.mask is not None:
       pre_pad = tuple((beg, dim - end) if strd != 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
       post_pad = tuple((beg, dim - end) if strd == 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
-      if any(p != (0, 0) for p in pre_pad): ops.append((Ops.PAD, pre_pad)); shape = tuple(dim + l + r for dim, (l, r) in zip(shape, pre_pad))
+      if any(p != (0, 0) for p in pre_pad): ops.append((Ops.PAD, pre_pad))
+      shape = tuple(dim + l + r for dim, (l, r) in zip(shape, pre_pad))
     else: post_pad = ()
     if any(dim != 1 and strd == 0 for dim, strd in zip(shape, view.strides)): ops.append((Ops.EXPAND, shape))
     if view.mask is not None and any(p != (0, 0) for p in post_pad): ops.append((Ops.PAD, post_pad))
