@@ -262,9 +262,10 @@ def resample(x, L, M, num_taps=64):
   h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
   h /= h.sum()
   # TODO(irwin): contiguous sped up things before replacing decimation with stride=M, retest if still relevant
-  upsampled = x[None].cat(Tensor.zeros(L-1, x.shape[-1])).T.flatten().contiguous()
+  upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
+  # upsampled = xx.cat(Tensor.zeros(L-1, *x.shape)).T.flatten().contiguous()
   padding = (len(h) // 2)
-  filtered = upsampled[None][None].conv2d(h[None][None], stride=M, padding=padding).flatten()
+  filtered = upsampled.conv2d(h.reshape(1, 1, -1), stride=M, padding=padding).flatten(1)
   return filtered
 
 def next_power_of_2(n):
