@@ -13,7 +13,7 @@ from test.helpers import not_support_multi_device
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
-  def test_sparse_cat_cross_entropy(self):
+  def test_sparse_categorical_crossentropy(self):
     # create in tinygrad
     input_tensor = Tensor.randn(6, 5) # not square to test that mean scaling uses the correct dimension
     target = Tensor([0, 0, 0, 1, 2, 3])  # torch doesn't support target=-1
