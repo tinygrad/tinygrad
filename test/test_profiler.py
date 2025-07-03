@@ -170,7 +170,7 @@ class TestProfiler(unittest.TestCase):
         test_fxn(err=False)
       with self.assertRaises(Exception):
         with cpu_profile("test_2", dev.device):
-            test_fxn(err=True)
+          test_fxn(err=True)
 
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
     self.assertEqual(len(range_events), 2)
