@@ -188,7 +188,7 @@ class TestMergeViews(unittest.TestCase):
   def test_merge_views_variable(self):
     from tinygrad import Variable
     N = 100
-    offset = Variable("start_pos", 1, N)*64
+    offset = Variable("start_pos", 1, N-1)*64
     v0 = View(shape=(N, 32, 2), strides=(32, 1, 0), offset=0, mask=((0, N), (0, 32), (0, 1)), contiguous=False)
     v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=offset, mask=None, contiguous=False)
     v = v0 + v1
