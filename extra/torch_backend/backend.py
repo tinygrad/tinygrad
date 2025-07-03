@@ -168,8 +168,7 @@ def cached_to_movement_ops(shape, st) -> list:
   if mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
   return mops
 
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.shape.shapetracker import apply_mop
+from tinygrad.shape.shapetracker import ShapeTracker, View, apply_mop
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or tensor.storage_offset()
