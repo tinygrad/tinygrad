@@ -27,21 +27,13 @@ class SimpleLlamaTokenizer:
     ret = ret.replace("Ċ", "\n")
     return ret
 
-# --------------------------------------------------------------------------- #
-# rotary-embedding helpers
-# --------------------------------------------------------------------------- #
-
-def build_rope_cache(seq_len: int, head_dim: int, base: int = 10000):
-  half_dim = head_dim // 2
-  freq = base ** (-Tensor.arange(0, half_dim, dtype='float32') / half_dim)
-  t = Tensor.arange(seq_len, dtype='float32')[:, None]          # (T, 1)
-  angles = t * freq                                             # (T, Hd/2)
-  return Tensor.stack(angles.cos(), angles.sin(), dim=-1)     # (T, Hd/2, 2)
-
-def apply_rope(x:Tensor, freqs_cis: Tensor, start_pos: int | Tensor):
+def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
-  cos = freqs_cis[None, None, start_pos:start_pos+T, :, 0]     # (T, half)
-  sin = freqs_cis[None, None, start_pos:start_pos+T, :, 1]     # (T, half)
+  # NOTE: this is usually in a RoPE cache, but tinygrad JIT should prune it outside the kernel
+  half_dim = Hd // 2
+  freq = base ** (-Tensor.arange(0, half_dim, dtype='float32') / half_dim)
+  angles = Tensor.arange(start_pos, start_pos+T, dtype='float32')[None, None, :, None] * freq
+  cos, sin = angles.cos(), angles.sin()
   x = x.reshape(B, H, T, Hd // 2, 2)    # split into pairs
   y1 = x[..., 0] * cos - x[..., 1] * sin
   y2 = x[..., 0] * sin + x[..., 1] * cos
@@ -73,7 +65,7 @@ class TransformerBlock:
   # ------------------------------------------------------------------ #
   # helpers
   # ------------------------------------------------------------------ #
-  def _attention(self, x: Tensor, start_pos: int|UOp, freqs_cis: Tensor, mask: Tensor|None) -> Tensor:
+  def _attention(self, x: Tensor, start_pos: int|UOp, mask: Tensor|None) -> Tensor:
     """
     RMS-norm → QKV proj → RoPE → SDPA → output proj
     Returns the *residual-added* tensor (x + attn_out).
@@ -86,8 +78,8 @@ class TransformerBlock:
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
 
-    q = apply_rope(q, freqs_cis, start_pos)
-    k = apply_rope(k, freqs_cis, start_pos)
+    q = apply_rope(q, start_pos)
+    k = apply_rope(k, start_pos)
 
     if self.max_context:
       if not hasattr(self, "cache_kv"):
@@ -117,8 +109,8 @@ class TransformerBlock:
     gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
     return (h + self.ffn_down(gated)).contiguous()
 
-  def __call__(self, x: Tensor, start_pos: int|UOp, freqs_cis: Tensor, mask: Tensor|None):
-    return self._feed_forward(self._attention(x, start_pos, freqs_cis, mask))
+  def __call__(self, x: Tensor, start_pos: int|UOp, mask: Tensor|None):
+    return self._feed_forward(self._attention(x, start_pos, mask))
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, max_context):
@@ -128,13 +120,10 @@ class Transformer:
     self.max_context, self.head_dim = max_context, dim // n_heads
 
   def __call__(self, tokens: Tensor, start_pos: int|UOp = 0):
-    #print(tokens.tolist(), start_pos)
-    B, T = tokens.shape
-    if not hasattr(self, '_rope_cache'):
-      self._rope_cache = build_rope_cache(self.max_context, self.head_dim)  # pre-compute the base RoPE table once
+    _, T = tokens.shape
     x = self.token_embd(tokens)                           # (B, T, D)
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
-    for block in self.blk: x = block(x, start_pos, self._rope_cache, mask)
+    for block in self.blk: x = block(x, start_pos, mask)
     return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax().item()
 
 if __name__ == "__main__":
@@ -151,15 +140,13 @@ if __name__ == "__main__":
   # rope_freqs.weight (32,) is unused?
   #for k,v in state_dict.items(): print(k, v.shape)
 
-  bos_id = kv.get("tokenizer.ggml.bos_token_id")
-  eos_id = kv.get("tokenizer.ggml.eos_token_id")
+  bos_id: int = kv["tokenizer.ggml.bos_token_id"]
+  eos_id: int = kv["tokenizer.ggml.eos_token_id"]
 
-  prompt_ids = [bos_id] + tok.encode("What's the sqrt of 4? Tell a story slowly meandering to the answer.")
-
+  ids: list[int] = [bos_id] + tok.encode("What's the sqrt of 4? Tell a story slowly meandering to the answer.")
   max_new_tokens = 256
-  ids = prompt_ids.copy()
-
   start_pos = 0
+
   v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
   while len(ids) < model.max_context and max_new_tokens > 0:
     next_id = model(Tensor([ids[start_pos:]], dtype="int32"), v_start_pos.bind(start_pos) if getenv("SYM") and start_pos != 0 else start_pos)
@@ -172,4 +159,3 @@ if __name__ == "__main__":
     token_str = tok.decode(ids)
     print(token_str)
     if next_id == eos_id: break
-
