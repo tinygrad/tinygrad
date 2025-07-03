@@ -413,17 +413,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
     return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
-  def bind(self, val:int):
+  def bind(self, val:int|UOp):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
-    assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
-    return UOp(Ops.BIND, self.dtype, (self, self.const_like(val)))
+    uval = self.const_like(val) if isinstance(val, int) else val
+    assert self.arg[1] <= uval.vmin and uval.vmax <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
+    return UOp(Ops.BIND, self.dtype, (self, uval))
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
@@ -778,13 +779,13 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable|bool|None=None):
+def track_rewrites(name:Callable|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       st = time.perf_counter_ns()
       name_str = (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}"
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(args[0] if args and name is None else name_str)
+        tracked_keys.append(name_str)
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
