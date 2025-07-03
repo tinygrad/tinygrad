@@ -235,7 +235,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs):
     if 'dtype' not in kwargs: kwargs['dtype'] = self.dtype.base
     return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
-  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
+  def store(self, *src:UOp, dtype=dtypes.void, **kwargs): return UOp(Ops.STORE, dtype, (self,)+src, **kwargs)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
@@ -647,7 +647,7 @@ class UPat(MathTrait):
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
   def gep(self, i:int|None=None, **kwargs): return UPat(Ops.GEP, None, (self,), (i,) if i is not None else None, **kwargs)
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
-  def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
+  def store(self, *src:UPat, dtype=dtypes.void, **kwargs): return UPat(Ops.STORE, dtype, (self,)+src, **kwargs)
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)

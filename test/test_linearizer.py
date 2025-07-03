@@ -289,7 +289,7 @@ class TestLinearizer(unittest.TestCase):
     realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
 
-    stores = [u for u in program.uops if u.op is Ops.STORE]
+    stores = [u for u in program.uops if u.op is Ops.STORE and u.dtype == dtypes.void]
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
@@ -646,7 +646,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(out)[-1]
     uops = get_program(k.get_optimized_ast(), k.opts).uops
     # check that the float4 cast collapses
-    store_vals = [u.src[-1] for u in uops if u.op is Ops.STORE]
+    store_vals = [u.src[-1] for u in uops if u.op is Ops.STORE and u.dtype == dtypes.void]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
 
@@ -702,7 +702,7 @@ class TestLinearizer(unittest.TestCase):
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
     uops = get_program(k.get_optimized_ast(), k.opts).uops
-    stores = [u for u in uops if u.op is Ops.STORE]
+    stores = [u for u in uops if u.op is Ops.STORE and u.dtype == dtypes.void]
 
     # the float4 value stores directly in lds and we skip upcast
     self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
