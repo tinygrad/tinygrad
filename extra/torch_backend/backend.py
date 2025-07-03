@@ -4,7 +4,7 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, apply_mop
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
