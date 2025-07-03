@@ -42,21 +42,13 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
   ops: list[tuple[Ops, Any]] = []
 
   for i, view in enumerate(views):
-    # resolve the eff shape for this view
     shape = tuple(b - a for a, b in view.mask) if view.mask else view.shape
-
-    # compute the starting position within the underlying buffer
     offset = view.offset + sum(strd * (dim - 1) for dim, strd in zip(shape, view.strides) if strd < 0)
     pos = offset + (sum(beg * strd for (beg, _), strd in zip(view.mask, view.strides)) if view.mask else 0)
-
-    # collect (dim, stride) pairs for non-zero strides
     strides = [(dim, abs(strd) if isinstance(strd, int) else strd) for dim, strd in zip(shape, view.strides) if strd]
     buffer = sum((d - 1) * s for d, s in strides) + 1 if strides else (1 if prod(shape) > 0 else 0)
     if i: buffer = (prod(views[i - 1].shape) - pos) if strides else (1 if prod(shape) > 0 else 0)
-
-    # initial reshape + shrink to isolate the relevant window
-    ops.extend([(Ops.RESHAPE, (-1,)),
-                (Ops.SHRINK, ((pos, pos + buffer),))])
+    ops.extend([(Ops.RESHAPE, (-1,)), (Ops.SHRINK, ((pos, pos + buffer),))])
 
     if strides:
       order, pairs = zip(*sorted(enumerate(strides), key=lambda p: (p[1][1], -p[1][0]), reverse=True))
@@ -76,18 +68,13 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
         else: ops.extend([(Ops.SHRINK, (*((0, p[0]) for p in pairs[:j]), (0, dim * stride))),
                           (Ops.RESHAPE, (*[p[0] for p in pairs[:j + 1]], stride)),])
 
-      ops.extend([(Ops.SHRINK, (*[(0, p[0]) for p in pairs], (0, 1))),
-                  (Ops.RESHAPE, tuple(p[0] for p in pairs)),])
+      ops.extend([(Ops.SHRINK, (*[(0, p[0]) for p in pairs], (0, 1))), (Ops.RESHAPE, tuple(p[0] for p in pairs))])
 
-      # restore original axis order if needed
       if order != list(range(len(order))): ops.append((Ops.PERMUTE, tuple(order.index(k) for k in range(len(order)))))
 
-    # final reshape to the intended shape
     ops.append((Ops.RESHAPE, tuple((0 if prod(shape)==0 and strd==0 and dim==0 else (dim if strd else 1)) for dim,strd in zip(shape, view.strides))))
-    # handle negative strides via flip
     if any(strd < 0 for strd in view.strides): ops.append((Ops.FLIP, tuple(-1 if strd < 0 else 1 for strd in view.strides)))
 
-    # mask-related padding
     if view.mask is not None:
       pre_pad = tuple((beg, dim - end) if strd != 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
       post_pad = tuple((beg, dim - end) if strd == 0 else (0, 0) for (beg, end), dim, strd in zip(view.mask, view.shape, view.strides))
@@ -96,7 +83,6 @@ def views_to_movement_ops(views: tuple["View", ...]) -> list[tuple[Ops, Any]]:
         shape = tuple(dim + l + r for dim, (l, r) in zip(shape, pre_pad))
     else: post_pad = ()
 
-    # expand axes and pad
     if any(dim != 1 and strd == 0 for dim, strd in zip(shape, view.strides)): ops.append((Ops.EXPAND, shape))
     if view.mask is not None and any(p != (0, 0) for p in post_pad): ops.append((Ops.PAD, post_pad))
   return ops
