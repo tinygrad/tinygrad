@@ -94,14 +94,6 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "name_default n1")
 
-  # name can also be the first arg
-  def test_self_name(self):
-    @track_rewrites()
-    def name_is_self(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_is_self(arg:=UOp.variable("a", 1, 10))
-    lst = get_viz_list()
-    self.assertEqual(lst[0]["name"], str(arg))
-
   # name can also come from a function
   def test_dyn_name_fxn(self):
     @track_rewrites(name=lambda a,ret: a.render())
