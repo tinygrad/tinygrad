@@ -778,11 +778,11 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable|bool|None=None):
+def track_rewrites(name:Callable|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
+        tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
