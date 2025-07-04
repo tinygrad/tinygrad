@@ -27,9 +27,10 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
     if isinstance(k, ProgramSpec):
-      ret.append({"name":k.name, "kernel_code":k.src, "steps":steps})
+      ret.append(r:={"name":k.name, "kernel_code":k.src, "steps":steps})
       ref_map.update(((k.function_name, i), (id(k.ast), i)))
-    else: ret.append({"name":str(k), "steps":steps})
+    else: ret.append(r:={"name":str(k), "steps":steps})
+    ref_map[r["name"]] = i
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call
