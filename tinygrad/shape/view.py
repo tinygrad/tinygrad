@@ -192,7 +192,7 @@ class View:
       return None
 
     # Project vm1's offset and strides on to vm2.
-    origin = unravel(vm2.shape, vm1.offset)
+    origin = [ssimplify(o) for o in unravel(vm2.shape, vm1.offset)]
     terms: list[list[tuple[int, sint]]] = [[] for _ in vm2.shape]
     strides: list[sint] = [0] * len(vm1.shape)
     for d1, st in enumerate(vm1.strides):
@@ -200,7 +200,7 @@ class View:
       for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
         if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possibly be 0
         terms[d2].append((d1, s1))
-        strides[d1] += s1 * vm2.strides[d2]
+        strides[d1] += ssimplify(s1 * vm2.strides[d2])
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
@@ -241,7 +241,7 @@ class View:
       # Otherwise if vm2's mask was violated, then cannot merge.
       if bad: return None
 
-    return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
+    return View.create(vm1.shape, tuple(strides), ssimplify(sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset))
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
