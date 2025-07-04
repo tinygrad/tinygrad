@@ -7,7 +7,6 @@ import numpy as np
 from tinygrad import Tensor, Device, Context, dtypes, Variable, TinyJit
 import json
 
-Device.DEFAULT = "WEBGPU"
 
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import safe_save, safe_load, load_state_dict, get_state_dict
@@ -18,8 +17,12 @@ import math
 
 
 if __name__ == '__main__':
+    previous_default = Device.DEFAULT
     def tofull(sd):
         return {k: v.float() for k,v in sd.items()}
+
+    def todevice(sd, device):
+        return {k: v.replace(v.to(device=device).realize()) for k,v in sd.items()}
 
     model, enc = init_whisper()
 
@@ -28,6 +31,8 @@ if __name__ == '__main__':
     # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
     # loading the state dict from a safetensor file changes the generated kernels
     safe_save(tofull(get_state_dict(model)), (dirname / "net.safetensors").as_posix())
+    Device.DEFAULT = "WEBGPU"
+    todevice(get_state_dict(model), "WEBGPU")
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
 
     def export_audio_prep():
