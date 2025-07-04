@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, lines, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
@@ -24,7 +24,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for k,v in zip(keys, contexts):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":lines(s.loc[0])[s.loc[1]-1].strip()} for s in v]
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
     if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":k.function_name, "steps":steps})
     else: ret.append({"name":str(k), "steps":steps})
   return ret
@@ -83,21 +83,21 @@ def _reconstruct(a:int):
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0_num,u1_num,upat in tqdm(ctx.matches):
+  for u0_num,u1_num,upat_loc in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat.location, upat.printable())}
+           "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
     if not ctx.bottom_up: next_sink = new_sink
 
 # Profiler API
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
-    if isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
+    if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
@@ -154,7 +154,7 @@ def get_profile(profile:list[ProfileEvent]):
     # ProfilePointEvent records perf_counter, offset other events by GPU time diff
     st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
-    dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
+    dev_events.setdefault(e.device,[]).append((st, et, 0. if en is None else float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
