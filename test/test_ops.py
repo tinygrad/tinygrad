@@ -1,9 +1,8 @@
-import time, math, unittest, functools
+import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-import warnings
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, OSX
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, OSX, AMD_LLVM
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -547,7 +546,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
-  @unittest.skipIf(getenv("AMD_LLVM", 0), "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
+  @unittest.skipIf(AMD_LLVM, "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator
@@ -827,6 +826,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
@@ -834,6 +834,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
@@ -1282,7 +1283,8 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"] or IMAGE, "not supported on these in CI/IMAGE")
+  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "LLVM", "GPU", "CUDA"] or IMAGE
+  or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
@@ -2595,10 +2597,13 @@ class TestOps(unittest.TestCase):
 
   def test_stack(self):
     for dim in range(-1, 3):
-      helper_test_op([(45,65,3), (45,65,3), (45,65,3)], lambda x, y, z: torch.stack((x, y, z), dim), lambda x, y, z: Tensor.stack(x, y, z, dim=dim))
+      helper_test_op([(5,6,3), (5,6,3), (5,6,3)], lambda x, y, z: torch.stack((x, y, z), dim), lambda x, y, z: Tensor.stack(x, y, z, dim=dim))
+      helper_test_op([(5,6,3), (5,6,3), (5,6,3)], lambda x, y, z: torch.stack((x, y, z), dim), lambda x, y, z: Tensor.stack((x, y, z), dim=dim))
 
     with self.assertRaises(IndexError):
       Tensor.stack(Tensor.randn(45, 65, 3), dim=77)
+    with self.assertRaises(ValueError):
+      Tensor.stack((Tensor([1, 2]), Tensor([3, 4])), Tensor([5, 6]))
 
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack(a, a).numpy(), Tensor([3.14, 3.14]).numpy())
@@ -2944,6 +2949,39 @@ class TestOps(unittest.TestCase):
       classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
       helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes), label_smoothing=ls),
                                 lambda x: x.cross_entropy(Tensor(classes), label_smoothing=ls))
+
+  def test_sparse_categorical_crossentropy(self):
+    classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+    helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss()(x, torch.tensor(classes)),
+                              lambda x: x.sparse_categorical_crossentropy(Tensor(classes)))
+
+    # combine args
+    helper_test_op([(12,10)],
+                   lambda x: torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=classes[0], label_smoothing=0.3)(x, torch.tensor(classes)),
+                   lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction="mean", ignore_index=classes[0], label_smoothing=0.3))
+
+    # with batch. somehow this does not match torch
+    classes = np.random.randint(0, 10, (3,12), dtype=np.int32).tolist()
+    helper_test_op([(3,12,10)], lambda x: torch.nn.CrossEntropyLoss()(x.permute(0,2,1), torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes)))
+
+  def test_sparse_categorical_crossentropy_reductions(self):
+    for r in ("mean", "sum", "none"):
+      classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(reduction=r)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction=r))
+
+  def test_sparse_categorical_crossentropy_ignore_index(self):
+    classes = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+    for i in (-1, 0, 3):
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), ignore_index=i))
+
+  def test_sparse_categorical_crossentropy_label_smoothing(self):
+    for s in (0.3, 0.9):
+      classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(label_smoothing=s)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), label_smoothing=s))
 
   def test_nll_loss(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()

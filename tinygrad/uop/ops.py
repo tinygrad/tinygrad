@@ -412,17 +412,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
     return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
-  def bind(self, val:int):
+  def bind(self, val:int|UOp):
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
-    assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
-    return UOp(Ops.BIND, self.dtype, (self, self.const_like(val)))
+    uval = self.const_like(val) if isinstance(val, int) else val
+    assert self.arg[1] <= uval.vmin and uval.vmax <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
+    return UOp(Ops.BIND, self.dtype, (self, uval))
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
@@ -583,6 +584,10 @@ def get_location() -> tuple[str, int]:
 def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except FileNotFoundError: return "<missing>"
+
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
@@ -647,10 +652,6 @@ class UPat(MathTrait):
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
-
-  def printable(self:UPat) -> str:
-    try: return lines(self.location[0])[self.location[1]-1].strip()
-    except FileNotFoundError: return "<missing>"
 
   def __repr__(self):
     def rep(x):
@@ -734,7 +735,11 @@ class PatternMatcher:
   def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
     # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
     new_n: UOp|None = uop
-    while new_n is not None: last_n, new_n = new_n, self.rewrite(new_n, ctx)
+    seen = set()
+    while new_n is not None:
+      if new_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+      seen.add(new_n)
+      last_n, new_n = new_n, self.rewrite(new_n, ctx)
     return last_n
 
 # *** non-blocking UOp tracker ***
@@ -759,7 +764,7 @@ match_stats:dict[UPat, list[Union[int, float]]] = dict()
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: int                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[int, int, UPat]]                                                       # before+after of all the matches
+  matches: list[tuple[int, int, tuple]]                                                      # before/after UOp, UPat location
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
@@ -774,11 +779,11 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable|bool|None=None):
+def track_rewrites(name:Callable|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(args[0] if args and name is None else (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
+        tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
@@ -821,11 +826,12 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None:
+      if (ret:=match(uop, ctx)) is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((track_uop(uop),track_uop(ret), p))
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -838,13 +844,13 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        with Context(PICKLE_BUFFERS=0): pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
+        pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", printable(k.location))
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
@@ -860,25 +866,27 @@ if TRACK_MATCH_STATS or PROFILE:
 # *** simple graph rewrite engine ***
 
 class RewriteContext:
-  def __init__(self, pm, ctx=None):
-    self.pm: PatternMatcher = pm
+  def __init__(self, pm, bpm, ctx=None):
+    self.pm: PatternMatcher|None = pm
+    self.bpm: PatternMatcher|None = bpm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def unified_rewrite(self, root:UOp, bottom_up=False) -> UOp:
+  def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-        if bottom_up: new_n = self.pm.fixed_point_rewrite(new_n, self.ctx)
+        if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src): stack.append((x, 0, x))
       elif stage == 1:
         if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
           # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if bottom_up or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+          if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
             self.replace[n] = new_n
             continue
         else:
@@ -893,16 +901,17 @@ class RewriteContext:
     return self.replace[root]
 
 @track_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None) -> UOp:
-  rewrite_ctx = RewriteContext(pm, ctx)
-  return rewrite_ctx.unified_rewrite(sink, bottom_up)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
+  return rewrite_ctx.unified_rewrite(sink)
 
 @track_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, input_map:dict[UOp, UOp]|None=None) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm, ctx)
+def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
+                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   new_map: dict[UOp, UOp] = {}
   for k in sink.toposort():
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k, bottom_up)
+    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
     if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable
 import dataclasses, functools, io, math, types, warnings, sys
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 
@@ -155,7 +155,7 @@ class OnnxRunner:
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input {name} sequence must be homogeneous")
       if not all(t.dtype is spec.dtype for t in sequence): warnings.warn(f"Dtypes for input {name} sequence aren't all {spec.dtype}")
       return sequence
-    dtype = _from_np_dtype(value.dtype) if str(type(value)) == "<class 'numpy.ndarray'>" else spec.dtype
+    dtype = _from_np_dtype(value.dtype) if is_numpy_ndarray(value) else spec.dtype
     tensor = Tensor(value, dtype=dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
     if tensor.dtype is not spec.dtype: warnings.warn(f"input {name} has mismatch on dtype. Expected {spec.dtype}, received {tensor.dtype}.")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):

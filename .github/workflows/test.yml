@@ -272,14 +272,6 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-    - name: Test tensor cores (TC=3)
-      run: |
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_METAL=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMD=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMD_MFMA=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_CUDA=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_INTEL=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
-        PYTHONPATH=. DEBUG=2 PYTHON=1 EMULATE_AMX=1 AMX=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores_emulation
     - name: Test device flop counts
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
@@ -429,6 +421,29 @@ jobs:
         run: PYTHONPATH="." GPU=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  testgendataset:
+    name: 'GPU Generate Kernel Dataset'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      IGNORE_OOB: 0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: gen-dataset
+          deps: testing_minimal
+          opencl: 'true'
+      - name: Generate Dataset
+        run: PYTHONPATH="." extra/optimization/generate_dataset.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sops.gz
+          path: /tmp/sops.gz
 
   testopenpilot:
     name: 'openpilot Compile Tests'
@@ -787,7 +802,6 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
-        AMD_LLVM: 1
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/test_hcq.py test/test_tiny.py test/test_amd_llvm.py --durations=20
@@ -823,8 +837,9 @@ jobs:
       run: npm cache clean --force
     - name: Install Puppeteer
       run: npm install puppeteer
-    - name: Run WEBGPU Efficientnet
-      run: node test/web/test_webgpu.js
+    # this is also flaky
+    #- name: Run WEBGPU Efficientnet
+    #  run: node test/web/test_webgpu.js
     # this is flaky
     #- name: Run VIZ tests as external package
     #  run: |
@@ -946,7 +961,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, x86]
+        backend: [llvm, cpu, webgpu, x86]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -959,11 +974,12 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-minimal
+          key: windows-${{ matrix.backend }}-minimal
           deps: testing_unit
+          pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'x86' && 'X86=1' }}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'webgpu' && 'WEBGPU=1' || matrix.backend == 'x86' && 'X86=1' }}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py

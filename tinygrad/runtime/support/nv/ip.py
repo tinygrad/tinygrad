@@ -28,7 +28,7 @@ class NVRpcQueue:
     if (pad_len:=(-len(data)) % 8): data += b'\x00' * pad_len
     checksum = 0
     for offset in range(0, len(data), 8): checksum ^= struct.unpack_from('Q', data, offset)[0]
-    return ((checksum >> 32) & 0xFFFFFFFF) ^ (checksum & 0xFFFFFFFF)
+    return hi32(checksum) ^ lo32(checksum)
 
   def send_rpc(self, func, msg, wait=False):
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
@@ -354,19 +354,19 @@ class NV_GSP(NV_IP):
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
     # reserve 512MB for the reserved PDES
-    res_va = self.nvdev.mm.alloc_vaddr(512 << 20)
+    res_va = self.nvdev.mm.alloc_vaddr(res_sz:=(512 << 20))
 
-    bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=(512<<20), numLevelsToCopy=3,
-      virtAddrLo=res_va, virtAddrHi=res_va+(512<<20)-1)
-    for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=512<<20)[:3]):
+    bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=res_sz, numLevelsToCopy=3,
+      virtAddrLo=res_va, virtAddrHi=res_va + res_sz - 1)
+    for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=res_sz)[:3]):
       bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
-        pageShift=47 - (9 * i), aperture=1)
-    self.rpc_rm_control(hObject=vaspace, cmd=0x90f10106, params=bufs_p)
+        pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
+    self.rpc_rm_control(hObject=vaspace, cmd=nv_gpu.NV90F1_CTRL_CMD_VASPACE_COPY_SERVER_RESERVED_PDES, params=bufs_p)
 
-    gpfifo_area = self.nvdev.mm.valloc(2<<20, contiguous=True)
-    userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x400 * 8, size=0x400, addressSpace=2, cacheAttrib=0)
+    gpfifo_area = self.nvdev.mm.valloc(4 << 10, contiguous=True)
+    userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x20 * 8, size=0x20, addressSpace=2, cacheAttrib=0)
     gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=32, engineType=0x1, cid=3,
-      hVASpace=vaspace, userdOffset=(ctypes.c_uint64*8)(0x400 * 8), userdMem=userd, internalFlags=0x1a, flags=0x200320)
+      hVASpace=vaspace, userdOffset=(ctypes.c_uint64*8)(0x20 * 8), userdMem=userd, internalFlags=0x1a, flags=0x200320)
     ch_gpfifo = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
 
     self.grctx_bufs = {0: GRBufDesc(0x237000, p=1, v=1), 1: GRBufDesc(0x6000, p=1, v=1, lc=1), 2: GRBufDesc(0x6000, p=1, v=1),
@@ -422,10 +422,10 @@ class NV_GSP(NV_IP):
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     return self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)[len(bytes(control_args)):]
 
-  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None):
+  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
-      numEntries=self.nvdev.mm.pte_cnt[0], flags=0x8, hVASpace=hVASpace, pasid=0xffffffff, subDeviceId=1, chId=0) # flags field is all channels.
-    alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_root, hDevice=device, pasid=0xffffffff, params=params)
+      numEntries=self.nvdev.mm.pte_cnt[0], flags=0x8, hVASpace=hVASpace, pasid=pasid, subDeviceId=1, chId=0) # flags field is all channels.
+    alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_root, hDevice=device, pasid=pasid, params=params)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY, bytes(alloc_args))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
 

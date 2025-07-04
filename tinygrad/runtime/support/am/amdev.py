@@ -101,7 +101,8 @@ class AMPageTableEntry:
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
   def address(self, entry_id:int) -> int: return self.entries[entry_id] & 0x0000FFFFFFFFF000
-  def is_pte(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
+  def is_huge_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
+  def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator(512 * (1 << 30), base=0x200000000000) # global for all devices.
@@ -112,6 +113,8 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev(PCIDevImplBase):
+  Version = 0xA0000005
+
   def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
     self.lock_fd = System.flock_acquire(f"am_{self.devfmt}.lock")
@@ -128,27 +131,10 @@ class AMDev(PCIDevImplBase):
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
-    self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000005)) and (getenv("AM_RESET", 0) != 1)
+    self.is_booting = True
+    self.init_sw(smi_dev=False)
 
-    # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
-      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
-      va_base=AMMemoryManager.va_allocator.base)
-    self.fw = AMFirmware(self)
-
-    # Initialize IP blocks
-    self.soc:AM_SOC = AM_SOC(self)
-    self.gmc:AM_GMC = AM_GMC(self)
-    self.ih:AM_IH = AM_IH(self)
-    self.psp:AM_PSP = AM_PSP(self)
-    self.smu:AM_SMU = AM_SMU(self)
-    self.gfx:AM_GFX = AM_GFX(self)
-    self.sdma:AM_SDMA = AM_SDMA(self)
-
-    # Init sw for all IP blocks
-    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
-
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
@@ -170,8 +156,29 @@ class AMDev(PCIDevImplBase):
 
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-    self.reg("regSCRATCH_REG7").write(am_version)
+    self.reg("regSCRATCH_REG7").write(AMDev.Version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
+
+  def init_sw(self, smi_dev=False):
+    self.smi_dev = smi_dev # During boot only boot memory can be allocated. This flag is to validate this.
+
+    # Memory manager & firmware
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
+      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, va_base=AMMemoryManager.va_allocator.base,
+      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
+    self.fw = AMFirmware(self)
+
+    # Initialize IP blocks
+    self.soc:AM_SOC = AM_SOC(self)
+    self.gmc:AM_GMC = AM_GMC(self)
+    self.ih:AM_IH = AM_IH(self)
+    self.psp:AM_PSP = AM_PSP(self)
+    self.smu:AM_SMU = AM_SMU(self)
+    self.gfx:AM_GFX = AM_GFX(self)
+    self.sdma:AM_SDMA = AM_SDMA(self)
+
+    # Init sw for all IP blocks
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")

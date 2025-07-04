@@ -6,7 +6,7 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, Variable, MathTrait, identity_element, all_metadata
 from tinygrad.uop.spec import tensor_uop_spec, type_verify
@@ -152,7 +152,7 @@ class Tensor(MathTrait):
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
       if dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).uop
       else: data = _frompy(data, dtype)
-    elif str(type(data)) == "<class 'numpy.ndarray'>":
+    elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == (): data = UOp.const(dtype or _from_np_dtype(data.dtype), data.item(), device, ())
@@ -1328,7 +1328,7 @@ class Tensor(MathTrait):
     ```
     """
     # checks for shapes and number of dimensions delegated to cat
-    return Tensor.cat(*[t.unsqueeze(dim) for t in [self, *args]], dim=dim)
+    return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
 
   def repeat_interleave(self, repeats:int, dim:int|None=None) -> Tensor:
     """
@@ -3919,7 +3919,7 @@ class Tensor(MathTrait):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
+    assert reduction in get_args(ReductionStr), f"reduction must be one of {get_args(ReductionStr)}"
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
     y_counted = Y.to(self.device).flatten().reshape(-1, 1)._one_hot_along_dim(self.shape[-1])
     y = (y_counted * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
@@ -3978,6 +3978,72 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+
+  def qr(self) -> tuple[Tensor, Tensor]:
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    R = self.clone()
+    b_shape, m, n = self.shape[0:self.ndim - 2], int(R.shape[-2]), int(R.shape[-1])
+    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + 2 * (m,)).expand(b_shape + 2 * (m,)).contiguous()
+    for i in range(int(min(m, n))):
+      x = R[..., i:m, i]
+      s = -x[..., 0].sign()
+      u1 = x[..., 0] - s * x.square().sum(-1).sqrt()
+      w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
+      w[..., 0, 0] = 1
+      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
+      R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
+      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
+    return Q,R
+
+  def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
+    #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
+    #preprocess the matrix
+    Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
+    num, q_num = int(min(m, n)), int(max(m, n))
+    U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
+    V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + 2 * (num,)).contiguous()
+    #prepare round robin pairing
+    permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
+    permute[num//2:num] = permute[num//2:num].flip(0)
+    inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
+    def one_round_jacobi(U, V,permute,inverse_permute):
+      #pair all the columns
+      V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
+      V_left, V_right = V_permuted.split(num//2, -1)
+      U_permuted, runoff_U = (U[..., permute].split(num - 1, -1)) if num % 2 == 1 else (U[..., permute], None)
+      U_left, U_right = U_permuted.split(num//2, -1)
+      #compute the jacobi rotations for each pairing
+      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
+      alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
+      tau = (beta - alpha) / (2 * gamma)
+      t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
+      c = 1 / (1 + t.square()).sqrt()
+      s = c * t
+      #apply the rotations
+      U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
+      U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute]
+      V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
+      V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute]
+      #prepare the next round robin pairings
+      if num % 2 == 1: permute = ((permute - 1) % num)
+      else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
+      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
+      return U, V, permute, inverse_permute
+    max_iterations, iterations_per_round = 1, int((num) * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
+    for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
+    #extract singular values and sort. construct U from Q
+    S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
+    new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
+    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + 2 * (num,))
+    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num])
+
+    padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
+    padded_u[..., 0:num, 0:num] = U
+    U = Q @ padded_u
+    if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
+    return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** Tensor Properties *****
 
