@@ -1296,57 +1296,47 @@ class Tensor(MathTrait):
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, dtype=self.dtype)
 
   def cat(self: Tensor, *args: Tensor, dim: int = 0) -> Tensor:
-      """
-      Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-      All tensors must have the same shape except in the concatenating dimension.
+    """
+    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
+    All tensors must have the same shape except in the concatenating dimension.
 
-      ```python exec="true" source="above" session="tensor" result="python"
-      t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-      print(t0.cat(t1, t2, dim=0).numpy())
-      ```
-      ```python exec="true" source="above" session="tensor" result="python"
-      print(t0.cat(t1, t2, dim=1).numpy())
-      ```
-      """
-      dim = self._resolve_dim(dim)
-      for arg in args:
-          assert arg.ndim == self.ndim and all(
-              ti == ai
-              for i, (ti, ai) in enumerate(zip(self.shape, arg.shape))
-              if i != dim
-          )
-      tensors = [self, *args]
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
+    print(t0.cat(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.cat(t1, t2, dim=1).numpy())
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    for arg in args:
+      assert arg.ndim == self.ndim and all(ti == ai for i, (ti, ai) in enumerate(zip(self.shape, arg.shape)) if i != dim)
+    tensors = [self, *args]
 
-      def _cat_impl(ts: list[Tensor]) -> Tensor:
-          cs = [0, *itertools.accumulate(t.shape[dim] for t in ts)]
-          padded = [
-              t.pad([
-                  (cs[i], cs[-1] - cs[i + 1]) if j == dim else None
-                  for j in range(t.ndim)
-              ])
-              for i, t in enumerate(ts)
-          ]
-          return functools.reduce(Tensor.add, padded)
+    def _cat_impl(ts: list[Tensor]) -> Tensor:
+      cs = [0, *itertools.accumulate(t.shape[dim] for t in ts)]
+      padded = [t.pad([(cs[i], cs[-1] - cs[i + 1]) if j == dim else None for j in range(t.ndim)]) for i, t in enumerate(ts)]
+      return functools.reduce(Tensor.add, padded)
 
-      if all(isinstance(t.shape[dim], int) for t in tensors):
-          total = sum(t.shape[dim] for t in tensors)
-          CHUNK = max(int(math.sqrt(total)), 256)
-          if total > CHUNK:
-              out_parts: list[Tensor] = []
-              cur_part: list[Tensor] = []
-              cur_size = 0
-              for t in tensors:
-                  if cur_size and cur_size + t.shape[dim] > CHUNK:
-                      out_parts.append(_cat_impl(cur_part))
-                      cur_part = []
-                      cur_size = 0
-                  cur_part.append(t)
-                  cur_size += t.shape[dim]
-              if cur_part:
-                  out_parts.append(_cat_impl(cur_part))
-              return _cat_impl(out_parts) if len(out_parts) > 1 else out_parts[0]
+    if all(isinstance(t.shape[dim], int) for t in tensors):
+      total = sum(t.shape[dim] for t in tensors)
+      CHUNK = max(int(math.sqrt(total)), 256)
+      if total > CHUNK:
+        out_parts: list[Tensor] = []
+        cur_part: list[Tensor] = []
+        cur_size = 0
+        for t in tensors:
+          if cur_size and cur_size + t.shape[dim] > CHUNK:
+            out_parts.append(_cat_impl(cur_part))
+            cur_part = []
+            cur_size = 0
+          cur_part.append(t)
+          cur_size += t.shape[dim]
+        if cur_part:
+          out_parts.append(_cat_impl(cur_part))
+        return _cat_impl(out_parts) if len(out_parts) > 1 else out_parts[0]
 
-      return _cat_impl(tensors)
+    return _cat_impl(tensors)
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
