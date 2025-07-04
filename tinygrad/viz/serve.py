@@ -94,10 +94,10 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 # Profiler API
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
-    if isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
+    if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
@@ -154,7 +154,7 @@ def get_profile(profile:list[ProfileEvent]):
     # ProfilePointEvent records perf_counter, offset other events by GPU time diff
     st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
     et = st if en is None else int(en+time_diff)
-    dev_events.setdefault(e.device,[]).append((st, et, float(en-ts), e))
+    dev_events.setdefault(e.device,[]).append((st, et, 0. if en is None else float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
