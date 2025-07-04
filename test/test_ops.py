@@ -2903,6 +2903,22 @@ class TestOps(unittest.TestCase):
       lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True,attn_mask=m),
       expected=RuntimeError)
 
+  def test_scaled_dot_product_attention_gqa(self):
+    def torch_gqa(x, y, z):
+      repeat_factor = x.shape[1] // y.shape[1]
+      y_repeated = y.repeat_interleave(repeat_factor, dim=1)
+      z_repeated = z.repeat_interleave(repeat_factor, dim=1)
+      return torch.nn.functional.scaled_dot_product_attention(x, y_repeated, z_repeated)
+    
+    helper_test_op([(32,32,16,64), (32,8,16,64), (32,8,16,64)],
+                   torch_gqa, lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True))
+
+  def test_scaled_dot_product_attention_gqa_errors(self):
+    self.helper_test_exception([(32,31,16,64), (32,8,16,64), (32,8,16,64)],
+      lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z),
+      lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True),
+      expected=(AssertionError, RuntimeError, ValueError))
+
   def test_binary_crossentropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),y.clip(0,1)),
                                        lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
