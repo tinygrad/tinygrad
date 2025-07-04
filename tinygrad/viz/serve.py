@@ -28,7 +28,7 @@ def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> li
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
     if isinstance(k, ProgramSpec):
       ret.append(r:={"name":k.name, "kernel_code":k.src, "steps":steps})
-      ref_map.update(((k.function_name, i), (id(k.ast), i)))
+      ref_map.update(((k.function_name, i), (k.ast, i)))
     else: ret.append(r:={"name":str(k), "steps":steps})
     ref_map[r["name"]] = i
   return ret
@@ -72,7 +72,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
     except Exception:
       label += "\n<ISSUE GETTING SHAPE>"
-    if (ref:=ref_map.get(id(u.arg.ast)) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
+    if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
