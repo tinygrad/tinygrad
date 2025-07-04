@@ -11,7 +11,6 @@ from examples.whisper import RATE, SAMPLES_PER_SEGMENT, mel, N_FFT, HOP_LENGTH, 
 import math
 
 if __name__ == '__main__':
-	previous_default = Device.DEFAULT
 	def tofull(sd):
 		return {k: v.float() for k,v in sd.items()}
 
@@ -39,7 +38,6 @@ if __name__ == '__main__':
 				self.pad_mode = pad_mode
 				self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
 				self.mel = mel(sr=RATE, n_fft=self.n_fft, n_mels=N_MELS).realize()
-
 
 			def stft_full(self, x:Tensor) -> Tensor:
 				res = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
@@ -77,7 +75,6 @@ if __name__ == '__main__':
 		safe_save(state, (dirname / 'encoder.safetensors'))
 		return prg, inp_sizes, out_sizes, state
 
-
 	def export_decoder_2():
 		def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
 			seqlen = x.shape[-1]
@@ -85,13 +82,8 @@ if __name__ == '__main__':
 			x += self.positional_embedding.shrink(((0, seqlen), None, None))
 			for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
 			return self.output_tok(x)[:, ctx-1].argmax(axis=-1).reshape(-1, 1)
-
 		model.decoder.forward = forward.__get__(model.decoder, TextDecoder)
 
-		# forward_jitted = TinyJit(forward)
-
-		# var = Variable("x", 1, model.decoder.max_tokens_to_sample-1)
-		# x = Tensor([[50257, 50362]]).pad((None, (0, model.decoder.max_tokens_to_sample-2))).realize()
 		x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
 		prg, inp_sizes, out_sizes, state = export_model(model.decoder, Device.DEFAULT.lower(),
 			x, Tensor.rand(1, 1500, 384), Variable("ctx", 1, model.decoder.max_tokens_to_sample*2-1).bind(2), model_name="decoder")
