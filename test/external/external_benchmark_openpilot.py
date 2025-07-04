@@ -14,8 +14,8 @@ if __name__ == "__main__":
   Tensor.manual_seed(100)
   input_shapes = {name: spec.shape for name, spec in run_onnx.graph_inputs.items()}
   input_types = {name: spec.dtype for name, spec in run_onnx.graph_inputs.items()}
-  new_inputs = {k:Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize() for k,shp in sorted(input_shapes.items())}
-  new_inputs_junk = {k:Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize() for k,shp in sorted(input_shapes.items())}
+  new_inputs = {k:Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize() for k,shp in input_shapes.items()}
+  new_inputs_junk = {k:Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize() for k,shp in input_shapes.items()}
   new_inputs_junk_numpy = {k:v.numpy() for k,v in new_inputs_junk.items()}
 
   # benchmark
