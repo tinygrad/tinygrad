@@ -230,7 +230,7 @@ class MemoryManager:
           nxt_range += 1
           if nxt_range == len(self.palloc_ranges):
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[next_size_idx-1]})")
+            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[nxt_range-1]})")
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
