@@ -16,11 +16,19 @@ if __name__ == "__main__":
   dev = Device["CPU"]
   asm = X86Renderer() if platform.machine() in ("x86_64", "amd64") else Arm64Renderer()
 
+  # kernel 209, 997, 1693, 2263 are invalid, all dividing by 0
+  ast_strs = ast_strs[:209] + ast_strs[210:997] + ast_strs[998:1693] + ast_strs[1694:2263] + ast_strs[2264:]
+
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
 
   average_tm_clang, average_tm_asm = 0, 0
   for num,ast in enumerate(ast_strs):
+    # asm compile
+    dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
+    lin = ast_str_to_lin(ast, opts=asm)
+    lin.apply_opts(hand_coded_optimizations(lin))
+    asm_prg = CompiledRunner(lin.to_program())
     # clang compile
     dev.compiler = ClangJITCompiler(opt_args=['-O1', '-march=native'])
     lin = ast_str_to_lin(ast, opts=dev.renderer)
@@ -35,18 +43,10 @@ if __name__ == "__main__":
     lin.apply_opts(hand_coded_optimizations(lin))
     asm_prg = CompiledRunner(lin.to_program())
 
-    # warmup
-    try:
-      runtime = clang_prg(bufs, {}, wait=True)
-    except RuntimeError:
-      print("clang failed ast:", num)
-      continue
-    if runtime > 1:
-      print("kernel timeout")
-      continue
-    asm_prg(bufs, {}, wait=True)
-
     tm_clang, tm_asm = [], []
+    # warmup
+    clang_prg(bufs, {}, wait=True)
+    asm_prg(bufs, {}, wait=True)
     for i in range(5):
       tm_clang.append(clang_prg(bufs, {}, wait=True))
       tm_asm.append(asm_prg(bufs, {}, wait=True))

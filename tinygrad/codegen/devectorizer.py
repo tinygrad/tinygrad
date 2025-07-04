@@ -203,8 +203,10 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
-  elif ctx is not None and ctx.device == "X86" and buf.dtype.base == dtypes.half:
-    pass
+  elif ctx is not None and ctx.device == "X86":
+    if buf.dtype.base == dtypes.float: lengths = [4,2]
+    #lengths = [l for l in [8,4,2] if buf.dtype.base.scalar().vec(l).itemsize <= 32]
+    #must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
@@ -293,25 +295,6 @@ devectorize = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
-])
-
-def split_vectorized_alu(alu:UOp):
-  if alu.dtype.count <= 4: return None
-  l = next(x for x in [4,2] if alu.dtype.count % x == 0)
-  alus = tuple(UOp(alu.op, alu.dtype.scalar().vec(l), tuple(s.gep(tuple(range(i, i+l)) if s.dtype.count == alu.dtype.count else i//l)
-                                                             for s in alu.src), alu.arg) for i in range(0, alu.dtype.count, l))
-  return UOp(Ops.CAT, alu.dtype, alus)
-
-def split_vectorized_acc(acc:UOp):
-  if acc.dtype.count <= 4: return None
-  l = next(x for x in [4,2] if acc.dtype.count % x == 0)
-  accs = tuple(UOp(acc.op, acc.dtype.scalar().vec(l),
-    tuple(s.gep(tuple(range(i, i+l))) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(0, acc.dtype.count, l))
-  return UOp(Ops.CAT, acc.dtype, accs)
-
-split_vectorize = PatternMatcher([
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
-  (UPat(Ops.DEFINE_REG, name="acc"), split_vectorized_acc),
 ])
 
 pm_render = PatternMatcher([
