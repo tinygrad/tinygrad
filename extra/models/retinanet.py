@@ -174,8 +174,19 @@ class RetinaNet:
       img_labels = Tensor.cat(*img_labels)
 
       # nms for each class
-      detections.extend(batched_nms(img_boxes, img_scores, img_labels))
+      keep = batched_nms(img_boxes, img_scores, img_labels)
 
+      # resize bboxes back to original size
+      img_boxes = img_boxes[keep]
+      if orig_image_sizes is not None:
+        resized_x = img_boxes[:, 0::2] * orig_image_sizes[i][1] / width
+        resized_y = img_boxes[:, 1::2] * orig_image_sizes[i][0] / height
+        img_boxes = Tensor.stack(resized_x, resized_y, dim=2).reshape(-1, 4)
+
+      # xywh format
+      img_boxes = img_boxes[:, :2].cat(img_boxes[:, 2:] - img_boxes[:, :2], dim=1)
+
+      detections.append({"boxes":img_boxes, "scores":img_scores[keep], "labels":img_labels[keep]})
     return detections
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
@@ -229,18 +240,18 @@ class RetinaNet:
         keep_mask[curr_indices[curr_keep_indices]] = True
       keep = np.where(keep_mask)[0]
       keep = keep[image_scores[keep].argsort()[::-1]]
-      detections.append(keep)
 
-      # # resize bboxes back to original size
-      # image_boxes = image_boxes[keep]
-      # if orig_image_sizes is not None:
-      #   resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
-      #   resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
-      #   image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
-      # # xywh format
-      # image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+      # resize bboxes back to original size
+      image_boxes = image_boxes[keep]
+      if orig_image_sizes is not None:
+        resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
+        resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
+        image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
 
-      # detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+      # xywh format
+      image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+
+      detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
     return detections
 
 class ClassificationHead:
