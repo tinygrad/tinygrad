@@ -169,6 +169,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 1, 7) // -2, -3, 0, "((a//2)*-1)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((a//2)*-1)")
 
+  def test_div_mod_zero(self):
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) // 0).simplify()
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) % 0).simplify()
+
   def test_sum_div_remove(self):
     self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
@@ -192,6 +198,17 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_no_factor(self):
     self.helper_test_variable(usum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
+
+  def test_mod_min_max(self):
+    self.helper_test_variable(Variable("x", 0, 10)%Variable("y", 1, 10), 0, 9, "(x%y)")
+    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", 1, 10), -9, 0, "(((x*-1)%y)*-1)")
+    self.helper_test_variable(Variable("x", 0, 10)%Variable("y", -10, -1), 0, 9, "(x%y)")
+    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", -10, -1), -9, 0, "(((x*-1)%y)*-1)")
+    self.helper_test_variable(Variable("x", -10, 10)%Variable("y", -10, -1), -9, 9, "(x%y)")
+
+    # test _min_max directly without the rewrite taking out the sign
+    self.assertEqual((Variable("x", -10, 0)%Variable("y", -10, -1))._min_max, (-9, 0))
+    self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
 
   def test_mod_factor(self):
     self.helper_test_variable(usum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b%2)*50)")

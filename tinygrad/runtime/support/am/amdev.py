@@ -1,11 +1,11 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, fcntl, os, hashlib
-from tinygrad.helpers import mv_address, getenv, DEBUG, temp, fetch
+import ctypes, collections, time, dataclasses, functools, os, hashlib
+from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.system import PCIDevImplBase
+from tinygrad.runtime.support.system import System, PCIDevImplBase
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -112,17 +112,11 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev(PCIDevImplBase):
+  Version = 0xA0000005
+
   def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
-
-    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
-
-    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
-    if os.path.exists(lock_name:=temp(f"am_{self.devfmt}.lock")): self.lock_fd = os.open(lock_name, os.O_RDWR)
-    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
-
-    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: raise RuntimeError(f"Failed to open AM device {self.devfmt}. It's already in use.")
+    self.lock_fd = System.flock_acquire(f"am_{self.devfmt}.lock")
 
     self._run_discovery()
     self._build_regs()
@@ -136,27 +130,10 @@ class AMDev(PCIDevImplBase):
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
-    self.is_booting, self.smi_dev = True, False # During boot only boot memory can be allocated. This flag is to validate this.
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == (am_version:=0xA0000005)) and (getenv("AM_RESET", 0) != 1)
+    self.is_booting = True
+    self.init_sw(smi_dev=False)
 
-    # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
-      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
-      va_base=AMMemoryManager.va_allocator.base)
-    self.fw = AMFirmware(self)
-
-    # Initialize IP blocks
-    self.soc:AM_SOC = AM_SOC(self)
-    self.gmc:AM_GMC = AM_GMC(self)
-    self.ih:AM_IH = AM_IH(self)
-    self.psp:AM_PSP = AM_PSP(self)
-    self.smu:AM_SMU = AM_SMU(self)
-    self.gfx:AM_GFX = AM_GFX(self)
-    self.sdma:AM_SDMA = AM_SDMA(self)
-
-    # Init sw for all IP blocks
-    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
-
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
@@ -178,8 +155,29 @@ class AMDev(PCIDevImplBase):
 
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-    self.reg("regSCRATCH_REG7").write(am_version)
+    self.reg("regSCRATCH_REG7").write(AMDev.Version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
+
+  def init_sw(self, smi_dev=False):
+    self.smi_dev = smi_dev # During boot only boot memory can be allocated. This flag is to validate this.
+
+    # Memory manager & firmware
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
+      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
+      va_base=AMMemoryManager.va_allocator.base)
+    self.fw = AMFirmware(self)
+
+    # Initialize IP blocks
+    self.soc:AM_SOC = AM_SOC(self)
+    self.gmc:AM_GMC = AM_GMC(self)
+    self.ih:AM_IH = AM_IH(self)
+    self.psp:AM_PSP = AM_PSP(self)
+    self.smu:AM_SMU = AM_SMU(self)
+    self.gfx:AM_GFX = AM_GFX(self)
+    self.sdma:AM_SDMA = AM_SDMA(self)
+
+    # Init sw for all IP blocks
+    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
