@@ -825,7 +825,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None:
+      if (ret:=match(uop, ctx)) is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
