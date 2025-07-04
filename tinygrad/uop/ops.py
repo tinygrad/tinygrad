@@ -763,7 +763,7 @@ match_stats:dict[UPat, list[Union[int, float]]] = dict()
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: int                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[int, int, UPat]]                                                       # before+after of all the matches
+  matches: list[tuple[int, int, tuple]]                                                      # before/after UOp, UPat location
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
@@ -829,7 +829,8 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((track_uop(uop),track_uop(ret), p))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
