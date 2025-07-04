@@ -21,12 +21,14 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # ** Metadata for a track_rewrites scope
 
+ref_map:dict[Any, int] = {}
 def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
-  for k,v in zip(keys, contexts):
+  for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":k.function_name, "steps":steps})
-    else: ret.append({"name":str(k), "steps":steps})
+    for key in (refs:=[k.name, k.function_name, k.ast] if isinstance(k, ProgramSpec) else [str(k)]): ref_map[key] = i
+    ret.append({"name":refs[0], "steps":steps})
+    if isinstance(k, ProgramSpec): ret[-1]["kernel_code"] = k.src
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call
@@ -68,10 +70,11 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
     except Exception:
       label += "\n<ISSUE GETTING SHAPE>"
+    if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
+                    "ref":ref, "tag":u.tag}
   return graph
 
 @functools.cache
@@ -111,7 +114,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
+    name = e.name
+    if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
