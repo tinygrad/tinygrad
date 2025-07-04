@@ -138,13 +138,6 @@
                 loadingContainer.style.display = "none";
             }
 
-            // let log_spec = await fetch('log_spec.bin')
-            //     .then(res => res.arrayBuffer())
-            //     .then(buf => {
-            //         const arr = new Float32Array(buf);
-            //         return arr;
-            //     });
-
             let loaded = await fetchMonoFloat32Array('./test2.wav');
             let samples = loaded.samples;
             if (samples.length > SAMPLES_PER_SEGMENT) {
@@ -159,59 +152,26 @@
 
             let log_spec = await net_mel(samples);
 
-            // const input = await prepareInput(offscreenContext);
             const output = await net_encoder(log_spec[0]);
             let context = [50257, 50362];
 
-            // Load JSON mapping
             const mapping = await fetch('./vocab.json').then(res => res.json());;
-
-            // Input list of indices
-            // const indices = [2, 0, 1];
-
-            // Translate and join
-            // const result = indices.map(i => mapping[i]).join('');
-            // console.log(result); // "fox cat dog"
-
 
             async function doOneToken(context, output, i) {
                 if (i < 384*2)
                 {
                     var decoded_0 = await net_decoder(context, output[0], [i]);
                     context.push(decoded_0[0]);
-                    // document.getElementById("output").innerText = context.toString();
                     document.getElementById("output").innerText = context.map(j => mapping[j]).join('');
                     if (decoded_0[0] == 50256) {
 
                     } else {
-                        // requestAnimationFrame(lambda => doOneToken(context, output, i+1));
                         setTimeout(async function() {await doOneToken(context, output, i+1);});
                     }
                 }
             }
 
             setTimeout(async function() {await doOneToken(context, output, 2);});
-            // for (var i = 2; i < 384*2; i += 2)
-            // {
-            //     var decoded_0 = await net_decoder(context, output[0], [i]);
-            //     context.push(decoded_0[0]);
-            //     document.getElementById("output").innerText = context.toString();
-            //     if (decoded_0[0] === 50256) {
-            //         break;
-            //     }
-            // }
-            // return context;
-        }
-
-
-        function downloadArrayAsTxt(arr, filename) {
-            let text = [...arr].map(x => x.toFixed(6)).join('\n');
-            let blob = new Blob([text], { type: 'text/plain' });
-
-            let a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            a.click();
         }
 
         const getDevice = async () => {
@@ -224,8 +184,6 @@
         };
 
         const final = transcribeAudio();
-        // final.then((response) => alert(response));
-        //final.then((response) => downloadArrayAsTxt(response, "whisper_encoder_output.txt"));
     </script>
 </body>
 </html>
