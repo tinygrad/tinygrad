@@ -165,7 +165,7 @@ class AMDev(PCIDevImplBase):
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
       pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, va_base=AMMemoryManager.va_allocator.base,
-      palloc_ranges=[(1 << i, 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), 11, -1)])
+      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
