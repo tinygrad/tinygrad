@@ -26,6 +26,46 @@
             overflow: hidden;
         }
 
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid #FFF;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+        }
+
+        @keyframes rotation {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            z-index: 10;
+        }
+
+        .loading-text {
+            font-size: 24px;
+            color: white;
+            margin-bottom: 20px;
+        }
+
         h1 {
             margin-top: 20px;
         }
@@ -35,10 +75,16 @@
     <h2>whisper tinygrad WebGPU</h2>
     <h2 id="wgpu-error" style="display: none; color: red;">Error: WebGPU is not supported in this browser</h2>
     <h2 id="output"></h2>
+    <div id="div-loading" class="loading-container">
+        <p class="loading-text">Loading model</p>
+        <span class="loader"></span>
+    </div>
 
     <script>
         let net_encoder = null;
         const wgpuError = document.getElementById('wgpu-error');
+        const loadingContainer = document.getElementById('div-loading');
+
         const SAMPLES_PER_SEGMENT = 480000;
 
         async function processFrame() {
@@ -80,12 +126,16 @@
                 let device = await getDevice();
                 if (!device) {
                     wgpuError.style.display = "block";
-                    // loadingContainer.style.display = "none";
+                    loadingContainer.style.display = "none";
                 }
+                const loadingText = document.querySelector("#div-loading > p");
+                loadingText.innerHTML = 'Loading model mel';
                 net_mel = await mel.load(device, "./mel.safetensors");
+                loadingText.innerHTML = 'Loading model encoder';
                 net_encoder = await encoder.load(device, "./encoder.safetensors");
+                loadingText.innerHTML = 'Loading model decoder';
                 net_decoder = await decoder.load(device, "./decoder.safetensors");
-                // loadingContainer.style.display = "none";
+                loadingContainer.style.display = "none";
             }
 
             // let log_spec = await fetch('log_spec.bin')
