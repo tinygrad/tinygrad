@@ -193,7 +193,6 @@ class TestMergeViews(unittest.TestCase):
     v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=start_pos*64, mask=None, contiguous=False)
     target = View(shape=(1, 8, 1, 32), strides=(0,0,0,1), offset=start_pos*32, mask=None, contiguous=False)
     v = v0 + v1
-    print(v)
     self.assertIsNotNone(v)
     self.assertEqual(v, target)
 
