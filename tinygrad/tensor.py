@@ -1329,8 +1329,8 @@ class Tensor(MathTrait):
           return functools.reduce(Tensor.add, padded)
 
       if all(isinstance(t.shape[dim], int) for t in tensors):
-          CHUNK = 256
           total = sum(t.shape[dim] for t in tensors)
+          CHUNK = max(int(math.sqrt(total)), 256)
           if total > CHUNK:
               out_parts: list[Tensor] = []
               cur_part: list[Tensor] = []
