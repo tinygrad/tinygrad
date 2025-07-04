@@ -52,7 +52,7 @@ class NVPageTableEntry:
     return (self.nvdev.NV_MMU_VER2_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER2_PDE).decode(self.entry(entry_id))
 
   def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
-  def supports_huge_page(self, paddr:int): return self.lv >= 4
+  def supports_huge_page(self, paddr:int): return self.lv >= 2 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
     if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
