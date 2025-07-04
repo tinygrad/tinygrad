@@ -2909,7 +2909,7 @@ class TestOps(unittest.TestCase):
       y_repeated = y.repeat_interleave(repeat_factor, dim=1)
       z_repeated = z.repeat_interleave(repeat_factor, dim=1)
       return torch.nn.functional.scaled_dot_product_attention(x, y_repeated, z_repeated)
-    
+
     helper_test_op([(32,32,16,64), (32,8,16,64), (32,8,16,64)],
                    torch_gqa, lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True))
 
