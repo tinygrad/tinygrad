@@ -188,11 +188,14 @@ class TestMergeViews(unittest.TestCase):
   def test_merge_views_variable(self):
     from tinygrad import Variable
     N = 100
-    offset = Variable("start_pos", 1, N-1)*64
+    start_pos = Variable("start_pos", 1, N-1)
     v0 = View(shape=(N, 32, 2), strides=(32, 1, 0), offset=0, mask=((0, N), (0, 32), (0, 1)), contiguous=False)
-    v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=offset, mask=None, contiguous=False)
+    v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=start_pos*64, mask=None, contiguous=False)
+    target = View(shape=(1, 8, 1, 32), strides=(0,0,0,1), offset=start_pos*32, mask=None, contiguous=False)
     v = v0 + v1
+    print(v)
     self.assertIsNotNone(v)
+    self.assertEqual(v, target)
 
   def test_view_padded_area1(self):
     # test_multinomial
