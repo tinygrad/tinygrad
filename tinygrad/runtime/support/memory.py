@@ -157,9 +157,10 @@ class PageTableTraverseContext:
 class MemoryManager:
   va_allocator: ClassVar[TLSFAllocator|None] = None
 
-  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], first_lv:int, first_page_lv:int, va_base:int):
+  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], first_lv:int, first_page_lv:int, va_base:int,
+               palloc_ranges:list[tuple[int, int]]):
     self.dev, self.vram_size, self.va_base = dev, vram_size, va_base
-    self.pt_t, self.pte_cnt, self.pte_covers, self.first_page_lv = pt_t, pte_cnt, pte_covers, first_page_lv
+    self.pt_t, self.pte_cnt, self.pte_covers, self.first_page_lv, self.palloc_ranges = pt_t, pte_cnt, pte_covers, first_page_lv, palloc_ranges
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
@@ -217,23 +218,19 @@ class MemoryManager:
     if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
-      paddrs = []
-      ctx = PageTableTraverseContext(self.dev, self.root_page_table, va, create_pts=True)
-      for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        rem_len = seg_cnt * seg_size
-        while rem_len > 0:
-          # Try to allocate as long segment (power of 2) as possible
-          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
-          while cont_seg_sz >= 0x1000:
-            try: paddr = self.palloc(cont_seg_sz, zero=False)
-            except MemoryError: cont_seg_sz //= 2
-            else: break
+      nxt_range, rem_size, paddrs = 0, size, []
+      while rem_size > 0:
+        while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
 
-          if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
-          else:
+        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=False), try_sz)]
+        except MemoryError:
+          # Move to a smaller size and try again.
+          nxt_range += 1
+          if nxt_range == len(self.palloc_ranges):
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate a contiguous page. (allocation size={size:#x})")
-          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
+            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[next_size_idx-1]})")
+          continue
+        rem_size -= self.palloc_ranges[nxt_range][0]
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
