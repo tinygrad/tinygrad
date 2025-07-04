@@ -1295,26 +1295,6 @@ class Tensor(MathTrait):
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, dtype=self.dtype)
 
-  # def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-  #   """
-  #   Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-  #   All tensors must have the same shape except in the concatenating dimension.
-
-  #   ```python exec="true" source="above" session="tensor" result="python"
-  #   t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-  #   print(t0.cat(t1, t2, dim=0).numpy())
-  #   ```
-  #   ```python exec="true" source="above" session="tensor" result="python"
-  #   print(t0.cat(t1, t2, dim=1).numpy())
-  #   ```
-  #   """
-  #   dim = self._resolve_dim(dim)
-  #   for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-  #   tensors = [self, *args]
-  #   dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-  #   for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-  #   return functools.reduce(Tensor.add, tensors)
-
   def cat(self: Tensor, *args: Tensor, dim: int = 0) -> Tensor:
       """
       Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
