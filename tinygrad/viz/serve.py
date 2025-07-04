@@ -114,7 +114,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    shapes.append({"name":ctxs[ref]["name"] if (ref:=ref_map.get(e.name)) is not None else e.name, "st":st, "dur":dur, "depth":depth, "ref":ref})
+    name = e.name
+    if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
