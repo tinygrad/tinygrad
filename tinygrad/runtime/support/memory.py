@@ -139,12 +139,11 @@ class PageTableTraverseContext:
       if pt_cnt == self._pt_pte_cnt(pt.lv): self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
   def next(self, size:int, paddr:int|None=None, off:int=0):
-    assert not self.create_pts or paddr is not None, "paddr must be provided when allocating new page tables"
-
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
-        while not pt.supports_huge_page(paddr+off) or pte_covers > size or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
+        assert paddr is not None, "paddr must be provided when allocating new page tables"
+        while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
         while not pt.is_huge_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
