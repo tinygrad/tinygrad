@@ -1,20 +1,14 @@
-import os
-# os.environ["DEFAULT_FLOAT"] = "FLOAT32"
 from pathlib import Path
 
-import tinygrad
 import numpy as np
-from tinygrad import Tensor, Device, Context, dtypes, Variable, TinyJit
+from tinygrad import Tensor, Device, Variable
 import json
 
-
-from tinygrad.helpers import getenv
 from tinygrad.nn.state import safe_save, safe_load, load_state_dict, get_state_dict
 from extra.export_model import export_model
-from examples.whisper import MODEL_URLS, get_encoding, hann_window, init_whisper, MultiHeadAttention, ResidualAttentionBlock, TextDecoder, AudioEncoder, Whisper, make_stft_basis_buffers, stft
-from examples.whisper import resample_batched, RATE, SAMPLES_PER_SEGMENT, stft_full, mel, N_FFT, HOP_LENGTH, N_MELS
+from examples.whisper import hann_window, init_whisper, TextDecoder, make_stft_basis_buffers, stft
+from examples.whisper import RATE, SAMPLES_PER_SEGMENT, mel, N_FFT, HOP_LENGTH, N_MELS
 import math
-
 
 if __name__ == '__main__':
 	previous_default = Device.DEFAULT
