@@ -178,7 +178,7 @@ class MemoryManager:
 
   def page_tables(self, vaddr:int, size:int):
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
-    for _ in ctx.next(size): return [pt for pt, _, _ in ctx.pt_stack]
+    for _ in ctx.next(size, paddr=0): return [pt for pt, _, _ in ctx.pt_stack]
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
