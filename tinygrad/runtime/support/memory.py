@@ -118,7 +118,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
-    assert not pt.is_pte(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_huge_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -138,13 +138,14 @@ class PageTableTraverseContext:
       pt, pt_cnt, _ = self.pt_stack.pop()
       if pt_cnt == self._pt_pte_cnt(pt.lv): self.pt_stack[-1] = (self.pt_stack[-1][0], self.pt_stack[-1][1] + 1, self.pt_stack[-1][2])
 
-  def next(self, size:int, off=0):
+  def next(self, size:int, paddr:int|None=None, off:int=0):
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
       if self.create_pts:
-        while pt.lv < self.dev.mm.first_page_lv or pte_covers > size or self.vaddr & (pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
+        assert paddr is not None, "paddr must be provided when allocating new page tables"
+        while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_pte(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_huge_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
@@ -157,9 +158,10 @@ class PageTableTraverseContext:
 class MemoryManager:
   va_allocator: ClassVar[TLSFAllocator|None] = None
 
-  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], first_lv:int, first_page_lv:int, va_base:int):
+  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], va_base:int,
+               palloc_ranges:list[tuple[int, int]], first_lv:int=0):
     self.dev, self.vram_size, self.va_base = dev, vram_size, va_base
-    self.pt_t, self.pte_cnt, self.pte_covers, self.first_page_lv = pt_t, pte_cnt, pte_covers, first_page_lv
+    self.pt_t, self.pte_cnt, self.pte_covers, self.palloc_ranges = pt_t, pte_cnt, pte_covers, palloc_ranges
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
@@ -176,7 +178,7 @@ class MemoryManager:
 
   def page_tables(self, vaddr:int, size:int):
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
-    for _ in ctx.next(size): return [pt for pt, _, _ in ctx.pt_stack]
+    for _ in ctx.next(size, paddr=0): return [pt for pt, _, _ in ctx.pt_stack]
 
   def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
@@ -185,7 +187,7 @@ class MemoryManager:
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
-      for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize):
+      for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
@@ -217,23 +219,19 @@ class MemoryManager:
     if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
-      paddrs = []
-      ctx = PageTableTraverseContext(self.dev, self.root_page_table, va, create_pts=True)
-      for off, _, _, seg_cnt, seg_size in ctx.next(size):
-        rem_len = seg_cnt * seg_size
-        while rem_len > 0:
-          # Try to allocate as long segment (power of 2) as possible
-          cont_seg_sz, paddr = 1 << (self._frag_size(ctx.vaddr+off, rem_len) + 12), None
-          while cont_seg_sz >= 0x1000:
-            try: paddr = self.palloc(cont_seg_sz, zero=False)
-            except MemoryError: cont_seg_sz //= 2
-            else: break
+      nxt_range, rem_size, paddrs = 0, size, []
+      while rem_size > 0:
+        while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
 
-          if paddr is not None: paddrs += [(paddr, cont_seg_sz)]
-          else:
+        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=False), try_sz)]
+        except MemoryError:
+          # Move to a smaller size and try again.
+          nxt_range += 1
+          if nxt_range == len(self.palloc_ranges):
             for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate a contiguous page. (allocation size={size:#x})")
-          rem_len, off = rem_len - cont_seg_sz, off + cont_seg_sz
+            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[nxt_range-1]})")
+          continue
+        rem_size -= self.palloc_ranges[nxt_range][0]
 
     return self.map_range(va, size, paddrs, uncached=uncached)
 
