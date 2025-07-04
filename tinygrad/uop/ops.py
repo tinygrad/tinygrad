@@ -399,6 +399,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
+    if PROFILE and isinstance(ret, Buffer): ret._uop_ref = self.src[0].arg
     buffers[self] = ret
     return ret
   @property
@@ -781,13 +782,22 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
 def track_rewrites(name:Callable|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
+      st = time.perf_counter_ns()
+      name_str = (fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}"
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
+        tracked_keys.append(name_str)
         tracked_ctxs.append([])
       ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
         tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
+        if isinstance(name_ret, str): name_str = tracked_keys[-1].replace(fn, name_ret)
+        from tinygrad.device import Compiled, ProfileRangeEvent
+        from tinygrad.renderer import ProgramSpec
+        import decimal
+        if isinstance(tracked_keys[-1], ProgramSpec): name_str = f"{fn} for {tracked_keys[-1].name}"
+        en = time.perf_counter_ns()
+        Compiled.profile_events.append(ProfileRangeEvent("TINY", name_str, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=False))
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)

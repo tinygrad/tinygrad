@@ -122,6 +122,9 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
+      if e.arg["uop_ref"] is not None:
+        for k,v in get_buffer_refs(e.arg["uop_ref"]).items():
+          e.arg[k] = v
       shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
       step += 1
@@ -161,6 +164,37 @@ def get_profile(profile:list[ProfileEvent]):
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+
+# map Ops.UNIQUE to locations in viz
+kmap:dict[int, dict] = {}
+revmap:dict[UOp, int] = {}
+def build_kmap():
+  for i,c in enumerate(ctxs):
+    if not c["name"].startswith("Schedule"): continue
+    # *** 1. map all buffers to kernels in the large graph
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "create_ast":
+        kernel_graph = _reconstruct(contexts[1][i][j].sink)
+        for u in kernel_graph.toposort():
+          if u.op is Ops.ASSIGN:
+            kernel = u.src[1]
+            unique = u.src[0].src[0].arg
+            kmap[unique] = {"metadata":str(kernel.arg.metadata), "found":[]}
+            revmap.setdefault(kernel.arg.ast, []).append(unique)
+    # *** 2. find asts (small graphs)
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "replace globals":
+        uop = _reconstruct(contexts[1][i][j].sink)
+        for buf in revmap.get(uop, []):
+          kmap[buf]["found"].append((i, j+1))
+      # *** 3. find children (small asts)
+      if step["name"] == "replace buffer":
+        uop = _reconstruct(contexts[1][i][j].sink)
+        for u in uop.toposort():
+          if u.op is Ops.BUFFER: kmap.setdefault(buf, {"found":[], "metadata":None})["found"].append((i, j))
+def get_buffer_refs(unique:int) -> dict:
+  if not kmap: build_kmap()
+  return kmap.get(unique, {"found":[], "metadata":None})
 
 # ** HTTP server
 
