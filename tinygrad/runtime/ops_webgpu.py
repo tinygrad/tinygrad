@@ -6,6 +6,7 @@ from tinygrad.runtime.autogen import webgpu
 from typing import List, Any, TypeAlias
 import ctypes
 import os
+import sys
 
 WGPUDevPtr: TypeAlias = webgpu.WGPUDevice # type: ignore
 WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer # type: ignore
@@ -193,12 +194,18 @@ class WebGpuAllocator(Allocator['WGPUDevPtr']):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
+    toggles_ptr = None
+    if sys.platform == "win32":
+      # NOTE(irwin): toggle use_dxc enables f16 support on windows
+      toggles = webgpu.WGPUDawnTogglesDescriptor(chain=webgpu.WGPUChainedStruct(sType=webgpu.WGPUSType_DawnTogglesDescriptor), enabledToggleCount=1,
+        enabledToggles=(ctypes.POINTER(ctypes.c_char) * 1)(ctypes.cast(ctypes.pointer(to_c_string("use_dxc")), ctypes.POINTER(ctypes.c_char))))
+      toggles_ptr = ctypes.cast(ctypes.pointer(toggles), ctypes.POINTER(webgpu.WGPUChainedStruct))
     # Requesting an adapter
     adapter_res = _run(webgpu.wgpuInstanceRequestAdapterF, webgpu.WGPURequestAdapterCallbackInfo, webgpu.WGPURequestAdapterCallback,
     webgpu.WGPURequestAdapterStatus__enumvalues, 1, 2, instance,
 
     webgpu.WGPURequestAdapterOptions(powerPreference=webgpu.WGPUPowerPreference_HighPerformance,
-      backendType=backend_types.get(os.getenv("WEBGPU_BACKEND", ""), 0)))
+      nextInChain=toggles_ptr, backendType=backend_types.get(os.getenv("WEBGPU_BACKEND", ""), 0)))
 
     # Get supported features
     supported_features = webgpu.WGPUSupportedFeatures()
