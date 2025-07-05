@@ -1,4 +1,4 @@
-from tinygrad import Device
+from tinygrad import Device, Context
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, colorize_float
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
@@ -24,11 +24,6 @@ if __name__ == "__main__":
 
   average_tm_clang, average_tm_asm = 0, 0
   for num,ast in enumerate(ast_strs):
-    # asm compile
-    dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
-    lin = ast_str_to_lin(ast, opts=asm)
-    lin.apply_opts(hand_coded_optimizations(lin))
-    asm_prg = CompiledRunner(lin.to_program())
     # clang compile
     dev.compiler = ClangJITCompiler(opt_args=['-O1', '-march=native'])
     lin = ast_str_to_lin(ast, opts=dev.renderer)
@@ -38,10 +33,11 @@ if __name__ == "__main__":
     bufs = bufs_from_lin(lin)
 
     # asm compile
-    dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
-    lin = ast_str_to_lin(ast, opts=asm)
-    lin.apply_opts(hand_coded_optimizations(lin))
-    asm_prg = CompiledRunner(lin.to_program())
+    with Context(DEVECTORIZE=0):
+      dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
+      lin = ast_str_to_lin(ast, opts=asm)
+      lin.apply_opts(hand_coded_optimizations(lin))
+      asm_prg = CompiledRunner(lin.to_program())
 
     tm_clang, tm_asm = [], []
     # warmup
