@@ -118,7 +118,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
-      ref = ref_map.get(e.name.key or e.name.display_name)
+      ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
   return {"shapes":shapes, "maxDepth":len(levels)}
 

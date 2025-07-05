@@ -771,7 +771,7 @@ class TrackedGraphRewrite:
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str        # display name of this trace event
-  key:str|None=None       # optional key to search for related traces
+  keys:tuple[str, ...]=() # optional keys to search for related traces
   cat:str|None=None       # optional category to color this by
 
 tracked_keys:list[Any] = []
@@ -798,8 +798,8 @@ def track_rewrites(name:Callable|bool=True):
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
         tracked_keys[-1] = key = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
-        if isinstance(key, str): e.name = TracingKey(key, cat=func.__name__)
-        else: e.name = TracingKey(f"{func.__name__} for {name_ret.name}", name_ret.name, cat=func.__name__)
+        if isinstance(key, str): e.name = TracingKey(key, (key,), func.__name__)
+        else: e.name = TracingKey(f"{func.__name__} for {name_ret.name}", (name_ret.name,), func.__name__)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
