@@ -22,8 +22,8 @@ base_rewrite = PatternMatcher([
   # accumulator
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
   # a bit hacky, if an assign moves to memory it's a store
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: ctx.string_rewrite.rewrite(x.src[0].store(x.src[1]), ctx) if not ctx.is_reg(ctx.r[x.src[0]]) else None),
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
+  (UPat.var("x").assign(UPat.var("y")), lambda ctx,x,y: ctx.string_rewrite.rewrite(x.store(y), ctx) if not ctx.is_reg(ctx.r[x]) else None),
+  (UPat.var("x").assign(UPat.var("y"), name="a"), lambda ctx,x,y,a: f"{ctx.ops[x.dtype][a.op]} {ctx[x]}, {ctx[y]}" if ctx[x] != ctx[y] else None),
   # binary ops
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   # unary ops
@@ -36,15 +36,11 @@ base_rewrite = PatternMatcher([
 ])
 
 asm_matcher = PatternMatcher([
-  # load/store use pointer arithmetic and we get rid of the buf pointer, size in arg for define local
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
-   lambda buf,idx: buf.replace(dtype=dtypes.uint64, arg=(buf.dtype.size*buf.dtype.itemsize) if buf.dtype.local else buf.arg) +
-    idx.cast(dtypes.uint64)*buf.dtype.itemsize),
   # move mask from INDEX to the load/store
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("gate"))), UPat.var("alt"))),
-   lambda buf,idx,gate,alt: UOp(Ops.LOAD, alt.dtype, (buf.index(idx), alt, gate))),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat())), UPat.var("val"), UPat.var("gate"))),
-   lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
+  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt")),
+   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
+  (UPat.var("buf").index(UPat.var("idx"), UPat()).store(UPat.var("val"), UPat.var("gate")),
+   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # cast to pointer is a noop
@@ -85,7 +81,6 @@ asm_matcher = PatternMatcher([
 
 powers_of_two = {2**i:i for i in range(64)}
 def split_vectorized_alu(alu:UOp):
-  # bools that come from float32 are kept vectorized
   dt = alu.src[-1].dtype
   if alu.op in (Ops.LOG2, Ops.EXP2, Ops.SIN) or dt.scalar() != dtypes.float32: return no_vectorized_alu(alu)
   if dt.itemsize <= 16 and dt.count in powers_of_two: return None
@@ -206,6 +201,7 @@ class AsmRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
+      if u.op in (Ops.NOOP, Ops.CONST): continue
       # free dead registers
       for v in [v for v in live if live_range[v][1] < i]: reg_class(v).insert(0, live.pop(v))
       # reload necessary vars
@@ -224,9 +220,10 @@ class AsmRenderer(Renderer):
           loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
       # TODO: need to ignore noop and assign here
+      # TODO: base coalesce and derived coalesce
       for s in src:
         if u.op is Ops.VECTORIZE: continue
-        if u.op is Ops.LOAD and len(u.src) == 3 and s is not u.src[1]: continue
+        if u.op is Ops.LOAD and len(u.src) == 6 and s is not u.src[-2]: continue
         if isinstance(self, X86Renderer):
           if u.op is Ops.WHERE and s is not u.src[1]: continue
           if u.op is Ops.MULACC and s is not u.src[0]: continue
@@ -234,7 +231,7 @@ class AsmRenderer(Renderer):
         if s in live and live_range[s][1] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
-      if u.op not in (Ops.NOOP, Ops.CONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
+      if u.op not in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
         # render assembly
         if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
@@ -335,6 +332,10 @@ def arm64_load_consts(x:UOp) -> UOp|None:
 
 # TODO: technically loading to w reg doesn't zero extend upper 32 bits so not a NOOP, use 64 regs when loading?
 arm64_matcher = asm_matcher + PatternMatcher([
+  # load/store use pointer arithmetic and we get rid of the buf pointer, size in arg for define local
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
+   lambda buf,idx: buf.replace(dtype=dtypes.uint64, arg=(buf.dtype.size*buf.dtype.itemsize) if buf.dtype.local else buf.arg) +
+    idx.cast(dtypes.uint64)*buf.dtype.itemsize),
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
   # some ops can't take imm in srcs
   (UPat((Ops.CMPNE, Ops.CMPLT, Ops.XOR, Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE, Ops.STORE), name="x"),
@@ -466,12 +467,19 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
   # const load
   (UPat.cvar("c").load(name="x"), lambda ctx,c,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[c]}"),
-  # gated load
-  (UPat.var("a").load(UPat.var("b"), UPat.var("m"), name="x"), lambda ctx,x,a,b,m:
-   f"{ctx.two_address(x, b)}test {ctx[m]}, 1\nje .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, [{ctx[a]}]\n.L{ctx.uops.index(x)}:"),
-  # local/global store
-  (UPat.var("y").store(name="x"), lambda ctx,y,x: f"{ctx.ops[y.dtype][x.op]} [{ctx.mem[y]}], {ctx[y]}"),
-  (UPat.var("y").store(UPat.var("z"), allow_any_len=True, name="x"), lambda ctx,y,z,x: f"{ctx.ops[z.dtype][x.op]} [{ctx[y]}], {ctx[z]}"),
+  # local load/store
+  (UPat.var("x").load(name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
+  (UPat.var("x").store(name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx.mem[x]}], {ctx[x]}"),
+  (UPat.var("x").store(UPat.var("y"), name="st"), lambda ctx,x,y,st: f"{ctx.ops[x.dtype][st.op]} [{ctx[x]}], {ctx[y]}"),
+  # global load/store
+  (UPat.var("b").load(UPat.var("i"), UPat.var("s"), UPat.var("d"), name="ld"),
+   lambda ctx,b,i,s,d,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}]"),
+  (UPat.var("b").store(UPat.var("i"), UPat.var("s"), UPat.var("d"), UPat.var("x"), allow_any_len=True, name="st"),
+   lambda ctx,b,i,s,d,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}], {ctx[x]}"),
+  # global gated load
+  (UPat.var("b").load(UPat.var("i"), UPat.var("s"), UPat.var("d"), UPat.var("a"), UPat.var("m"), name="ld"),
+   lambda ctx,b,i,s,d,a,m,ld: f"{ctx.two_address(ld, a)}test {ctx[m]}, 1\nje .L{ctx.uops.index(ld)}\n"
+   f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}]\n.L{ctx.uops.index(ld)}:"),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_rewrite.rewrite(x, ctx) if x.dtype.count > 1 else None),
   # devectorize
   (UPat(Ops.GEP, dtypes.ints, name="x"), lambda ctx,x: f"vpextr{x86_int_suf[x.dtype.itemsize]} {ctx[x]}, {ctx[x.src[0]]}, {x.arg[0]}"),
@@ -523,20 +531,38 @@ x86_rewrite = PatternMatcher([
 def x86_load_consts(x:UOp) -> UOp|None:
   if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
   nsrc = []
-  for s in x.src:
+  for i,s in enumerate(x.src):
     if s.op is Ops.CONST:
       if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
       elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
       elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
-      elif x.dtype.count > 1 or abs(s.arg) > dtypes.max(dtypes.int32): s = s.load()
+      elif (x.dtype.count > 1 and x.op not in (Ops.LOAD, Ops.STORE)) or abs(s.arg) > dtypes.max(dtypes.int32): s = s.load()
+      # don't allow store of const, assembler complains about operand size, TODO: shouldn't really be here
+      elif x.op == Ops.STORE and i == len(x.src)-1: s = s.load()
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
 x86_matcher = asm_matcher + PatternMatcher([
+  # we use general registers to load/store the 2 bytes of float16
+  (UPat.var("idx").load(UPat.var("alt"), UPat.var("mask"), dtype=dtypes.float16),
+   lambda idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(dtypes.float16)),
+  (UPat.var("idx").load(dtype=dtypes.float16), lambda idx: idx.load(dtype=dtypes.int16).bitcast(dtypes.float16)),
+  (UPat.var("idx").store(UPat.var("val", dtypes.float16)), lambda idx,val: idx.store(val.bitcast(dtypes.int16))),
+  # add scale to index, get rid of pointers
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
+   lambda buf,idx: UOp(Ops.INDEX, dtypes.uint64, (buf.replace(dtype=dtypes.uint64), idx, UOp.const(dtypes.int32, buf.dtype.itemsize)))),
+  # fold displacement into index
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx")+UPat.cvar("disp"), UPat.cvar("scale", dtypes.int32))),
+   lambda buf,idx,disp,scale: UOp(Ops.INDEX, buf.dtype, (buf, idx.cast(dtypes.uint64), scale, disp*scale))),
+  # if no displacement, displacement becomes 0 (to standardize index)
+   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.cvar("scale", dtypes.int32))),
+   lambda buf,idx,scale: UOp(Ops.INDEX, buf.dtype, (buf, idx.cast(dtypes.uint64), scale, UOp.const(dtypes.int32, 0)))),
+  # fold index into load/store
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx"),), allow_any_len=True, name="x"), lambda x,idx: x.replace(src=idx.src+x.src[1:])),
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
-  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD, Ops.STORE), name="x"),
+  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load() if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # boolean vector is a mask, each element all 1s or 0s
@@ -550,11 +576,6 @@ x86_matcher = asm_matcher + PatternMatcher([
    if a.dtype.count > 1 and m.dtype.itemsize != a.dtype.itemsize else None),
   # a boolean gep is the mask dtype casted to bool
   (UPat(Ops.GEP, dtypes.bool, (UPat.var("y"),), name="x"), lambda y,x: x.replace(dtype=y.dtype.scalar()).cast(x.dtype)),
-  # we use general registers to load/store the 2 bytes of float16
-  (UPat(Ops.LOAD, dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
-   lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
-  (UPat(Ops.LOAD, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.int16).bitcast(x.dtype)),
-  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("x", dtypes.float16))), lambda idx,x: idx.store(x.bitcast(dtypes.int16))),
   # float16 alus are done in float32
   (UPat(GroupOp.ALU, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float32.vec(x.dtype.count), tuple(s.cast_vec(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
