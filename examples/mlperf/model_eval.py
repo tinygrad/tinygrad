@@ -116,9 +116,10 @@ def eval_retinanet():
     try: next_proc = data_get()
     except StopIteration: next_proc = None
     nd = time.perf_counter()
-    predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
+    predictions, img_ids = mdl.postprocess_detections2(proc[0][0], proc[0][1], orig_image_sizes=proc[2]), proc[1]
     pd = time.perf_counter()
-    coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+    # exp = mdl.postprocess_detections(proc[0][0].numpy(), proc[0][1], orig_image_sizes=proc[2])
+    coco_results  = [{"image_id": img_ids[i], "category_id": label.numpy(), "bbox": box.tolist(), "score": score.numpy()}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
