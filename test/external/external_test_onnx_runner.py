@@ -1,8 +1,8 @@
-import unittest, onnx, tempfile
-from tinygrad import dtypes
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+import unittest, onnx
+from tinygrad import dtypes, Tensor
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
+from tinygrad.frontend.onnx import OnnxRunner
 from hypothesis import given, settings, strategies as st
 import numpy as np
 
@@ -17,11 +17,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
     graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor])
     model = onnx.helper.make_model(graph)
-    tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
-    onnx.save(model, tmp.name)
-    tmp.flush()
-    model = onnx_load(tmp.name)
-    runner = OnnxRunner(model)
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
     self.assertEqual(len(runner.graph_inputs), 1)
     self.assertEqual(runner.graph_inputs['input'].dtype, tinygrad_dtype)
 
@@ -33,11 +29,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     node = onnx.helper.make_node('Identity', inputs=['input'], outputs=['output'])
     graph = onnx.helper.make_graph([node], 'identity_test', [input_tensor], [output_tensor], [initializer])
     model = onnx.helper.make_model(graph)
-    tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
-    onnx.save(model, tmp.name)
-    tmp.flush()
-    model = onnx_load(tmp.name)
-    runner = OnnxRunner(model)
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
     self.assertEqual(len(runner.graph_inputs), 1)
     self.assertEqual(runner.graph_values['initializer'].dtype, tinygrad_dtype)
 
@@ -48,11 +40,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     node = onnx.helper.make_node('Constant', inputs=[], outputs=['output'], value=value_tensor)
     graph = onnx.helper.make_graph([node], 'attribute_test', [], [output_tensor])
     model = onnx.helper.make_model(graph)
-    tmp = tempfile.NamedTemporaryFile(suffix='.onnx')
-    tmp.flush()
-    onnx.save(model, tmp.name)
-    model = onnx_load(tmp.name)
-    runner = OnnxRunner(model)
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, tinygrad_dtype)
 
   @settings(deadline=1000) # TODO investigate unreliable timing

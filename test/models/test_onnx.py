@@ -7,7 +7,7 @@ try:
   import onnx
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 
@@ -25,7 +25,7 @@ np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
-    onnx_model = onnx_load(fetch(OPENPILOT_MODEL))
+    onnx_model = fetch(OPENPILOT_MODEL)
     run_onnx = OnnxRunner(onnx_model)
     def get_inputs():
       np_inputs = {
@@ -69,7 +69,7 @@ class TestOnnxModel(unittest.TestCase):
       ps.print_stats(30)
 
   def test_openpilot_model(self):
-    onnx_model = onnx_load(fetch(OPENPILOT_MODEL))
+    onnx_model = fetch(OPENPILOT_MODEL)
     run_onnx = OnnxRunner(onnx_model)
     print("got run_onnx")
     inputs = {
@@ -121,10 +121,9 @@ class TestOnnxModel(unittest.TestCase):
       input_name, input_new)
 
   def _test_model(self, fn, input_name, input_new, debug=False):
-    onnx_model = onnx_load(fn)
+    run_onnx = OnnxRunner(fn)
     print("onnx loaded")
     from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
-    run_onnx = OnnxRunner(onnx_model)
 
     def run(img):
       inputs = {input_name: preprocess(img, new=input_new)}
