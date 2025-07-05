@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
-from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
+from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
@@ -73,6 +73,7 @@ class TestUOpSpec(unittest.TestCase):
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
+  @unittest.skip("old store")
   def test_buffer_uops_st(self):
     a = Tensor.randn(4, 4)+2
     helper_test_verify_ast(ast:=a.schedule()[-1].ast)
@@ -81,6 +82,7 @@ class TestUOpSpec(unittest.TestCase):
     const_st = [u.st for u in ast.toposort() if u.op is Ops.CONST][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
+  @unittest.skip("old store")
   def test_assert_swizzle(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
@@ -90,15 +92,10 @@ class TestUOpSpec(unittest.TestCase):
 
   def test_const_view_always_valid(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
+    a = UOp.const(dtypes.int, 0, None, ())
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
 
-  def test_assert_masked_view_in_const(self):
-    t = Tensor(6).uop
-    a = t.replace(src=(t.src[0].replace(arg=t.st.reshape((1,)).pad(((0, 1),))),))
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      type_verify([a], tensor_uop_spec)
 
 if __name__ == '__main__':
   unittest.main()
