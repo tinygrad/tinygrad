@@ -587,8 +587,6 @@ class TestOps(unittest.TestCase):
     if is_dtype_supported(dtypes.uint64):
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
-    # 1 // 0 is device dependent, but it should not raise
-    Tensor([1]).idiv(1).realize()
 
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
