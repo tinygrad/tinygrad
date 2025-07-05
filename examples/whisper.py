@@ -1,14 +1,54 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections
+import sys, base64, multiprocessing, itertools, collections, math
 from typing import Optional, Union, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
+from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
 import numpy as np
 import librosa
+
+# ***** WIP stft helpers *****
+# TODO(irwin): pick a more suitable place for these
+# TODO(irwin): asserts
+# TODO(irwin): tinygrad.nn.STFT class
+
+def stft(x:Tensor, weight:Tensor, n_fft, stride, pad, pad_mode="constant")->Tensor:
+  cutoff = int(n_fft // 2) + 1
+  x_padded = x.pad(pad, mode=pad_mode)
+  stft_raw = x_padded.unsqueeze(1).conv2d(weight, stride=stride)
+
+  # NOTE(irwin): magnitudes only atm
+  magnitudes = (stft_raw[:, :cutoff, :]**2 + stft_raw[:, cutoff:, :]**2).sqrt()
+  return magnitudes
+
+# TODO(irwin): functools.rlu_cache?
+def make_basis_buffers(N_FFT: int, k_freq_bin: int|Tensor, window:Tensor) -> tuple[Tensor, Tensor]:
+  # NOTE(irwin): do we even need this .float()?
+  n = Tensor.arange(N_FFT).float()
+  angle = 2 * math.pi * k_freq_bin * n / N_FFT
+
+  w = window
+  cos_basis = w * angle.cos()
+  # NOTE(irwin): negate sin_basis to match torch
+  sin_basis = w * -angle.sin()
+  return cos_basis, sin_basis
+
+def hann_window(N:int, periodic=True) -> Tensor:
+  M = N+(periodic*1)
+  return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
+
+def make_stft_basis_buffers(n_fft:int, window:Tensor) -> Tensor:
+  return Tensor.cat(*make_basis_buffers(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, window)).reshape(n_fft+2, 1, n_fft)
+
+def stft_full(x:Tensor, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant") -> Tensor:
+  assert window == "hann", "other window types not implemented yet"
+  bb = make_stft_basis_buffers(n_fft, hann_window(n_fft))
+  res = stft(x, bb, n_fft, stride, pad, pad_mode)
+  return res
 
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
@@ -123,6 +163,132 @@ class Whisper:
     self.is_multilingual = dims["n_vocab"] == 51865
     self.batch_size = batch_size
 
+# rewritten from numpy
+def rfftfreq(n, d=1.0, device=None):
+  val = 1.0 / (n * d)
+  N = n // 2 + 1
+  results = Tensor.arange(N, device=device)
+  return results * val
+
+# just like in librosa
+def fft_frequencies(sr:float, n_fft:int):
+  return rfftfreq(n=n_fft, d=1.0 / sr)
+
+def hz_to_mel(freq:Tensor)->Tensor:
+  # Fill in the linear part
+  f_min = 0.0
+  f_sp = 200.0 / 3
+
+  mels = (freq - f_min) / f_sp
+
+  # Fill in the log-scale part
+
+  min_log_hz = 1000.0  # beginning of log region (Hz)
+
+  mask = freq >= min_log_hz
+  return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (Tensor(6.4).log() / 27.0), mels)
+
+def mel_to_hz(mels:Tensor)->Tensor:
+  # Fill in the linear scale
+  f_min = 0.0
+  f_sp = 200.0 / 3
+  freqs = f_min + f_sp * mels
+
+  # And now the nonlinear scale
+  min_log_hz = 1000.0  # beginning of log region (Hz)
+  min_log_mel = (min_log_hz - f_min) / f_sp  # same (Mels)
+  logstep = Tensor(6.4).log() / 27.0  # step size for log region
+
+  # If we have vector data, vectorize
+  log_t = mels >= min_log_mel
+  freqs = log_t.where(min_log_hz * ((logstep * (mels - min_log_mel)).exp()), freqs)
+
+  return freqs
+
+def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025.0)->Tensor:
+  # 'Center freqs' of mel bands - uniformly spaced between limits
+  min_max_mel = hz_to_mel(Tensor([fmin, fmax]))
+
+  mels = Tensor.linspace(min_max_mel[0], min_max_mel[1], n_mels)
+  hz = mel_to_hz(mels)
+  return hz
+
+def mel(
+  *,
+  sr: float,
+  n_fft: int,
+  n_mels: int = 128,
+  fmin: float = 0.0,
+  fmax: Optional[float] = None,
+  dtype: DTypeLike = dtypes.float32,
+) -> Tensor:
+
+  if fmax is None:
+    fmax = float(sr) / 2
+
+  # Initialize the weights
+  n_mels = int(n_mels)
+  weights = Tensor.zeros((n_mels, int(1 + n_fft // 2)), dtype=dtype).contiguous()
+
+  # Center freqs of each FFT bin
+  fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft)
+
+  # 'Center freqs' of mel bands - uniformly spaced between limits
+  mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax)
+
+  fdiff = mel_f[1:] - mel_f[:-1]
+  # ramps = np.subtract.outer(mel_f, fftfreqs)
+  ramps = mel_f[None].T.expand(-1, fftfreqs.shape[-1]) - fftfreqs
+
+  lower = -ramps[:n_mels] / fdiff[:n_mels][None].T
+  upper = ramps[2:n_mels + 2] / fdiff[1:n_mels + 1][None].T
+  weights = lower.minimum(upper).maximum(0)
+
+
+  # Slaney-style mel is scaled to be approx constant energy per channel
+  enorm = 2.0 / (mel_f[2 : n_mels + 2] - mel_f[:n_mels])
+  weights *= enorm[:, None]
+
+  return weights
+
+# @TinyJit
+def resample(x, L, M, num_taps=64):
+  fc = 0.5 / max(L, M)
+  t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
+  # NOTE(irwin): poor man's sinc
+  h:Tensor = (t * fc * np.pi).sin() / (t * fc * np.pi)
+  # hack fix NaN
+  h[num_taps//2] = 1.0
+  h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
+  h /= h.sum()
+  # TODO(irwin): contiguous sped up things before replacing decimation with stride=M, retest if still relevant
+  upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
+  # upsampled = xx.cat(Tensor.zeros(L-1, *x.shape)).T.flatten().contiguous()
+  padding = (len(h) // 2)
+  filtered = upsampled.conv2d(h.reshape(1, 1, -1), stride=M, padding=padding).flatten(1)
+  return filtered
+
+def next_power_of_2(n):
+  if n <= 0:
+    return 1
+  return 1 << (n - 1).bit_length()
+
+def resample2(samples, source, target):
+  gcd = math.gcd(source, target)
+  M = source // gcd
+  L = target // gcd
+  # NOTE(irwin): overkill but works
+  taps = next_power_of_2(max(M, L))*2
+  #print(M, L, taps)
+  return resample(samples, L, M, taps)
+
+def resample_batched(samples, source, target):
+  count = samples.shape[-1]
+  rbs = source*10
+  samples = samples.pad(((0, math.ceil(count / rbs) * rbs - count))).reshape(-1, rbs)
+  resampled = resample2(samples, source, target)
+
+  return resampled[:int((count / source) * target)]
 
 RATE = 16000
 SEGMENT_SECONDS=30
@@ -132,7 +298,7 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=None) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
@@ -140,29 +306,23 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
   :param truncate: If true, truncates (or pads) audio to exactly 30s for a single encoder pass
   :return: mel spectrogram of the given waveforms
   """
-  def pad_or_trim(arr, target_len):
-    curr_len = len(arr)
-    if curr_len == target_len:
-      return arr
-    elif curr_len < target_len:
-      return np.pad(arr, (0, target_len - curr_len), 'constant')
-    else:
-      return arr[:target_len]
-
-  max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
+  waveforms = [(resample_batched(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
+  max_len = max(len(wav) for wav in waveforms)
+  waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
+  max_len = SAMPLES_PER_SEGMENT if truncate else max_len
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-  waveforms = np.array(list(map(lambda w: pad_or_trim(w, max_len), waveforms)))
   assert waveforms.shape[0] <= batch_size
-  if waveforms.shape[0] < batch_size:
-    # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-    waveforms = np.pad(waveforms, pad_width=((0, batch_size - waveforms.shape[0]), (0, 0)))
+  waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
+  # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
+  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+  magnitudes = (stft[..., :-1] ** 2)
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
-  stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-  magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  def log10(x:Tensor):
+    return x.log2() * (math.log(2) / math.log(10))
 
-  log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
-  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
+  log_spec = log10(mel_spec.clip(1e-10, None))
+  log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
 
   return log_spec
@@ -230,19 +390,20 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
-  return waveform
+  waveform, sr = librosa.load(filename, sr=None)
+  return waveform, sr
 
 def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+  wav, sr = load_file_waveform(filename)
+  return transcribe_waveform(model, enc, [wav], sr=sr)
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=None):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, model.batch_size, truncate, sr=sr)
   nsample = model.decoder.max_tokens_to_sample
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
@@ -270,7 +431,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   transcriptions = [[] for _ in waveforms]
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
-    encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
+    encoded_audio = model.encoder.encode((log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
