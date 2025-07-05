@@ -119,6 +119,44 @@
             };
         }
 
+        // NOTE(irwin): copied from stable diffusion example
+        const getProgressDlForPart = async (part, progressCallback) => {
+            const response = await fetch(part);
+            const contentLength = response.headers.get('content-length');
+            const total = parseInt(contentLength, 10);
+
+            const res = new Response(new ReadableStream({
+                async start(controller) {
+                    const reader = response.body.getReader();
+                    for (;;) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        progressCallback(part, value.byteLength, total);
+                        controller.enqueue(value);
+                    }
+
+                    controller.close();
+                },
+            }));
+
+            return res.arrayBuffer();
+        };
+
+        let totalLoaded = 0;
+        let totalSize = 0;
+        let partSize = {};
+        const loadingText = document.querySelector("#div-loading > p");
+        const progressCallback = (part, loaded, total) => {
+            totalLoaded += loaded;
+
+            if (!partSize[part]) {
+                totalSize += total;
+                partSize[part] = true;
+            }
+
+            loadingText.innerHTML = `Loading model ${part.split('/').at(-1).split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
+        };
+
         async function transcribeAudio() {
             if (!net_encoder) {
                 await window.moduleReady;
@@ -128,13 +166,12 @@
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
                 }
-                const loadingText = document.querySelector("#div-loading > p");
                 loadingText.innerHTML = 'Loading model mel';
-                net_mel = await mel.load(device, "./mel.safetensors");
+                net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart("./mel.safetensors", progressCallback)));
                 loadingText.innerHTML = 'Loading model encoder';
-                net_encoder = await encoder.load(device, "./encoder.safetensors");
+                net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart("./encoder.safetensors", progressCallback)));
                 loadingText.innerHTML = 'Loading model decoder';
-                net_decoder = await decoder.load(device, "./decoder.safetensors");
+                net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart("./decoder.safetensors", progressCallback)));
                 loadingContainer.style.display = "none";
             }
 
