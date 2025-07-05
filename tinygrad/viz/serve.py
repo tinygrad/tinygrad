@@ -25,8 +25,8 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
+    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
     for key in k.keys: ref_map[key] = i
-    ret.append({"name":k.display_name, "kernel_code":k.fmt, "steps":steps})
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call

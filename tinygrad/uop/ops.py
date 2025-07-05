@@ -759,21 +759,22 @@ def track_uop(u:UOp):
 VIZ = ContextVar("VIZ", 0)
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
+
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                       # location that called graph_rewrite
-  sink: int                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[int, int, tuple]]                                                      # before/after UOp, UPat location
-  name: str|None                                                                             # optional name of the rewrite
-  depth: int                                                                                 # depth if it's a subrewrite
-  bottom_up: bool
+  loc:tuple[str, int]                    # location that called graph_rewrite
+  sink:int                               # the sink input to graph_rewrite
+  matches:list[tuple[int, int, tuple]]   # before/after UOp, UPat location
+  name:str|None                          # optional name of the rewrite
+  depth:int                              # depth if it's a subrewrite
+  bottom_up:bool
 
 @dataclass(frozen=True)
 class TracingKey:
-  display_name:str        # display name of this trace event
-  keys:tuple[str, ...]=() # optional keys to search for related traces
-  fmt:str|None=None       # optional detailed formatting
-  cat:str|None=None       # optional category to color this by
+  display_name:str                       # display name of this trace event
+  keys:tuple[str, ...]=()                # optional keys to search for related traces
+  fmt:str|None=None                      # optional detailed formatting
+  cat:str|None=None                      # optional category to color this by
 
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
