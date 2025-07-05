@@ -145,7 +145,7 @@ async function renderProfiler() {
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       const colorKey = e.cat ?? e.name;
       if (!nameMap.has(colorKey)) {
-        const colors = colors[k] ?? colors.DEFAULT;
+        const colors = devColors[k] ?? devColors.DEFAULT;
         nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
       }
       // offset y by depth

@@ -797,8 +797,8 @@ def track_rewrites(name:Callable|bool=True):
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
-        tracked_keys[-1] = new_name = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
-        if isinstance(new_name, str): e.name = TracingKey(new_name, cat=func.__name__)
+        tracked_keys[-1] = key = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
+        if isinstance(key, str): e.name = TracingKey(key, cat=func.__name__)
         else: e.name = TracingKey(f"{func.__name__} for {name_ret.name}", name_ret.name, cat=func.__name__)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
