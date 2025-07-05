@@ -772,8 +772,8 @@ class TrackedGraphRewrite:
 class TracingKey:
   display_name:str        # display name of this trace event
   keys:tuple[str, ...]=() # optional keys to search for related traces
-  cat:str|None=None       # optional category to color this by
   fmt:str|None=None       # optional detailed formatting
+  cat:str|None=None       # optional category to color this by
 
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
