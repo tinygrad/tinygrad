@@ -116,8 +116,7 @@ class Kernel:
     ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
     return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
-def create_kernel(x:UOp, b:UOp|None=None):
-  if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
+def create_kernel(x:UOp, b:UOp):
   kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), m if (m:=x.metadata) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
@@ -138,7 +137,7 @@ def append_to_kernel(x:UOp):
 create_kernels = PatternMatcher([
   # always give assign/gbarrier a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), create_kernel),
+  (UPat(Ops.GBARRIER, src=(UPat.var("x"),)), lambda x: create_kernel(x, UOp.new_buffer(x.device, x.size, x.dtype))),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # push RESHAPE through MSELECT
