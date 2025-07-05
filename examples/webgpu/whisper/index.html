@@ -90,15 +90,6 @@
 
         const SAMPLES_PER_SEGMENT = 480000;
 
-        async function processFrame() {
-            if (video.videoWidth == 0 || video.videoHeight == 0) {
-                requestAnimationFrame(processFrame);
-                return;
-            }
-            // const boxes = await detectObjectsOnFrame(offscreenContext);
-        }
-        // requestAnimationFrame(processFrame);
-
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
             const arrayBuffer = await response.arrayBuffer();
