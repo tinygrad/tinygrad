@@ -169,7 +169,14 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Print nvidia-smi
-      run: nvidia-smi
+      run: |
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:01:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:42:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:81:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:82:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:c1:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:c2:00.0/reset
+        nvidia-smi
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -186,15 +193,6 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Insert NVIDIA modules
-      run: |
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:01:00.0/reset
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:42:00.0/reset
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:81:00.0/reset
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:82:00.0/reset
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:c1:00.0/reset
-        echo 1 | sudo tee /sys/bus/pci/devices/0000:c2:00.0/reset
-        nvidia-smi
     - name: Run model inference benchmark
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
