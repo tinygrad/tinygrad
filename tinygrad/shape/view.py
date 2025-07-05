@@ -192,15 +192,15 @@ class View:
       return None
 
     # Project vm1's offset and strides on to vm2.
-    origin = unravel(vm2.shape, vm1.offset)
+    origin = [ssimplify(o) for o in unravel(vm2.shape, vm1.offset)]
     terms: list[list[tuple[int, sint]]] = [[] for _ in vm2.shape]
     strides: list[sint] = [0] * len(vm1.shape)
     for d1, st in enumerate(vm1.strides):
       if st == 0: continue
       for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
-        if (s1 := s1 - o) == 0: continue
+        if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possibly be 0
         terms[d2].append((d1, s1))
-        strides[d1] += s1 * vm2.strides[d2]
+        strides[d1] += ssimplify(s1 * vm2.strides[d2])
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
@@ -223,9 +223,12 @@ class View:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
-        if resolve(b <= t.vmin and t.vmax < e, False): continue
+        if resolve(b <= (t := t.simplify()).vmin and t.vmax < e, False): continue
         if len(term) != 1:
-          if not term and newe: newe[0] = 0
+          if not term and newe:
+            # t should be a constant if no terms contribute to this dimension, but it might not be simplified
+            if t.vmin != t.vmax: return None
+            newe[0] = 0
           else: bad = True
           continue
         d1, s1 = term[0]
@@ -238,7 +241,7 @@ class View:
       # Otherwise if vm2's mask was violated, then cannot merge.
       if bad: return None
 
-    return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
+    return View.create(vm1.shape, tuple(strides), ssimplify(sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset))
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:tuple[sint, ...]) -> Optional[View]:
