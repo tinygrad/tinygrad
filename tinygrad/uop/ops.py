@@ -791,11 +791,11 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(TracingKey((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", cat=fn))
+        tracked_keys.append(key:=TracingKey(n:=(fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
       # late import!
       from tinygrad.device import cpu_profile
-      with cpu_profile(func.__name__, "TINY") as e:
+      with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
