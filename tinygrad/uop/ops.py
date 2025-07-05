@@ -584,6 +584,10 @@ def get_location() -> tuple[str, int]:
 def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except FileNotFoundError: return "<missing>"
+
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
@@ -647,10 +651,6 @@ class UPat(MathTrait):
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
-
-  def printable(self:UPat) -> str:
-    try: return lines(self.location[0])[self.location[1]-1].strip()
-    except FileNotFoundError: return "<missing>"
 
   def __repr__(self):
     def rep(x):
@@ -763,7 +763,7 @@ match_stats:dict[UPat, list[Union[int, float]]] = dict()
 class TrackedGraphRewrite:
   loc: tuple[str, int]                                                                       # location that called graph_rewrite
   sink: int                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[int, int, UPat]]                                                       # before+after of all the matches
+  matches: list[tuple[int, int, tuple]]                                                      # before/after UOp, UPat location
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
@@ -825,11 +825,12 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None:
+      if (ret:=match(uop, ctx)) is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((track_uop(uop),track_uop(ret), p))
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -848,7 +849,7 @@ if TRACK_MATCH_STATS or PROFILE:
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", printable(k.location))
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
