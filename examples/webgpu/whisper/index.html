@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>whisper tinygrad WebGPU</title>
@@ -41,6 +42,7 @@
             0% {
                 transform: rotate(0deg);
             }
+
             100% {
                 transform: rotate(360deg);
             }
@@ -71,6 +73,7 @@
         }
     </style>
 </head>
+
 <body>
     <h2>whisper tinygrad WebGPU</h2>
     <h2 id="wgpu-error" style="display: none; color: red;">Error: WebGPU is not supported in this browser</h2>
@@ -195,20 +198,19 @@
             const mapping = await fetch('./vocab.json').then(res => res.json());;
 
             async function doOneToken(context, output, i) {
-                if (i < 384*2)
-                {
+                if (i < 384 * 2) {
                     var decoded_0 = await net_decoder(context, output[0], [i]);
                     context.push(decoded_0[0]);
                     document.getElementById("output").innerText = context.map(j => mapping[j]).join('');
                     if (decoded_0[0] == 50256) {
 
                     } else {
-                        setTimeout(async function() {await doOneToken(context, output, i+1);});
+                        setTimeout(async function () { await doOneToken(context, output, i + 1); });
                     }
                 }
             }
 
-            setTimeout(async function() {await doOneToken(context, output, 2);});
+            setTimeout(async function () { await doOneToken(context, output, 2); });
         }
 
         const getDevice = async () => {
@@ -217,10 +219,11 @@
             return await adapter.requestDevice({
                 requiredFeatures: ["shader-f16"],
                 powerPreference: "high-performance"
-		    });
+            });
         };
 
         const final = transcribeAudio();
     </script>
 </body>
+
 </html>
