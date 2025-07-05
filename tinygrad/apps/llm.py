@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys, argparse
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 
@@ -106,8 +107,20 @@ class Transformer:
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
+    self.max_context = max_context
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed
     self.forward_jit = TinyJit(self.forward)
+
+  @staticmethod
+  def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:
+    # TODO: remove the need for copy to default device
+    kv, state_dict = nn.state.gguf_load(gguf.to(None))
+    max_context = min(max_context, kv['llama.context_length']) if max_context is not None else kv['llama.context_length']
+    model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
+                        n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
+                        norm_eps=kv['llama.attention.layer_norm_rms_epsilon'], vocab_size=kv['llama.vocab_size'], max_context=max_context)
+    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    return model, kv
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
@@ -130,28 +143,17 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   # load the model
-  kv, state_dict = nn.state.gguf_load(Tensor.from_url(models[args.size]).to(None))
-
-  # convert to float16
-  # TODO: it should stay the quantized type
-  #state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]))
 
   # extract some metadata
-  max_context: int = min(args.max_context, kv['llama.context_length'])
   tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
   eos_id: int = tok.token_to_id["<|end_of_text|>"]
   eot_id: int = tok.token_to_id["<|eot_id|>"]
 
-  # create the model and load in the weights
-  model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
-                      n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
-                      norm_eps=kv['llama.attention.layer_norm_rms_epsilon'], vocab_size=kv['llama.vocab_size'], max_context=max_context)
-  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-
   ids: list[int] = tok.encode("<|begin_of_text|>")
-  v_start_pos = UOp.variable("start_pos", 1, max_context-1)
+  v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
   start_pos = 0
-  while len(ids) < max_context:
+  while len(ids) < model.max_context:
     # if we are at the start of a stream or end of turn, we fetch something from the user. this is the prompt
     if start_pos == 0 or ids[start_pos] == eot_id:
       ids += [t for x in [
@@ -160,7 +162,7 @@ if __name__ == "__main__":
 
     # run the model
     tokens = Tensor([ids[start_pos:]], dtype="int32")
-    next_id = model(tokens, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and tokens.shape[-1] == 1 else start_pos).item()
+    next_id = int(model(tokens, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and tokens.shape[-1] == 1 else start_pos).item())
 
     # add the new id, and update the start_pos
     ids.append(next_id)
