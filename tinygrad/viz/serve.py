@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, TracingKey, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.renderer import ProgramSpec
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
@@ -114,9 +114,12 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    name = e.name
+    name, cat = e.name, None
     if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth})
+    elif isinstance(e.name, TracingKey):
+      name, cat = e.name.display_name, e.name.cat
+      ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:

@@ -108,7 +108,8 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+const devColors = {"TINY":["#1B5745", "#1D2E62"],
+                   "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -141,12 +142,14 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
-     if (!nameMap.has(e.name)) {
-       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-     }
-     // offset y by depth
-     data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, ...nameMap.get(e.name) });
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const colorKey = e.cat ?? e.name;
+      if (!nameMap.has(colorKey)) {
+        const colors = devColors[k] ?? devColors.DEFAULT;
+        nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
+      }
+      // offset y by depth
+      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, ...nameMap.get(colorKey) });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;

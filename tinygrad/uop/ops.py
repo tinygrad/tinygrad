@@ -767,6 +767,13 @@ class TrackedGraphRewrite:
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
+
+@dataclass(frozen=True)
+class TracingKey:
+  display_name:str        # display name of this trace event
+  keys:tuple[str, ...]=() # optional keys to search for related traces
+  cat:str|None=None       # optional category to color this by
+
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
@@ -784,10 +791,15 @@ def track_rewrites(name:Callable|bool=True):
       if TRACK_MATCH_STATS >= 2:
         tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
         tracked_ctxs.append([])
-      ret = func(*args, **kwargs)
+      # late import!
+      from tinygrad.device import cpu_profile
+      with cpu_profile(func.__name__, "TINY") as e:
+        ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
-        tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
+        tracked_keys[-1] = key = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
+        if isinstance(key, str): e.name = TracingKey(key, (key,), func.__name__)
+        else: e.name = TracingKey(f"{func.__name__} for {name_ret.name}", (name_ret.name,), func.__name__)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
