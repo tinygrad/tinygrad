@@ -790,8 +790,9 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
 def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
+      fn = key = func.__name__
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(key:=TracingKey(n:=(fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
+        tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
       # late import!
       from tinygrad.device import cpu_profile
@@ -801,7 +802,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         name_ret = name(*args, **kwargs, ret=ret)
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
-        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{func.__name__} for {k.display_name}", k.keys, cat=func.__name__)
+        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
@@ -809,7 +810,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
         with Context(PICKLE_BUFFERS=0):
-          inputs = (func.__name__, args, kwargs, ContextVar._cache)
+          inputs = (fn, args, kwargs, ContextVar._cache)
           replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
       return ret
     return __wrapper
