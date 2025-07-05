@@ -767,15 +767,16 @@ class TrackedGraphRewrite:
   name: str|None                                                                             # optional name of the rewrite
   depth: int                                                                                 # depth if it's a subrewrite
   bottom_up: bool
-tracked_keys:list[Any] = []
-tracked_ctxs:list[list[TrackedGraphRewrite]] = []
-_name_cnt:dict[str, itertools.count] = {}
 
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str  # display name of this trace event
   key:str|None=None # optional key to search for related traces
   cat:str|None=None # optional category to color this by
+
+tracked_keys:list[Any] = []
+tracked_ctxs:list[list[TrackedGraphRewrite]] = []
+_name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
   replay_capture: dict[str, bytes] = {}
