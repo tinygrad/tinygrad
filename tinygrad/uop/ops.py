@@ -772,6 +772,7 @@ class TrackedGraphRewrite:
 class TracingKey:
   display_name:str        # display name of this trace event
   keys:tuple[str, ...]=() # optional keys to search for related traces
+  fmt:str|None=None       # optional detailed formatting
   cat:str|None=None       # optional category to color this by
 
 tracked_keys:list[Any] = []
@@ -785,11 +786,11 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable|bool=True):
+def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
+        tracked_keys.append(TracingKey((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", cat=fn))
         tracked_ctxs.append([])
       # late import!
       from tinygrad.device import cpu_profile
@@ -797,9 +798,9 @@ def track_rewrites(name:Callable|bool=True):
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
-        tracked_keys[-1] = key = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
-        if isinstance(key, str): e.name = TracingKey(key, (key,), func.__name__)
-        else: e.name = TracingKey(f"{func.__name__} for {name_ret.name}", (name_ret.name,), func.__name__)
+        assert isinstance(name_ret, TracingKey) or isinstance(name_ret, str)
+        tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
+        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{func.__name__} for {k.display_name}", k.keys, cat=func.__name__)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
