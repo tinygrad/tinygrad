@@ -186,8 +186,15 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Remove NVIDIA modules
-      run: sudo rmmod nvidia_drm nvidia_modeset nvidia_uvm nvidia || true
+    - name: Insert NVIDIA modules
+      run: |
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:01:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:42:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:81:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:82:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:c1:00.0/reset
+        echo 1 | sudo tee /sys/bus/pci/devices/0000:c2:00.0/reset
+        nvidia-smi
     - name: Run model inference benchmark
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -213,6 +220,8 @@ jobs:
       run: DEBUG=2 NV=1 python -m pytest -rA test/test_tiny.py
     - name: Test CUDA=1
       run: DEBUG=2 CUDA=1 python -m pytest -rA test/test_tiny.py
+    - name: Remove NVIDIA modules
+      run: sudo rmmod nvidia_drm nvidia_modeset nvidia_uvm nvidia || true
     - name: Run Stable Diffusion
       run: BENCHMARK_LOG=stable_diffusion NV=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -280,7 +289,7 @@ jobs:
         echo 1 | sudo tee /sys/bus/pci/devices/0000:82:00.0/reset
         echo 1 | sudo tee /sys/bus/pci/devices/0000:c1:00.0/reset
         echo 1 | sudo tee /sys/bus/pci/devices/0000:c2:00.0/reset
-        sudo modprobe nvidia_drm nvidia_modeset nvidia_uvm nvidia
+        nvidia-smi
 
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
@@ -363,7 +372,7 @@ jobs:
         echo 1 | sudo tee /sys/bus/pci/devices/0000:82:00.0/reset
         echo 1 | sudo tee /sys/bus/pci/devices/0000:c1:00.0/reset
         echo 1 | sudo tee /sys/bus/pci/devices/0000:c2:00.0/reset
-        sudo modprobe nvidia_drm nvidia_modeset nvidia_uvm nvidia
+        nvidia-smi
 
   testamdbenchmark:
     name: tinybox red Benchmark
