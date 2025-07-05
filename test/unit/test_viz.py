@@ -111,7 +111,7 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
-    self.assertEqual(lst[0]["kernel_code"], "input=(a+1)")
+    self.assertEqual(lst[0]["fmt"], "input=(a+1)")
 
   def test_colored_label(self):
     # NOTE: dataclass repr prints literal escape codes instead of unicode chars
