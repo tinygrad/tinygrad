@@ -770,9 +770,9 @@ class TrackedGraphRewrite:
 
 @dataclass(frozen=True)
 class TracingKey:
-  display_name:str  # display name of this trace event
-  key:str|None=None # optional key to search for related traces
-  cat:str|None=None # optional category to color this by
+  display_name:str        # display name of this trace event
+  key:str|None=None       # optional key to search for related traces
+  cat:str|None=None       # optional category to color this by
 
 tracked_keys:list[Any] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
