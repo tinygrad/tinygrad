@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
-from tinygrad.opt import get_optimized_ast
+from tinygrad.opt import get_optimized_ast_2
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.spec import type_verify
 
@@ -27,7 +27,9 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
+  #modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
+  modified_ast = get_optimized_ast_2(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
+  #modified_ast = ast.replace(arg=KernelInfo(name="test"))
   if __debug__: type_verify(list(modified_ast.toposort()))
 
   # linearize
