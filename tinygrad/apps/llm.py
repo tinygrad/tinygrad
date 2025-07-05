@@ -1,4 +1,4 @@
-import sys
+import sys, argparse
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 
 class SimpleLlamaTokenizer:
@@ -73,14 +73,15 @@ class TransformerBlock:
 
     if self.max_context:
       if not hasattr(self, "cache_kv"):
-        self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=x.dtype).contiguous().realize()
+        self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
       self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v)).realize()
       k = self.cache_kv[0, :, :, 0:start_pos+T, :]
       v = self.cache_kv[1, :, :, 0:start_pos+T, :]
     else:
       assert start_pos == 0
 
-    if self.n_heads != self.n_kv_heads:               # MQA replication
+    # TODO: add enable_gqa to scaled_dot_product_attention matching torch
+    if self.n_heads != self.n_kv_heads:
       rep = self.n_heads // self.n_kv_heads
       k = k.repeat_interleave(rep, dim=1)
       v = v.repeat_interleave(rep, dim=1)
@@ -105,7 +106,7 @@ class Transformer:
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
-    # JIT is used if T=1 and start_pos is a UOp
+    # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed
     self.forward_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
@@ -116,36 +117,56 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
+models = {
+  "1B": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
+  "3B": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
+  "7B": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-f16.gguf"
+}
+
 if __name__ == "__main__":
-  gguf_tensor = Tensor.from_url("https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf")
-  kv, state_dict = nn.state.gguf_load(gguf_tensor.to(None))
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
+  parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  args = parser.parse_args()
 
+  # load the model
+  kv, state_dict = nn.state.gguf_load(Tensor.from_url(models[args.size]).to(None))
+
+  # convert to float16
+  # TODO: it should stay the quantized type
+  #state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+
+  # extract some metadata
+  max_context: int = min(args.max_context, kv['llama.context_length'])
   tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
-  max_context: int = kv['llama.context_length']
-
-  bos_id: int = tok.token_to_id["<|begin_of_text|>"]
   eos_id: int = tok.token_to_id["<|end_of_text|>"]
   eot_id: int = tok.token_to_id["<|eot_id|>"]
 
+  # create the model and load in the weights
   model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
                       n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
                       norm_eps=kv['llama.attention.layer_norm_rms_epsilon'], vocab_size=kv['llama.vocab_size'], max_context=max_context)
-  # NOTE: rope_freqs.weight (32,) is unused?
-  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)
+  nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
 
-  ids: list[int] = [bos_id]
+  ids: list[int] = tok.encode("<|begin_of_text|>")
   v_start_pos = UOp.variable("start_pos", 1, max_context-1)
   start_pos = 0
   while len(ids) < max_context:
-    if ids[start_pos] in [bos_id, eot_id]:
-      # if we are at the start of a stream or end of turn, we fetch something from the user. this is the prompt
+    # if we are at the start of a stream or end of turn, we fetch something from the user. this is the prompt
+    if start_pos == 0 or ids[start_pos] == eot_id:
       ids += [t for x in [
-        "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n", f"{input(">>> ")}\n", "<|eot_id|>",
+        "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n", f"{input('>>> ')}\n", "<|eot_id|>",
         "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"] for t in tok.encode(x)]
+
+    # run the model
     tokens = Tensor([ids[start_pos:]], dtype="int32")
     next_id = model(tokens, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and tokens.shape[-1] == 1 else start_pos).item()
+
+    # add the new id, and update the start_pos
     ids.append(next_id)
     start_pos = len(ids) - 1
     if next_id == eos_id: break
+
+    # write to stdout
     sys.stdout.write(tok.decode([next_id]) if next_id != eot_id else "\n\n")
     sys.stdout.flush()
