@@ -302,6 +302,7 @@ async function renderProfiler() {
 
   const tooltip = document.body.appendChild(document.createElement("div"));
   tooltip.id = "tooltip";
+  tooltip.classList.add("wrap");
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.tooltipText != null) {
