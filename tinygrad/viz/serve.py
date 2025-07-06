@@ -92,6 +92,37 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
     if not ctx.bottom_up: next_sink = new_sink
 
+# map Ops.UNIQUE to locations in viz
+kmap:dict[int, dict] = {}
+revmap:dict[UOp, int] = {}
+def build_kmap():
+  for i,c in enumerate(ctxs):
+    if not c["name"].startswith("Schedule"): continue
+    # *** 1. map all buffers to kernels in the large graph
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "create_ast":
+        kernel_graph = _reconstruct(contexts[1][i][j].sink)
+        for u in kernel_graph.toposort():
+          if u.op is Ops.ASSIGN:
+            kernel = u.src[1]
+            unique = u.src[0].src[0].arg
+            kmap[unique] = {"metadata":str(kernel.arg.metadata), "ref":[]}
+            revmap.setdefault(kernel.arg.ast, []).append(unique)
+    # *** 2. find asts (small graphs)
+    for j,step in enumerate(c["steps"]):
+      if step["name"] == "replace globals":
+        uop = _reconstruct(contexts[1][i][j].sink)
+        for buf in revmap.get(uop, []):
+          kmap[buf]["ref"].append((i, j+1))
+      # *** 3. find children (small asts)
+      if step["name"] == "replace buffer":
+        uop = _reconstruct(contexts[1][i][j].sink)
+        for u in uop.toposort():
+          if u.op is Ops.BUFFER: kmap.setdefault(buf, {"ref":[], "metadata":None})["ref"].append((i, j))
+def get_buffer_refs(unique:int) -> dict:
+  if not kmap: build_kmap()
+  return kmap.get(unique, {"re":[], "metadata":None})
+
 # Profiler API
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
@@ -128,6 +159,8 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
+      if (uop_ref:=e.arg.get("uop_ref")):
+        for k,v in get_buffer_refs(uop_ref).items(): e.arg[k] = v
       shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
       step += 1

@@ -198,7 +198,8 @@ async function renderProfiler() {
         ctx.fill();
         let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
         if (e.arg.uop_ref != null) tooltipText += `\nUOp=${e.arg.uop_ref}`;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        if ((e.arg.metadata != null) && (e.arg.metadata !== "()")) tooltipText += `\n${e.arg.metadata}`;
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, ref:e.arg.ref });
         continue;
       }
       // zoom only changes x and width
@@ -294,6 +295,7 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    console.log(foundRect);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
   });
 
@@ -405,10 +407,15 @@ function setState(ns) {
 // set a new context and keep the old one in browser history
 function setCtxWithHistory(newCtx) {
   if (newCtx == null) return;
+  let currentStep = 0;
+  if (Array.isArray(newCtx)) {
+    currentStep = newCtx[0][1];
+    newCtx = newCtx[0][0];
+  }
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
