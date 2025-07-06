@@ -10,7 +10,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="http://127.0.0.1:35729/livereload.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -118,7 +117,6 @@
     width: 100%;
     height: 100%;
     padding-top: 50px;
-    position: relative;
   }
   .ctx-list-parent {
     width: 15%;
@@ -168,7 +166,6 @@
     padding: 6px;
     cursor: pointer;
     height: 32px;
-    min-width: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -177,10 +174,6 @@
   .btn:hover {
     background-color: #2a2b36;
     border-color: #5a5b66;
-  }
-  .disabled {
-    opacity: 0.4;
-    pointer-events: none;
   }
   .collapsed .container {
     display: none;
@@ -232,54 +225,13 @@
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
   }
-  #floating {
-    position: fixed;
-    top: 10px;
-    right: 20px;
-    z-index: 4;
-    display: flex;
-    align-items: center;
-    background-color: #1a1b26;
-    padding: 4px 8px;
-    border-radius: 8px;
-    display: none;
-  }
-  #floating > .btn {
-    border: none;
-  }
-  #floating > p {
-    margin-right: 12px;
-  }
-  .forward-btn > svg {
-    transform: rotate(180deg);
-  }
   </style>
 </head>
 <body>
-  <svg style="display: none;">
-    <symbol id="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M15 19l-7-7 7-7" />
-    </symbol>
-    <symbol id="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M18 6L6 18M6 6l12 12" />
-    </symbol>
-  </svg>
-  <div id="floating">
-    <p></p>
-    <button class="btn back-btn">
-      <svg width="20" height="20"><use href="#arrow"/></svg>
-    </button>
-    <button class="btn forward-btn">
-      <svg width="20" height="20"><use href="#arrow"/></svg>
-    </button>
-    <button class="btn x-btn">
-      <svg width="20" height="20"><use href="#x"/></svg>
-    </button>
-  </div>
   <div class="main-container">
     <div class="floating-container">
       <button class="btn collapse-btn">
-        <svg width="20" height="20"><use href="#arrow"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"><path d="M15 19l-7-7 7-7"/></svg>
       </button>
       <button class="btn" id="zoom-to-fit-btn" aria-label="Fit graph">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="20">

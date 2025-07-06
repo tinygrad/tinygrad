@@ -108,49 +108,19 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+const devColors = {"TINY":["#1B5745", "#1D2E62"],
+                   "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-var currRef = 0;
-var fetchedRefs = null;
-var currMetadata = null;
-const floating = document.getElementById("floating");
-floating.querySelector(".x-btn").addEventListener("click", () => {
-  currRef = 0;
-  floating.style.display = "none";
-});
-const bw = floating.querySelector(".back-btn");
-const fw = floating.querySelector(".forward-btn");
-bw.addEventListener("click", () => setRef(currRef-1));
-fw.addEventListener("click", () => setRef(currRef+1));
-function setRef(newRef) {
-  if (newRef > fetchedRefs.length-1) newRef = fetchedRefs.length-1;
-  if (newRef < 0) newRef = 0;
-  fw.classList.remove("disabled");
-  bw.classList.remove("disabled");
-  if (newRef == 0) bw.classList.add("disabled");
-  if (newRef == fetchedRefs.length-1) fw.classList.add("disabled");
-  currRef = newRef;
-  floating.querySelector("p").innerText = `${currRef+1}/${fetchedRefs.length}`;
-  const [i, j] = fetchedRefs[newRef];
-  setCtxWithHistory(i+1, j, { currentCtx:0, currentStep:0 });
-}
-
-var profileRet, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
-  if (profileRet == null) {
-    profileRet = await (await fetch("/get_profile")).json()
-    // default focus on first device?
-    // focusedDevice = Object.keys(profileRet.layout)[0];
-  }
+  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
-  const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name ?? c.name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
@@ -172,35 +142,14 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
-      let kernel = kernelMap.get(e.name);
-      let name = kernel?.name ?? e.name;
-      if (k === "TINY") {
-        name = e.name;
-        for (const [k,v] of kernelMap) {
-          if (v.name == e.name.split("for ")[1]) {
-            kernel = v
-            break;
-          }
-        }
-      }
-      let colorKey = e.name;
-      if (k === "TINY") colorKey = e.name.split(" ")[0];
-      // first split by colors
-      let parts = parseColors(name);
-      // if it's only one color, split by whitespace
-      if (parts.length == 1) {
-        const { st, color } = parts[0];
-        parts = st.split(" ").map((s,i) => ({ st:(i === 0 ? "" : " ")+s, color }));
-      }
-      const label = parts.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const colorKey = e.cat ?? e.name;
       if (!nameMap.has(colorKey)) {
-        let colorsList = colors;
-        if (k === "TINY") colorsList = ["#1B5745", "#1D2E62"];
-        let fillColor = colorsList[i%colors.length];
-        nameMap.set(colorKey, { fillColor });
+        const colors = devColors[k] ?? devColors.DEFAULT;
+        nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
       }
       // offset y by depth
-      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(colorKey), label });
+      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, ...nameMap.get(colorKey) });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -215,8 +164,7 @@ async function renderProfiler() {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      const color = bufColors[i%bufColors.length];
-      data.shapes.push({ x, y1, y2, arg:e.arg, color, key:i });
+      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -246,19 +194,11 @@ async function renderProfiler() {
         for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
         for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
         ctx.closePath();
-        ctx.fillStyle = e.key === focusedShape ? "#D6409F" : e.color;
+        ctx.fillStyle = e.color;
         ctx.fill();
-        let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`;
-        if (e.arg.uop_ref != null) {
-          tooltipText += ` ${e.arg.uop_ref}`
-        }
-        if (e.arg.metadata != null && e.arg.metadata !== "()") {
-          tooltipText += `\n${e.arg.metadata}`
-        }
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, key:e.key, arg:e.arg });
-        // ctx.strokeStyle = e.key === focusedShape ? "white" : "transparent";
-        // ctx.lineWidth = 1;
-        // ctx.stroke();
+        let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
+        if (e.arg.uop_ref != null) tooltipText += `\nUOp=${e.arg.uop_ref}`;
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
         continue;
       }
       // zoom only changes x and width
@@ -266,7 +206,7 @@ async function renderProfiler() {
       const width = xscale(e.x+e.dur)-x;
       ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
       // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -351,16 +291,10 @@ async function renderProfiler() {
     }
   }
 
-  canvas.addEventListener("click", async (e) => {
+  canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
-    if (foundRect?.arg?.uop_ref != null) {
-      fetchedRefs = foundRect.arg.found;
-      if (!(fetchedRefs.length)) return;
-      floating.style.display = "flex";
-      setRef(currRef);
-    }
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
@@ -372,19 +306,9 @@ async function renderProfiler() {
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
       tooltip.innerText = foundRect.tooltipText;
-      if (foundRect.key != null) {
-        focusedShape = foundRect.key;
-        return render();
-      }
-    } else {
-      tooltip.style.display = "none";
-      focusedShape = null;
-    }
+    } else tooltip.style.display = "none";
   });
-  canvas.addEventListener("mouseleave", () => {
-    tooltip.style.display = "none";
-    focusedShape = null;
-  });
+  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
 }
 
 // ** zoom and recentering
@@ -479,19 +403,16 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx, newStep=0, prevState=null) {
+function setCtxWithHistory(newCtx) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
-  const backState = prevState != null ? prevState : state;
-  history.replaceState(backState, "");
-  history.pushState(backState, "");
-  setState({ expandSteps:true, currentCtx:newCtx, currentStep:newStep, currentRewrite:0 });
+  history.replaceState(state, "");
+  history.pushState(state, "");
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:0, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
-  currRef = 0;
-  floating.style.display = "none";
 });
 
 async function main() {
@@ -519,7 +440,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -558,7 +479,7 @@ async function main() {
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {
