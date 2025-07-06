@@ -215,7 +215,7 @@ class AsmRenderer(Renderer):
           # if var first use in range is a load we don't need to reload
           if live_at_range:
             rng, rng_live = list(live_at_range.items())[-1]
-            if s in rng_live and not (self.is_reg(loc[s]) or any(s in self.srcs(x) for x in uops[live_range[rng][0]:i-1])): rng_live.pop(s)
+            if s in rng_live and not (self.is_reg(loc[s]) or any(live_range[rng][0] < l < i for l in live_range[s])): rng_live.pop(s)
           loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
       # TODO: need to ignore noop and assign here
