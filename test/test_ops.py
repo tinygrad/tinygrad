@@ -3061,15 +3061,16 @@ class TestOps(unittest.TestCase):
   def test_svd(self):
     # test for tiny backend. real svd tests are in test_linalg
     A = torch.randn(5, 5)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=True)
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    U, S, Vh = torch.linalg.svd(A)
+    np.testing.assert_equal(U.shape, (5,5))
+    np.testing.assert_equal(Vh.shape, (5,5))
     np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
 
-    # # TODO: this works with torch, but not TINY_BACKEND. U has a wrong shape
-    # A = torch.randn(5, 3)
-    # U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    # np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+    A = torch.randn(5, 3)
+    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    np.testing.assert_equal(U.shape, (5,3))
+    np.testing.assert_equal(Vh.shape, (3,3))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
