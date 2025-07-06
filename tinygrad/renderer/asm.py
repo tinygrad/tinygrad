@@ -145,18 +145,18 @@ class AsmRenderer(Renderer):
     spill_place: dict[UOp, UOp] = {}
     self.stack_size: int = 0
     inst_map: dict[UOp, list[str]] = {}
-    # live ranges, first pass updates start of range
+    # live ranges, first pass builds ranges
     live_range: dict[UOp, list[int]] = {}
     for i,u in enumerate(uops):
-      # void dtypes don't hold values, consts aren't instructions, noop and assign use location of src[0]
-      u = self.bypass(u)
-      if u.dtype != dtypes.void and u.op != Ops.CONST: live_range[u] = [i, i]
+      if u.dtype != dtypes.void and u.op not in (Ops.CONST, Ops.NOOP, Ops.ASSIGN): live_range[u] = [i]
+      for v in set(self.srcs(u)):
+        if v in live_range: live_range[v].append(i)
     # second pass updates end of range, a var defined before a range and used inside it is needed for the whole range
     ranges: list[UOp] = []
     for i,u in enumerate(reversed(uops)):
       for s in (s for s in self.srcs(u) if s in live_range):
-        end = next((live_range[rng][1] for rng in ranges if live_range[s][0] < live_range[rng][0]), len(uops)-i-1)
-        live_range[s][1] = max(live_range[s][1], end)
+        end = next((live_range[rng][-1] for rng in ranges if live_range[s][0] < live_range[rng][0]), len(uops)-i-1)
+        if end > live_range[s][-1]: live_range[s].append(end)
       if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
       if u.op is Ops.RANGE: ranges.pop()
 
@@ -166,8 +166,7 @@ class AsmRenderer(Renderer):
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
       # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
       # this prioritizes vars defined outside loops
-      spilled = max([k for k,v in live.items() if v in cons],
-                    key=lambda k: next((j for j,u in enumerate(uops[i:live_range[k][1]]) if k in self.srcs(u)), live_range[k][1]-i))
+      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j in live_range[k] if j >= i), live_range[k][-1]-i))
       if spilled not in mem:
         offset = self.stack_size + (spilled.dtype.itemsize - self.stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
         self.stack_size = offset + spilled.dtype.itemsize
@@ -203,7 +202,7 @@ class AsmRenderer(Renderer):
         continue
       if u.op in (Ops.NOOP, Ops.CONST): continue
       # free dead registers
-      for v in [v for v in live if live_range[v][1] < i]: reg_class(v).insert(0, live.pop(v))
+      for v in [v for v in live if live_range[v][-1] < i]: reg_class(v).insert(0, live.pop(v))
       # reload necessary vars
       if u.op is Ops.ENDRANGE:
         for k,v in live_at_range.pop(u.src[0], {}).items():
@@ -228,7 +227,7 @@ class AsmRenderer(Renderer):
           if u.op is Ops.WHERE and s is not u.src[1]: continue
           if u.op is Ops.MULACC and s is not u.src[0]: continue
           if u.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and u.dtype in dtypes.ints + (dtypes.bool,) and s is not u.src[0]: continue
-        if s in live and live_range[s][1] == i: reg_class(s).insert(0, live.pop(s))
+        if s in live and live_range[s][-1] == i: reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
       if u.op not in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
