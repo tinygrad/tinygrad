@@ -889,9 +889,7 @@ class Tensor(MathTrait):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    r = Tensor.rand(n, device=device, **kwargs)
-    _, indices = r.sort()
-    return indices.cast(dtype)
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
@@ -2829,6 +2827,17 @@ class Tensor(MathTrait):
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
+
+  def argsort(self, dim:int=-1, descending:bool=False) -> Tensor:
+    """
+    Returns the indices that sort input tensor along given `dimension` in given `descending` order by value.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[2, 3, 4, 1], [1, 4, 3, 2]])
+    print(t.argsort().numpy())
+    ```
+    """
+    return self.sort(dim, descending)[1]
 
   def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
     """
