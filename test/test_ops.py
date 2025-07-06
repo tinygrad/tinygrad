@@ -1924,6 +1924,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(3, (3, 2)))
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(-1, (3, 2, 1)))
 
+  def test_diag(self):
+    helper_test_op([(5,)], lambda x: x.diag())
+
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: torch.roll(x, -1, 0), lambda x: x.roll(-1, 0))
