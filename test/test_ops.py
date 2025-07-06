@@ -1104,6 +1104,12 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
                    lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
 
+  def test_argsort(self):
+    for dim in [-1, 0, 1]:
+      for descending in [True, False]:
+        helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=dim, descending=descending, stable=True).type(torch.int32),
+                                  lambda x: x.argsort(dim, descending), forward_only=True)
+
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
     helper_test_op([(10)], lambda x: x.topk(3).indices.type(torch.int32), lambda x: x.topk(3)[1], forward_only=True)
