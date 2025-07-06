@@ -353,7 +353,7 @@ def sort_values(input, dim=-1, descending=False, stable=True, values=None, indic
   return wrap(out_values), wrap(out_indices)
 
 @torch.library.impl("aten::_linalg_svd", "privateuseone")
-def _linalg_svd(self, full_matrices=True):
+def _linalg_svd(self, full_matrices=False):
   U, S, Vh = unwrap(self).svd(full_matrices)
   return wrap(U), wrap(S), wrap(Vh)
 
