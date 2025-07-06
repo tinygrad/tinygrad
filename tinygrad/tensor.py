@@ -661,7 +661,7 @@ class Tensor(MathTrait):
     ```
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    x = Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)
+    x = Tensor.ones(n, **kwargs).diag()
     return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
@@ -1557,6 +1557,17 @@ class Tensor(MathTrait):
     """
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
+
+  def diag(self) -> Tensor:
+    """
+    Returns a 2-D square tensor with the elements of input as the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 2, 3]).diag().numpy())
+    ```
+    """
+    if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
+    return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]) -> Tensor:
     """

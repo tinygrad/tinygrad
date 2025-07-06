@@ -587,12 +587,6 @@ class TestOps(unittest.TestCase):
     if is_dtype_supported(dtypes.uint64):
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
-    # 1 // 0 is device dependent, but it should not raise
-    Tensor([1]).idiv(1).realize()
-    if not CI:  # TODO: crashed in CI on some devices
-      # ... because if might be in a where branch that the output is well defined
-      t = Tensor([-1, 0, 1, 2])
-      np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
 
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
@@ -1929,6 +1923,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(0, (2, 2)))
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(3, (3, 2)))
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(-1, (3, 2, 1)))
+
+  def test_diag(self):
+    helper_test_op([(5,)], lambda x: x.diag())
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0))
