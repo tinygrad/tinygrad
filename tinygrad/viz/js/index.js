@@ -112,7 +112,8 @@ const devColors = {"TINY":["#1B5745", "#1D2E62"],
                    "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+focusedDevice = "NULL";
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -164,7 +165,7 @@ async function renderProfiler() {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
       const y1 = e.y.map(yscale);
       const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length], key:`${k}-${i}`, });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -194,12 +195,12 @@ async function renderProfiler() {
         for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
         for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
         ctx.closePath();
-        ctx.fillStyle = e.color;
+        ctx.fillStyle = (focusedShape != null && e.key === focusedShape) ? "red" : e.color;
         ctx.fill();
         let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
         if (e.arg.uop_ref != null) tooltipText += `\nUOp=${e.arg.uop_ref}`;
         if ((e.arg.metadata != null) && (e.arg.metadata !== "()")) tooltipText += `\n${e.arg.metadata}`;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, ref:e.arg.ref });
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, ref:e.arg.ref, key:e.key });
         continue;
       }
       // zoom only changes x and width
@@ -295,7 +296,6 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    console.log(foundRect);
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
   });
 
@@ -308,7 +308,14 @@ async function renderProfiler() {
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
       tooltip.innerText = foundRect.tooltipText;
-    } else tooltip.style.display = "none";
+      if (foundRect.key != null) {
+        focusedShape = foundRect.key;
+        render(zoomLevel);
+      }
+    } else {
+      tooltip.style.display = "none";
+      focusedShape = null;
+    }
   });
   canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
 }
@@ -447,7 +454,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
