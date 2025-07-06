@@ -468,6 +468,12 @@ class PCIIface(PCIIfaceBase):
     # Setup classes for the GPU
     self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
 
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
+    # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
+    page_size = (2 << 20) if size >= (8 << 20) and not uncached and not host else (4 << 10)
+    return super().alloc(round_up(size, page_size), host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, **kwargs)
+
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
