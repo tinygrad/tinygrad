@@ -4,8 +4,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.renderer import ProgramSpec
+from tinygrad.uop.ops import TrackedGraphRewrite, TracingKey, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
@@ -21,12 +20,13 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # ** Metadata for a track_rewrites scope
 
-def get_metadata(keys:list[Any], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
+ref_map:dict[Any, int] = {}
+def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
-  for k,v in zip(keys, contexts):
+  for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    if isinstance(k, ProgramSpec): ret.append({"name":k.name, "kernel_code":k.src, "ref":id(k.ast), "function_name":k.function_name, "steps":steps})
-    else: ret.append({"name":str(k), "steps":steps})
+    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    for key in k.keys: ref_map[key] = i
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call
@@ -68,10 +68,11 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
     except Exception:
       label += "\n<ISSUE GETTING SHAPE>"
+    if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":id(u.arg.ast) if u.op is Ops.KERNEL else None, "tag":u.tag}
+                    "ref":ref, "tag":u.tag}
   return graph
 
 @functools.cache
@@ -111,7 +112,12 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    shapes.append({"name":e.name, "st":st, "dur":dur, "depth":depth})
+    name, cat = e.name, None
+    if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
+    elif isinstance(e.name, TracingKey):
+      name, cat = e.name.display_name, e.name.cat
+      ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
