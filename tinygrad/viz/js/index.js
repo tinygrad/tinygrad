@@ -305,9 +305,11 @@ async function renderProfiler() {
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.tooltipText != null) {
+      const rectHeight = (foundRect.y1-foundRect.y0);
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
-      tooltip.style.top = (e.pageY)+"px";
+      // offset by rect height
+      tooltip.style.top = (e.pageY+rectHeight+10)+"px";
       tooltip.innerText = foundRect.tooltipText;
       if (foundRect.key != null) {
         focusedShape = foundRect.key;
