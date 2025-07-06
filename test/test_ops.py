@@ -3061,7 +3061,9 @@ class TestOps(unittest.TestCase):
   def test_svd(self):
     # test for tiny backend. real svd tests are in test_linalg
     A = torch.randn(5, 5)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=True)
+    U, S, Vh = torch.linalg.svd(A)
+    np.testing.assert_equal(U.shape, (5,5))
+    np.testing.assert_equal(Vh.shape, (5,5))
     np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
 
     A = torch.randn(5, 3)
