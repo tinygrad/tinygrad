@@ -200,6 +200,7 @@ async function renderProfiler() {
         let tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
         if (e.arg.uop_ref != null) tooltipText += `\nUOp=${e.arg.uop_ref}`;
         if ((e.arg.metadata != null) && (e.arg.metadata !== "()")) tooltipText += `\n${e.arg.metadata}`;
+        tooltipText += `\nAlive for ${formatTime(e.arg.alive_for)}`
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText, ref:e.arg.ref, key:e.key });
         continue;
       }

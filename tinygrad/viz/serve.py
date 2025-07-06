@@ -161,7 +161,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     if e.name == "alloc":
       if (uop_ref:=e.arg.get("uop_ref")):
         for k,v in get_buffer_refs(uop_ref).items(): e.arg[k] = v
-      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg, "st":int(e.st)}
       timestamps.append(int(e.st))
       step += 1
       mem += e.arg["nbytes"]
@@ -170,6 +170,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
       timestamps.append(int(e.st))
       step += 1
       mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
+      removed["arg"]["alive_for"] = float(e.st-decimal.Decimal(removed["st"]))
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
