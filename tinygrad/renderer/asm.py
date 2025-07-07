@@ -205,9 +205,8 @@ class AsmRenderer(Renderer):
       for v in [v for v in live if live_range[v][-1] < i]: reg_class(v).insert(0, live.pop(v))
       # reload necessary vars
       if u.op is Ops.ENDRANGE:
-        lrng = live_at_range.pop(u.src[0], {})
-        for k,v in lrng.items():
-          if loc[k] != v: loc[k] = alloc(k, [v])
+        for k,reg in live_at_range.pop(u.src[0], {}).items():
+          if loc[k] != reg: loc[k] = alloc(k, [reg])
       # assign srcs, ignore srcs without live ranges
       src = tuple(s for s in self.srcs(u) if s in live_range)
       for s in src:
