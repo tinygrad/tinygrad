@@ -482,6 +482,8 @@ class PCIIface(PCIIfaceBase):
     res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
     return type(params).from_buffer_copy(res) if params is not None else None
 
+  def device_fini(self): self.dev_impl.fini()
+
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
