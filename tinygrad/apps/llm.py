@@ -128,10 +128,11 @@ class Transformer:
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
-    v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
+    v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
     start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
-    while len(tokens) < model.max_context:
+    self.forward_jit.reset()  # TODO: why is this required?
+    while len(tokens) < self.max_context:
       t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
       next_id = int(t.item())
       tokens.append(next_id)
