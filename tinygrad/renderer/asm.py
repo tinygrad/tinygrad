@@ -172,7 +172,7 @@ class AsmRenderer(Renderer):
         self.stack_size = offset + spilled.dtype.itemsize
         mem[spilled] = self.render_mem(offset)
         inst = spill_place.get(spilled, spilled)
-        inst_map[inst].append(self.string_rewrite.rewrite(spilled.store(), ctx=self))
+        inst_map[inst].append(cast(str, self.string_rewrite.rewrite(spilled.store(), ctx=self)))
       loc[spilled] = mem[spilled]
       return live.pop(spilled)
 
@@ -190,7 +190,7 @@ class AsmRenderer(Renderer):
         if self.is_reg(loc[x]): spill_place[x] = u
         move = UOp(Ops.COPY, x.dtype, (x,)) if self.is_reg(self.r[x]) else x.load()
         loc[move] = ret
-        inst_map[u].append(self.string_rewrite.rewrite(move, ctx=self))
+        inst_map[u].append(cast(str, self.string_rewrite.rewrite(move, ctx=self)))
       if ret in self.callee_saved and ret not in callee_saved: callee_saved.append(ret)
       return ret
 
@@ -205,7 +205,8 @@ class AsmRenderer(Renderer):
       for v in [v for v in live if live_range[v][-1] < i]: reg_class(v).insert(0, live.pop(v))
       # reload necessary vars
       if u.op is Ops.ENDRANGE:
-        for k,v in live_at_range.pop(u.src[0], {}).items():
+        lrng = live_at_range.pop(u.src[0], {})
+        for k,v in lrng.items():
           if loc[k] != v: loc[k] = alloc(k, [v])
       # assign srcs, ignore srcs without live ranges
       src = tuple(s for s in self.srcs(u) if s in live_range)
