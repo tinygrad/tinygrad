@@ -1933,6 +1933,9 @@ class TestOps(unittest.TestCase):
   def test_diag(self):
     helper_test_op([(5,)], lambda x: x.diag())
 
+  def test_diagonal(self):
+    helper_test_op([(5,5)], lambda x: x.diagonal())
+
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: torch.roll(x, -1, 0), lambda x: x.roll(-1, 0))
