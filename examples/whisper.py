@@ -296,12 +296,13 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=None) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=RATE) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
                      Used to prevent JIT mismatch errors since the encoder does not accept symbolic shapes
   :param truncate: If true, truncates (or pads) audio to exactly 30s for a single encoder pass
+  :param sr: Sample rate of all waveforms. Waveforms will be resampled to 16000Hz if different.
   :return: mel spectrogram of the given waveforms
   """
   waveforms = [(resample_batched(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
@@ -388,14 +389,14 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, sr = librosa.load(filename, sr=None)
-  return waveform, sr
+  waveform, sr = librosa.load(filename, sr=RATE)
+  return waveform
 
 def transcribe_file(model, enc, filename):
-  wav, sr = load_file_waveform(filename)
-  return transcribe_waveform(model, enc, [wav], sr=sr)
+  wav = load_file_waveform(filename)
+  return transcribe_waveform(model, enc, [wav])
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=None):
+def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=RATE):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
