@@ -3862,7 +3862,8 @@ class Tensor(MathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
+                                   is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
     `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
@@ -3879,6 +3880,10 @@ class Tensor(MathTrait):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+    if enable_gqa:
+      key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
+      value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
     if is_causal:
