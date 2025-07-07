@@ -218,7 +218,7 @@ def mel(
   n_mels: int = 128,
   fmin: float = 0.0,
   fmax: Optional[float] = None,
-  dtype: DTypeLike = dtypes.float32,
+  dtype: DTypeLike = dtypes.default_float,
 ) -> Tensor:
 
   if fmax is None:
@@ -235,13 +235,11 @@ def mel(
   mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax)
 
   fdiff = mel_f[1:] - mel_f[:-1]
-  # ramps = np.subtract.outer(mel_f, fftfreqs)
   ramps = mel_f[None].T.expand(-1, fftfreqs.shape[-1]) - fftfreqs
 
   lower = -ramps[:n_mels] / fdiff[:n_mels][None].T
   upper = ramps[2:n_mels + 2] / fdiff[1:n_mels + 1][None].T
   weights = lower.minimum(upper).maximum(0)
-
 
   # Slaney-style mel is scaled to be approx constant energy per channel
   enorm = 2.0 / (mel_f[2 : n_mels + 2] - mel_f[:n_mels])
