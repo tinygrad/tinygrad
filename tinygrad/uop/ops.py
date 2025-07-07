@@ -469,8 +469,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def vmax(self) -> ConstType: return self._min_max_overflow[1]
   @functools.cached_property
   def _min_max_overflow(self) -> tuple[ConstType, ConstType]:
-    vmin, vmax = self._min_max
-    return (vmin if vmax <= self.dtype.max else self.dtype.min, vmax if vmin >= self.dtype.min else self.dtype.max)
+    vmin, vmax, dmin, dmax = *self._min_max, self.dtype.min, self.dtype.max
+    return (dmin if vmax > dmax else max(vmin, dmin), dmax if vmin < dmin else min(vmax, dmax))
   @property
   def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
