@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, argparse
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 
-class SimpleLlamaTokenizer:
+class SimpleTokenizer:
   def __init__(self, vocab: list[str]):
     self.vocab: list[str] = vocab
     self.biggest_token: int = max(map(len, vocab))
@@ -25,6 +25,9 @@ class SimpleLlamaTokenizer:
 
   def decode(self, ids: list[int]) -> str:
     return ''.join(self.vocab[tid] for tid in ids).replace(self.replace_space, " ").replace(self.replace_newline, "\n")
+
+  def role(self, role:str):
+    return [t for x in ["<|start_header_id|>", role, "<|end_header_id|>\n\n"] for t in self.encode(x)]  # llama style
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
@@ -103,6 +106,7 @@ class Transformer:
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
+    self.output = nn.Linear(dim, vocab_size, bias=False)
     self.max_context = max_context
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT
     self.forward_jit = TinyJit(self.forward)
@@ -111,7 +115,7 @@ class Transformer:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # TODO: add temperature
-    return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    return self.output(self.output_norm(x))[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
@@ -120,10 +124,18 @@ class Transformer:
   def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
-    max_context = min(max_context, kv['llama.context_length']) if max_context is not None else kv['llama.context_length']
-    model = Transformer(num_blocks=kv['llama.block_count'], dim=kv['llama.embedding_length'], hidden_dim=kv['llama.feed_forward_length'],
-                        n_heads=kv['llama.attention.head_count'], n_kv_heads=kv['llama.attention.head_count_kv'],
-                        norm_eps=kv['llama.attention.layer_norm_rms_epsilon'], vocab_size=kv['llama.vocab_size'], max_context=max_context)
+
+    # all state items should be float16, not float32
+    state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+
+    # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
+    if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
+
+    arch = kv['general.architecture']
+    max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
+    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
+                        n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
+                        norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     return model, kv
 
@@ -131,7 +143,7 @@ class Transformer:
     v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
     start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
-    self.forward_jit.reset()  # TODO: why is this required?
+    self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
     while len(tokens) < self.max_context:
       t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
       next_id = int(t.item())
@@ -142,7 +154,8 @@ class Transformer:
 models = {
   "1B": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
   "3B": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
-  "7B": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-f16.gguf"
+  "3B_f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
+  "8B": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
 }
 
 if __name__ == "__main__":
@@ -155,18 +168,15 @@ if __name__ == "__main__":
   model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
 
   # extract some metadata
-  tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
-  eos_id: int = tok.token_to_id["<|end_of_text|>"]
-  eot_id: int = tok.token_to_id["<|eot_id|>"]
+  tok = SimpleTokenizer(kv["tokenizer.ggml.tokens"])
+  bos_id: int = kv['tokenizer.ggml.bos_token_id']
+  eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
-  ids: list[int] = tok.encode("<|begin_of_text|>")
+  ids: list[int] = [bos_id]
   while 1:
     start_pos = len(ids) - 1
-    ids += [t for x in [
-      "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n", f"{input('>>> ')}\n", "<|eot_id|>",
-      "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"] for t in tok.encode(x)]
+    ids += tok.role("user") + tok.encode(input('>>> ')) + [eos_id] + tok.role("assistant")
     for next_id in model.generate(ids, start_pos):
-      sys.stdout.write(tok.decode([next_id]) if next_id != eot_id else "\n\n")
+      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
       sys.stdout.flush()
-      if next_id in (eos_id, eot_id): break
-    if next_id == eos_id: break
+      if next_id == eos_id: break

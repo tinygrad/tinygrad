@@ -1,19 +1,18 @@
+# eval for tinygrad.apps.llm
 import pyarrow.parquet as pq
 from tinygrad.helpers import fetch, colored
-from tinygrad.apps.llm import Transformer, SimpleLlamaTokenizer, models
+from tinygrad.apps.llm import Transformer, SimpleTokenizer, models
 from tinygrad import Tensor
 
 if __name__ == "__main__":
-  #dat = fetch("https://huggingface.co/datasets/allenai/ai2_arc/resolve/main/ARC-Easy/train-00000-of-00001.parquet")
-  #dat = fetch("https://huggingface.co/datasets/allenai/ai2_arc/resolve/main/ARC-Easy/test-00000-of-00001.parquet")
   dat = fetch("https://huggingface.co/datasets/allenai/ai2_arc/resolve/main/ARC-Challenge/test-00000-of-00001.parquet")
   table = pq.read_table(dat)
 
   model, kv = Transformer.from_gguf(Tensor.from_url(models["1B"]), max_context=4096)
 
-  tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
-  eos_id: int = tok.token_to_id["<|end_of_text|>"]
-  eot_id: int = tok.token_to_id["<|eot_id|>"]
+  tok = SimpleTokenizer(kv["tokenizer.ggml.tokens"])
+  bos_id: int = kv['tokenizer.ggml.bos_token_id']
+  eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
   num_correct, num_answered = 0, 0
   total_questions = len(table["question"])
@@ -22,9 +21,7 @@ if __name__ == "__main__":
                '\n'.join([f"{k}) {v}" for k,v in zip(choices['label'], choices['text'])]) +\
                "\n\nReply with the letter of the correct answer only."
     try:
-      ids = [t for x in ["<|begin_of_text|>",
-        "<|start_header_id|>", "user", "<|end_header_id|>\n\n", phrasing, "<|eot_id|>",
-        "<|start_header_id|>", "assistant", "<|end_header_id|>\n\n", "Answer: "] for t in tok.encode(x)]
+      ids = [bos_id] + tok.role("user") + tok.encode(phrasing) + [eos_id] + tok.role("assistant") + tok.encode("Answer: ")
     except RuntimeError:
       # TODO: fix the tokenizer
       pass
