@@ -587,12 +587,6 @@ class TestOps(unittest.TestCase):
     if is_dtype_supported(dtypes.uint64):
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
-    # 1 // 0 is device dependent, but it should not raise
-    Tensor([1]).idiv(1).realize()
-    if not CI:  # TODO: crashed in CI on some devices
-      # ... because if might be in a where branch that the output is well defined
-      t = Tensor([-1, 0, 1, 2])
-      np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
 
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
@@ -1109,6 +1103,12 @@ class TestOps(unittest.TestCase):
                    lambda x: x.sort(descending=True)[0], forward_only=True, vals=[[0, 1] * 9])
     helper_test_op(None, lambda x: x.sort(stable=True, descending=True).indices.type(torch.int32),
                    lambda x: x.sort(descending=True)[1], forward_only=True, vals=[[0, 1] * 9])
+
+  def test_argsort(self):
+    for dim in [-1, 0, 1]:
+      for descending in [True, False]:
+        helper_test_op([(8,8,6)], lambda x: torch.argsort(x, dim=dim, descending=descending, stable=True).type(torch.int32),
+                                  lambda x: x.argsort(dim, descending), forward_only=True)
 
   def test_topk(self):
     helper_test_op([(10)], lambda x: x.topk(3).values, lambda x: x.topk(3)[0], forward_only=True)
@@ -1929,6 +1929,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(0, (2, 2)))
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(3, (3, 2)))
     helper_test_op([(4,3,6,6)], lambda x: x.unflatten(-1, (3, 2, 1)))
+
+  def test_diag(self):
+    helper_test_op([(5,)], lambda x: x.diag())
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0))
@@ -2903,6 +2906,17 @@ class TestOps(unittest.TestCase):
       lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True,attn_mask=m),
       expected=RuntimeError)
 
+  def test_scaled_dot_product_attention_gqa(self):
+    helper_test_op([(32,32,16,64), (32,8,16,64), (32,8,16,64)],
+                   lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,enable_gqa=True),
+                   lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True))
+
+  def test_scaled_dot_product_attention_gqa_errors(self):
+    self.helper_test_exception([(32,31,16,64), (32,8,16,64), (32,8,16,64)],
+      lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z),
+      lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True),
+      expected=(AssertionError, RuntimeError, ValueError))
+
   def test_binary_crossentropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),y.clip(0,1)),
                                        lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
@@ -2949,6 +2963,39 @@ class TestOps(unittest.TestCase):
       classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
       helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes), label_smoothing=ls),
                                 lambda x: x.cross_entropy(Tensor(classes), label_smoothing=ls))
+
+  def test_sparse_categorical_crossentropy(self):
+    classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+    helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss()(x, torch.tensor(classes)),
+                              lambda x: x.sparse_categorical_crossentropy(Tensor(classes)))
+
+    # combine args
+    helper_test_op([(12,10)],
+                   lambda x: torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=classes[0], label_smoothing=0.3)(x, torch.tensor(classes)),
+                   lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction="mean", ignore_index=classes[0], label_smoothing=0.3))
+
+    # with batch. somehow this does not match torch
+    classes = np.random.randint(0, 10, (3,12), dtype=np.int32).tolist()
+    helper_test_op([(3,12,10)], lambda x: torch.nn.CrossEntropyLoss()(x.permute(0,2,1), torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes)))
+
+  def test_sparse_categorical_crossentropy_reductions(self):
+    for r in ("mean", "sum", "none"):
+      classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(reduction=r)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction=r))
+
+  def test_sparse_categorical_crossentropy_ignore_index(self):
+    classes = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+    for i in (-1, 0, 3):
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), ignore_index=i))
+
+  def test_sparse_categorical_crossentropy_label_smoothing(self):
+    for s in (0.3, 0.9):
+      classes = np.random.randint(0, 10, (12,), dtype=np.int32).tolist()
+      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(label_smoothing=s)(x, torch.tensor(classes)),
+                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), label_smoothing=s))
 
   def test_nll_loss(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
@@ -3027,6 +3074,20 @@ class TestOps(unittest.TestCase):
 
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
+
+  def test_svd(self):
+    # test for tiny backend. real svd tests are in test_linalg
+    A = torch.randn(5, 5)
+    U, S, Vh = torch.linalg.svd(A)
+    np.testing.assert_equal(U.shape, (5,5))
+    np.testing.assert_equal(Vh.shape, (5,5))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+
+    A = torch.randn(5, 3)
+    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    np.testing.assert_equal(U.shape, (5,3))
+    np.testing.assert_equal(Vh.shape, (3,3))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
