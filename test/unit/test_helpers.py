@@ -1,8 +1,8 @@
 import ctypes, gzip, unittest
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
-from tinygrad.tensor import get_shape
+from tinygrad.tensor import Tensor, get_shape
 from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
 import numpy as np
 
@@ -362,6 +362,32 @@ class TestArgFix(unittest.TestCase):
     self.assertEqual(argfix((1., 2., 3.)), (1., 2., 3.))
   def test_list(self):
     self.assertEqual(argfix([True, False]), (True, False))
+
+class TestWordWrap(unittest.TestCase):
+  def test_wrap_simple(self):
+    wrap = 10
+    st = "x"*wrap*2
+    st2 = word_wrap(st, wrap)
+    self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_colored(self):
+    wrap = 10
+    st = colored("x"*wrap*2, "red")
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), 2)
+
+class TestIsNumpyNdarray(unittest.TestCase):
+  def test_ndarray(self):
+    self.assertTrue(is_numpy_ndarray(np.array([1, 2, 3])))
+  def test_ndarray_tolist(self):
+    self.assertFalse(is_numpy_ndarray(np.array([1, 2, 3]).tolist()))
+  def test_list(self):
+    self.assertFalse(is_numpy_ndarray([1, 2, 3]))
+  def test_tensor(self):
+    self.assertFalse(is_numpy_ndarray(Tensor([1, 2, 3])))
+    self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))
+  def test_tensor_numpy(self):
+    self.assertTrue(is_numpy_ndarray(Tensor([1, 2, 3]).numpy()))
 
 if __name__ == '__main__':
   unittest.main()

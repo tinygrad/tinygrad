@@ -7,6 +7,7 @@ from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put,
                              cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
+from tinygrad.uop.ops import TracingKey
 
 # **************** Device ****************
 
@@ -56,8 +57,8 @@ class ProfileEvent: pass
 class ProfileDeviceEvent(ProfileEvent):
   device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
 
-@dataclass(frozen=True)
-class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
+@dataclass
+class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
@@ -71,15 +72,13 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
 
-@dataclass
-class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
-
 @contextlib.contextmanager
-def cpu_profile(name, device="CPU", is_copy=False, display=True) -> Generator[ProfileResult, None, None]:
-  yield (res:=ProfileResult(st:=time.perf_counter_ns()))
-  res.en = en = time.perf_counter_ns()
-  if PROFILE and display:
-    Compiled.profile_events += [ProfileRangeEvent(device, name, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=is_copy)]
+def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, decimal.Decimal(time.perf_counter_ns()) / 1000, is_copy=is_copy)
+  try: yield res
+  finally:
+    res.en = decimal.Decimal(time.perf_counter_ns()) / 1000
+    if PROFILE and display: Compiled.profile_events.append(res)
 
 # **************** Buffer + Allocators ****************
 

@@ -8,8 +8,6 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
-AM_VERSION = 0xA0000005
-
 def bold(s): return f"\033[1m{s}\033[0m"
 
 def trim(s:str, length:int) -> str:
@@ -73,21 +71,12 @@ class AMSMI(AMDev):
     self._run_discovery()
     self._build_regs()
 
-    if self.reg("regSCRATCH_REG7").read() != AM_VERSION:
+    if self.reg("regSCRATCH_REG7").read() != AMDev.Version:
       raise Exception(f"Unsupported AM version: {self.reg('regSCRATCH_REG7').read():x}")
 
-    self.is_booting, self.smi_dev = True, True
+    self.is_booting = True
+    self.init_sw(smi_dev=True)
     self.partial_boot = True # do not init anything
-    self.mm = AMMemoryManager(self, self.vram_size)
-
-    # Initialize IP blocks
-    self.soc:AM_SOC = AM_SOC(self)
-    self.gmc:AM_GMC = AM_GMC(self)
-    self.ih:AM_IH = AM_IH(self)
-    self.psp:AM_PSP = AM_PSP(self)
-    self.smu:AM_SMU = AM_SMU(self)
-
-    for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]: ip.init_sw()
 
   def read_pci_state(self):
     with open(f"/sys/bus/pci/devices/{self.pcibus}/power_state", "r") as f: return f.read().strip().rstrip()
@@ -136,7 +125,7 @@ class SMICtx:
         if d.pci_state == "D0": d._init_from_d0()
         os.system('clear')
 
-      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() != AM_VERSION:
+      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() != AMDev.Version:
         self.devs.remove(d)
         self.opened_pcidevs.remove(d.pcibus)
         os.system('clear')
@@ -295,8 +284,8 @@ if __name__ == "__main__":
           while True:
             try: pid = subprocess.check_output(['sudo', 'lsof', '-t', dev]).decode('utf-8').split('\n')[0]
             except subprocess.CalledProcessError: break
-            if stopped_pids[pid] > 0: time.sleep(0.5)
-            if stopped_pids[pid] == 10:
+            if stopped_pids[pid] > 0: time.sleep(0.1)
+            if stopped_pids[pid] == 64:
               print(f"{dev[8:-5]}: can't stop process {pid}, exitting")
               exit(1)
 

@@ -44,12 +44,11 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
-  alu_op: Ops = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
-  return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), alu_op)
+  return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
@@ -58,12 +57,8 @@ def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
-  # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  if cast(PtrDType, buf.dtype).local and x.src[1].op is Ops.REDUCE:
-    reduce_input = x.src[1].src[0]
-    store_back = reduce_input.op is Ops.LOAD and cast(PtrDType, reduce_input.src[0].dtype).local
-  else: store_back = False
-  if (not cast(PtrDType, buf.dtype).local) or store_back:
+  if not cast(PtrDType, buf.dtype).local:
+    # NOTE: only store the local reduceop in the threads that are actually doing the reduce
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
