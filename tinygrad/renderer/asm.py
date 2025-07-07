@@ -519,7 +519,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.MOD, name="x"), lambda ctx,x:
    f"push rax\nmov rax, {ctx.r[x.src[0]]}\n"
    f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
-   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n{'mov dl, ah\n' if x.dtype.itemsize == 1 else ''}pop rax"),
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n"+('mov dl, ah\n' if x.dtype.itemsize == 1 else '')+"pop rax"),
   (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
    lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # endrange
