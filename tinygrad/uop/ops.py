@@ -182,7 +182,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
-    vmin, vmax = (simple_self:=self.simplify())._min_max
+    vmin, vmax = (simple_self:=self.simplify())._min_max_overflow
     if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self.render()}")
     assert isinstance(vmin, expected_type), f"vmin is wrong dtype {type(vmin)} != {expected_type}"
     return vmin
@@ -464,10 +464,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
   @property
-  def vmin(self) -> ConstType: return self._min_max[0]
+  def vmin(self) -> ConstType: return self._min_max_overflow[0]
   @property
-  def vmax(self) -> ConstType: return self._min_max[1]
+  def vmax(self) -> ConstType: return self._min_max_overflow[1]
   @functools.cached_property
+  def _min_max_overflow(self) -> tuple[ConstType, ConstType]:
+    vmin, vmax = self._min_max
+    return (vmin if vmax <= self.dtype.max else self.dtype.min, vmax if vmin >= self.dtype.min else self.dtype.max)
+  @property
   def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
