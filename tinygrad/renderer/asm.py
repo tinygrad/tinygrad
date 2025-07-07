@@ -246,7 +246,7 @@ class AsmRenderer(Renderer):
     # stack must be aligned to 16 bytes
     return (name, kernel, self.stack_size + (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16, callee_saved)
 
-  def render_kernel(self, name:str, kernel:list[str], stack_size:int, called_saved:list[str]): raise NotImplementedError("arch specific")
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]): raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
 
 # x18 clobbered on macos/windows, x29 is frame pointer, kept for stack arg access
