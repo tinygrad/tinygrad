@@ -1,6 +1,16 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
-from tinygrad.device import is_dtype_supported
+#from tinygrad.device import is_dtype_supported
+def is_dtype_supported(x): return False
+def md(a, b):
+  diff = (a - b).abs().mean().item()
+  ratio = diff / a.abs().mean().item()
+  return diff, ratio
+from tinygrad.nn.state import safe_load, get_state_dict
+unet_io = safe_load("/home/hooved/train-sd/training/stable_diffusion/datasets/tensors/unet_training_io.safetensors")
+for k,v in unet_io.items():
+  unet_io[k] = v.to("NV").realize()
+
 from typing import Optional, Union, List, Any, Tuple
 import math
 
@@ -15,7 +25,8 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int):
     self.in_layers = [
-      GroupNorm(32, channels),
+      #GroupNorm(32, channels),
+      GroupNorm(16, channels),
       Tensor.silu,
       Conv2d(channels, out_channels, 3, padding=1),
     ]
@@ -24,7 +35,8 @@ class ResBlock:
       Linear(emb_channels, out_channels),
     ]
     self.out_layers = [
-      GroupNorm(32, out_channels),
+      #GroupNorm(32, out_channels),
+      GroupNorm(16, out_channels),
       Tensor.silu,
       lambda x: x,  # needed for weights loading code to work
       Conv2d(out_channels, out_channels, 3, padding=1),
@@ -97,7 +109,7 @@ class SpatialTransformer:
       ctx_dim = [ctx_dim]*depth
     else:
       assert isinstance(ctx_dim, list) and depth == len(ctx_dim)
-    self.norm = GroupNorm(32, channels)
+    self.norm = GroupNorm(32, channels, eps=1e-06)
     assert channels == n_heads * d_head
     self.proj_in  = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head) for d in range(depth)]
@@ -217,7 +229,8 @@ class UNetModel:
         self.output_blocks.append(layers)
 
     self.out = [
-      GroupNorm(32, ch),
+      #GroupNorm(32, ch),
+      GroupNorm(16, ch),
       Tensor.silu,
       Conv2d(model_ch, out_ch, 3, padding=1),
     ]
