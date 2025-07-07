@@ -172,7 +172,8 @@ spec = PatternMatcher([
   (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=(dtypes.bool,)+dtypes.sints), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=(dtypes.bool,)+dtypes.sints), UPat.var("x"), UPat.var("y"))),
+   lambda w,x,y: w.dtype == x.dtype == y.dtype),
   (UPat((Ops.CMPLT, Ops.CMPNE), dtype=(dtypes.bool,)+dtypes.sints, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),

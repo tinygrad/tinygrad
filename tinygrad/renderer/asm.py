@@ -415,7 +415,7 @@ x86_vec_int_shared = {Ops.WHERE: "vpblendvb", Ops.AND: "vpand", Ops.OR: "vpor", 
 x86_vec_sint_base = {Ops.ADD: "vpadd", Ops.SUB: "vpsub", Ops.MUL: "vpmull", Ops.SHL: "vpsllv", Ops.SHR: "vpsrav", Ops.CMPLT: "vpcmpgt"}
 x86_vec_uint_base = {**x86_vec_sint_base, Ops.SHR: "vpsrlv"}
 x86_vec_sint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_sint_base.items()}, **x86_vec_int_shared,
-                               **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in (dtypes.bool,)+dtypes.sints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
+                **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in (dtypes.bool,)+dtypes.sints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
 x86_vec_uint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_uint_base.items()}, **x86_vec_int_shared,
                                **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in dtypes.uints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
 x86_vec_float16_ops = {x.vec(l):{**x86_vec_mov_sz[x.vec(l).itemsize]} for x in (dtypes.float16,) for l in [2,4,8,16]}
@@ -577,7 +577,8 @@ x86_matcher = asm_matcher + PatternMatcher([
   (UPat(Ops.GEP, dtypes.bool, (UPat.var("y"),), name="x"), lambda y,x: x.replace(dtype=y.dtype.scalar()).cast(x.dtype)),
   # float16 alus are done in float32
   (UPat(GroupOp.ALU, dtypes.float16, name="x"),
-   lambda x: UOp(x.op, dtypes.float32.vec(x.dtype.count), tuple(s.cast_vec(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+   lambda x: UOp(x.op, dtypes.float32.vec(x.dtype.count),
+                 tuple(s.cast_vec(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   # float16 accumulator are done in float32 as there's no register move for float16
   (UPat(Ops.ASSIGN, dtypes.float16, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x:
    x.replace(dtype=dtypes.float32, src=(a.replace(dtype=dtypes.float32,
