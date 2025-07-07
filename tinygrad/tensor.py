@@ -661,7 +661,7 @@ class Tensor(MathTrait):
     ```
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    x = Tensor.ones((n,1),**kwargs).pad((None,(0,n))).flatten().shrink(((0,n*n),)).reshape(n,n)
+    x = Tensor.ones(n, **kwargs).diag()
     return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
@@ -889,9 +889,7 @@ class Tensor(MathTrait):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    r = Tensor.rand(n, device=device, **kwargs)
-    _, indices = r.sort()
-    return indices.cast(dtype)
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
@@ -1557,6 +1555,17 @@ class Tensor(MathTrait):
     """
     dim = self._resolve_dim(dim)
     return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
+
+  def diag(self) -> Tensor:
+    """
+    Returns a 2-D square tensor with the elements of input as the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 2, 3]).diag().numpy())
+    ```
+    """
+    if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
+    return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]) -> Tensor:
     """
@@ -2819,6 +2828,17 @@ class Tensor(MathTrait):
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
+  def argsort(self, dim:int=-1, descending:bool=False) -> Tensor:
+    """
+    Returns the indices that sort input tensor along given `dimension` in given `descending` order by value.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[2, 3, 4, 1], [1, 4, 3, 2]])
+    print(t.argsort().numpy())
+    ```
+    """
+    return self.sort(dim, descending)[1]
+
   def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
     """
     Computes the top-k elements of the tensor along the specified `dim`.
@@ -3842,7 +3862,8 @@ class Tensor(MathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
+                                   is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
     `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
@@ -3859,6 +3880,10 @@ class Tensor(MathTrait):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+    if enable_gqa:
+      key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
+      value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     # handle attention mask
     if is_causal:
