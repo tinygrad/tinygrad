@@ -1,31 +1,16 @@
 from pathlib import Path
 
 import numpy as np
+
+from .audio_helpers import stft, hann_window, make_stft_basis_buffers, mel
 from tinygrad import Tensor, Device, Variable
 import json
 
 from tinygrad.nn.state import safe_save, safe_load, load_state_dict, get_state_dict
 from extra.export_model import export_model
-from examples.whisper import hann_window, init_whisper, TextDecoder, make_stft_basis_buffers, stft
-from examples.whisper import RATE, SAMPLES_PER_SEGMENT, mel, N_FFT, HOP_LENGTH, N_MELS
+from examples.whisper import init_whisper, TextDecoder
+from examples.whisper import RATE, SAMPLES_PER_SEGMENT, N_FFT, HOP_LENGTH, N_MELS
 import math
-
-class STFT:
-  def __init__(self, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant"):
-    assert window == "hann", "other window types not implemented yet"
-    self.n_fft = n_fft
-    self.stride = stride
-    self.pad = pad
-    self.pad_mode = pad_mode
-    self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
-
-  def __call__(self, waveforms):
-    return self.forward(waveforms)
-
-  def forward(self, x:Tensor) -> Tensor:
-    x = x.reshape(-1, x.shape[-1])
-    spec = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
-    return spec
 
 if __name__ == '__main__':
   def tofull(sd):
