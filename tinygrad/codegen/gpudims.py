@@ -17,7 +17,7 @@ def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   return dims
 
 def _split_dims(dims, max_sizes):
-  if all(d <= m for d,m in zip(dims, max_sizes)): return dims
+  if all((d.cast(dtypes.uint64) if isinstance(d, UOp) else d) <= m for d,m in zip(dims, max_sizes)): return dims
   _dims = list(dims) + [1]*(3-len(dims))
   for i in range(len(_dims)):
     while _dims[i] > max_sizes[i]:
