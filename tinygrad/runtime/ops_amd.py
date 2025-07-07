@@ -853,8 +853,3 @@ class AMDDevice(HCQCompiled):
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
-
-  def finalize(self):
-    try: self.synchronize() # Try to finalize device in any case.
-    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-    if hasattr(self.iface, 'device_fini'): self.iface.device_fini()

@@ -73,7 +73,7 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
 
 @contextlib.contextmanager
-def cpu_profile(name, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
   res = ProfileRangeEvent(device, name, decimal.Decimal(time.perf_counter_ns()) / 1000, is_copy=is_copy)
   try: yield res
   finally:
