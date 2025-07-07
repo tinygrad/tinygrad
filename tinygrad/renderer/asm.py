@@ -118,6 +118,10 @@ class AsmRenderer(Renderer):
     # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
     if u.op is Ops.ASSIGN and s is self.srcs(u)[0] and s in self.mem: return [self.mem[s]]
     return []
+  def can_coalesce(self, x:UOp, s:UOp) -> bool:
+    if x.op is Ops.VECTORIZE: return False
+    if x.op is Ops.LOAD and len(x.src) == 6 and s is not x.src[-2]: return False
+    return True
   def render_imm(self, imm:str): raise NotImplementedError("arch specific")
   def render_mem(self, sz:int): raise NotImplementedError("arch specific")
   def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
@@ -155,7 +159,7 @@ class AsmRenderer(Renderer):
     ranges: list[UOp] = []
     for i,u in enumerate(reversed(uops)):
       for s in (s for s in self.srcs(u) if s in live_range):
-        end = next((live_range[rng][-1] for rng in ranges if live_range[s][0] < live_range[rng][0]), len(uops)-i-1)
+        end = next((live_range[rng][-1] for rng in ranges if live_range[s][0] < live_range[rng][0]), 0)
         if end > live_range[s][-1]: live_range[s].append(end)
       if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
       if u.op is Ops.RANGE: ranges.pop()
@@ -219,17 +223,9 @@ class AsmRenderer(Renderer):
             if s.op != Ops.DEFINE_REG and s in rng_live and not \
               (self.is_reg(loc[s]) or any(live_range[rng][0] < l < i for l in live_range[s])): rng_live.pop(s)
           loc[s] = alloc(s, cons)
-      # free srcs before assigning destination to coalesce when valid
-      # TODO: need to ignore noop and assign here
-      # TODO: base coalesce and derived coalesce
+      # when valid free srcs before assigning destination to coalesce
       for s in src:
-        if u.op is Ops.VECTORIZE: continue
-        if u.op is Ops.LOAD and len(u.src) == 6 and s is not u.src[-2]: continue
-        if isinstance(self, X86Renderer):
-          if u.op is Ops.WHERE and s is not u.src[1]: continue
-          if u.op is Ops.MULACC and s is not u.src[0]: continue
-          if u.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and u.dtype in dtypes.ints + (dtypes.bool,) and s is not u.src[0]: continue
-        if s in live and live_range[s][-1] == i: reg_class(s).insert(0, live.pop(s))
+        if s in live and live_range[s][-1] == i and self.can_coalesce(u, s): reg_class(s).insert(0, live.pop(s))
       # assign destination
       if u in live_range: loc[u] = alloc(u, self.constraints(u))
       if u.op not in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
@@ -636,6 +632,12 @@ class X86Renderer(AsmRenderer):
       # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
       if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
     return self.reg_class(u)
+  def can_coalesce(self, x:UOp, s:UOp) -> bool:
+    if not super().can_coalesce(x, s): return False
+    if x.op is Ops.WHERE and s is not x.src[1]: return False
+    if x.op is Ops.MULACC and s is not x.src[0]: return False
+    if x.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and x.dtype in dtypes.ints + (dtypes.bool,) and s is not x.src[0]: return False
+    return True
   def render_imm(self, imm:str) -> str: return imm
   def render_mem(self, sz:int) -> str: return f"rsp + {sz}"
   def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
