@@ -474,7 +474,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
-      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
+      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max_overflow, self.src[1]._min_max_overflow
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.SUB: return s0_vmin-s1_vmax, s0_vmax-s1_vmin
       if self.op is Ops.AND and s1_vmin == s1_vmax and s0_vmin >= 0 and s1_vmin >= 0: return min(0, s0_vmin), min(s0_vmax, s1_vmax)
