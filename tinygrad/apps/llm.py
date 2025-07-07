@@ -110,7 +110,8 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax()
+    # TODO: add temperature
+    return (self.output_norm(x) @ self.token_embd.weight.T)[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
@@ -126,17 +127,16 @@ class Transformer:
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     return model, kv
 
-  def generate(self, tokens:list[int], start_pos=0, stop_len:int|None=None, stop_tokens:tuple[int, ...]=()):
+  def generate(self, tokens:list[int], start_pos=0):
     v_start_pos = UOp.variable("start_pos", 1, model.max_context-1)
     start_pos = 0
-    while len(tokens) < model.max_context and (stop_len is None or len(tokens) < stop_len):
-      t = Tensor([tokens[start_pos:]], dtype="int32")
-      next_id = int(self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos).item())
-      yield next_id
+    t = Tensor([tokens[start_pos:]], dtype="int32")
+    while len(tokens) < model.max_context:
+      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
+      next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
-      if next_id in stop_tokens: break
-
+      yield next_id
 
 models = {
   "1B": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
@@ -164,7 +164,8 @@ if __name__ == "__main__":
     ids += [t for x in [
       "<|start_header_id|>", "user", "<|end_header_id|>", "\n\n", f"{input('>>> ')}\n", "<|eot_id|>",
       "<|start_header_id|>", "assistant", "<|end_header_id|>", "\n\n"] for t in tok.encode(x)]
-    for next_id in model.generate(ids, start_pos, stop_tokens=(eos_id, eot_id)):
+    for next_id in model.generate(ids, start_pos):
       sys.stdout.write(tok.decode([next_id]) if next_id != eot_id else "\n\n")
       sys.stdout.flush()
+      if next_id in (eos_id, eot_id): break
     if next_id == eos_id: break
