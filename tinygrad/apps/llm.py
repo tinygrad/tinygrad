@@ -151,7 +151,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]))
+  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
 
   # extract some metadata
   tok = SimpleLlamaTokenizer(kv["tokenizer.ggml.tokens"])
