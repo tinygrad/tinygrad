@@ -25,10 +25,8 @@ def stft(x:Tensor, weight:Tensor, n_fft, stride, pad, pad_mode="constant")->Tens
   magnitudes = (stft_raw[:, :cutoff, :]**2 + stft_raw[:, cutoff:, :]**2).sqrt()
   return magnitudes
 
-# TODO(irwin): functools.rlu_cache?
 def make_basis_buffers(N_FFT: int, k_freq_bin: int|Tensor, window:Tensor) -> tuple[Tensor, Tensor]:
-  # NOTE(irwin): do we even need this .float()?
-  n = Tensor.arange(N_FFT).float()
+  n = Tensor.arange(N_FFT)
   angle = 2 * math.pi * k_freq_bin * n / N_FFT
 
   w = window
