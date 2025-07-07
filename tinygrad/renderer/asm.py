@@ -164,13 +164,14 @@ class AsmRenderer(Renderer):
     def _alloc(x:UOp, cons:list[str]):
       # assign free register, otherwise spill one
       if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
-      # we choose the var whose next use is the latest, in case no next use we use the uop(endrange) that kills the var
-      # this prioritizes vars defined outside loops
-      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next((j for j in live_range[k] if j >= i), live_range[k][-1]-i))
+      # we choose the var whose next use is the latest, this also prioritizes vars defined outside loops
+      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next(j for j in live_range[k] if j >= i))
       if spilled not in mem:
         offset = self.stack_size + (spilled.dtype.itemsize - self.stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
         self.stack_size = offset + spilled.dtype.itemsize
         mem[spilled] = self.render_mem(offset)
+        # accumulator isn't safe to hoist as value may change
+        if spilled.op is Ops.DEFINE_REG and spilled not in spill_place: spill_place[spilled] = u
         inst = spill_place.get(spilled, spilled)
         inst_map[inst].append(cast(str, self.string_rewrite.rewrite(spilled.store(), ctx=self)))
       loc[spilled] = mem[spilled]
@@ -212,10 +213,11 @@ class AsmRenderer(Renderer):
       for s in src:
         cons = self.constraints(u, s)
         if s in loc and loc[s] not in cons:
-          # if var first use in range is a load we don't need to reload
+          # if var first use in range is a load we don't need to reload, NOTE: accumulator isn't hoisted so rule doesn't apply
           if live_at_range:
             rng, rng_live = list(live_at_range.items())[-1]
-            if s in rng_live and not (self.is_reg(loc[s]) or any(live_range[rng][0] < l < i for l in live_range[s])): rng_live.pop(s)
+            if s.op != Ops.DEFINE_REG and s in rng_live and not \
+              (self.is_reg(loc[s]) or any(live_range[rng][0] < l < i for l in live_range[s])): rng_live.pop(s)
           loc[s] = alloc(s, cons)
       # free srcs before assigning destination to coalesce when valid
       # TODO: need to ignore noop and assign here
