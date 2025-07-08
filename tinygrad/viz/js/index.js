@@ -145,9 +145,7 @@ async function renderProfiler() {
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
       let parts = parseColors(e.name);
-      if (parts.length === 1) {
-        parts = e.name.split(" ").map((st,i) => ({ st: i > 0 ? " "+st : st, color:parts[0].color }))
-      }
+      if (parts.length === 1) parts = e.name.split(" ").map((st,i) => ({ st: i>0 ? " "+st : st, color:parts[0].color }));
       const label = parts.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       const colorKey = e.cat ?? e.name;
       if (!nameMap.has(colorKey)) {

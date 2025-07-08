@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, ProfileEvent, BufferSpec, PROFILE
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, AMD_LLVM
+from tinygrad.device import Compiled, BufferSpec
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, AMD_LLVM, PROFILE, ProfileEvent
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt

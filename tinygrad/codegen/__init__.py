@@ -15,7 +15,6 @@ from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
   pm_reduce, ReduceContext, correct_load_store, pm_render, get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.viz.tracing import cpu_profile, TracingKey
 
 @dataclass
 class RewriteStep:
@@ -24,9 +23,7 @@ class RewriteStep:
   name: str|None = None
   bottom_up: bool = False
   def __call__(self, sink:UOp):
-    with cpu_profile(TracingKey(self.name or repr(type(self)), cat=self.name), device="TINY"):
-      ret = graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
-    return ret
+    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 

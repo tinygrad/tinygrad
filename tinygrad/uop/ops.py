@@ -6,8 +6,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
-from tinygrad.viz.tracing import cpu_profile, TracingKey
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -826,21 +825,20 @@ class TrackedPatternMatcher(PatternMatcher):
     ret = None
     ler = {u.op for u in uop.src}
     for p,match,early_reject in self.pdict.get(uop.op, []):
-      with cpu_profile(TracingKey(printable(p.location), cat=str(id(p))), device="TINY"):
-        if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-        st = time.perf_counter()
-        if not early_reject.issubset(ler):
-          match_stats[p][2] += time.perf_counter()-st
-          continue
-        match_stats[p][1] += 1
-        if (ret:=match(uop, ctx)) is not None and ret is not uop:
-          match_stats[p][0] += 1
-          match_stats[p][3] += (et:=time.perf_counter()-st)
-          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
-          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-            active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
-          return ret
+      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
+      st = time.perf_counter()
+      if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
+        continue
+      match_stats[p][1] += 1
+      if (ret:=match(uop, ctx)) is not None and ret is not uop:
+        match_stats[p][0] += 1
+        match_stats[p][3] += (et:=time.perf_counter()-st)
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
+        return ret
+      match_stats[p][2] += time.perf_counter()-st
     return None
 
 if TRACK_MATCH_STATS or PROFILE:

@@ -4,11 +4,9 @@ from collections import defaultdict
 from typing import Optional, Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
-# TODO: fix places that import this from device
-from tinygrad.viz.tracing import cpu_events, ProfileEvent, ProfileRangeEvent # noqa: F401
 
 # **************** Device ****************
 

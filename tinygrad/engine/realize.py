@@ -1,9 +1,9 @@
 from typing import Optional, cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, TracingKey
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
