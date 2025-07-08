@@ -23,7 +23,12 @@ class RewriteStep:
   name: str|None = None
   bottom_up: bool = False
   def __call__(self, sink:UOp):
-    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
+    # late import!
+    from tinygrad.device import cpu_profile
+    with cpu_profile(self.name, "TINY") as e:
+      ret = graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
+    e.cat = self.name # color by the name of RewriteStep
+    return ret
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
