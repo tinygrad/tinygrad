@@ -67,11 +67,11 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
   @settings(deadline=1000) # TODO investigate unreliable timing
   @given(onnx_data_type=st.sampled_from(device_unsupported_dtypes))
   def test_unsupported_dtype_spec(self, onnx_data_type):
-    tinygrad_dtype = dtypes.default_int if dtypes.is_int(data_types[onnx_data_type]) else dtypes.default_float
-    # TODO: maybe unsupported input spec dtype parsing shouldn't default to a dtype
-    self._test_input_spec_dtype(onnx_data_type, tinygrad_dtype)
-    self._test_initializer_dtype(onnx_data_type, tinygrad_dtype)
-    self._test_node_attribute_dtype(onnx_data_type, tinygrad_dtype)
+    true_dtype = data_types[onnx_data_type]
+    default_dtype = dtypes.default_int if dtypes.is_int(true_dtype) else dtypes.default_float
+    self._test_input_spec_dtype(onnx_data_type, true_dtype)
+    self._test_initializer_dtype(onnx_data_type, default_dtype)
+    self._test_node_attribute_dtype(onnx_data_type, default_dtype)
 
 if __name__ == '__main__':
   unittest.main()
