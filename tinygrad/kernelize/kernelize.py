@@ -138,8 +138,7 @@ def append_to_kernel(x:UOp):
 create_kernels = PatternMatcher([
   # always give assign/contiguous a kernel
   (UPat.assign(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL}), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, src=(UPat({Ops.CONST, Ops.VIEW, Ops.RESHAPE}|DONT_PLACE_IN_KERNEL),), name="x"), create_kernel),
-  (UPat(Ops.CONTIGUOUS, src=(UPat(name="x"),)), create_kernel),
+  (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
   # walk back the local graph until we reach a realized source
   (UPat(Ops.KERNEL, name="x"), append_to_kernel),
   # push RESHAPE through MSELECT
@@ -253,7 +252,7 @@ add_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).view(x.st),)),
   # STORE (except for meta ops)
-  (UPat(Ops.SINK, src=(UPat(GroupOp.Meta, name="x"),)), lambda x:x),
+  (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
   # passthrough ASSIGN
