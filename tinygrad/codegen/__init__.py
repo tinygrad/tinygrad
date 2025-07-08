@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, cpu_profile, TracingKey
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
@@ -23,7 +23,8 @@ class RewriteStep:
   name: str|None = None
   bottom_up: bool = False
   def __call__(self, sink:UOp):
-    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
+    with cpu_profile(TracingKey(self.name, cat=self.name), "TINY"):
+      return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
