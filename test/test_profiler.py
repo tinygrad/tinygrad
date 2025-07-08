@@ -11,6 +11,7 @@ MOCKGPU = getenv("MOCKGPU")
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
   Compiled.profile_events = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
+  cpu_events.clear()
 
   profile_list = []
   with Context(PROFILE=1):
@@ -74,13 +75,15 @@ class TestProfiler(unittest.TestCase):
     evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
 
     assert len(evs) == 3, "3 kernel runs are expected"
-    assert evs[0].is_copy, "kernel should be copy"
-    assert evs[1].name == runner_name, "kernel name is not correct"
-    assert not evs[1].is_copy, "kernel should not be copy"
-    assert evs[2].is_copy, "kernel should be copy"
+    # NOTE: order of events does not matter, the tool is responsible for sorting them
+    copy_events = [e for e in evs if e.is_copy]
+    self.assertEqual(len(copy_events), 2)
 
-    for i in range(1, 3):
-      assert evs[i].st > evs[i-1].en, "timestamp not aranged"
+    prg_events = [e for e in evs if not e.is_copy]
+    assert prg_events[0].name == runner_name, "kernel name is not correct"
+
+    #for i in range(1, 3):
+    #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
   def test_profile_multidev(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
