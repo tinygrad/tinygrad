@@ -109,7 +109,7 @@ function formatTime(ts, dur=ts) {
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 // TODO: generate this
-const devColors = {"TINY":["#1B5745", "#1D2E62", "#0A0F1F", "#10172D", "#161F3B", "#27387A", "#324193", "#3E4BAC", "#4A5AC1", "#576ADA", "#647AF0", "#7189FF",
+const devColors = {"TINY":["#1D2E62", "#0A0F1F", "#10172D", "#161F3B", "#27387A", "#324193", "#3E4BAC", "#4A5AC1", "#576ADA", "#647AF0", "#7189FF",
                     "#8098FF", "#8EA6FF", "#9CB3FF", "#A9BFFF", "#B7CBFF"],
                    "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];

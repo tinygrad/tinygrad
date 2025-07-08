@@ -7,6 +7,7 @@ from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
+from tinygrad.viz.tracing import cpu_profile, TracingKey
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -769,13 +770,6 @@ class TrackedGraphRewrite:
   depth:int                              # depth if it's a subrewrite
   bottom_up:bool
 
-@dataclass(frozen=True)
-class TracingKey:
-  display_name:str                       # display name of this trace event
-  keys:tuple[str, ...]=()                # optional keys to search for related traces
-  fmt:str|None=None                      # optional detailed formatting
-  cat:str|None=None                      # optional category to color this by
-
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
@@ -794,8 +788,6 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
       if TRACK_MATCH_STATS >= 2:
         tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
-      # late import!
-      from tinygrad.device import cpu_profile
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
@@ -834,20 +826,21 @@ class TrackedPatternMatcher(PatternMatcher):
     ret = None
     ler = {u.op for u in uop.src}
     for p,match,early_reject in self.pdict.get(uop.op, []):
-      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-      st = time.perf_counter()
-      if not early_reject.issubset(ler):
+      with cpu_profile(TracingKey(printable(p.location), cat=str(id(p))), device="TINY"):
+        if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
+        st = time.perf_counter()
+        if not early_reject.issubset(ler):
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        if (ret:=match(uop, ctx)) is not None and ret is not uop:
+          match_stats[p][0] += 1
+          match_stats[p][3] += (et:=time.perf_counter()-st)
+          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+            active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
+          return ret
         match_stats[p][2] += time.perf_counter()-st
-        continue
-      match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None and ret is not uop:
-        match_stats[p][0] += 1
-        match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
-        return ret
-      match_stats[p][2] += time.perf_counter()-st
     return None
 
 if TRACK_MATCH_STATS or PROFILE:
