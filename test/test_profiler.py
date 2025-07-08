@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics, time
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile
+from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
@@ -18,6 +18,7 @@ def helper_collect_profile(*devs):
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
     for x in Compiled.profile_events: profile_list.append(x)
+    profile_list.extend(cpu_events)
 
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
