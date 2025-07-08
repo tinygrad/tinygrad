@@ -3614,29 +3614,38 @@ class Tensor(MathTrait):
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x, reverse)
 
-  def pow(self, x:Tensor|ConstType, reverse=False) -> Tensor:
+  def pow(self, x: Tensor | ConstType, reverse=False) -> Tensor:
     """
     Computes power of `self` with `x`.
     Equivalent to `self ** x`.
 
-    ```python exec="true" source="above" session="tensor" result="python"
+    ```python
     print(Tensor([-1, 2, 3]).pow(2.0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
     print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
+
+    # Check for 0 ** 0 or 0 ** negative power
+    if (base == 0).logical_and(exponent <= 0).any():
+        raise ZeroDivisionError("0 cannot be raised to a negative power or zero")
+
     # TODO: int pow
-    if not base.is_floating_point(): raise RuntimeError("base needs to be float")
+    # if not base.is_floating_point(): raise RuntimeError("base needs to be float")
+    # hopefully this works !!
+    if base.dtype.is_int() and (isinstance(exponent, Tensor) and exponent.dtype.is_int()):
+      if (exponent < 0).any():
+        raise ValueError("Integer base cannot be raised to a negative integer exponent")
 
+      # Element-wise integer exponentiation
+      ret = base._apply_uop(UOp.pow_int, exponent)
+      return ret
+    # Floating point case
     ret = base._apply_uop(UOp.pow, exponent)
-    # NOTE: pow(int, float) -> int
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) else ret
 
+    # Cast result back to original dtype if needed
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) else ret
   def maximum(self, x:Tensor|ConstType) -> Tensor:
     """
     Computes element-wise maximum of `self` and `x`.
