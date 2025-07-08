@@ -10,7 +10,6 @@ from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.kernelize.kernelize import fix_kernel_ops
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
@@ -475,50 +474,9 @@ class TestUOpStr(unittest.TestCase):
     sum_uop = Tensor.empty(32, 32).sum().uop
     assert str(eval(str(sum_uop))) == str(sum_uop)
 
-@unittest.skip("uop no longer has order like this")
-class TestIndexingOrdering(unittest.TestCase):
-  # NOTE: these tests skip type_verify since they add dtype to STORE
-  @unittest.expectedFailure
-  def test_simple_order(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    st0 = UOp(Ops.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
-    st1 = UOp(Ops.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = to_uops_list([st1, st0], skip_check=True)
-    stores = [st for st in uops if st.op is Ops.STORE]
-    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
-
-  @unittest.expectedFailure
-  def test_ordering_multi_output(self):
-    buf0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    buf1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
-    st0_0 = UOp(Ops.STORE, dtypes.float.vec(4), (buf0, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
-    st1_0 = UOp(Ops.STORE, dtypes.float, (buf0, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    st0_1 = UOp(Ops.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
-    st1_1 = UOp(Ops.STORE, dtypes.float, (buf1, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = to_uops_list([st0_0, st1_0, st0_1, st1_1], skip_check=True)
-    stores = [st for st in uops if st.op is Ops.STORE]
-    print("\n".join(map(str, stores)))
-    # buf0 stores come first
-    self.assertEqual(stores[0].src[0].arg, stores[1].src[0].arg)
-    # buf1 stores come next
-    self.assertEqual(stores[2].src[0].arg, stores[3].src[0].arg)
-    # both stores are aligned based on idx
-    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
-    assert stores[2].src[1] < stores[3].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
-
-  def test_simple_order_with_special(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
-    st0 = UOp(Ops.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
-    st1 = UOp(Ops.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
-    uops = full_rewrite(UOp.sink(st1, st0))
-    stores = [st for st in uops if st.op is Ops.STORE]
-    assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
-
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(fix_kernel_ops.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "kernelize.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])

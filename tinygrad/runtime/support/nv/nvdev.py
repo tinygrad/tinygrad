@@ -48,13 +48,14 @@ class NVPageTableEntry:
   def entry(self, entry_id:int) -> int: return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.is_pte(entry_id): return self.nvdev.NV_MMU_VER2_PTE.decode(self.entry(entry_id))
+    if self.is_huge_page(entry_id): return self.nvdev.NV_MMU_VER2_PTE.decode(self.entry(entry_id))
     return (self.nvdev.NV_MMU_VER2_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER2_PDE).decode(self.entry(entry_id))
 
-  def is_pte(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
+  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
+  def supports_huge_page(self, paddr:int): return self.lv >= 2 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
-    if self.is_pte(entry_id): return self.read_fields(entry_id)['valid']
+    if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
     return self.read_fields(entry_id)['aperture_small' if self.lv == 3 else 'aperture'] != 0
 
   def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small_sys' if self.lv == 3 else 'address_sys'] << 12
@@ -78,8 +79,8 @@ class NVDev(PCIDevImplBase):
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512],
-      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], first_lv=0, first_page_lv=4, va_base=0)
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512], va_base=0,
+      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
     self.flcn:NV_FLCN = NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
@@ -88,6 +89,8 @@ class NVDev(PCIDevImplBase):
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
+
+  def fini(self): System.pci_reset(self.devfmt) # Reset the device to clean up resources. TODO: Consider a warm start process.
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr, value):

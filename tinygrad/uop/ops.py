@@ -584,6 +584,10 @@ def get_location() -> tuple[str, int]:
 def lines(fn) -> list[str]:
   with open(fn) as f: return f.readlines()
 
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except FileNotFoundError: return "<missing>"
+
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
@@ -647,10 +651,6 @@ class UPat(MathTrait):
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
-
-  def printable(self:UPat) -> str:
-    try: return lines(self.location[0])[self.location[1]-1].strip()
-    except FileNotFoundError: return "<missing>"
 
   def __repr__(self):
     def rep(x):
@@ -759,15 +759,24 @@ def track_uop(u:UOp):
 VIZ = ContextVar("VIZ", 0)
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[Union[int, float]]] = dict()
+
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc: tuple[str, int]                                                                       # location that called graph_rewrite
-  sink: int                                                                                  # the sink input to graph_rewrite
-  matches: list[tuple[int, int, UPat]]                                                       # before+after of all the matches
-  name: str|None                                                                             # optional name of the rewrite
-  depth: int                                                                                 # depth if it's a subrewrite
-  bottom_up: bool
-tracked_keys:list[Any] = []
+  loc:tuple[str, int]                    # location that called graph_rewrite
+  sink:int                               # the sink input to graph_rewrite
+  matches:list[tuple[int, int, tuple]]   # before/after UOp, UPat location
+  name:str|None                          # optional name of the rewrite
+  depth:int                              # depth if it's a subrewrite
+  bottom_up:bool
+
+@dataclass(frozen=True)
+class TracingKey:
+  display_name:str                       # display name of this trace event
+  keys:tuple[str, ...]=()                # optional keys to search for related traces
+  fmt:str|None=None                      # optional detailed formatting
+  cat:str|None=None                      # optional category to color this by
+
+tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
@@ -778,16 +787,22 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable|bool=True):
+def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
+      fn = key = func.__name__
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append((fn:=func.__name__)+f" n{next(_name_cnt.setdefault(fn, itertools.count(1)))}")
+        tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
-      ret = func(*args, **kwargs)
+      # late import!
+      from tinygrad.device import cpu_profile
+      with cpu_profile(key, "TINY") as e:
+        ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
-        tracked_keys[-1] = tracked_keys[-1].replace(fn, name_ret) if isinstance(name_ret, str) else name_ret
+        assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
+        tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
+        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
       if getenv("CAPTURE_PROCESS_REPLAY"):
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
@@ -795,7 +810,7 @@ def track_rewrites(name:Callable|bool=True):
         loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
         with Context(PICKLE_BUFFERS=0):
-          inputs = (func.__name__, args, kwargs, ContextVar._cache)
+          inputs = (fn, args, kwargs, ContextVar._cache)
           replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
       return ret
     return __wrapper
@@ -825,11 +840,12 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None:
+      if (ret:=match(uop, ctx)) is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites: active_rewrites[-1].matches.append((track_uop(uop),track_uop(ret), p))
+        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -848,7 +864,7 @@ if TRACK_MATCH_STATS or PROFILE:
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", k.printable())
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:20s}", printable(k.location))
         ret = [x+y for x,y in zip(ret, v)]
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")

@@ -123,20 +123,16 @@
     padding-top: 50px;
     border-right: 1px solid #4a4b56;
   }
-  .ctx-list {
+  .ctx-list, .metadata {
     width: 100%;
     height: 100%;
     overflow-y: auto;
+    scrollbar-gutter: stable;
   }
   .metadata-parent {
     width: 20%;
     border-left: 1px solid #4a4b56;
     margin-left: auto;
-  }
-  .metadata {
-    width: 100%;
-    height: 100%;
-    overflow-y: auto;
   }
   .resize-handle {
     position: absolute;
@@ -182,8 +178,8 @@
     display: flex;
     flex-wrap: wrap;
   }
-  .rewrite-list > * + * {
-    margin-left: 4px;
+  .rewrite-list > ul {
+    padding: 2px;
   }
   .wrap {
     word-wrap: break-word;
