@@ -151,25 +151,9 @@ class Kernel:
   @property
   def group_for_reduces(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GROUP_REDUCE]) if hasattr(self, 'axis_types') else 0
 
-  def _legacy_colors(self) -> list[str]:
-    # first non local non reduce dims are global (blue)
-    colors = ["blue"] * self.global_dims
-    # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
-    colors += ["cyan"] * self.local_dims
-    # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
-    colors += ["green"] * self.group_for_reduces
-    # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
-    colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
-    # upcasted dimensions are reduce (magenta) or normal (yellow)
-    colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
-    assert len(colors) == self.shape_len, "colors size mismatch"
-    return colors
-
   def colors(self) -> list[str]:
     assert len(self.axis_types) == self.shape_len, "colors size mismatch"
-    ret = [axis_colors[x] for x in self.axis_types]
-    assert self._legacy_colors() == ret, f"legacy colors mismatch colors {self._legacy_colors()} != {ret}"
-    return ret
+    return [axis_colors[x] for x in self.axis_types]
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
@@ -428,8 +412,8 @@ class Kernel:
       check(padded, "nothing was padded")
 
     if append_opt: self.applied_opts.append(opt)
-    if self.simplify_ones() and self.tensor_core_opts:
-      self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+    #if self.simplify_ones() and self.tensor_core_opts:
+    #  self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
   def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
     for opt in opts: self.apply_opt(opt)
@@ -449,6 +433,10 @@ class Kernel:
     Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
+
+  def finalize(self):
+    self.finalized = True
+    self.simplify_ones()
 
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
@@ -521,7 +509,7 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
 
       return ret
-    self.finalized = True
+    self.finalize()
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
