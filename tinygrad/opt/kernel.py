@@ -153,7 +153,7 @@ class Kernel:
 
   def colors(self) -> list[str]:
     assert len(self.axis_types) == self.shape_len, "colors size mismatch"
-    return [axis_colors[x] for x in self.axis_types]
+    return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
