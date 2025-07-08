@@ -90,6 +90,8 @@ class NVDev(PCIDevImplBase):
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
 
+  def fini(self): System.pci_reset(self.devfmt) # Reset the device to clean up resources. TODO: Consider a warm start process.
+
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr, value):
     self.mmio[addr // 4] = value

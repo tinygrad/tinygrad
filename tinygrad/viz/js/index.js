@@ -108,7 +108,8 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+const devColors = {"TINY":["#1B5745", "#1D2E62"],
+                   "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -120,8 +121,6 @@ async function renderProfiler() {
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
-  const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
@@ -143,13 +142,14 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
-     const kernel = kernelMap.get(e.name);
-     if (!nameMap.has(e.name)) {
-       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-     }
-     // offset y by depth
-     data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const colorKey = e.cat ?? e.name;
+      if (!nameMap.has(colorKey)) {
+        const colors = devColors[k] ?? devColors.DEFAULT;
+        nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
+      }
+      // offset y by depth
+      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, ...nameMap.get(colorKey) });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -205,7 +205,7 @@ async function renderProfiler() {
       const width = xscale(e.x+e.dur)-x;
       ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
       // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -407,7 +407,7 @@ function setCtxWithHistory(newCtx) {
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:0, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
@@ -478,7 +478,7 @@ async function main() {
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {

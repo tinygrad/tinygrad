@@ -368,8 +368,8 @@ jobs:
         PYTHONPATH=. python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         DEBUG=1 MIN_ASTS=1 PYTHONPATH=. python extra/optimization/get_action_space.py
-    - name: Repo line count < 14600 lines
-      run: MAX_LINE_COUNT=14600 python sz.py
+    - name: Repo line count < 15000 lines
+      run: MAX_LINE_COUNT=15000 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -546,6 +546,20 @@ jobs:
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  testllm:
+    name: Test LLM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: apps_llm
+      - name: Test 1B LLM
+        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm | grep -i rooster
 
   testmodels:
     name: Models (llvm+cpu+gpu)
