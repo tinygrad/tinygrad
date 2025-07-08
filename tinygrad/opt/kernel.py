@@ -159,9 +159,25 @@ class Kernel:
   @property
   def applied_opts(self) -> list[Opt]: return list(self.info.applied_opts)
 
+  def _legacy_colors(self) -> list[str]:
+    # first non local non reduce dims are global (blue)
+    colors = ["blue"] * self.global_dims
+    # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
+    colors += ["cyan"] * self.local_dims
+    # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
+    colors += ["green"] * self.group_for_reduces
+    # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
+    colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
+    # upcasted dimensions are reduce (magenta) or normal (yellow)
+    colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
+    assert len(colors) == self.shape_len, "colors size mismatch"
+    return colors
+
   def colors(self) -> list[str]:
     assert len(self.axis_types) == self.shape_len, "colors size mismatch"
-    return [axis_colors[x] for x in self.axis_types]
+    ret = [axis_colors[x] for x in self.axis_types]
+    assert self._legacy_colors() == ret, f"legacy colors mismatch colors {self._legacy_colors()} != {ret}"
+    return ret
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
@@ -200,9 +216,10 @@ class Kernel:
   def simplify_ones(self) -> bool:
     # remove places where the shape is all ones
     if any(all_ones:=[s==1 for s in self.full_shape]):
-      if hasattr(self, 'axis_types'): self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
-                       upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
+      if hasattr(self, 'axis_types'):
+        self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
+        self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
+                         upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
       self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
       return True
     return False
