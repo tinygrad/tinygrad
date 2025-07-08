@@ -201,6 +201,8 @@ class Kernel:
     # remove places where the shape is all ones
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'): self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
+      self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
+                       upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
       self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
       return True
     return False
