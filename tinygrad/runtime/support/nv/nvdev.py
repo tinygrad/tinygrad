@@ -127,7 +127,7 @@ class NVDev(PCIDevImplBase):
   def _alloc_boot_struct(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
-    return struct, paddrs[0]
+    return type(struct).from_address(va), paddrs[0]
 
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
