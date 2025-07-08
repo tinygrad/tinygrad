@@ -25,9 +25,9 @@ class RewriteStep:
   def __call__(self, sink:UOp):
     # late import!
     from tinygrad.device import cpu_profile
-    with cpu_profile(self.name, "TINY") as e:
+    from tinygrad.uop.ops import TracingKey
+    with cpu_profile(TracingKey(self.name, cat=self.name), "TINY"):
       ret = graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
-    e.cat = self.name # color by the name of RewriteStep
     return ret
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
