@@ -388,18 +388,18 @@ x86_reg_map = {**{"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si
                 "rcx": {4: "ecx", 2: "cx", 1: "cl"}, "rax": {4: "eax", 2: "ax", 1: "al"}, "rbx": {4: "ebx", 2: "bx", 1: "bl"},
                **{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"} for i in range(8,16)}},
                **{f"ymm{i}": {sz: f"xmm{i}" for sz in [16,8,4,2]} for i in range(0,16)}}
-# NOTE: because of inconsistent support avx512 instructions aren't used
+# NOTE: avx512 instructions aren't used
 # *** x86 scalar ops ***
-x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov"}
 x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
-x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
-                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove"}
+x86_unsigned_ops = {Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
+                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove",
+                    Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
 x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
-                 Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
+                 Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", Ops.STORE: "vmovss", Ops.LOAD: "vmovss", Ops.ASSIGN: "movss"}
 x86_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_float32_ops.items()}}
 # NOTE: these are just for local moves
-x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss"}
+x86_float16_ops = {Ops.STORE: "vmovss", Ops.LOAD: "vmovss", Ops.ASSIGN: "movss"}
 # *** x86 vector ops ***
 x86_vec_mov_sz = {4: {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"},
                   8: {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "vmovq"},
