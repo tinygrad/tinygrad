@@ -23,7 +23,7 @@ class RewriteStep:
   name: str|None = None
   bottom_up: bool = False
   def __call__(self, sink:UOp):
-    with cpu_profile(TracingKey(self.name, cat=self.name), "TINY"):
+    with cpu_profile(TracingKey(self.name or repr(type(self)), cat=self.name), "TINY"):
       return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
