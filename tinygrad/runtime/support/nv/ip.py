@@ -252,8 +252,8 @@ class NV_FLCN_COT(NV_IP):
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
     self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
-    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
     self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_fsp_pri.h")
+    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
     self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_emem_channels.h")
 
     self.falcon = 0x00110000
@@ -298,9 +298,6 @@ class NV_FLCN_COT(NV_IP):
     # print(hex(self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(self.falcon).read()))
     while True:
       if self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(self.falcon).read() == 0x818787f7: break
-      # print(hex(self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(self.falcon).read()))
-
-    print("OK")
 
   def kfsp_send_msg(self, nvmd:int, buf:bytes):
     # All single-packets go to seid 0
@@ -311,20 +308,8 @@ class NV_FLCN_COT(NV_IP):
     self.nvdev.NV_PFSP_EMEMC[0].write(offs=0, blk=0, aincw=1, aincr=0)
     for i in range(0, len(buf), 4): self.nvdev.NV_PFSP_EMEMD[0].write(int.from_bytes(buf[i:i+4], 'little'))
 
-    # Check offset
-    # ememc_vals = self.nvdev.NV_PFSP_EMEMC[0].read_bitfields()
-    
-    # print(self.nvdev.NV_PFSP_EMEMC[0].read_bitfields())
-    # reg = self.rreg(self.NV_PFSP_EMEMC(self.FSP_EMEM_CHANNEL_RM))
-    # offs, blk = self.read_num("NV_PFSP_EMEMC", self.rreg(self.NV_PFSP_EMEMC(self.FSP_EMEM_CHANNEL_RM)), "OFFS", "BLK")
-    # print(offs, blk)
-
-    # print("tail", hex(len(buf) - 4))
     self.nvdev.NV_PFSP_QUEUE_TAIL[0].write(len(buf) - 4)
     self.nvdev.NV_PFSP_QUEUE_HEAD[0].write(0)
-    
-    # self.wreg(self.NV_PFSP_QUEUE_TAIL(self.FSP_EMEM_CHANNEL_RM), len(buf) - 4) # TAIL points to the last DWORD written, so subtract 1
-    # self.wreg(self.NV_PFSP_QUEUE_HEAD(self.FSP_EMEM_CHANNEL_RM), 0)
 
     # Waiting for a response
     while self.nvdev.NV_PFSP_MSGQ_HEAD[0].read() == self.nvdev.NV_PFSP_MSGQ_TAIL[0].read(): pass
@@ -333,15 +318,13 @@ class NV_FLCN_COT(NV_IP):
     msg_len = tail - head + 4
 
     self.nvdev.NV_PFSP_EMEMC[0].write(offs=0, blk=0, aincw=0, aincr=1)
-    # self.wreg(self.NV_PFSP_EMEMC(self.FSP_EMEM_CHANNEL_RM), self.build_num("NV_PFSP_EMEMC", offs=0, blk=0, aincw=0, aincr=1))
 
     msg = bytearray()
     for i in range(0, msg_len, 4): msg += int.to_bytes(self.nvdev.NV_PFSP_EMEMD[0].read(), 4, 'little')
 
     self.nvdev.NV_PFSP_MSGQ_TAIL[0].write(head)
 
-    print(f"Received {len(msg)} bytes: {msg.hex()}")
-
+    # print(f"Received {len(msg)} bytes: {msg.hex()}")
     # som, eom, seid, seq = self.read_num("MCTP_HEADER", int.from_bytes(msg[:4], 'little'), "SOM", "EOM", "SEID", "SEQ")
     # typ, vendor_id = self.read_num("MCTP_MSG_HEADER", int.from_bytes(msg[4:8], 'little'), "TYPE", "VENDOR_ID")
     # assert som == 1 and eom == 1, f"Invalid MCTP header: {som}, {eom}, {seid}, {seq}"
@@ -420,8 +403,6 @@ class NV_GSP(NV_IP):
 
   def init_boot_binary_image(self):
     self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
-    print(sum(self.booter_image))
-
     self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
     _, self.booter_sysmem = System.alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
 
@@ -447,10 +428,9 @@ class NV_GSP(NV_IP):
       sizeOfRadix3Elf=(radix3_sz:=len(self.gsp_image)), sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0],
       sizeOfSignature=0x1000, sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
       bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
-      bootloaderManifestOffset=self.booter_desc.manifestOffset,
-      nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000, frtsSize=0x100000)
+      bootloaderManifestOffset=self.booter_desc.manifestOffset, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000, frtsSize=0x100000)
 
-    print(f"Booter image size: {len(self.booter_image)} bytes", hex(self.booter_sysmem[0]))
+    # print(f"Booter image size: {len(self.booter_image)} bytes", hex(self.booter_sysmem[0]))
     # print(f"Radix3 image size: {len(self.gsp_image)} bytes")
     # print(f"Signature size: {0x1000} bytes")
     # print(f"Booter code offset: {self.booter_desc.monitorCodeOffset:#x}, size: {self.booter_desc.monitorCodeSize:#x}")
