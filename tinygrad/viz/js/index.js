@@ -96,8 +96,13 @@ async function renderDag(graph, additions, recenter=false) {
 }
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
-  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+const parseColors = (name, defaultColor="#ffffff") => {
+  const ret = []
+  for (const [_, code, colored_st, st] of name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)) {
+    ret.push({ st:colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code) - 30 + 60) % 60] : defaultColor });
+  }
+  return ret;
+}
 
 // ** profiler graph
 
@@ -115,6 +120,7 @@ const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
+  console.log("** renderProfiler called");
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
@@ -144,7 +150,7 @@ async function renderProfiler() {
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
       let parts = parseColors(e.name);
-      if (parts.length === 1) parts = e.name.split(" ").map((st,i) => ({ st: i>0 ? " "+st : st, color:parts[0].color }));
+      // if (parts.length === 1) parts = e.name.split(" ").map((st,i) => ({ st: i>0 ? " "+st : st, color:parts[0].color }));
       const label = parts.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       const colorKey = e.cat ?? e.name;
       if (!nameMap.has(colorKey)) {
@@ -442,7 +448,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

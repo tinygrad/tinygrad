@@ -826,7 +826,7 @@ class TrackedPatternMatcher(PatternMatcher):
     ler = {u.op for u in uop.src}
     for p,match,early_reject in self.pdict.get(uop.op, []):
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-      with cpu_profile(printable(p.location), device="TINY", display=TRACK_MATCH_STATS>=3):
+      with cpu_profile(printable(p.location), device="TINY", display=TRACK_MATCH_STATS>=2):
         st = time.perf_counter()
         if not early_reject.issubset(ler):
           match_stats[p][2] += time.perf_counter()-st
