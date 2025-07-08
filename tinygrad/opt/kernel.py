@@ -65,6 +65,9 @@ class Kernel:
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
 
+    # finalized means you can't optimize anymore
+    self.finalized: bool = False
+
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
@@ -87,6 +90,7 @@ class Kernel:
     # parameters for optimizations
     ret.info, ret.group_for_reduces = self.info, self.group_for_reduces
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.finalized = self.finalized
 
     return ret
 
@@ -343,6 +347,7 @@ class Kernel:
     return opt.axis
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
+    if self.finalized: raise RuntimeError("can't optimize Kernel after it's finalized")
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
 
     if opt.op is OptOps.TC:
@@ -524,6 +529,7 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
 
       return ret
+    self.finalized = True
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")

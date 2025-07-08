@@ -64,7 +64,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
-    p = x[1].to_program(name_override="test")
+    p = x[1].copy().to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
     if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
