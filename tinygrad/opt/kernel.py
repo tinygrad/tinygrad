@@ -3,6 +3,7 @@ import itertools, functools, math
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
+from enum import Enum, auto
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
 from tinygrad.uop.spec import type_verify, ast_spec
@@ -13,6 +14,18 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, 
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
+
+class AxisType(Enum):
+  GLOBAL = auto()
+  LOCAL = auto()
+  GROUP_REDUCE = auto()
+  REDUCE = auto()
+  UPCAST = auto()
+  UNROLL = auto()
+
+axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan",
+               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red",
+               AxisType.UPCAST: "yellow", AxisType.UNROLL: "magenta"}
 
 class KernelOptError(Exception): pass
 
@@ -72,6 +85,9 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # axis types
+    self.axis_types = [AxisType.REDUCE if resolve(x!=y) else AxisType.GLOBAL for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
     if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
@@ -86,6 +102,7 @@ class Kernel:
     # things downstream of the AST
     ret.reduceops, ret.vars, ret.bufs = self.reduceops, self.vars, self.bufs
     ret.sts = self.sts[:]
+    ret.axis_types = self.axis_types[:]
 
     # parameters for optimizations
     ret.info, ret.group_for_reduces = self.info, self.group_for_reduces
@@ -142,18 +159,9 @@ class Kernel:
   @property
   def applied_opts(self) -> list[Opt]: return list(self.info.applied_opts)
 
-  # there's eight chunks of the shape
-  # blue   -- global dims
-  # cyan   -- local dims (warp ones first)
-  #  *** self.first_reduce
-  # green  -- reduce-local dims
-  # red    -- reduce loops
-  #  *** self.upcasted
-  # purple -- reduce upcasted
-  # yellow -- normal upcasted dimensions
-  def colors(self) -> list[str]:
+  def _legacy_colors(self) -> list[str]:
     # first non local non reduce dims are global (blue)
-    colors = ["blue"] * self.global_dims if not self.dont_use_locals else ["BLUE"] * self.global_dims
+    colors = ["blue"] * self.global_dims
     # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
     colors += ["cyan"] * self.local_dims
     # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
@@ -164,6 +172,12 @@ class Kernel:
     colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
+
+  def colors(self) -> list[str]:
+    assert len(self.axis_types) == self.shape_len, "colors size mismatch"
+    ret = [axis_colors[x] for x in self.axis_types]
+    assert self._legacy_colors() == ret, f"legacy colors mismatch colors {self._legacy_colors()} != {ret}"
+    return ret
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
@@ -188,8 +202,9 @@ class Kernel:
   # amount : the amount to take
   # top : if you want to pull that amount from the top
   # insert_before : place to insert the new stuff
-  def shift_to(self, axis, amount, top=False, insert_before=None):
+  def shift_to(self, axis, amount, new_type, top=False, insert_before=None):
     if insert_before is None: insert_before = self.shape_len
+    self.axis_types.insert(insert_before, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
@@ -200,13 +215,14 @@ class Kernel:
 
   def simplify_ones(self) -> bool:
     # remove places where the shape is all ones
-    # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return False
-    all_ones = [s==1 for s in self.full_shape]
-    self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
-                     upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
-    self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
-    return any(all_ones)
+    if any(all_ones:=[s==1 for s in self.full_shape]):
+      if hasattr(self, 'axis_types'):
+        self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
+        self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
+                         upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
+      self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
+      return True
+    return False
 
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
@@ -386,14 +402,14 @@ class Kernel:
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
-      self.shift_to(axis, amt, insert_before=self.first_reduce)
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=self.first_reduce)
       self.update_info(local_dims=self.info.local_dims + 1)
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
-      self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
       check(axis < self.first_upcast, "can't upcasted already upcasted")
@@ -404,13 +420,13 @@ class Kernel:
       # first_reduce will ++, so offset loss in simplify_ones
       if self.full_shape[axis] == amt and axis == self.first_reduce: self.update_info(local_dims=self.local_dims + 1)
       if self.full_shape[axis] == amt and axis < self.first_reduce+self.group_for_reduces: self.group_for_reduces -= 1 # fully unrolling a GROUP
-      self.shift_to(axis, amt, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
       self.upcast()
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")

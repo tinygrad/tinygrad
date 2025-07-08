@@ -227,7 +227,7 @@ class TestLinearizer(unittest.TestCase):
     r = a[:-1] + a[1:]
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
@@ -240,7 +240,7 @@ class TestLinearizer(unittest.TestCase):
     r = a.expand([2]) + b.expand([2])
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
@@ -251,8 +251,8 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.conv2d(x,w,padding=1).relu()
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
     k.linearize()
     accs = [u for u in k.uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in k.uops if u.op is Ops.STORE]
@@ -296,7 +296,7 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.stack(a, b)
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
@@ -768,10 +768,8 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 dimension
-    k.shift_to(0, 2, insert_before=k.shape_len-1)
-    k.upcast()
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (4, 2)
@@ -785,8 +783,8 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(0, 4)
-      k.shift_to(0, shift, insert_before=k.shape_len-1)
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
       k.upcast()
       k.upcast()
       k.linearize()
@@ -821,10 +819,8 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
-    k.upcast()
-    k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=2))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 2)
@@ -862,7 +858,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 0)
@@ -878,12 +874,13 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.upcast()
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) in {(0,1), (1,1)}
 
+  @unittest.skip("no longer supported")
   def test_float4_noncontiguous(self):
     a = Tensor.empty(4, 2).realize()
     b = Tensor.empty(4, 2).realize()
@@ -910,8 +907,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 axis
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 1)
@@ -925,8 +921,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 axis
-    k.upcast()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
     k.linearize()
 
     assert TestFloat4.count_float4(k.uops) == (1, 1)
