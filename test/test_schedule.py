@@ -2232,8 +2232,8 @@ class TestSimplifier(unittest.TestCase):
     assert sink.shape == a.shape
 
 tensor_const_pm = PatternMatcher([
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)))), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)).view(), lambda: True),
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR, src=(UPat(Ops.DEVICE),)), UPat(Ops.CONST))).view(), lambda: True),
 ])
 class TestConst(unittest.TestCase):
   # ** part 1: basic functionality of a tensor directly created from CONST
@@ -2264,7 +2264,7 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).pad((1, 1)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat.where(UPat(Ops.VALID), UPat.cvar("x"), UPat(Ops.CONST, arg=0))),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat.cvar("x").view())))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [0, 1, 1, 1, 1, 0])
@@ -2273,7 +2273,7 @@ class TestConst(unittest.TestCase):
     a = Tensor.ones((4,)).contiguous()
     sched = a.schedule()
     print(sched[0].ast)
-    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(Ops.CONST)),))
+    const_ast_pattern = UPat(Ops.SINK, src=(UPat.store(UPat(), UPat.cvar("x").view())))
     self.assertEqual(len(const_ast_pattern.match(sched[0].ast, {})), 1)
     run_schedule(sched)
     self.assertListEqual(a.tolist(), [1, 1, 1, 1])

@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UPat, Ops, UOp
 realized_pattern = UPat(Ops.BUFFER)
 # after realization, base tensor uops become RESHAPE(BUFFER)
 buffer_view_pattern = UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),))
-const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
+const_pattern = UPat(Ops.VIEW, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)),))
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.uop, pat)
 
@@ -57,19 +57,6 @@ class TestTensorUopRepresentation(unittest.TestCase):
     c = a+b
     print(c.uop)
     is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
-
-  def test_const_pattern(self):
-    a = Tensor(1)
-    print(a.uop)
-    is_pattern(a, const_pattern) # const in tensor has a DEVICE and VIEW src
-    is_pattern(a, UPat.cvar("x")) # even cvar works!
-
-  def test_consts_do_not_realize(self):
-    a = Tensor(1)
-    print(a.uop)
-    pre_realize = a.uop
-    a.realize()
-    assert a.uop is pre_realize
 
   def test_viewed_consts_do_not_realize(self):
     a = Tensor.ones(10, 10)

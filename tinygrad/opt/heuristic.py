@@ -13,7 +13,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
+    st0, st1 = k.sts[k.bufs.index(mulop.src[0].src[0].src[0])], k.sts[k.bufs.index(mulop.src[1].src[0].src[0])]
     strides0, strides1 = st0.real_strides(), st1.real_strides()
     def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
     if strides0[k.first_reduce] == 1 and not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
@@ -41,7 +41,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # upcast float4 images
   for buf_index,buf in enumerate(k.bufs):
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
-    if buf.src[0].dtype.__class__ is ImageDType:
+    if buf.dtype.__class__ is ImageDType:
       #assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {k.bufs[buf_index]}"
       if len(unit_stride_axes_mul_4) and all(x < k.first_upcast for x in unit_stride_axes_mul_4):
         if unit_stride_axes_mul_4[0] < k.first_reduce:
