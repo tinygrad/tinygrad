@@ -203,6 +203,8 @@ class Kernel:
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return False
     all_ones = [s==1 for s in self.full_shape]
+    #print(self.colors())
+    #print(self.local_dims, self.full_shape, sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]))
     self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
                      upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
@@ -459,6 +461,10 @@ class Kernel:
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
 
+  def finalize(self):
+    self.finalized = True
+    self.simplify_ones()
+
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
@@ -529,8 +535,7 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
 
       return ret
-    self.finalized = True
-    self.simplify_ones()
+    self.finalize()
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")

@@ -1123,6 +1123,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
       assert k.apply_tensor_cores(1, extra_opts=opts), "no tensor core triggered"
     else:
       k.apply_opts(opts)
+    k.finalize()
     if expected_color_size is not None:
       cs = list(zip(k.colors(), k.full_shape))
       assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
