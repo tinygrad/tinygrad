@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -231,7 +231,6 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[1]["name"], prg.name)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
-from tinygrad.helpers import ProfileRangeEvent
 from tinygrad.viz.serve import get_profile
 
 class TestVizProfiler(unittest.TestCase):
