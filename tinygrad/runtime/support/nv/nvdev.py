@@ -3,7 +3,7 @@ import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
+from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import System, PCIDevImplBase
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -81,7 +81,7 @@ class NVDev(PCIDevImplBase):
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
     self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512], va_base=0,
       pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
-    self.flcn:NV_FLCN = NV_FLCN(self)
+    self.flcn:NV_FLCN_COT = NV_FLCN_COT(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
     # Turn the booting early, gsp client is loaded from the clean.
@@ -105,13 +105,13 @@ class NVDev(PCIDevImplBase):
     self.include("src/common/inc/swref/published/nv_ref.h")
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
-    self.chip_name = {0x17: "GA", 0x19: "AD"}[self.chip_details['architecture']] + str(100+self.chip_details['implementation'])
+    self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
-    if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
-      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
-      System.pci_reset(self.devfmt)
-      time.sleep(0.5)
+    # if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
+    if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
+    System.pci_reset(self.devfmt)
+    time.sleep(1.5)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
@@ -127,7 +127,7 @@ class NVDev(PCIDevImplBase):
   def _alloc_boot_struct(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
-    return struct, paddrs[0]
+    return type(struct).from_address(va), paddrs[0]
 
   def _download(self, file) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
@@ -142,7 +142,7 @@ class NVDev(PCIDevImplBase):
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
-    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0,
+    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
       'NV_VIRTUAL_FUNCTION':0xb80000}
 
