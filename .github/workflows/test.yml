@@ -559,7 +559,7 @@ jobs:
         with:
           key: apps_llm
       - name: Test 1B LLM
-        run: echo "What's a male chicken called? Answer with only one word." | python3 -m tinygrad.apps.llm | grep -i rooster
+        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm | grep -i rooster
 
   testmodels:
     name: Models (llvm+cpu+gpu)
