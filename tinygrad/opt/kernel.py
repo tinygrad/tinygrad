@@ -148,10 +148,10 @@ class Kernel:
   def global_dims(self) -> int: return self.first_reduce-self.local_dims
 
   @property
-  def local_dims(self) -> int: return self.info.local_dims
+  def local_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.LOCAL]) if hasattr(self, 'axis_types') else 0
 
   @property
-  def upcasted(self) -> int: return self.info.upcasted
+  def upcasted(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.UPCAST, AxisType.UNROLL}]) if hasattr(self, 'axis_types') else 0
 
   @property
   def dont_use_locals(self) -> bool: return self.info.dont_use_locals
