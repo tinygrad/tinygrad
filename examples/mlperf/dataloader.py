@@ -522,12 +522,12 @@ def collate(batch:list[dict]):
   return ret
 
 # Reference (code): https://github.com/mlcommons/training/blob/2f4a93fb4888180755a8ef55f4b977ef8f60a89e/stable_diffusion/ldm/data/webdatasets.py, Line 55
-# Reference (params): https://github.com/mlcommons/training/blob/2f4a93fb4888180755a8ef55f4b977ef8f60a89e/stable_diffusion/configs/train_01x08x08.yaml, Line 110
+# Reference (params): https://github.com/mlcommons/training/blob/ab4ae1ca718d7fe62c369710a316dff18768d04b/stable_diffusion/configs/train_01x08x08.yaml, Line 107
 def batch_load_train_stable_diffusion(BS:int):
   # TODO: replace webdataset with pure python (tarfile, etc.); would need to replicate reservoir sampling across all shards
   # webdataset depends on torch.utils.data.DataLoader
   import webdataset
-  # TODO: code for downloading/caching dataset, in extra/datasets/laion
+  # TODO: add code for downloading/caching dataset, in extra/datasets/laion
   dataset = webdataset.WebDataset(urls=f'{os.getenv("BASEDIR")}/laion-400m/webdataset-moments-filtered/{{00000..00000}}.tar', resampled=True,
                                   cache_size=-1, cache_dir=None)
   dataset = dataset.shuffle(size=1000)
