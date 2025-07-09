@@ -1357,6 +1357,7 @@ def train_llama3():
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
+  from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1366,10 +1367,6 @@ def train_stable_diffusion():
   BASEDIR = getenv("BASEDIR", "")
   assert BASEDIR, "set BASEDIR to path of datasets"
 
-  x = batch_load_train_stable_diffusion(BS)
-  for batch in x:
-    break
-  
   unet_params = {
     "adm_in_ch": None,
     "in_ch": 4,
@@ -1385,33 +1382,25 @@ def train_stable_diffusion():
   }
   model = UNetModel(**unet_params)
 
-  """
-  opt = torch.optim.AdamW(params, lr=lr)
-  AdamW (
-Parameter Group 0
-    amsgrad: False
-    betas: (0.9, 0.999)
-    capturable: False
-    differentiable: False
-    eps: 1e-08
-    foreach: None
-    fused: None
-    lr: 1.25e-07
-    maximize: False
-    weight_decay: 0.01
-)
-  """
-  optimizer = AdamW(get_parameters(model), lr=lr)
+  optimizer = AdamW(get_parameters(model))
+  lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
+  scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
+  # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
+  scheduler.step()
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, optimizer, scheduler): pass
-    #optimizer.zero_grad()
+  def train_step(model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
+    optimizer.zero_grad()
 
-    #optimizer.step()
-    #scheduler.step()
+    optimizer.step()
+    scheduler.step()
     #Tensor.realize(loss, optimizer.optimizers[0].lr)
     #return loss, optimizer.optimizers[0].lr
+
+  dl = batch_load_train_stable_diffusion(BS)
+  for batch in dl:
+    break
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
