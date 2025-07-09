@@ -90,6 +90,7 @@
 
         const SAMPLES_PER_SEGMENT = 480000;
         const BASE_URL = '.'; // for LFS-stored weights
+        const AUDIO_PATH = 'test2.wav';
 
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
@@ -170,7 +171,7 @@
                 loadingContainer.style.display = "none";
             }
 
-            let loaded = await fetchMonoFloat32Array('./test2.wav');
+            let loaded = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             let samples = loaded.samples;
             if (samples.length > SAMPLES_PER_SEGMENT) {
                 samples = samples.slice(0, SAMPLES_PER_SEGMENT);
