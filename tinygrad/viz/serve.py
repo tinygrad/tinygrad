@@ -95,11 +95,16 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 # Profiler API
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent], devs) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
     if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
     if isinstance(e, ProfileGraphEvent):
+      cpu_ts = []
+      for ent in e.ents:
+        tdiff = devs[ent.device][ent.is_copy]
+        cpu_ts += [e.sigs[ent.st_id]+tdiff, e.sigs[ent.en_id]+tdiff]
+      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
@@ -155,7 +160,7 @@ def get_profile(profile:list[ProfileEvent]):
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   min_ts:int|None = None
   max_ts:int|None = None
-  for ts,en,e in flatten_events(profile):
+  for ts,en,e in flatten_events(profile, devs):
     time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
     # ProfilePointEvent records perf_counter, offset other events by GPU time diff
     st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
