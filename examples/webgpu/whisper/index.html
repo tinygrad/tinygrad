@@ -208,22 +208,25 @@
             }
             requestAnimationFrame(updateLoop);
 
-            async function doOneToken(context, output, i) {
+            const offset = context.length;
+            if (offset >= 384) {
+                console.error("Context length exceeds 384");
+                inferenceDone = true;
+                return;
+            }
+            for(let i = offset; i < (offset+384); ++i) {
                 if (i < 384 * 2) {
                     var decoded_0 = await net_decoder(context, output[0], [i]);
                     context.push(decoded_0[0]);
                     pendingText = context.map(j => mapping[j]).join('');
                     if (decoded_0[0] == 50256) {
-                        inferenceDone = true;
-                    } else {
-                        setTimeout(async function () { await doOneToken(context, output, i + 1); });
+                        break;
                     }
                 } else {
-                    inferenceDone = true;
+                    break;
                 }
             }
-
-            setTimeout(async function () { await doOneToken(context, output, 2); });
+            inferenceDone = true;
         }
 
         const getDevice = async () => {
