@@ -100,6 +100,7 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decima
     if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
     if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
     if isinstance(e, ProfileGraphEvent):
+      yield (e.sigs[0], e.sigs[-1], ProfileRangeEvent(e.ents[0].device, f"batched {len(e.ents)}", e.sigs[0], e.sigs[-1]))
       for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
