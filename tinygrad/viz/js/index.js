@@ -96,15 +96,8 @@ async function renderDag(graph, additions, recenter=false) {
 }
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-function* parseColors(name, defaultColor="#ffffff") {
-  for (const [_, code, colored_st, st] of name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)) {
-    yield { st:colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code) - 30 + 60) % 60] : defaultColor }
-  }
-}
-function* enumerate(iterable) {
-  let i = 0
-  for (const value of iterable) yield [i++, value]
-}
+const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
+  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
 
 // ** profiler graph
 
@@ -115,14 +108,12 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["#0A0F1F", "#0E1328", "#121732", "#161B3C", "#1A1F46", "#1E2350", "#22275A", "#262B64", "#2A306E", "#2E3478", "#323882", "#363C8C",
-                   "#3A4096", "#3E44A0", "#4248AA", "#464CB4"],
+const devColors = {"TINY":["#1B5745", "#1D2E62"],
                    "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
-  console.log("** renderProfiler called");
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
@@ -151,15 +142,11 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     for (const [i,e] of timeline.shapes.entries()) {
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       const colorKey = e.cat ?? e.name;
       if (!nameMap.has(colorKey)) {
         const colors = devColors[k] ?? devColors.DEFAULT;
         nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
-      }
-      let label = [];
-      for (const { color, st } of parseColors(e.name)) label.push({ color, st, width:ctx.measureText(st).width });
-      if (label.length == 1) {
-        label = label[0].st.split(" ").map((st,i) => ({ st: i>0 ? " "+st : st, color:label[0].color, width:ctx.measureText(st).width }));
       }
       // offset y by depth
       data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, ...nameMap.get(colorKey) });
@@ -224,7 +211,7 @@ async function renderProfiler() {
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
       const labelY = e.y+e.height/2;
-      for (const [i,l] of enumerate(e.label)) {
+      for (const [i,l] of e.label.entries()) {
         if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
           if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
           break;
@@ -437,9 +424,7 @@ async function main() {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      let html = "";
-      for (const c of parseColors(name)) html += `<span style="color: ${c.color}">${c.st}</span>`;
-      p.innerHTML = html;
+      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
@@ -454,7 +439,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

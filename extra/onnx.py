@@ -307,7 +307,7 @@ def get_onnx_ops():
 
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
-  def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None): return x if min is None and max is None else x.clip(min, max)
+  def Clip(x: Tensor, min:Tensor|None=None, max:Tensor|None=None): return x if min is None and max is None else x.clip(min, max)  # noqa: A002
   def IsInf(x:Tensor, detect_negative:int=1, detect_positive:int=1): return x.isinf(bool(detect_positive), bool(detect_negative))
 
   # ***** Unary Ops (activation) *****
@@ -450,7 +450,7 @@ def get_onnx_ops():
                         zip(strides, input_shape, output_padding, kernel_shape, dilations, output_shape)], auto_pad)
     if pads is None: # we generate pads
       output_shape = output_shape or [X.shape[i+2] * strides[i] for i in range(len(strides))]
-      pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
+      pads = [strides[i]*(input_shape[i]-1)+output_padding[i]+((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
       pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape) * 2
     pads = _onnx_pads_to_tiny_pads(pads)
     return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
@@ -536,7 +536,7 @@ def get_onnx_ops():
     return X.permute(*argsort(perm)) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
-  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):
+  def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
     val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
     return val, idx.cast(dtypes.int64)
 
@@ -637,7 +637,8 @@ def get_onnx_ops():
   def AffineGrid(theta:Tensor, size:list[int], align_corners:int=0):
     N, _, *spatial_dims = size
     def generate_grid(steps):
-      return Tensor.linspace(-1, 1, steps, device=theta.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+      if align_corners: return Tensor.linspace(-1, 1, steps, device=theta.device)
+      return Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
     grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
     base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=theta.device), dim=-1)
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
