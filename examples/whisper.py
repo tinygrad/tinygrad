@@ -271,7 +271,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, do_beam=F
 
   def apply_logit_filters(logits, tokens, sample_begin):
     logits[:, suppress_tokens] = -np.inf
-    
+
     if tokens.shape[1] == sample_begin:
       blank_tokens = enc.encode(" ") + [eot]
       logits[:, blank_tokens] = -np.inf
@@ -367,8 +367,8 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, do_beam=F
 
   def get_unpadded_length(padded_segment):
     return np.count_nonzero(np.sum(np.abs(padded_segment), axis=(0, 1)))
-          
-  def gettexttoks(line): 
+
+  def gettexttoks(line):
     trunc_context = [tok for tok in line if tok < eot or tok > no_tst][-nsample+len(start_tokens):]
     if do_seek and (trunc_context[-1]>no_tst and trunc_context[-2]>no_tst): trunc_context = trunc_context[:-1]
     return trunc_context
