@@ -474,7 +474,7 @@ class Kernel:
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+            srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
