@@ -5,16 +5,12 @@
     <meta charset="UTF-8">
     <title>whisper tinygrad WebGPU</title>
     <script>
-        // Promise the external script can await
         window.moduleReady = new Promise(resolve => window._resolveModule = resolve);
     </script>
     <script type="module">
-        import mel from "./mel.js"
-        window.mel = mel;
-        import encoder from "./encoder.js"
-        window.encoder = encoder;
-        import decoder from "./decoder.js"
-        window.decoder = decoder;
+        import mel from "./mel.js"; window.mel = mel;
+        import encoder from "./encoder.js"; window.encoder = encoder;
+        import decoder from "./decoder.js"; window.decoder = decoder;
         window._resolveModule();
     </script>
     <style>
@@ -28,74 +24,45 @@
             flex-direction: column;
             align-items: center;
         }
+        .container { max-width: 800px; width: 100%; }
+        h2 { text-align: center; color: #fff; margin-bottom: 2rem; }
+        #wgpu-error { color: #ff6b6b; }
 
-        .container {
-            max-width: 800px;
-            width: 100%;
-        }
-
-        h2 {
-            text-align: center;
-            color: #fff;
-            margin-bottom: 2rem;
-        }
-
-        #wgpu-error {
-            color: #ff6b6b;
-        }
-
-        #transcription-log {
+        #transcription-container {
             background-color: #444;
             border-radius: 8px;
             padding: 1.5rem;
             margin-top: 1rem;
             height: 60vh;
             overflow-y: auto;
-        }
-
-        .transcription-chunk {
-            padding: 0.75rem 0;
-            border-bottom: 1px solid #555;
-        }
-
-        .transcription-chunk:last-child {
-            border-bottom: none;
-        }
-
-        .loading-container {
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
-            z-index: 10;
         }
+        #transcription-log { flex-grow: 1; }
+        .transcription-chunk { padding: 0.75rem 0; border-bottom: 1px solid #555; }
+        .transcription-chunk:empty { display: none; }
+        #current-transcription {
+            color: #fff;
+            min-height: 1.5em;
+            padding: 0.75rem 0;
+        }
+        #current-transcription::after {
+            content: '▋';
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
 
+        .loading-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.8); z-index: 10;
+        }
         .loader {
-            width: 48px;
-            height: 48px;
-            border: 5px solid #FFF;
-            border-bottom-color: #888;
-            border-radius: 50%;
-            display: inline-block;
-            animation: rotation 1s linear infinite;
+            width: 48px; height: 48px; border: 5px solid #FFF; border-bottom-color: #888;
+            border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite;
         }
-
-        @keyframes rotation {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-            font-size: 1.5rem;
-            color: white;
-            margin-bottom: 1.5rem;
-        }
+        @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .loading-text { font-size: 1.5rem; color: white; margin-bottom: 1.5rem; }
     </style>
 </head>
 
@@ -103,7 +70,10 @@
     <div class="container">
         <h2>Whisper Tinygrad WebGPU</h2>
         <h2 id="wgpu-error" style="display: none;">Error: WebGPU is not supported in this browser</h2>
-        <div id="transcription-log"></div>
+        <div id="transcription-container">
+            <div id="transcription-log"></div>
+            <div id="current-transcription"></div>
+        </div>
     </div>
     <div id="div-loading" class="loading-container">
         <p class="loading-text">Loading model</p>
@@ -115,40 +85,29 @@
         const wgpuError = document.getElementById('wgpu-error');
         const loadingContainer = document.getElementById('div-loading');
         const transcriptionLog = document.getElementById('transcription-log');
+        const currentTranscription = document.getElementById('current-transcription');
+        const transcriptionContainer = document.getElementById('transcription-container');
 
         const SAMPLES_PER_SEGMENT = 480000;
-        const BASE_URL = '.'; // for LFS-stored weights
+        const BASE_URL = '.';
         const AUDIO_PATH = 'RED_16k.wav';
 
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
             const arrayBuffer = await response.arrayBuffer();
-
-            const audioCtx = new window.AudioContext({ sampleRate: 16000 });
+            const audioCtx = new AudioContext({ sampleRate: 16000 });
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-            // Downmix to mono by averaging channels
-            const channels = audioBuffer.numberOfChannels;
-            const length = audioBuffer.length;
-            const mono = new Float32Array(length);
-
-            for (let c = 0; c < channels; c++) {
+            const mono = new Float32Array(audioBuffer.length);
+            for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
                 const data = audioBuffer.getChannelData(c);
-                for (let i = 0; i < length; i++) mono[i] += data[i] / channels;
+                for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
             }
-
-            return {
-                sampleRate: audioBuffer.sampleRate,
-                samples: mono
-            };
+            return { sampleRate: audioBuffer.sampleRate, samples: mono };
         }
 
-        // NOTE(irwin): copied from stable diffusion example
         const getProgressDlForPart = async (part, progressCallback) => {
             const response = await fetch(part);
-            const contentLength = response.headers.get('content-length');
-            const total = parseInt(contentLength, 10);
-
+            const total = parseInt(response.headers.get('content-length'), 10);
             const res = new Response(new ReadableStream({
                 async start(controller) {
                     const reader = response.body.getReader();
@@ -158,76 +117,67 @@
                         progressCallback(part, value.byteLength, total);
                         controller.enqueue(value);
                     }
-
                     controller.close();
                 },
             }));
-
             return res.arrayBuffer();
         };
 
-        let totalLoaded = 0;
-        let totalSize = 0;
-        let partSize = {};
+        let totalLoaded = 0, totalSize = 0, partSize = {};
         const loadingText = document.querySelector("#div-loading > p");
         const progressCallback = (part, loaded, total) => {
             totalLoaded += loaded;
-
-            if (!partSize[part]) {
-                totalSize += total;
-                partSize[part] = true;
-            }
-
-            loadingText.innerHTML = `Loading model ${part.split('/').at(-1).split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
+            if (!partSize[part]) { totalSize += total; partSize[part] = true; }
+            loadingText.innerHTML = `Loading model ${part.split('/').pop().split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
         };
 
         async function transcribeAudio() {
             if (!net_encoder) {
                 await window.moduleReady;
-
-                let device = await getDevice();
+                const device = await getDevice();
                 if (!device) {
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
+                    return;
                 }
-                loadingText.innerHTML = 'Loading model mel';
                 net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/mel.safetensors`, progressCallback)));
-                loadingText.innerHTML = 'Loading model encoder';
                 net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/encoder.safetensors`, progressCallback)));
-                loadingText.innerHTML = 'Loading model decoder';
                 net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/decoder.safetensors`, progressCallback)));
                 loadingContainer.style.display = "none";
             }
 
-            let loaded = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
-            let samples = loaded.samples;
-
+            const { samples } = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             let log_specs = [];
-            for (var i = 0; i < samples.length; i+=SAMPLES_PER_SEGMENT) {
-                let chunk = samples.slice(i, i+SAMPLES_PER_SEGMENT);
+            for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
+                let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
                 if (chunk.length < SAMPLES_PER_SEGMENT) {
-                    let padded = new Float32Array(SAMPLES_PER_SEGMENT);
-                    for (var j = 0; j < chunk.length; ++j) {
-                        padded[j] = chunk[j];
-                    }
+                    const padded = new Float32Array(SAMPLES_PER_SEGMENT);
+                    padded.set(chunk);
                     chunk = padded;
                 }
-                let log_spec = await net_mel(chunk);
-                log_specs.push(log_spec[0]);
+                log_specs.push((await net_mel(chunk))[0]);
             }
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
 
-            for (var index = 0; index < log_specs.length; ++index) {
-                const output = await net_encoder(log_specs[index]);
+            let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+            const updateLoop = (now) => {
+                if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
+                    currentTranscription.innerText = pendingText;
+                    lastDisplayed = pendingText;
+                    lastUpdateTime = now;
+                    transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+                }
+                if (!inferenceDone) requestAnimationFrame(updateLoop);
+            };
+            requestAnimationFrame(updateLoop);
 
-                const TOK_EOS = 50256;
-                const TOK_BEGIN_TRANSCRIPTION = 50257;
-                const TOK_TRANSCRIBE = 50358;
-                const TOK_NO_TIMESTAMPS = 50362;
+            for (const log_spec of log_specs) {
+                const audio_features = await net_encoder(log_spec);
+                const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
                 let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
-
                 const MAX_TOKENS_TO_DECODE = 384;
+
                 const offset = context.length;
                 if (offset >= MAX_TOKENS_TO_DECODE) {
                     console.error("Context length exceeds 384");
@@ -235,11 +185,10 @@
                 }
                 for(let i = offset; i < (offset+MAX_TOKENS_TO_DECODE); ++i) {
                     if (i < MAX_TOKENS_TO_DECODE * 2) {
-                        var decoded_0 = await net_decoder(context, output[0], [i]);
-                        context.push(decoded_0[0]);
-                        if (decoded_0[0] == TOK_EOS) {
-                            break;
-                        }
+                        const [nextToken] = await net_decoder(context, audio_features[0], [i]);
+                        context.push(nextToken);
+                        pendingText = context.map(j => mapping[j]).join('');
+                        if (nextToken == TOK_EOS) break;
                     } else {
                         break;
                     }
@@ -247,23 +196,22 @@
 
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
-                newChunk.innerText = context.map(j => mapping[j]).join('');
+                newChunk.innerText = pendingText;
                 transcriptionLog.appendChild(newChunk);
-                transcriptionLog.scrollTop = transcriptionLog.scrollHeight;
+                pendingText = '';
+                currentTranscription.innerText = '';
             }
+            inferenceDone = true;
+            currentTranscription.style.display = 'none';
         }
 
         const getDevice = async () => {
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
-            return await adapter.requestDevice({
-                requiredFeatures: ["shader-f16"],
-                powerPreference: "high-performance"
-            });
+            return adapter?.requestDevice({ requiredFeatures: ["shader-f16"], powerPreference: "high-performance" });
         };
 
         transcribeAudio();
     </script>
 </body>
-
 </html>
