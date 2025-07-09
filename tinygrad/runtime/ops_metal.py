@@ -83,7 +83,8 @@ class MetalDevice(Compiled):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
-      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
+      # NOTE: command buffers from MetalGraph are not profiled here
+      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
