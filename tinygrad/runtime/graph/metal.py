@@ -63,6 +63,7 @@ class MetalGraph(GraphRunner):
 
   def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
+    # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
 
     all_resources = dedup(self.all_resources + [input_rawbuffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
