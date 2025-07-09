@@ -77,7 +77,7 @@
 <body>
     <h2>whisper tinygrad WebGPU</h2>
     <h2 id="wgpu-error" style="display: none; color: red;">Error: WebGPU is not supported in this browser</h2>
-    <h2 id="output"></h2>
+    <div id="output"></div>
     <div id="div-loading" class="loading-container">
         <p class="loading-text">Loading model</p>
         <span class="loader"></span>
@@ -173,24 +173,21 @@
 
             let loaded = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             let samples = loaded.samples;
-            if (samples.length > SAMPLES_PER_SEGMENT) {
-                samples = samples.slice(0, SAMPLES_PER_SEGMENT);
-            } else if (samples.length < SAMPLES_PER_SEGMENT) {
-                let padded = new Float32Array(SAMPLES_PER_SEGMENT);
-                for (var i = 0; i < samples.length; ++i) {
-                    padded[i] = samples[i];
+
+            let log_specs = [];
+            for (var i = 0; i < samples.length; i+=SAMPLES_PER_SEGMENT) {
+                let chunk = samples.slice(i, i+SAMPLES_PER_SEGMENT);
+                if (chunk.length < SAMPLES_PER_SEGMENT) {
+                    let padded = new Float32Array(SAMPLES_PER_SEGMENT);
+                    for (var i = 0; i < chunk.length; ++i) {
+                        padded[i] = chunk[i];
+                    }
+                    chunk = padded;
                 }
-                samples = padded;
+                let log_spec = await net_mel(chunk);
+                log_specs.push(log_spec[0]);
             }
-
-            let log_spec = await net_mel(samples);
-
-            const output = await net_encoder(log_spec[0]);
-            const TOK_EOS = 50256;
-            const TOK_BEGIN_TRANSCRIPTION = 50257;
-            const TOK_TRANSCRIBE = 50358;
-            const TOK_NO_TIMESTAMPS = 50362;
-            let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
+            console.log(log_specs.length);
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
 
@@ -214,23 +211,39 @@
             }
             requestAnimationFrame(updateLoop);
 
-            const offset = context.length;
-            if (offset >= MAX_TOKENS_TO_DECODE) {
-                console.error("Context length exceeds 384");
-                inferenceDone = true;
-                return;
-            }
-            for(let i = offset; i < (offset+MAX_TOKENS_TO_DECODE); ++i) {
-                if (i < MAX_TOKENS_TO_DECODE * 2) {
-                    var decoded_0 = await net_decoder(context, output[0], [i]);
-                    context.push(decoded_0[0]);
-                    pendingText = context.map(j => mapping[j]).join('');
-                    if (decoded_0[0] == TOK_EOS) {
+            for (var index = 0; index < log_specs.length; ++index) {
+                const output = await net_encoder(log_specs[index]);
+
+                const TOK_EOS = 50256;
+                const TOK_BEGIN_TRANSCRIPTION = 50257;
+                const TOK_TRANSCRIBE = 50358;
+                const TOK_NO_TIMESTAMPS = 50362;
+                let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
+
+                const offset = context.length;
+                if (offset >= MAX_TOKENS_TO_DECODE) {
+                    console.error("Context length exceeds 384");
+                    inferenceDone = true;
+                    return;
+                }
+                for(let i = offset; i < (offset+MAX_TOKENS_TO_DECODE); ++i) {
+                    if (i < MAX_TOKENS_TO_DECODE * 2) {
+                        var decoded_0 = await net_decoder(context, output[0], [i]);
+                        context.push(decoded_0[0]);
+                        pendingText = context.map(j => mapping[j]).join('');
+                        if (decoded_0[0] == TOK_EOS) {
+                            break;
+                        }
+                    } else {
                         break;
                     }
-                } else {
-                    break;
                 }
+                const out = document.getElementById("output");
+                var dupe = out.cloneNode(true);
+                dupe.id += index;
+                dupe.innerText = pendingText;
+                pendingText = '';
+                out.insertAdjacentElement('beforebegin', dupe);
             }
             inferenceDone = true;
         }
