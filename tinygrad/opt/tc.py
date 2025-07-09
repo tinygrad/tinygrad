@@ -1,5 +1,4 @@
 import math
-from typing import Optional
 from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import getenv
@@ -12,20 +11,23 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
-  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
+  swizzle: tuple[tuple[tuple[int, ...], tuple[int, ...]], tuple[tuple[int, ...], tuple[int, ...]]]  # (local_swizzle, reduce_upcast_swizzle)
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def __post_init__(self):
+    # all axes have size 2, <local> <reduce> <upcast> is the order
     local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
-    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), (
-      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})")
+    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), \
+      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})"
     assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"
-    assert 2**upcast_axes == self.elements_per_thread[2], (
-      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}")
-    assert all(len(perm[0]) == local_axes and len(perm[1]) == reduce_axes + upcast_axes for perm in self.swizzle if perm), (
-      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes}))")
+    assert 2**upcast_axes == self.elements_per_thread[2], \
+      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}"
+    # check swizzle
+    assert len(self.swizzle[0][0]) == len(self.swizzle[1][0]) == local_axes, "local swizzle size is wrong"
+    assert len(self.swizzle[0][1]) == len(self.swizzle[1][1]) == reduce_axes + upcast_axes, "reduce/upcast swizzle size is wrong"
+    assert all(sorted(s[0] + s[1]) == list(range(local_axes + reduce_axes + upcast_axes)) for s in self.swizzle), "swizzle missing some dims"
 
 # ***** NVIDIA *****
 
@@ -67,7 +69,8 @@ metal = [TensorCore(dims=(8,8,8), threads=32, elements_per_thread=(2,2,2), dtype
 
 # ***** Apple AMX *****
 
-amx = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt, swizzle=(None,((),(4,5,6,7,0,1,2,3))),
+amx = [TensorCore(dims=(sz,sz,1), threads=1, elements_per_thread=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
+                  swizzle=(((),(0,1,2,3,4,5,6,7)), ((),(4,5,6,7,0,1,2,3))),
                   opts=("u0","u0","u0","u0","u1","u1","u1","u1")) for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
 
 # ***** Intel ****
