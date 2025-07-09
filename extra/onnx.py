@@ -186,7 +186,7 @@ class OnnxRunner:
     return {name:Tensor.empty(*spec.shape, device=device, dtype=dtype or spec.dtype) for name, spec in self.graph_inputs.items()}
 
   def to(self, device:str):
-    self.graph_values = {k:v.to(device) if v is not None else None for k,v in self.graph_values.items()}
+    self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
     self.graph_nodes = tuple(OnnxNode(n.num, n.op, tuple(n.inputs), tuple(n.outputs),
                                       {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
     return self

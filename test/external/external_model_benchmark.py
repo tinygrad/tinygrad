@@ -133,10 +133,7 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
     np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  import time
-  st = time.time()
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
   if (model:=getenv("MODEL", "")) != "": benchmark_model(model, devices, validate_outs=True)
   else:
     for m in MODELS: benchmark_model(m, devices, validate_outs=True)
-  print(f"total time: {time.time() - st:.2f}s")
