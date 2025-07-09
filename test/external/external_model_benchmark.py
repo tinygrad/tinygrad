@@ -62,7 +62,7 @@ def benchmark_model(m, devices, validate_outs=False):
   for device in devices:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-    tinygrad_model = OnnxRunner(fn)
+    tinygrad_model = runner.to(device)
     benchmark(m, f"tinygrad_{device.lower()}_jitless", lambda: {k:v.numpy() for k,v in tinygrad_model(inputs).items()})
 
     from tinygrad.engine.jit import TinyJit
@@ -111,7 +111,7 @@ def benchmark_model(m, devices, validate_outs=False):
         inputs = {k:Tensor(inp, dtype=dtypes.float32) if inp.dtype == np.float16 else Tensor(inp) for k,inp in np_inputs.items()}
       else:
         inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
-      tinygrad_model = OnnxRunner(fn)
+      tinygrad_model = runner.to(device)
       tinygrad_out = tinygrad_model(inputs)
 
       ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
@@ -133,7 +133,10 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol, atol):
     np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
+  import time
+  st = time.time()
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CPU"]
   if (model:=getenv("MODEL", "")) != "": benchmark_model(model, devices, validate_outs=True)
   else:
     for m in MODELS: benchmark_model(m, devices, validate_outs=True)
+  print(f"total time: {time.time() - st:.2f}s")
