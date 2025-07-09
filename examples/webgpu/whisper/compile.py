@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .audio_helpers import stft, hann_window, make_stft_basis_buffers, mel
+from examples.webgpu.whisper.audio_helpers import stft, hann_window, make_stft_basis_buffers, mel
 from tinygrad import Tensor, Device, Variable
 import json
 

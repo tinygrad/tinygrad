@@ -143,9 +143,9 @@ def char_pointer_cast(string, encoding='utf-8'):
     return ctypes.cast(string, ctypes.POINTER(ctypes.c_char))
 
 
-
+import sys
 _libraries = {}
-_libraries['libcuda.so'] = ctypes.CDLL(ctypes.util.find_library('cuda'))
+_libraries['libcuda.so'] = ctypes.CDLL(ctypes.util.find_library('nvcuda' if sys.platform == 'win32' else 'cuda'))
 
 
 cuuint32_t = ctypes.c_uint32
