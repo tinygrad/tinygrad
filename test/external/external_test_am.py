@@ -21,7 +21,8 @@ class FakeAM:
   def __init__(self):
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
-    self.vram_mv = memoryview(bytearray(4 << 30))
+    self.vram_size = (4 << 30)
+    self.vram_mv = memoryview(bytearray(self.vram_size))
     self.vram = MMIOInterface(mv_address(self.vram_mv), self.vram_mv.nbytes)
     self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
