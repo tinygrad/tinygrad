@@ -117,6 +117,17 @@ class TextDecoder:
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
 
+  def rearrange_kv_cache(self, beam_indices: List[int], length=None):
+    for block in self.blocks:
+      if block.attn.kv_caching != 'self': continue
+      for cache_attr in ['cache_k', 'cache_v']:
+        cache = getattr(block.attn, cache_attr, None)
+        if cache is None: continue
+        selected = [cache[i] for i in beam_indices]
+        if isinstance(length, int): selected = [s[:, :length] for s in selected]
+        selected_tensor = selected[0].stack(*selected[1:], dim=0)
+        getattr(block.attn, cache_attr).assign(selected_tensor.contiguous()).realize()
+
 class Whisper:
   def __init__(self, dims, batch_size=1):
     self.encoder = AudioEncoder(**dims)
@@ -237,13 +248,13 @@ def load_file_waveform(filename):
 def transcribe_file(model, enc, filename, **kwargs):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], **kwargs)
 
-def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, do_beam=False, truncate=False):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, (1 if do_beam else model.batch_size), truncate)
   nsample = model.decoder.max_tokens_to_sample
 
   no_tst, eot = enc._special_tokens['<|notimestamps|>'], enc.eot_token
@@ -265,7 +276,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, truncate=
       blank_tokens = enc.encode(" ") + [eot]
       logits[:, blank_tokens] = -np.inf
 
-    if not do_seek: return
+    if not do_seek: return None
     timestamp_begin = enc._special_tokens['<|0.00|>']
 
     for k in range(tokens.shape[0]):
@@ -296,16 +307,36 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, truncate=
       if ts_logprob > max_text_logprob:
         logits[k, :timestamp_begin] = -np.inf
 
+  def get_ctx_lens(ctx): return [len(seq) - (r := np.argmax(seq[::-1] != eot)) - ((i := len(seq) - r) >= 2 and seq[i-2] > eot and seq[i-1] > eot) for seq in ctx]
+  def rank(ctx_lens, sum_logprob, length_penalty=None): return int(np.argmax([beam_logprob / (l if length_penalty is None else ((5+l)/6)**length_penalty) for beam_logprob, l in zip(sum_logprob, ctx_lens)]))
+
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
-    pos, next_tokens, sample_begin = 0, ctx, len(ctx[0])
+    pos, next_tokens, sample_begin, sum_logprob = 0, ctx, len(ctx[0]), [0]*len(ctx)
     for i in range((nsample-len(start_tokens))*2):
-      next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].numpy().astype(np.float16)
+      next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].numpy()
       apply_logit_filters(next_logits, ctx, sample_begin)
-      next_tokens = next_logits.argmax(axis=-1).astype(np.int32).reshape(-1, 1)
+      if do_beam:
+          bs, vs = model.batch_size, next_logits.shape[-1]
+          logprob = log_softmax(next_logits, axis=-1)
+          mask = np.full_like(logprob, -np.inf)
+          mask[:, eot] = 0
+          logprob = (logprob[0, :] if len(ctx[0])==sample_begin else np.where((ctx[:, -1] == eot)[:, None], mask, logprob)+sum_logprob.reshape(-1,1)).flatten()
+          top_idxs = np.argpartition(logprob, -bs)[-bs:]
+          top_idxs = top_idxs[np.argsort(-logprob[top_idxs])]
+          beam_idxs, next_tokens = top_idxs // vs, (top_idxs % vs).reshape(-1, 1)
+          ctx, sum_logprob = ctx[beam_idxs], logprob[top_idxs]
+          model.decoder.rearrange_kv_cache(beam_idxs.tolist())
+      else:
+          next_tokens = next_logits.argmax(axis=-1).astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
       if (next_tokens == eot).all(): break
+    if do_beam:
+      ctx_lens = get_ctx_lens(ctx)
+      idx = rank(ctx_lens, sum_logprob)
+      model.decoder.rearrange_kv_cache([idx]*model.batch_size, ctx_lens[idx])
+      ctx = np.tile(ctx[idx], (model.batch_size, 1))
     return ctx
 
   def ts2float(ts): return float(enc.decode([ts])[2:-2])
@@ -329,8 +360,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, truncate=
       inc = FRAMES_PER_SEGMENT
     return res, inc
 
-  def pad_segment(curr_frame):
-    seg = log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]
+  def pad_segment(seg):
     pad_len = FRAMES_PER_SEGMENT - seg.shape[2]
     if pad_len > 0: seg = np.pad(seg, ((0, 0), (0, 0), (0, pad_len)), mode='constant')
     return seg
@@ -349,7 +379,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, truncate=
   curr_frame = 0
 
   while curr_frame < (get_unpadded_length(log_spec)-2000 if do_seek else log_spec.shape[-1]):
-    encoded_audio = model.encoder.encode(Tensor(pad_segment(curr_frame)))
+    encoded_audio = model.encoder.encode(Tensor(pad_segment(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT])))
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
@@ -381,11 +411,11 @@ def listener(q):
   print("done listening")
 
 if __name__ == "__main__":
-  do_seek = getenv('SEEK')
-  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
+  do_seek, do_beam = map(lambda x: bool(getenv(x, 0)), ('SEEK', 'BEAM_DECODE'))
+  model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=5 if do_beam else 1)
 
   if len(sys.argv) > 1:
-    transcription = transcribe_file(model, enc, sys.argv[1], do_seek=do_seek)
+    transcription = transcribe_file(model, enc, sys.argv[1], do_seek=do_seek, do_beam=do_beam)
     if do_seek:
       for seg in transcription: print({k: seg[k] for k in ('seek','start', 'end', 'text')})
     else:

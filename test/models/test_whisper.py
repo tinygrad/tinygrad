@@ -14,8 +14,10 @@ TEST_FILE_2 = str(pathlib.Path(__file__).parent / "whisper/test2.wav")
 TRANSCRIPTION_2 = "a slightly longer audio file so that we can test batch transcriptions of varying length."
 # TODO this file will possibly not survive long. find another 1-2 minute sound file online to transcribe
 TEST_FILE_3_URL = 'https://homepage.ntu.edu.tw/~karchung/miniconversations/mc45.mp3'
-TRANSCRIPTION_3 = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine, and I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs and the back trimmed, and I'd like the rest thinned out a bit and layered. Where would you like the part? On the left, right about here. Here, have a look. What do you think? It's fine. Here's a thousand anti-dollars. It's 30-ant extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time."   # noqa: E501
+TRANSCRIPTION_3 = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine, and I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs and the back trimmed, and I'd like the rest thinned out a bit and layered. Where would you like the part? On the left, right about here. Here, have a look. What do you think? It's fine. Here's a thousand anti-dollars. It's 30-ant extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time." # noqa: E501
+TRANSCRIPTION_3_BEAM = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine, and I'd like conditioner, please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs and the back trimmed, and I'd like the rest thinned out a bit and layered. Where would you like the part? On the left, right about here. Here, have a look. What do you think? It's fine. Here's a thousand anti-dollars. It's 30 anti-extra for the rinse. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time." # noqa: E501
 TRANSCRIPTION_3_SEEK = [{'seek': 0, 'start': 0.0, 'end': 2.44, 'text': ' Just lie back and relax.'}, {'seek': 0, 'start': 2.44, 'end': 5.44, 'text': ' Is the level of pressure about right?'}, {'seek': 0, 'start': 5.44, 'end': 9.44, 'text': " Yes, it's fine, and I'd like conditioner, please."}, {'seek': 0, 'start': 9.44, 'end': 10.84, 'text': ' Sure.'}, {'seek': 0, 'start': 10.84, 'end': 13.84, 'text': " I'm going to start the second lathering now."}, {'seek': 0, 'start': 13.84, 'end': 16.88, 'text': ' Would you like some Q-tips?'}, {'seek': 0, 'start': 16.88, 'end': 18.92, 'text': " How'd you like it cut?"}, {'seek': 0, 'start': 18.92, 'end': 21.72, 'text': " I'd like my bangs in the back trimmed,"}, {'seek': 0, 'start': 21.72, 'end': 24.76, 'text': " and I'd like the rest thinned out a bit and layered."}, {'seek': 0, 'start': 24.76, 'end': 26.72, 'text': ' Where would you like the part?'}, {'seek': 0, 'start': 26.72, 'end': 29.76, 'text': ' On the left, right about here.'}, {'seek': 2976, 'start': 30.76, 'end': 32.08, 'text': ' Here, have a look.'}, {'seek': 2976, 'start': 32.08, 'end': 33.68, 'text': ' What do you think?'}, {'seek': 2976, 'start': 33.68, 'end': 34.68, 'text': " It's fine."}, {'seek': 2976, 'start': 34.68, 'end': 37.04, 'text': " Here's $1,000."}, {'seek': 2976, 'start': 37.04, 'end': 39.760000000000005, 'text': " It's 30-ant extra for the rinse."}, {'seek': 2976, 'start': 39.760000000000005, 'end': 41.72, 'text': " Here's your change and receipt."}, {'seek': 2976, 'start': 41.72, 'end': 44.68, 'text': ' Thank you, and please come again.'}, {'seek': 2976, 'start': 44.68, 'end': 47.400000000000006, 'text': ' So how do you like it?'}, {'seek': 2976, 'start': 47.400000000000006, 'end': 49.44, 'text': " It could have been worse, but you'll"}, {'seek': 2976, 'start': 49.44, 'end': 52.68000000000001, 'text': " notice that I didn't ask her for her card."}, {'seek': 2976, 'start': 52.68000000000001, 'end': 55.68000000000001, 'text': ' Hmm, yeah.'}, {'seek': 2976, 'start': 55.68000000000001, 'end': 59.28, 'text': ' Maybe you can try that place over there next time.'}] # noqa: E501
+TRANSCRIPTION_3_BEAM_SEEK = [{'seek': 0, 'start': 0.0, 'end': 2.6, 'text': ' Just lie back and relax.'}, {'seek': 0, 'start': 2.6, 'end': 5.5, 'text': ' Is the level of pressure about right?'}, {'seek': 0, 'start': 5.5, 'end': 9.4, 'text': " Yes, it's fine, and I'd like conditioner, please."}, {'seek': 0, 'start': 9.4, 'end': 10.8, 'text': ' Sure.'}, {'seek': 0, 'start': 10.8, 'end': 13.9, 'text': " I'm going to start the second lathering now."}, {'seek': 0, 'start': 13.9, 'end': 16.9, 'text': ' Would you like some Q-tips?'}, {'seek': 0, 'start': 16.9, 'end': 18.900000000000002, 'text': " How'd you like it cut?"}, {'seek': 0, 'start': 18.900000000000002, 'end': 21.6, 'text': " I'd like my bangs in the back trimmed,"}, {'seek': 0, 'start': 21.6, 'end': 24.8, 'text': " and I'd like the rest thinned out a bit and layered."}, {'seek': 0, 'start': 24.8, 'end': 26.7, 'text': ' Where would you like the part?'}, {'seek': 0, 'start': 26.7, 'end': 29.8, 'text': ' On the left, right about here.'}, {'seek': 2980, 'start': 30.7, 'end': 32.1, 'text': ' Here, have a look.'}, {'seek': 2980, 'start': 32.1, 'end': 33.7, 'text': ' What do you think?'}, {'seek': 2980, 'start': 33.7, 'end': 34.7, 'text': " It's fine."}, {'seek': 2980, 'start': 34.7, 'end': 37.0, 'text': " Here's a thousand anti-dollars."}, {'seek': 2980, 'start': 37.0, 'end': 39.8, 'text': " It's 30-ant extra for the rinse."}, {'seek': 2980, 'start': 39.8, 'end': 41.7, 'text': " Here's your change and receipt."}, {'seek': 2980, 'start': 41.7, 'end': 44.7, 'text': ' Thank you, and please come again.'}, {'seek': 2980, 'start': 44.7, 'end': 47.400000000000006, 'text': ' So how do you like it?'}, {'seek': 2980, 'start': 47.400000000000006, 'end': 49.8, 'text': " It could have been worse, but you'll notice"}, {'seek': 2980, 'start': 49.8, 'end': 52.7, 'text': " that I didn't ask her for her card."}, {'seek': 2980, 'start': 52.7, 'end': 55.5, 'text': ' Hmm, yeah.'}, {'seek': 2980, 'start': 55.5, 'end': 59.3, 'text': ' Maybe you can try that place over there next time.'}] # noqa: E501
 
 @unittest.skipIf(CI and Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
@@ -32,8 +34,8 @@ class TestWhisper(unittest.TestCase):
     del cls.enc
 
   @classmethod
-  def reinit_model(cls, batch_size: int):
-    if cls.model.batch_size == batch_size: return
+  def reinit_model(cls, batch_size: int, force: bool=False):
+    if not force and cls.model.batch_size == batch_size: return
     del cls.model
     del cls.enc
     cls.model, cls.enc = init_whisper("tiny.en", batch_size=batch_size)
@@ -95,6 +97,20 @@ class TestWhisper(unittest.TestCase):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform, do_seek=True)
     self.assert_transcriptions_equal(transcription, TRANSCRIPTION_3_SEEK)
+
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
+  def test_transcribe_beam(self):
+    self.__class__.reinit_model(5, force=True)
+    waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
+    transcription = transcribe_waveform(self.model, self.enc, waveform, do_beam=True)
+    self.assertEqual(transcription, TRANSCRIPTION_3_BEAM)
+
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
+  def test_transcribe_beam_seek(self):
+    self.__class__.reinit_model(5, force=True)
+    waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
+    transcription = transcribe_waveform(self.model, self.enc, waveform, do_beam=True, do_seek=True)
+    self.assert_transcriptions_equal(transcription, TRANSCRIPTION_3_BEAM_SEEK)
 
 if __name__ == '__main__':
   unittest.main()
