@@ -1,6 +1,7 @@
 from typing import cast
 import math, struct, sys
-from tinygrad.renderer import Renderer, tc
+from tinygrad.opt import tc
+from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
