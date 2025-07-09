@@ -1,7 +1,7 @@
 from typing import Any, cast
 import ctypes, re
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, getenv, merge_dicts
+from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
@@ -91,7 +91,8 @@ class MetalGraph(GraphRunner):
 
     msg("executeCommandsInBuffer:withRange:")(encoder, self.icb, self.range)
     msg("endEncoding")(encoder)
-    msg("setLabel:")(command_buffer, to_ns_str(f"batched {len(self.jit_cache)}"))
+    msg("setLabel:")(command_buffer, to_ns_str(f"batched {len(self.jit_cache)}"
+                                               +(" "+",".join([cast(CompiledRunner,p.prg)._prg.name for p in self.jit_cache]) if PROFILE else "")))
     msg("commit")(command_buffer)
     self.command_buffer = command_buffer
 
