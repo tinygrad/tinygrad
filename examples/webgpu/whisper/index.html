@@ -89,6 +89,7 @@
         const loadingContainer = document.getElementById('div-loading');
 
         const SAMPLES_PER_SEGMENT = 480000;
+        const BASE_URL = '.'; // for LFS-stored weights
 
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
@@ -161,11 +162,11 @@
                     loadingContainer.style.display = "none";
                 }
                 loadingText.innerHTML = 'Loading model mel';
-                net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart("./mel.safetensors", progressCallback)));
+                net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/mel.safetensors`, progressCallback)));
                 loadingText.innerHTML = 'Loading model encoder';
-                net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart("./encoder.safetensors", progressCallback)));
+                net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/encoder.safetensors`, progressCallback)));
                 loadingText.innerHTML = 'Loading model decoder';
-                net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart("./decoder.safetensors", progressCallback)));
+                net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/decoder.safetensors`, progressCallback)));
                 loadingContainer.style.display = "none";
             }
 
