@@ -79,8 +79,8 @@ class NVDev(PCIDevImplBase):
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512], va_base=0,
-      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=48, va_shifts=[12, 21, 29, 38, 47], va_base=0,
+      palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
     self.flcn:NV_FLCN = NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
