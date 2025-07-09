@@ -1,7 +1,7 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
@@ -84,12 +84,7 @@ class MetalDevice(Compiled):
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
-        if lb.startswith("batched"):
-          # create a graph entry and evenly space each program
-          ents = [ProfileGraphEntry(self.device, p, i, i+1, is_copy=False) for i,p in enumerate(lb.split(" ")[2].split(","))]
-          step = (en-st)/len(ents)
-          Compiled.profile_events += [ProfileGraphEvent(ents, [], [st+step*i for i in range(len(ents)+1)])]
-        else: Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:

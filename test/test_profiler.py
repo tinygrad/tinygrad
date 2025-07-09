@@ -181,5 +181,18 @@ class TestProfiler(unittest.TestCase):
     # record start/end time up to exit (error or success)
     self.assertGreater(range_events[0].en-range_events[0].st, range_events[1].en-range_events[1].st)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
+  def test_graph(self):
+    from test.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
+    device = TestProfiler.d0.device
+    bufs = [helper_alloc_rawbuffer(device, fill=True) for _ in range(5)]
+    graphs = [[helper_exec_op(device, bufs[0], [bufs[1], bufs[2]]), helper_exec_op(device, bufs[0], [bufs[3], bufs[4]]),]]
+    with helper_collect_profile(dev:=TestProfiler.d0) as profile:
+      helper_test_graphs(dev.graph, graphs, runs:=2)
+    graphs = [e for e in profile if isinstance(e, ProfileGraphEvent)]
+    self.assertEqual(len(graphs), runs)
+    for ge in graphs:
+      self.assertEqual(len(ge.ents), len(graphs))
+
 if __name__ == "__main__":
   unittest.main()
