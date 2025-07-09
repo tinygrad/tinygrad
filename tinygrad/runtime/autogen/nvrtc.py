@@ -6,23 +6,11 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, ctypes.util, sys
+import ctypes, ctypes.util
+
 
 _libraries = {}
-if sys.platform == 'win32':
-    import glob, os.path
-    def find_nv_dll(glob_pattern):
-        cuda_bin = os.path.join(os.environ.get("CUDA_PATH", ""), "bin")
-        matches = glob.glob(os.path.join(cuda_bin, glob_pattern))
-        return matches[0] if matches else None
-
-    nvjitlink_dll = find_nv_dll("nvrtc64_*.dll")
-    if not nvjitlink_dll:
-        raise RuntimeError("nvrtc64 DLL not found.")
-
-    _libraries['libnvrtc.so'] = ctypes.CDLL(nvjitlink_dll)
-else:
-    _libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
+_libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
@@ -149,15 +137,8 @@ class Union(ctypes.Union, AsDictMixin):
     pass
 
 
-if sys.platform == 'win32':
-    nvjitlink_dll = find_nv_dll("nvJitLink_*.dll")
-    if not nvjitlink_dll:
-        raise RuntimeError("nvJitLink DLL not found.")
 
-    _libraries['libnvJitLink.so'] = ctypes.CDLL(nvjitlink_dll)
-else:
-    _libraries['libnvJitLink.so'] = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
-
+_libraries['libnvJitLink.so'] = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
