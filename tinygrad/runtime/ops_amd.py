@@ -742,7 +742,8 @@ class AMDDevice(HCQCompiled):
     self.max_wave_id = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
                        (min((self.max_cu_id+1)*40, self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] * 512) - 1)
     self.xccs = self.iface.props.get('num_xcc', 1) if getenv("XCCS", 1) else 1
-    self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2),(9,5)} # this is what llvm refers to as "architected flat scratch"
+    # this is what llvm refers to as "architected flat scratch"
+    self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2),(9,5)}
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
