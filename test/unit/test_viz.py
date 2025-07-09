@@ -272,7 +272,6 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(devices[0], 'NV')
     self.assertEqual(devices[1], 'NV:1')
 
-
     nv_events = j['layout']['NV']['timeline']['shapes']
     # TODO: make this work with MultiGraphs
     self.assertEqual(nv_events[0]['name'], 'batched 2')
