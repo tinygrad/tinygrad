@@ -34,11 +34,11 @@ class NVPageTableEntry:
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     if not table:
-      x = self.nvdev.NV_MMU_VER2_PTE.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, vol=uncached, kind=6)
+      x = self.nvdev.NV_MMU_VER3_PTE.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, pcf=int(uncached), kind=6)
     elif self.lv == 3:
-      x = self.nvdev.NV_MMU_VER2_DUAL_PDE.encode(is_pte=False, address_small_sys=paddr >> 12, aperture_small=1 if valid else 0, vol_small=0, no_ats=1)
+      x = self.nvdev.NV_MMU_VER3_DUAL_PDE.encode(is_pte=False, address_small=paddr >> 12, aperture_small=1 if valid else 0, pcf_small=0b10 | int(uncached))
     else:
-      x = self.nvdev.NV_MMU_VER2_PDE.encode(is_pte=False, address_sys=paddr >> 12, aperture=1 if valid else 0, vol=0, no_ats=1)
+      x = self.nvdev.NV_MMU_VER3_PDE.encode(is_pte=False, address=paddr >> 12, aperture=1 if valid else 0, pcf=0b10 | int(uncached))
 
     if self.lv != 3: self.entries[entry_id] = x
     else:
@@ -48,8 +48,8 @@ class NVPageTableEntry:
   def entry(self, entry_id:int) -> int: return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.is_huge_page(entry_id): return self.nvdev.NV_MMU_VER2_PTE.decode(self.entry(entry_id))
-    return (self.nvdev.NV_MMU_VER2_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER2_PDE).decode(self.entry(entry_id))
+    if self.is_huge_page(entry_id): return self.nvdev.NV_MMU_VER3_PTE.decode(self.entry(entry_id))
+    return (self.nvdev.NV_MMU_VER3_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER3_PDE).decode(self.entry(entry_id))
 
   def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
   def supports_huge_page(self, paddr:int): return self.lv >= 2 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
@@ -58,7 +58,7 @@ class NVPageTableEntry:
     if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
     return self.read_fields(entry_id)['aperture_small' if self.lv == 3 else 'aperture'] != 0
 
-  def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small_sys' if self.lv == 3 else 'address_sys'] << 12
+  def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small' if self.lv == 3 else ('address_sys' if self.lv == 4 else 'address')] << 12
 
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 44), base=1 << 30) # global for all devices.
@@ -79,8 +79,9 @@ class NVDev(PCIDevImplBase):
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512], va_base=0,
-      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[2, 512, 512, 512, 256, 512], va_base=0,
+      pte_covers=[0x100000000000000, 0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000],
+      palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
     self.flcn:NV_FLCN_COT = NV_FLCN_COT(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
@@ -118,9 +119,9 @@ class NVDev(PCIDevImplBase):
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
 
     # MMU Init
-    self.reg_names.update(['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE'])
-    for name in ['NV_MMU_VER2_PTE', 'NV_MMU_VER2_PDE', 'NV_MMU_VER2_DUAL_PDE']: self.__dict__[name] = NVReg(self, None, None, fields={})
-    self.include("kernel-open/nvidia-uvm/hwref/turing/tu102/dev_mmu.h")
+    self.reg_names.update(['NV_MMU_VER3_PTE', 'NV_MMU_VER3_PDE', 'NV_MMU_VER3_DUAL_PDE'])
+    for name in ['NV_MMU_VER3_PTE', 'NV_MMU_VER3_PDE', 'NV_MMU_VER3_DUAL_PDE']: self.__dict__[name] = NVReg(self, None, None, fields={})
+    self.include("kernel-open/nvidia-uvm/hwref/hopper/gh100/dev_mmu.h")
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
