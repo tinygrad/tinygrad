@@ -266,7 +266,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=RATE)
   transcriptions = [[] for _ in waveforms]
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
-    encoded_audio = model.encoder.encode((log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
+    encoded_audio = model.encoder.encode((log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT].contiguous()))
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
