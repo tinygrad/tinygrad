@@ -25,7 +25,6 @@ class TestOnnxOps(unittest.TestCase):
     model = self.helper_build_model(op, inps, opts, outs)
     with tempfile.NamedTemporaryFile() as tmp:
       onnx.save(model, tmp.name)
-      tmp.flush()
       validate(tmp.name, inps, rtol, atol)
 
 class TestMainOnnxOps(TestOnnxOps):

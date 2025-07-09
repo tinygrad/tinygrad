@@ -2,9 +2,7 @@ from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx import OnnxValue
-import tempfile, os
 import numpy as np
-import onnx
 import onnxruntime as ort
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):

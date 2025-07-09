@@ -8,9 +8,9 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model_clang, compile_net, jit_model
-from tinygrad.frontend.onnx import OnnxRunner
 
 def get_uncompiled_model2(dataset_size=32, output_size=4):
   inputs = tf.keras.Input(shape=(dataset_size,), name="inputs")
