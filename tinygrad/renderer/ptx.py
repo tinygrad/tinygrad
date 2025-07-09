@@ -1,9 +1,10 @@
 from typing import cast, Callable
 import struct
 from collections import defaultdict
+from tinygrad.opt import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
-from tinygrad.renderer import Renderer, tc
+from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.helpers import flatten, get_single_element
 

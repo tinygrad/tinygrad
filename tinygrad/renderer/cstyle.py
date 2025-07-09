@@ -1,10 +1,11 @@
 from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
+from tinygrad.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.renderer import Renderer, tc
+from tinygrad.renderer import Renderer
 from tinygrad.codegen.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([

@@ -7,8 +7,9 @@ import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.opt import tc
 from tinygrad.uop.ops import exec_alu, Ops, UOp, GroupOp
-from tinygrad.renderer import Renderer, tc
+from tinygrad.renderer import Renderer
 
 def _load(m, i):
   if i is None: return 0.0
