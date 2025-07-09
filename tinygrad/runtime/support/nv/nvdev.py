@@ -79,8 +79,8 @@ class NVDev(PCIDevImplBase):
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, pte_cnt=[4, 512, 512, 256, 512], va_base=0,
-      pte_covers=[0x800000000000, 0x4000000000, 0x20000000, 0x200000, 0x1000], palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=48, va_shifts=[12, 21, 29, 38, 47], va_base=0,
+      palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
     self.flcn:NV_FLCN = NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
@@ -89,6 +89,8 @@ class NVDev(PCIDevImplBase):
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
+
+  def fini(self): System.pci_reset(self.devfmt) # Reset the device to clean up resources. TODO: Consider a warm start process.
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
   def wreg(self, addr, value):
@@ -125,10 +127,10 @@ class NVDev(PCIDevImplBase):
   def _alloc_boot_struct(self, struct):
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
-    return struct, paddrs[0]
+    return type(struct).from_address(va), paddrs[0]
 
   def _download(self, file) -> str:
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/e8113f665d936d9f30a6d508f3bacd1e148539be/{file}"
+    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
     return fetch(url, subdir="defines").read_text()
 
   def extract_fw(self, file:str, dname:str) -> bytes:
