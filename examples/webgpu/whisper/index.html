@@ -199,9 +199,11 @@
             let lastUpdateTime = 0;
             let inferenceDone = false;
 
+            const ELEMENT_UPDATE_FPS = 30;
+            const MAX_TOKENS_TO_DECODE = 384;
             function updateLoop(now) {
                 if (pendingText !== null && pendingText !== lastDisplayed) {
-                    if (now - lastUpdateTime >= 1000.0 / 30) {
+                    if (now - lastUpdateTime >= 1000.0 / ELEMENT_UPDATE_FPS) {
                         document.getElementById("output").innerText = pendingText;
                         lastDisplayed = pendingText;
                         lastUpdateTime = now;
@@ -213,13 +215,13 @@
             requestAnimationFrame(updateLoop);
 
             const offset = context.length;
-            if (offset >= 384) {
+            if (offset >= MAX_TOKENS_TO_DECODE) {
                 console.error("Context length exceeds 384");
                 inferenceDone = true;
                 return;
             }
-            for(let i = offset; i < (offset+384); ++i) {
-                if (i < 384 * 2) {
+            for(let i = offset; i < (offset+MAX_TOKENS_TO_DECODE); ++i) {
+                if (i < MAX_TOKENS_TO_DECODE * 2) {
                     var decoded_0 = await net_decoder(context, output[0], [i]);
                     context.push(decoded_0[0]);
                     pendingText = context.map(j => mapping[j]).join('');
