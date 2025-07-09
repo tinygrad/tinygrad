@@ -19,33 +19,47 @@
     </script>
     <style>
         body {
-            background-color: #607d8b;
-            text-align: center;
-            font-family: Arial, sans-serif;
+            background-color: #333;
+            color: #f0f0f0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 0;
-            overflow: hidden;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        .loader {
-            width: 48px;
-            height: 48px;
-            border: 5px solid #FFF;
-            border-bottom-color: transparent;
-            border-radius: 50%;
-            display: inline-block;
-            box-sizing: border-box;
-            animation: rotation 1s linear infinite;
+        .container {
+            max-width: 800px;
+            width: 100%;
         }
 
-        @keyframes rotation {
-            0% {
-                transform: rotate(0deg);
-            }
+        h2 {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 2rem;
+        }
 
-            100% {
-                transform: rotate(360deg);
-            }
+        #wgpu-error {
+            color: #ff6b6b;
+        }
+
+        #transcription-log {
+            background-color: #444;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            height: 60vh;
+            overflow-y: auto;
+        }
+
+        .transcription-chunk {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #555;
+        }
+
+        .transcription-chunk:last-child {
+            border-bottom: none;
         }
 
         .loading-container {
@@ -58,26 +72,39 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.6);
+            background-color: rgba(0, 0, 0, 0.8);
             z-index: 10;
         }
 
-        .loading-text {
-            font-size: 24px;
-            color: white;
-            margin-bottom: 20px;
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid #FFF;
+            border-bottom-color: #888;
+            border-radius: 50%;
+            display: inline-block;
+            animation: rotation 1s linear infinite;
         }
 
-        h1 {
-            margin-top: 20px;
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 1.5rem;
+            color: white;
+            margin-bottom: 1.5rem;
         }
     </style>
 </head>
 
 <body>
-    <h2>whisper tinygrad WebGPU</h2>
-    <h2 id="wgpu-error" style="display: none; color: red;">Error: WebGPU is not supported in this browser</h2>
-    <div id="output"></div>
+    <div class="container">
+        <h2>Whisper Tinygrad WebGPU</h2>
+        <h2 id="wgpu-error" style="display: none;">Error: WebGPU is not supported in this browser</h2>
+        <div id="transcription-log"></div>
+    </div>
     <div id="div-loading" class="loading-container">
         <p class="loading-text">Loading model</p>
         <span class="loader"></span>
@@ -87,10 +114,11 @@
         let net_encoder = null;
         const wgpuError = document.getElementById('wgpu-error');
         const loadingContainer = document.getElementById('div-loading');
+        const transcriptionLog = document.getElementById('transcription-log');
 
         const SAMPLES_PER_SEGMENT = 480000;
         const BASE_URL = '.'; // for LFS-stored weights
-        const AUDIO_PATH = 'test2.wav';
+        const AUDIO_PATH = 'RED_16k.wav';
 
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
@@ -179,37 +207,16 @@
                 let chunk = samples.slice(i, i+SAMPLES_PER_SEGMENT);
                 if (chunk.length < SAMPLES_PER_SEGMENT) {
                     let padded = new Float32Array(SAMPLES_PER_SEGMENT);
-                    for (var i = 0; i < chunk.length; ++i) {
-                        padded[i] = chunk[i];
+                    for (var j = 0; j < chunk.length; ++j) {
+                        padded[j] = chunk[j];
                     }
                     chunk = padded;
                 }
                 let log_spec = await net_mel(chunk);
                 log_specs.push(log_spec[0]);
             }
-            console.log(log_specs.length);
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
-
-            let pendingText = null;
-            let lastDisplayed = '';
-            let lastUpdateTime = 0;
-            let inferenceDone = false;
-
-            const ELEMENT_UPDATE_FPS = 30;
-            const MAX_TOKENS_TO_DECODE = 384;
-            function updateLoop(now) {
-                if (pendingText !== null && pendingText !== lastDisplayed) {
-                    if (now - lastUpdateTime >= 1000.0 / ELEMENT_UPDATE_FPS) {
-                        document.getElementById("output").innerText = pendingText;
-                        lastDisplayed = pendingText;
-                        lastUpdateTime = now;
-                        if (inferenceDone) return;
-                    }
-                }
-                requestAnimationFrame(updateLoop);
-            }
-            requestAnimationFrame(updateLoop);
 
             for (var index = 0; index < log_specs.length; ++index) {
                 const output = await net_encoder(log_specs[index]);
@@ -220,17 +227,16 @@
                 const TOK_NO_TIMESTAMPS = 50362;
                 let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
 
+                const MAX_TOKENS_TO_DECODE = 384;
                 const offset = context.length;
                 if (offset >= MAX_TOKENS_TO_DECODE) {
                     console.error("Context length exceeds 384");
-                    inferenceDone = true;
                     return;
                 }
                 for(let i = offset; i < (offset+MAX_TOKENS_TO_DECODE); ++i) {
                     if (i < MAX_TOKENS_TO_DECODE * 2) {
                         var decoded_0 = await net_decoder(context, output[0], [i]);
                         context.push(decoded_0[0]);
-                        pendingText = context.map(j => mapping[j]).join('');
                         if (decoded_0[0] == TOK_EOS) {
                             break;
                         }
@@ -238,14 +244,13 @@
                         break;
                     }
                 }
-                const out = document.getElementById("output");
-                var dupe = out.cloneNode(true);
-                dupe.id += index;
-                dupe.innerText = pendingText;
-                pendingText = '';
-                out.insertAdjacentElement('beforebegin', dupe);
+
+                const newChunk = document.createElement('div');
+                newChunk.className = 'transcription-chunk';
+                newChunk.innerText = context.map(j => mapping[j]).join('');
+                transcriptionLog.appendChild(newChunk);
+                transcriptionLog.scrollTop = transcriptionLog.scrollHeight;
             }
-            inferenceDone = true;
         }
 
         const getDevice = async () => {
@@ -257,7 +262,7 @@
             });
         };
 
-        const final = transcribeAudio();
+        transcribeAudio();
     </script>
 </body>
 
