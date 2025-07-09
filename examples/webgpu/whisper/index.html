@@ -186,7 +186,11 @@
             let log_spec = await net_mel(samples);
 
             const output = await net_encoder(log_spec[0]);
-            let context = [50257, 50362];
+            const TOK_EOS = 50256;
+            const TOK_BEGIN_TRANSCRIPTION = 50257;
+            const TOK_TRANSCRIBE = 50358;
+            const TOK_NO_TIMESTAMPS = 50362;
+            let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
 
@@ -219,7 +223,7 @@
                     var decoded_0 = await net_decoder(context, output[0], [i]);
                     context.push(decoded_0[0]);
                     pendingText = context.map(j => mapping[j]).join('');
-                    if (decoded_0[0] == 50256) {
+                    if (decoded_0[0] == TOK_EOS) {
                         break;
                     }
                 } else {
