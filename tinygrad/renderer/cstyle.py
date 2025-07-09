@@ -393,11 +393,11 @@ class AMDRenderer(CStyleLanguage):
 
   @staticmethod
   def get_tensor_cores(arch):
-    return {"gfx942": tc.amd_cdna, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
+    return {"gfx942": tc.amd_cdna, "gfx950": tc.amd_cdna, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
     self.tensor_cores = self.get_tensor_cores(arch)
-    if self.arch.split(":")[0] == "gfx942":
+    if self.tensor_cores == tc.amd_cdna:
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)")]) + base_rewrite
   def __reduce__(self): return self.__class__, (self.arch,)
@@ -457,10 +457,10 @@ class AMDRenderer(CStyleLanguage):
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     for arg in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-      if self.arch.split(":")[0] == "gfx942":
+      if self.tensor_cores == tc.amd_cdna:
         prefix.append(f"#define __{arg[0]} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if arg[2] == dtypes.half else 'bf16_1k'}")
       # #define __WMMA_16_16_16_half_half __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
-      elif self.arch.split(":")[0] == "gfx1201":
+      elif self.tensor_cores == tc.amd_rdna4:
         prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_{type_map[arg[3]]}_16x16x16_{type_map[arg[2]]}_w32_gfx12")
       elif arg[3] == dtypes.float:
         prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if arg[2] == dtypes.half else 'bf16'}_w32")
