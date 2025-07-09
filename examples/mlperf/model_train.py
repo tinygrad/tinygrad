@@ -1355,6 +1355,8 @@ def train_llama3():
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 def train_stable_diffusion():
+  from extra.models.unet import UNetModel
+  from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1363,6 +1365,25 @@ def train_stable_diffusion():
 
   BASEDIR = getenv("BASEDIR", "")
   assert BASEDIR, "set BASEDIR to path of datasets"
+
+  x = batch_load_train_stable_diffusion(BS)
+  for batch in x:
+    break
+  
+  unet_params = {
+    "adm_in_ch": None,
+    "in_ch": 4,
+    "out_ch": 4,
+    "model_ch": 320,
+    "attention_resolutions": [4, 2, 1],
+    "num_res_blocks": 2,
+    "channel_mult": [1, 2, 4, 4],
+    "d_head": 64,
+    "transformer_depth": [1, 1, 1, 1],
+    "ctx_dim": 1024,
+    "use_linear": True,
+  }
+  model = UNetModel(**unet_params)
 
   """
   opt = torch.optim.AdamW(params, lr=lr)
@@ -1380,7 +1401,7 @@ Parameter Group 0
     weight_decay: 0.01
 )
   """
-  #optimizer = AdamW(get_parameters(model), lr=lr)
+  optimizer = AdamW(get_parameters(model), lr=lr)
 
   @TinyJit
   @Tensor.train()
