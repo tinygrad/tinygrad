@@ -1,11 +1,11 @@
 import unittest, decimal, json
 from dataclasses import dataclass
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, TracingKey
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -230,7 +230,7 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
 
-from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
 class TestVizProfiler(unittest.TestCase):

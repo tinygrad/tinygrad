@@ -326,11 +326,14 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
+        python3 -m ruff check extra/onnx.py extra/onnx_parser.py
         python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
+      run: |
+        python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
+        python -m mypy --strict-equality extra/onnx_parser.py
 
   unittest:
     name: Unit Tests

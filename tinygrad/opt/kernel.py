@@ -1,8 +1,9 @@
 from __future__ import annotations
 import itertools, functools, math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
+from enum import Enum, auto
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
 from tinygrad.uop.spec import type_verify, ast_spec
@@ -14,8 +15,14 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
 
-class KernelOptError(Exception): pass
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
 
+axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan",
+               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red",
+               AxisType.UPCAST: "yellow", AxisType.UNROLL: "magenta"}
+
+class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
 
@@ -35,13 +42,10 @@ class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
     assert ast.op is Ops.SINK, ast.op
     self.ast = ast
-    self.info: KernelInfo = self.ast.arg if self.ast.arg is not None else KernelInfo()
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
     if __debug__: type_verify(list(self.ast.toposort()), ast_spec)
-
-    self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
 
     self.vars: list[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
@@ -52,6 +56,7 @@ class Kernel:
 
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
+    self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE_AXIS]
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
@@ -60,14 +65,19 @@ class Kernel:
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
 
     # parameters for optimization
-    self.group_for_reduces: int = 0
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
+    self.applied_opts: list[Opt] = []
+    self.dont_use_locals = False
+    self.finalized: bool = False
 
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
+
+    # axis types
+    self.axis_types = [AxisType.REDUCE if resolve(x!=y) else AxisType.GLOBAL for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
 
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
@@ -83,17 +93,14 @@ class Kernel:
     # things downstream of the AST
     ret.reduceops, ret.vars, ret.bufs = self.reduceops, self.vars, self.bufs
     ret.sts = self.sts[:]
+    ret.axis_types = self.axis_types[:]
 
     # parameters for optimizations
-    ret.info, ret.group_for_reduces = self.info, self.group_for_reduces
+    ret.applied_opts, ret.dont_use_locals = self.applied_opts[:], self.dont_use_locals
     ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
+    ret.finalized = self.finalized
 
     return ret
-
-  def update_info(self, **updates): self.info = replace(self.info, **updates)
-
-  @property
-  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
 
   def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
     upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
@@ -103,69 +110,57 @@ class Kernel:
 
   @property
   def first_reduce(self) -> int:
-    return [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
-
+    for i in range(self.first_upcast):
+      if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE): return i
+    return self.first_upcast
   @property
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
 
   @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
-
-  @property
-  def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
-
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
-
   @property
   def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
 
   @property
+  def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
+  @property
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def global_dims(self) -> int: return self.first_reduce-self.local_dims
-
+  def global_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GLOBAL]) if hasattr(self, 'axis_types') else 0
   @property
-  def local_dims(self) -> int: return self.info.local_dims
-
+  def local_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.LOCAL]) if hasattr(self, 'axis_types') else 0
   @property
-  def upcasted(self) -> int: return self.info.upcasted
-
+  def upcasted(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.UPCAST, AxisType.UNROLL}]) if hasattr(self, 'axis_types') else 0
   @property
-  def dont_use_locals(self) -> bool: return self.info.dont_use_locals
+  def group_for_reduces(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GROUP_REDUCE]) if hasattr(self, 'axis_types') else 0
 
-  @property
-  def applied_opts(self) -> list[Opt]: return list(self.info.applied_opts)
+  # ******************** colors and names ********************
 
-  # there's eight chunks of the shape
-  # blue   -- global dims
-  # cyan   -- local dims (warp ones first)
-  #  *** self.first_reduce
-  # green  -- reduce-local dims
-  # red    -- reduce loops
-  #  *** self.upcasted
-  # purple -- reduce upcasted
-  # yellow -- normal upcasted dimensions
   def colors(self) -> list[str]:
-    # first non local non reduce dims are global (blue)
-    colors = ["blue"] * self.global_dims if not self.dont_use_locals else ["BLUE"] * self.global_dims
-    # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
-    colors += ["cyan"] * self.local_dims
-    # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
-    colors += ["green"] * self.group_for_reduces
-    # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
-    colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
-    # upcasted dimensions are reduce (magenta) or normal (yellow)
-    colors += ["magenta" if self.full_shape[i] != self.sts[0].shape[i] else "yellow" for i in range(self.first_upcast, self.shape_len)]
-    assert len(colors) == self.shape_len, "colors size mismatch"
-    return colors
+    assert len(self.axis_types) == self.shape_len, "colors size mismatch"
+    return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
     ret = ' '.join(colored(s, color) for s,color in zip(shape_strs, self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
+
+  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
+  @functools.cached_property
+  def name(self) -> str:
+    # kernel name (before late upcast)
+    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort()) else "E")
+    suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
+    name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
+
+    # name the function something unique
+    Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1
+    num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
+    return name + colored(num, 'BLACK')
 
   # ******************** base simplifiers ********************
 
@@ -175,17 +170,13 @@ class Kernel:
     def permute(st:ShapeTracker): return st.permute(tuple(axis)) if axis is not None else st
     self.sts = [permute(reshape(st)) for st in self.sts]
 
-  # drops the final dimension
-  def upcast(self):
-    check(self.full_shape[-1] != 1, "can't upcast a dimension with size 1")
-    self.update_info(upcasted=self.info.upcasted + 1)
-
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
   # insert_before : place to insert the new stuff
-  def shift_to(self, axis, amount, top=False, insert_before=None):
+  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_before:int|None=None):
     if insert_before is None: insert_before = self.shape_len
+    self.axis_types.insert(insert_before, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
     self.reshape_and_permute(
@@ -196,17 +187,18 @@ class Kernel:
 
   def simplify_ones(self) -> bool:
     # remove places where the shape is all ones
-    # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return False
-    all_ones = [s==1 for s in self.full_shape]
-    self.update_info(local_dims=self.local_dims - sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce]),
-                     upcasted=self.upcasted - sum(all_ones[self.first_upcast:])) # TODO: no necessary since upcasted axis can't be un-upcasted
-    self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
-    return any(all_ones)
+    if any(all_ones:=[s==1 for s in self.full_shape]):
+      if hasattr(self, 'axis_types'):
+        self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
+      self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
+      return True
+    return False
 
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
+    # NOTE: we can't use self.first_reduce yet
+    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     if isinstance(self.membufs[0].dtype, ImageDType):
@@ -233,7 +225,7 @@ class Kernel:
         si, sti, last_st = s[i], st[i], ret[-1][1]
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
-      mergeable = all(can_merge) and i != self.first_reduce
+      mergeable = all(can_merge) and i != first_reduce
       for j,(s,st) in enumerate(zip(shapes, strides)):
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
         else: rets[j].append((s[i], st[i]))
@@ -241,7 +233,103 @@ class Kernel:
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
-  # ******************** high level optimizers ********************
+  # ******************** apply optimizations ********************
+
+  def real_axis(self, opt:Opt):
+    if opt.axis is None: return -1
+    if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
+    if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.first_reduce+self.group_for_reduces+opt.axis
+    return opt.axis
+
+  def apply_opt(self, opt:Opt, append_opt:bool=True):
+    if self.finalized: raise RuntimeError("can't optimize Kernel after it's finalized")
+    if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
+
+    if opt.op is OptOps.TC:
+      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
+      check(len(self.opts.tensor_cores) > 0, "must have tensor cores")
+      check(opt.axis is not None, "tensor core opts must have an axis")
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
+      check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
+      check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
+      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
+      self.applied_opts.append(opt)
+      return
+
+    axis = self.real_axis(opt)
+    check(axis < len(self.full_shape), "invalid axis")
+
+    if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
+    elif opt.arg is not None:
+      check(isinstance(opt.arg, int), "arg should be int")
+      amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
+      check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
+      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+    else: amt = -1
+
+    if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
+                                      (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
+      acc_sz = self.reduceop.dtype.itemsize
+      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
+      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
+      smem_sz = amt*acc_sz*upcast_sz*local_sz
+      check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
+
+    if opt.op is OptOps.LOCAL:    # cyan
+      # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # it's disabled for now since it makes BEAM slow for little gain
+      check(self.opts.has_local, "target does not support local")
+      check(axis < self.global_dims, "local is for globals")
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=self.first_reduce)
+    elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
+      check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
+      check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
+      check(not self.tensor_core, "can't group with tensor cores")
+      check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
+      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+    elif opt.op is OptOps.UNROLL:                     # purple
+      check(axis < self.first_upcast, "can't upcasted already upcasted")
+      check(amt <= 32, "don't unroll more than 32")
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
+    elif opt.op is OptOps.UPCAST:                     # yellow
+      check(axis < self.first_reduce, "upcast is for non-reduce")
+      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
+      check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
+    elif opt.op is OptOps.NOLOCALS:
+      check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
+      check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
+      self.dont_use_locals = True
+    elif opt.op is OptOps.SWAP:
+      check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
+      permute = list(range(self.shape_len))
+      permute[axis], permute[amt] = permute[amt], permute[axis]
+      self.reshape_and_permute(None, tuple(permute))
+    elif opt.op is OptOps.PADTO:
+      check(not self.vars, "does not work with symbolic shape")
+      check(axis < self.first_upcast, "cannot pad upcasted")
+      # ok to pad SUM if all parent ALU ops have f(0) = 0
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
+      padded = False
+      for i,st in enumerate(self.sts):
+        if (s:=st.shape[axis]) == 1: continue  # reduced
+        check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
+        if (ru := round_up(cast(int, s), amt) - s):
+          # pad right seems to be faster
+          self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+          padded = True
+      check(padded, "nothing was padded")
+
+    if append_opt: self.applied_opts.append(opt)
+    if self.simplify_ones() and self.tensor_core_opts:
+      self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+
+  def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
+    for opt in opts: self.apply_opt(opt)
+    return self
+
+  # **** kernel outputs, mostly tensor cores ****
 
   def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
     has_cast = tc.dtype_in != tc.dtype_out
@@ -305,7 +393,6 @@ class Kernel:
       0: will disable any tensor core matching
       1: enable tensor cores
       2: apply tensor core shape but don't use UOp.WMMA
-      3: emulate tensor cores with local memory
     extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
     tc_select -- specifies which tensor core(s) to use for optimization (default -1)
       -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
@@ -336,124 +423,6 @@ class Kernel:
     except KernelOptError:
       return False
 
-  def real_axis(self, opt:Opt):
-    if opt.axis is None: return -1
-    if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
-    if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.first_reduce+self.group_for_reduces+opt.axis
-    return opt.axis
-
-  def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
-
-    if opt.op is OptOps.TC:
-      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
-      check(len(self.opts.tensor_cores) > 0, "must have tensor cores")
-      check(opt.axis is not None, "tensor core opts must have an axis")
-      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
-      check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
-      check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
-      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
-      self.update_info(applied_opts=self.info.applied_opts + (opt,))
-      return
-
-    axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
-
-    if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
-    elif opt.arg is not None:
-      check(isinstance(opt.arg, int), "arg should be int")
-      amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
-      check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
-      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
-    else: amt = -1
-
-    if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
-                                      (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
-      acc_sz = self.reduceop.dtype.itemsize
-      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
-      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
-      smem_sz = amt*acc_sz*upcast_sz*local_sz
-      check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
-
-    if opt.op is OptOps.LOCAL:    # cyan
-      # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
-      # it's disabled for now since it makes BEAM slow for little gain
-      check(self.opts.has_local, "target does not support local")
-      check(axis < self.global_dims, "local is for globals")
-      self.shift_to(axis, amt, insert_before=self.first_reduce)
-      self.update_info(local_dims=self.info.local_dims + 1)
-    elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
-      check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
-      check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
-      check(not self.tensor_core, "can't group with tensor cores")
-      check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
-      self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
-      self.group_for_reduces += 1
-    elif opt.op is OptOps.UNROLL:                     # purple
-      check(axis < self.first_upcast, "can't upcasted already upcasted")
-      check(amt <= 32, "don't unroll more than 32")
-      # TODO: fix upcast_count to put purples before yellows. broken because of METAL tensor cores
-      #upcast_count = sum(x == y for x,y in zip(self.full_shape[-self.upcasted:], self.output_shape[-self.upcasted:])) if self.upcasted else 0
-      #self.shift_to(axis, amt, insert_before=None if upcast_count == 0 else self.shape_len-upcast_count)
-      # first_reduce will ++, so offset loss in simplify_ones
-      if self.full_shape[axis] == amt and axis == self.first_reduce: self.update_info(local_dims=self.local_dims + 1)
-      if self.full_shape[axis] == amt and axis < self.first_reduce+self.group_for_reduces: self.group_for_reduces -= 1 # fully unrolling a GROUP
-      self.shift_to(axis, amt, insert_before=None)
-      self.upcast()
-    elif opt.op is OptOps.UPCAST:                     # yellow
-      check(axis < self.first_reduce, "upcast is for non-reduce")
-      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
-      check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, insert_before=None)
-      self.upcast()
-    elif opt.op is OptOps.NOLOCALS:
-      check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
-      check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
-      self.update_info(dont_use_locals=True)
-    elif opt.op is OptOps.SWAP:
-      check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
-      permute = list(range(self.shape_len))
-      permute[axis], permute[amt] = permute[amt], permute[axis]
-      self.reshape_and_permute(None, tuple(permute))
-    elif opt.op is OptOps.PADTO:
-      check(not self.vars, "does not work with symbolic shape")
-      check(axis < self.first_upcast, "cannot pad upcasted")
-      # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
-      padded = False
-      for i,st in enumerate(self.sts):
-        if (s:=st.shape[axis]) == 1: continue  # reduced
-        check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
-        if (ru := round_up(cast(int, s), amt) - s):
-          # pad right seems to be faster
-          self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
-          padded = True
-      check(padded, "nothing was padded")
-
-    if append_opt: self.update_info(applied_opts=self.info.applied_opts + (opt,))
-    if self.simplify_ones() and self.tensor_core_opts:
-      self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
-
-  def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
-    for opt in opts: self.apply_opt(opt)
-    return self
-
-  # **** kernel outputs ****
-
-  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
-  @functools.cached_property
-  def name(self) -> str:
-    # kernel name (before late upcast)
-    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op is Ops.SINK or x.op in GroupOp.Buffer for x in self.ast.toposort()) else "E")
-    suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
-    name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
-
-    # name the function something unique
-    Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1
-    num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
-    return name + colored(num, 'BLACK')
-
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
@@ -466,8 +435,9 @@ class Kernel:
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
-        return ret.replace(arg=replace(self.info, name=ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
-          global_dims=self.global_dims if self.opts.has_local else 0, local_dims=self.local_dims + self.group_for_reduces, opts_to_apply=None))
+        return ret.replace(arg=KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
+                                          self.global_dims if self.opts.has_local else 0, self.local_dims + self.group_for_reduces,
+                                          self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
@@ -494,17 +464,13 @@ class Kernel:
             if swizzle: srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
-          if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-
-          else:
-            tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
+          tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
           return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
@@ -524,13 +490,17 @@ class Kernel:
           return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
 
       return ret
+    self.finalized = True
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # TODO: update the tests and delete these methods
 
-  def linearize(self):
+  @property
+  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+
+  def DEPRECATED_linearize(self):
     self.to_program()
     return self
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:

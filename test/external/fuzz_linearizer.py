@@ -206,7 +206,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(test_lin.linearize().uops)
+        try: tuops = tuplize_uops(test_lin.DEPRECATED_linearize().uops)
         except KeyboardInterrupt: raise
         except BaseException as e:
           print(test_lin.ast)
