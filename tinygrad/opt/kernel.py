@@ -473,7 +473,7 @@ class Kernel:
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
+          for i, (src, swizzle) in enumerate(zip(srcs, tc.n_swizzle())):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
             srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
