@@ -316,18 +316,18 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, do_beam=F
       next_logits = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].numpy()
       apply_logit_filters(next_logits, ctx, sample_begin)
       if do_beam:
-          bs, vs = model.batch_size, next_logits.shape[-1]
-          logprob = log_softmax(next_logits, axis=-1)
-          mask = np.full_like(logprob, -np.inf)
-          mask[:, eot] = 0
-          logprob = (logprob[0, :] if len(ctx[0])==sample_begin else np.where((ctx[:, -1] == eot)[:, None], mask, logprob)+sum_logprob.reshape(-1,1)).flatten()
-          top_idxs = np.argpartition(logprob, -bs)[-bs:]
-          top_idxs = top_idxs[np.argsort(-logprob[top_idxs])]
-          beam_idxs, next_tokens = top_idxs // vs, (top_idxs % vs).reshape(-1, 1)
-          ctx, sum_logprob = ctx[beam_idxs], logprob[top_idxs]
-          model.decoder.rearrange_kv_cache(beam_idxs.tolist())
+        bs, vs = model.batch_size, next_logits.shape[-1]
+        logprob = log_softmax(next_logits, axis=-1)
+        mask = np.full_like(logprob, -np.inf)
+        mask[:, eot] = 0
+        logprob = (logprob[0, :] if len(ctx[0])==sample_begin else np.where((ctx[:, -1] == eot)[:, None], mask, logprob)+sum_logprob.reshape(-1,1)).flatten()
+        top_idxs = np.argpartition(logprob, -bs)[-bs:]
+        top_idxs = top_idxs[np.argsort(-logprob[top_idxs])]
+        beam_idxs, next_tokens = top_idxs // vs, (top_idxs % vs).reshape(-1, 1)
+        ctx, sum_logprob = ctx[beam_idxs], logprob[top_idxs]
+        model.decoder.rearrange_kv_cache(beam_idxs.tolist())
       else:
-          next_tokens = next_logits.argmax(axis=-1).astype(np.int32).reshape(-1, 1)
+        next_tokens = next_logits.argmax(axis=-1).astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
@@ -376,7 +376,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, do_seek=False, do_beam=F
   ctx = np.tile(start_tokens, (model.batch_size,1))
   transcriptions = [[] for _ in waveforms]
 
-  curr_frame = 0
+  curr_frame, inc = 0, FRAMES_PER_SEGMENT
 
   while curr_frame < (get_unpadded_length(log_spec)-2000 if do_seek else log_spec.shape[-1]):
     encoded_audio = model.encoder.encode(Tensor(pad_segment(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT])))
