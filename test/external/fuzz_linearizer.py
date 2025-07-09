@@ -20,9 +20,9 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
+from tinygrad.opt.kernel import Kernel
+from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.opt.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.uop.ops import UOp, Ops
@@ -73,7 +73,7 @@ def get_fuzz_rawbufs(lin):
         data = np.random.uniform(-1, 1, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       else:
         data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().lazydata.base.realized.as_buffer())
+      rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().uop.base.realized.as_buffer())
   return rawbufs
 
 def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_device=None):
@@ -206,7 +206,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(test_lin.linearize().uops)
+        try: tuops = tuplize_uops(test_lin.DEPRECATED_linearize().uops)
         except KeyboardInterrupt: raise
         except BaseException as e:
           print(test_lin.ast)

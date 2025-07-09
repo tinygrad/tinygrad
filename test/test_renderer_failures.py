@@ -23,7 +23,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   uops = dedup(flatten(_recursive_add(st) for st in stores))
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
-  inbufs = [cast(UOp,x.lazydata).base.buffer for x in inputs]
+  inbufs = [cast(UOp,x.uop).base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render(uops)
   ei = CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops[-1], uops=uops, local_size=local_size))
   ei.exec(outbufs+inbufs)

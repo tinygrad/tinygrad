@@ -3,8 +3,7 @@ import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
-from tinygrad.helpers import dedup, partition, all_same, flatten
-from tinygrad.uop.spec import type_verify
+from tinygrad.helpers import dedup, partition, all_same, flatten, getenv
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -72,7 +71,7 @@ class BlockContext:
   child_count: dict[UOp, int]
   block_ctxs: dict[UOp, tuple[UOp, ...]]
   child_ctxs: dict[UOp, tuple[UOp, ...]]
-  def last_ctx(self, u): return ret if (ret:=self.child_ctxs.get(u)) is not None else self.block_ctxs[u]
+  def last_ctx(self, u): return self.child_ctxs.get(u, self.block_ctxs[u])
   @staticmethod
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
@@ -100,7 +99,7 @@ class BlockContext:
           ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
         else: ctx.child_ctxs[u] = ()
       elif u.op is Ops.ASSIGN:
-        assert u.src[0].op is Ops.DEFINE_ACC
+        assert u.src[0].op is Ops.DEFINE_REG
         ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]])
     return ctx
 
@@ -158,7 +157,8 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
     base_block = UOp(Ops.BLOCKSTART, src=tuple(v), arg=(new_ctx, new_child_ctx))
     srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
-  lst = block_reorder(lst[::-1])
+  lst = lst[::-1]
+  if getenv("BLOCK_REORDER", 1): lst = block_reorder(lst)
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
@@ -211,13 +211,12 @@ def remove_blockend(x:UOp):
   # if there's any remaining blocks that need to go in this BLOCKEND, we don't remove it
   if any(x.arg.end in y.arg.ctx for y in x.src if y.op in {Ops.BLOCK, Ops.BLOCKEND}): return None
 
-  parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]
-  assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
-  if len(parent_blocks) > 0:
+  if (parent_blocks := [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]):
+    assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
     parent_block = parent_blocks[0]
     assert len(parent_blocks) == parent_block.arg.cnt
     # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
-    early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+    early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_REG and x.arg.end in y.src)
     # NOTE: we have to add a barrier at the start if barrier is used in the range
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
@@ -237,9 +236,6 @@ def finalize(sink:UOp) -> UOp:
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
-
-  if __debug__: type_verify(lst)
-
   return UOp(Ops.BLOCKFINAL, arg=BasicBlock(tuple(lst)))
 
 pm_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="sink"), finalize)])
