@@ -269,8 +269,9 @@ class TestVizProfiler(unittest.TestCase):
     j = json.loads(get_profile(prof))
 
     devices = list(j['layout'])
-    self.assertEqual(devices[0], 'NV')
-    self.assertEqual(devices[1], 'NV:1')
+    self.assertEqual(devices[0], 'NV Graph')
+    self.assertEqual(devices[1], 'NV')
+    self.assertEqual(devices[2], 'NV:1')
 
     nv_events = j['layout']['NV']['timeline']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -282,6 +283,10 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+
+    graph_events = j['layout']['NV Graph']['timeline']['shapes']
+    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
+    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
