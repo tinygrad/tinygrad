@@ -1,5 +1,5 @@
 from typing import Any, Sequence, cast, Literal, Callable
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, pathlib, struct
+import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct
 from io import BufferedReader
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray
@@ -247,7 +247,7 @@ def type_parse(onnx_type: dict):
   if "tensor_type" in elem_type:
     shape_dims = elem_type['tensor_type'].get('shape', {}).get('dim', [])
     parsed_shape = tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims)
-    dtype = dtype_parse(elem_type['tensor_type']['elem_type'])
+    dtype = data_types[elem_type['tensor_type']['elem_type']]
     return OnnxValue(parsed_shape, dtype, is_optional, is_sequence)
   raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
 
@@ -312,8 +312,8 @@ class OnnxRunner:
     self.graph_values = {"": None, **{x["name"]:buffer_parse(x) for x in model["graph"]["initializer"]}}
     self.graph_inputs = {x["name"]:type_parse(x["type"]) for x in model["graph"]["input"] if x["name"] not in self.graph_values}
     self.graph_outputs = tuple(x["name"] for x in model["graph"]["output"])
-    self.graph_nodes = tuple(OnnxNode(num, n["op_type"], tuple(n["input"]), tuple(n["output"]), {x["name"]:attribute_parse(x) for x in n["attribute"]})
-                       for num,n in enumerate(model["graph"]["node"]))
+    self.graph_nodes = tuple(OnnxNode(num, n["op_type"], tuple(n["input"]), tuple(n["output"]),
+                                      {x["name"]:attribute_parse(x) for x in n["attribute"]}) for num,n in enumerate(model["graph"]["node"]))
     self.opset_version = model["opset_import"][0]["version"]
     self.variable_dims: dict[str, int] = {}
 
