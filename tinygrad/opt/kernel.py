@@ -389,8 +389,8 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
-        for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False) # TODO: this should be the reduce, not 0
         for opt in tc.opts: self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], tc_opts.axes[int(opt[1])], 2), append_opt=False)
+        for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False) # TODO: this should be the reduce, not 0
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -463,13 +463,13 @@ class Kernel:
           wd, tcd = self.global_dims, self.first_upcast
           def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
             upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
-            return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
+            return tuple((tcd + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
           def get_tc_swizzle_st(shape, local_perm, upcast_perm, reduce_perm):
-            ru_perm = reduce_perm + upcast_perm
+            ur_perm = upcast_perm + reduce_perm
             offset = (tcd - (wd + len(local_perm)))
             permaxis = list(range(wd)) \
               + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
-              + [wd + x + (offset if x >= len(local_perm) else 0) for x in ru_perm] + list(range(tcd + len(ru_perm), len(shape)))
+              + [wd + x + (offset if x >= len(local_perm) else 0) for x in ur_perm] + list(range(tcd + len(ur_perm), len(shape)))
             return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -477,7 +477,7 @@ class Kernel:
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
             srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
 
-          tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
+          tc_reduce_axes = tuple(tcd + len(tc.get_upcast_axes()) + ax for ax, _ in tc.get_reduce_axes())
           tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
           wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
