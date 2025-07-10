@@ -31,9 +31,10 @@ class Opt:
 class AxisType(Enum):
   GLOBAL = auto(); LOCAL = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
 
-axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan",
-               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red",
-               AxisType.UPCAST: "yellow", AxisType.UNROLL: "magenta"}
+axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.UPCAST: "u",
+                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.UPCAST: "yellow",
+               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
 class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
@@ -90,7 +91,7 @@ class Kernel:
     self.simplify_merge_adjacent()
 
     # axis types
-    self.axis_types = [AxisType.REDUCE if resolve(x!=y) else AxisType.GLOBAL for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else AxisType.GLOBAL for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
 
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
@@ -436,6 +437,15 @@ class Kernel:
     except KernelOptError:
       return False
 
+  # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
+  def shape_str(self) -> list[str]:
+    ret: list[str] = []
+    cnt: dict[AxisType, int] = {}
+    for x in self.axis_types:
+      cnt[x] = (cnt[x] + 1) if x in cnt else 0
+      ret.append(f"{axis_letters[x]}{cnt[x]}")
+    return ret
+
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
@@ -460,22 +470,15 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
-          wd, tcd = self.global_dims, self.first_upcast
+          tcd = self.first_upcast
           def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
             upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
             return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
-          def get_tc_swizzle_st(shape, local_perm, upcast_perm, reduce_perm):
-            ru_perm = reduce_perm + upcast_perm
-            offset = (tcd - (wd + len(local_perm)))
-            permaxis = list(range(wd)) \
-              + [wd + x + (offset if x >= len(local_perm) else 0) for x in local_perm]  + list(range(wd + len(local_perm), tcd)) \
-              + [wd + x + (offset if x >= len(local_perm) else 0) for x in ru_perm] + list(range(tcd + len(ru_perm), len(shape)))
-            return ShapeTracker.from_shape(shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, (src, swizzle) in enumerate(zip(srcs, tc.n_swizzle())):
+          for i, (src, permaxis) in enumerate(zip(srcs, tc.permutes_for_shape_str(self.shape_str()))):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            srcs[i] = src.view(get_tc_swizzle_st(src_st.shape, *swizzle))
+            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(permaxis)))
 
           tc_reduce_axes = tuple(tcd + ax for ax, _ in tc.get_reduce_axes())
           tc_upcast_axes = (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
