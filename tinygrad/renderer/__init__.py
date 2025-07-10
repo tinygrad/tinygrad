@@ -1,23 +1,12 @@
 from __future__ import annotations
-from typing import Optional, Callable, cast
+from typing import Optional, Callable, cast, TYPE_CHECKING
 import functools, itertools
-from enum import Enum, auto
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
-from tinygrad.renderer.tc import TensorCore
-
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: Optional[int] = None
-  arg: Optional[int | tuple] = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
+if TYPE_CHECKING:
+  from tinygrad.opt.tc import TensorCore
+  from tinygrad.opt.kernel import Opt
 
 @dataclass(frozen=True)
 class Estimates:
