@@ -389,7 +389,7 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
-        for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, amt), append_opt=False)
+        for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False) # TODO: this should be the reduce, not 0
         for opt in tc.opts: self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], tc_opts.axes[int(opt[1])], 2), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
@@ -464,7 +464,7 @@ class Kernel:
           def get_upcast_axes(buf): # upcast along non-zero dimensions of (tc_reduce + tc_upcast)
             upcast_axes = int(math.log2(tc.elements_per_thread[buf]))
             return tuple((tcd + len(tc.get_reduce_axes()) + len(tc.get_upcast_axes()) - (i+1), 2) for i in range(upcast_axes))
-          def get_tc_swizzle_st(shape, local_perm, reduce_perm, upcast_perm):
+          def get_tc_swizzle_st(shape, local_perm, upcast_perm, reduce_perm):
             ru_perm = reduce_perm + upcast_perm
             offset = (tcd - (wd + len(local_perm)))
             permaxis = list(range(wd)) \
