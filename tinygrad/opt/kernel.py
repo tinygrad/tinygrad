@@ -464,12 +464,10 @@ class Kernel:
                                           self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
-
-        def reduced_axes(start, stop):
-          return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        axes = reduced_axes(self.first_reduce + self.group_for_reduces, self.shape_len)
-        grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
-
+        axes = tuple(i for i in range(0, self.shape_len) if self.axis_types[i] in {AxisType.REDUCE, AxisType.UNROLL} and
+                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        grouped_axes = tuple(i for i in range(0, self.shape_len) if self.axis_types[i] is AxisType.GROUP_REDUCE and
+                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
