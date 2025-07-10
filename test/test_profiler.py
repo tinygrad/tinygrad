@@ -10,7 +10,10 @@ MOCKGPU = getenv("MOCKGPU")
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
-  Compiled.profile_events = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
+  saved = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
+  Compiled.profile_events.clear()
+  for x in saved: Compiled.profile_events.append(x)
+
   cpu_events.clear()
 
   profile_list = []
