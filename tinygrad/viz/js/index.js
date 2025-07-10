@@ -143,7 +143,7 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    let colorKey;
+    let colorKey, currentRef;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
@@ -152,8 +152,14 @@ async function renderProfiler() {
       }
       const fillColor = lighten(colorMap.get(colorKey), e.depth);
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      if (e.ref != null) currentRef = e.ref;
+      let ref = {ctx:currentRef, step:0};
+      if (e.ref == null && currentRef != null) {
+        const stepIdx = ctxs[currentRef+1].steps.findIndex((s) => s.name == e.name);
+        if (stepIdx !== -1) ref.step = stepIdx;
+      }
       // offset y by depth
-      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, fillColor });
+      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -297,7 +303,7 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref.ctx, foundRect.ref.step);
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
@@ -406,12 +412,12 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, step=0) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
