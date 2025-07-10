@@ -83,7 +83,8 @@ if __name__ == '__main__':
       x = self.token_embedding(x)
       x += self.positional_embedding.shrink(((0, seqlen), None, None))
       for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
-      return self.output_tok(x)[:, ctx-1].argmax(axis=-1).reshape(-1, 1)
+      probs = self.output_tok(x)[:, ctx-1]
+      return probs.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[:128, :]
     model.decoder.forward = forward.__get__(model.decoder, TextDecoder)
 
     x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
