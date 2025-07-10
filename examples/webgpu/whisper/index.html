@@ -63,6 +63,18 @@
         }
         @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .loading-text { font-size: 1.5rem; color: white; margin-bottom: 1.5rem; }
+
+        #overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 2em;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
     </style>
 </head>
 
@@ -74,6 +86,8 @@
             <div id="transcription-log"></div>
             <div id="current-transcription"></div>
         </div>
+        <div id="drop-zone">Drop files here</div>
+        <div id="overlay">Drop your file</div>
     </div>
     <div id="div-loading" class="loading-container">
         <p class="loading-text">Loading model</p>
@@ -245,6 +259,101 @@
             const adapter = await navigator.gpu.requestAdapter();
             return adapter?.requestDevice({ requiredFeatures: ["shader-f16"], powerPreference: "high-performance" });
         };
+
+        // async function dropHandler(ev) {
+        //     console.log("File(s) dropped");
+
+        //     // Prevent default behavior (Prevent file from being opened)
+        //     ev.preventDefault();
+
+        //     if (ev.dataTransfer.items) {
+        //         // Use DataTransferItemList interface to access the file(s)
+        //         [...ev.dataTransfer.items].forEach(async (item, i) => {
+        //         // If dropped items aren't files, reject them
+        //         if (item.kind === "file") {
+        //             const file = item.getAsFile();
+        //             console.log(`… file[${i}].name = ${file.name}`);
+        //             // if (file.name.endsWith('.glb')) {
+        //                 // modelChunks = await loadGLBFile(file);
+        //                 await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
+        //             // }
+        //         }
+        //         });
+        //     } else {
+        //         // Use DataTransfer interface to access the file(s)
+        //         [...ev.dataTransfer.files].forEach((file, i) => {
+        //         console.log(`… file[${i}].name = ${file.name}`);
+        //         });
+        //     }
+        // }
+
+        // function dragOverHandler(ev) {
+        //     console.log("File(s) in drop zone");
+
+        //     // Prevent default behavior (Prevent file from being opened)
+        //     ev.preventDefault();
+        // }
+
+        /*
+        ondrop="dropHandler(event);" ondragover="dragOverHandler(event);"
+        */
+        const overlay = document.getElementById('overlay');
+        // overlay.ondrop = dropHandler;
+        // overlay.ondragover = dragOverHandler;
+        // transcriptionLog.ondragstart = function (event) { event.target.style.border = "3px dotted red"; }
+        // transcriptionLog.ondrag = function (event) { event.target.style.color = "black"; }
+
+        let counter = 0;
+
+        document.addEventListener('dragenter', e => {
+            e.preventDefault();
+            counter++;
+            overlay.style.display = 'flex';
+        });
+
+        document.addEventListener('dragleave', e => {
+            e.preventDefault();
+            counter--;
+            if (counter === 0) overlay.style.display = 'none';
+        });
+
+        document.addEventListener('dragover', e => {
+            console.log("File(s) in drop zone");
+
+            // Prevent default behavior (Prevent file from being opened)
+            e.preventDefault(); // Needed to allow drop
+        });
+
+        document.addEventListener('drop', e => {
+            e.preventDefault();
+            counter = 0;
+            overlay.style.display = 'none';
+
+            console.log("File(s) dropped");
+
+            // Prevent default behavior (Prevent file from being opened)
+            e.preventDefault();
+
+            if (e.dataTransfer.items) {
+                // Use DataTransferItemList interface to access the file(s)
+                [...e.dataTransfer.items].forEach(async (item, i) => {
+                    // If dropped items aren't files, reject them
+                    if (item.kind === "file") {
+                        const file = item.getAsFile();
+                        console.log(`… file[${i}].name = ${file.name}`);
+                        // if (file.name.endsWith('.glb')) {
+                            // modelChunks = await loadGLBFile(file);
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
+                        // }
+                    }
+                });
+            } else {
+                // Use DataTransfer interface to access the file(s)
+                [...e.dataTransfer.files].forEach((file, i) => {
+                    console.log(`… file[${i}].name = ${file.name}`);
+                });
+            }
+        });
 
         transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`));
     </script>
