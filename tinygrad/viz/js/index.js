@@ -108,9 +108,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["#1A1F46", "#1E2350", "#22275A", "#262B64", "#2A306E", "#2E3478", "#323882", "#363C8C"],
+const devColors = {"TINY":["rgb(27, 87, 69)", "rgb(29, 46, 98)"],
                    "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
+
+const lighten = (rgb, depth, step=0.1) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -141,15 +143,17 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of timeline.shapes.entries()) {
-      const colorKey = e.cat ?? e.name;
+    let colorKey = null;
+    for (const e of timeline.shapes) {
+      if (colorKey == null || e.cat != null) colorKey = e.cat ?? e.name
       if (!colorMap.has(colorKey)) {
         const colors = devColors[k] ?? devColors.DEFAULT;
-        colorMap.set(colorKey, colors[i%colors.length]);
+        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
+      const fillColor = lighten(colorMap.get(colorKey), e.depth);
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       // offset y by depth
-      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, fillColor:colorMap.get(colorKey)});
+      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
