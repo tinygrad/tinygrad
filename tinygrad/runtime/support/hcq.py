@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback
-from tinygrad.helpers import PROFILE, getenv, to_mv, round_up
+from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent, ProfileProgramEvent
+from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, Variable, UOp
 from tinygrad.runtime.autogen import libc
 

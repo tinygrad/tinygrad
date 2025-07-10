@@ -1,11 +1,11 @@
 import unittest, decimal, json
 from dataclasses import dataclass
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, TracingKey
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -230,7 +230,7 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
 
-from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
 class TestVizProfiler(unittest.TestCase):
@@ -269,8 +269,9 @@ class TestVizProfiler(unittest.TestCase):
     j = json.loads(get_profile(prof))
 
     devices = list(j['layout'])
-    self.assertEqual(devices[0], 'NV')
-    self.assertEqual(devices[1], 'NV:1')
+    self.assertEqual(devices[0], 'NV Graph')
+    self.assertEqual(devices[1], 'NV')
+    self.assertEqual(devices[2], 'NV:1')
 
     nv_events = j['layout']['NV']['timeline']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -282,6 +283,10 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+
+    graph_events = j['layout']['NV Graph']['timeline']['shapes']
+    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
+    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

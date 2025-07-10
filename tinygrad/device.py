@@ -1,13 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Optional, Any, Generic, TypeVar, Iterator, Generator
+from typing import Optional, Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import TracingKey
 
 # **************** Device ****************
 
@@ -51,14 +50,9 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 
 # **************** Profile ****************
 
-class ProfileEvent: pass
-
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
   device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
-
-@dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
@@ -71,14 +65,6 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
-
-@contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, decimal.Decimal(time.perf_counter_ns()) / 1000, is_copy=is_copy)
-  try: yield res
-  finally:
-    res.en = decimal.Decimal(time.perf_counter_ns()) / 1000
-    if PROFILE and display: Compiled.profile_events.append(res)
 
 # **************** Buffer + Allocators ****************
 
@@ -396,7 +382,7 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events+Buffer.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz

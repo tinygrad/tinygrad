@@ -172,7 +172,10 @@ if __name__ == "__main__":
   ids: list[int] = [bos_id]
   while 1:
     start_pos = len(ids) - 1
-    ids += tok.role("user") + tok.encode(input('>>> ')) + [eos_id] + tok.role("assistant")
+    try:
+      ids += tok.role("user") + tok.encode(input('>>> ')) + [eos_id] + tok.role("assistant")
+    except EOFError:
+      break
     for next_id in model.generate(ids, start_pos):
       sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
       sys.stdout.flush()

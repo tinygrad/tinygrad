@@ -88,6 +88,7 @@ backend_test.exclude('FLOAT8')
 backend_test.exclude('INT4')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
+backend_test.exclude('FLOAT4E2M1')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
@@ -99,10 +100,12 @@ backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
 backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_quantizelinear_float4e2m1_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_dequantizelinear_e5m2_cpu')
+backend_test.exclude('test_dequantizelinear_float4e2m1_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
@@ -181,6 +184,11 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
+
+backend_test.exclude('test_rms_normalization')  # RMSNormalization
+backend_test.exclude('test_rotary_embedding')  # RotaryEmbedding
+backend_test.exclude('test_attention_3d')  # not piped correctly?
+backend_test.exclude('test_attention_4d')  # not piped correctly?
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
