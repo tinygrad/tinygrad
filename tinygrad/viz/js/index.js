@@ -108,11 +108,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["rgb(27, 87, 69)", "rgb(29, 46, 98)"],
-                   "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
+const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
+                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-const lighten = (rgb, depth, step=0.1) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
+const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -143,9 +143,9 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    let colorKey = null;
+    let colorKey;
     for (const e of timeline.shapes) {
-      if (colorKey == null || e.cat != null) colorKey = e.cat ?? e.name
+      if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
         const colors = devColors[k] ?? devColors.DEFAULT;
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
