@@ -119,6 +119,8 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
+  // NOTE: scrolling via mouse can only zoom the graph
+  profiler.node().addEventListener("wheel", e => e.preventDefault(), { passive:false });
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
@@ -274,7 +276,9 @@ async function renderProfiler() {
   }
 
   function resize() {
-    let { width, height } = rect(".profiler");
+    const profiler = document.querySelector(".profiler");
+    // NOTE: use clientWidth to account for the scrollbar
+    let [width, height] = [profiler.clientWidth, profiler.clientHeight];
     width -= rect("#device-list").width+padding;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
