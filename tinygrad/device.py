@@ -142,7 +142,10 @@ class Buffer:
       if PROFILE:
         self._prof_num = num = len(Buffer.profile_events)
         ts = decimal.Decimal(time.perf_counter_ns())/1000
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
+        try: uop_ref = self._uop_ref
+        except AttributeError: uop_ref = None
+        args = {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes, "uop_ref":uop_ref}
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, args))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"

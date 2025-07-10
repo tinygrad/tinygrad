@@ -399,6 +399,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
     buffers[self] = ret
+    if PROFILE and isinstance(ret, Buffer): ret._uop_ref = self.src[0].arg
     return ret
   @property
   def realized(self) -> Optional[Buffer|MultiBuffer]:
