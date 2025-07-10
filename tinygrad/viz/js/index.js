@@ -1,4 +1,4 @@
-// **** graph helpers
+// ** graph helpers
 
 const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
