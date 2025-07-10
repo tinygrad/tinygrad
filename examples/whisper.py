@@ -8,12 +8,129 @@ from tinygrad import Tensor, TinyJit, nn, Variable
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import fetch, trange
 from tinygrad.uop.ops import UOp
+from tinygrad.dtype import DTypeLike, dtypes
 import numpy as np
-import librosa
 import tiktoken
 from tiktoken import Encoding
 import functools
-import os
+import wave
+import subprocess
+
+# for real-time listening
+try:
+  import pyaudio
+except ImportError:
+  pyaudio = None
+# thanks to @intendedconsequence
+def hann_window(N:int, periodic=True) -> Tensor:
+  M = N+(periodic*1)
+  return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
+
+def make_basis_buffers(N_FFT: int, k_freq_bin: int|Tensor, window:Tensor) -> tuple[Tensor, Tensor]:
+  n = Tensor.arange(N_FFT)
+  angle = 2 * math.pi * k_freq_bin * n / N_FFT
+  w = window
+  cos_basis = w * angle.cos()
+  sin_basis = w * -angle.sin()
+  return cos_basis, sin_basis
+
+def make_stft_basis_buffers(n_fft:int, window:Tensor) -> Tensor:
+  return Tensor.cat(*make_basis_buffers(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, window)).reshape(n_fft+2, 1, n_fft)
+
+def stft(x:Tensor, weight:Tensor, n_fft, stride, pad, pad_mode="constant")->Tensor:
+  cutoff = int(n_fft // 2) + 1
+  x_padded = x.pad(pad, mode=pad_mode)
+  stft_raw = x_padded.unsqueeze(1).conv2d(weight, stride=stride)
+  magnitudes = (stft_raw[:, :cutoff, :]**2 + stft_raw[:, cutoff:, :]**2).sqrt()
+  return magnitudes
+
+class STFT:
+  def __init__(self, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant"):
+    assert window == "hann", "other window types not implemented yet"
+    self.n_fft = n_fft
+    self.stride = stride
+    self.pad = pad
+    self.pad_mode = pad_mode
+    self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
+
+  def __call__(self, waveforms):
+    return self.forward(waveforms)
+
+  def forward(self, x:Tensor) -> Tensor:
+    x = x.reshape(-1, x.shape[-1])
+    spec = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
+    return spec
+
+def rfftfreq(n, d=1.0, device=None):
+  val = 1.0 / (n * d)
+  N = n // 2 + 1
+  results = Tensor.arange(N, device=device)
+  return results * val
+
+def fft_frequencies(sr:float, n_fft:int):
+  return rfftfreq(n=n_fft, d=1.0 / sr)
+
+def hz_to_mel(freq:Tensor)->Tensor:
+  f_min = 0.0
+  f_sp = 200.0 / 3
+  mels = (freq - f_min) / f_sp
+  min_log_hz = 1000.0
+  mask = freq >= min_log_hz
+  return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (Tensor(6.4).log() / 27.0), mels)
+
+def mel_to_hz(mels:Tensor)->Tensor:
+  f_min = 0.0
+  f_sp = 200.0 / 3
+  freqs = f_min + f_sp * mels
+  min_log_hz = 1000.0
+  min_log_mel = (min_log_hz - f_min) / f_sp
+  logstep = Tensor(6.4).log() / 27.0
+  log_t = mels >= min_log_mel
+  freqs = log_t.where(min_log_hz * ((logstep * (mels - min_log_mel)).exp()), freqs)
+  return freqs
+
+def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025.0)->Tensor:
+  min_max_mel = hz_to_mel(Tensor([fmin, fmax]))
+
+  mels = Tensor.linspace(min_max_mel[0], min_max_mel[1], n_mels)
+  hz = mel_to_hz(mels)
+  return hz
+
+def mel(*, sr: float, n_fft: int, n_mels: int = 128, fmin: float = 0.0, fmax: Optional[float] = None, dtype: DTypeLike = dtypes.default_float) -> Tensor:
+  fmax = fmax or sr / 2
+  n_mels = int(n_mels)
+  n_fft_bins = int(1 + n_fft // 2)
+  fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft)
+  mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax)
+  fdiff = mel_f[1:] - mel_f[:-1]
+  ramps = mel_f[None].T.expand(-1, fftfreqs.shape[-1]) - fftfreqs
+  weights = (-ramps[:n_mels] / fdiff[:n_mels][None].T).minimum(ramps[2:n_mels + 2] / fdiff[1:n_mels + 1][None].T).maximum(0)
+  weights *= (2.0 / (mel_f[2:n_mels + 2] - mel_f[:n_mels]))[:, None]
+  return weights.contiguous()
+
+def resample2(samples, source, target):
+  gcd = math.gcd(source, target)
+  M = source // gcd
+  L = target // gcd
+  taps = next_power_of_2(max(M, L))*2
+  return resample(samples, L, M, taps)
+
+def next_power_of_2(n):
+  if n <= 0:
+    return 1
+  return 1 << (n - 1).bit_length()
+
+def resample(x, L, M, num_taps=64):
+  fc = 0.5 / max(L, M)
+  t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
+  h:Tensor = (t * fc * np.pi).sin() / (t * fc * np.pi)
+  h[num_taps//2] = 1.0
+  h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
+  h /= h.sum()
+  upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
+  padding = (len(h) // 2)
+  filtered = upsampled.conv2d(h.reshape(1, 1, -1), stride=M, padding=padding).flatten(1)
+  return filtered
 
 RATE = 16000
 SEGMENT_SECONDS = 30
@@ -27,12 +144,7 @@ RECORD_SECONDS = 10
 
 @functools.lru_cache(maxsize=16)
 def get_mel_filters(n_mels=80, n_fft=400, sr=16000):
-  filters_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"mel_filters_{n_mels}_{n_fft}_{sr}.npz")
-  if os.path.exists(filters_path):
-    return np.load(filters_path, allow_pickle=False)['mel_filters']
-  filters = librosa.filters.mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
-  np.savez_compressed(filters_path, mel_filters=filters)
-  return filters
+  return mel(sr=sr, n_fft=n_fft, n_mels=n_mels).numpy()
 
 def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
@@ -40,10 +152,12 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
   waveforms = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
   if waveforms.shape[0] < batch_size:
     waveforms = np.pad(waveforms, ((0, batch_size - waveforms.shape[0]), (0, 0)))
-  stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-  magnitudes = np.abs(stft[..., :-1]) ** 2
+  waveforms_tensor = Tensor(waveforms)
+  stft_processor = STFT(n_fft=N_FFT, stride=HOP_LENGTH, pad=(N_FFT//2, N_FFT//2))
+  stft_result = stft_processor(waveforms_tensor)
+  magnitudes = stft_result[..., :-1] ** 2
   mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
-  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes, 1e-10, None))
+  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes.numpy(), 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
   return (log_spec + 4.0) / 4.0
 
@@ -249,7 +363,21 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   enc = get_encoding("multilingual" if model.is_multilingual else "gpt2")
   return model, enc
 
-def load_file_waveform(filename): return librosa.load(filename, sr=RATE)[0]
+def load_file_waveform(filename):
+  try:
+    cmd = ["ffmpeg", "-nostdin", "-threads", "0", "-i", filename, "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", str(RATE), "-"]
+    out = subprocess.run(cmd, capture_output=True, check=True).stdout
+    return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+  except (subprocess.CalledProcessError, FileNotFoundError):
+    try:
+      with wave.open(filename, 'rb') as wav_file:
+        if wav_file.getnchannels() != 1: raise ValueError("Only mono audio files are supported")
+        original_sr = wav_file.getframerate()
+        audio = np.frombuffer(wav_file.readframes(wav_file.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+        return resample2(Tensor(audio), original_sr, RATE).numpy() if original_sr != RATE else audio
+    except Exception as e:
+      raise RuntimeError(f"Failed to load audio file {filename}: {e}")
+    
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
@@ -294,7 +422,7 @@ class BeamSampled:
   probs: np.ndarray
   finished_prob: np.ndarray
 
-def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarray, ctx: np.ndarray, beam_size: int=5, topk: int=5):
+def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarray, ctx: np.ndarray, beam_size: int=3, topk: int=3):
   eot = enc._special_tokens["<|endoftext|>"]
   log_probs: np.ndarray = log_softmax(logits, axis=-1)
   top_k_idx = np.argpartition(log_probs, -beam_size)[:, -beam_size:]
@@ -323,7 +451,7 @@ def beamsearch_sampling(logits: np.ndarray, model: Whisper, sum_probs: np.ndarra
       break
 
   next_tokens = np.array(next_tokens).reshape((-1, 1))
-  ctx = np.array(selected_sequence) if indices != list(range(beam_size)) else np.concat((ctx, next_tokens), axis=1)
+  ctx = np.array(selected_sequence) if indices != list(range(beam_size)) else np.concatenate((ctx, next_tokens), axis=1)
 
   for block in model.decoder.blocks:
     block.attn.rearrange_kv_cache(indices)
@@ -349,7 +477,7 @@ def inferloop(model: Whisper, ctx: np.ndarray, encoded_audio: Tensor, temperatur
       sum_probs += probs
       if (next_tokens := replace_eot(next_tokens.flatten(), ctx, eot)).all() == eot: break
       next_tokens = next_tokens.reshape((-1, 1))[:ctx.shape[0]]  # Match batch dimension
-      ctx = np.concat((ctx, next_tokens), axis=1)
+      ctx = np.concatenate((ctx, next_tokens), axis=1)
     pos = ctx.shape[-1] - 1
   return ctx, sum_probs
 
@@ -489,7 +617,9 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
   return transcriptions[0].strip() if transcriptions else transcribed
 
 def listener(q):
-  import pyaudio
+  if pyaudio is None:
+    print("PyAudio is not installed. Real-time listening is disabled.")
+    return
   p = pyaudio.PyAudio()
   stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
   print("listening")
