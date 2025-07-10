@@ -117,7 +117,6 @@ class TestProfiler(unittest.TestCase):
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].is_copy, "kernel should be copy"
 
-  @unittest.skip("FLAKY!")
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
