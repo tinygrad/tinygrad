@@ -1,4 +1,4 @@
-import unittest, struct, contextlib, statistics, time
+import unittest, struct, contextlib, statistics, time, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
@@ -189,6 +189,9 @@ class TestProfiler(unittest.TestCase):
     graphs = [[helper_exec_op(device, bufs[0], [bufs[1], bufs[2]]), helper_exec_op(device, bufs[0], [bufs[3], bufs[4]]),]]
     with helper_collect_profile(dev:=TestProfiler.d0) as profile:
       helper_test_graphs(dev.graph, graphs, runs:=2)
+      # NOTE: explicitly trigger deletion of all graphs
+      graphs.clear()
+      gc.collect()
     graphs = [e for e in profile if isinstance(e, ProfileGraphEvent)]
     self.assertEqual(len(graphs), runs)
     for ge in graphs:
