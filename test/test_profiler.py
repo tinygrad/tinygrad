@@ -1,7 +1,7 @@
-import unittest, struct, contextlib, statistics
+import unittest, struct, contextlib, statistics, time
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context
-from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileRangeEvent, ProfileDeviceEvent, ProfileGraphEvent
+from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
+from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
 
@@ -11,6 +11,7 @@ MOCKGPU = getenv("MOCKGPU")
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
   Compiled.profile_events = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
+  cpu_events.clear()
 
   profile_list = []
   with Context(PROFILE=1):
@@ -18,6 +19,7 @@ def helper_collect_profile(*devs):
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
     for x in Compiled.profile_events: profile_list.append(x)
+    profile_list.extend(cpu_events)
 
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
@@ -73,13 +75,15 @@ class TestProfiler(unittest.TestCase):
     evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
 
     assert len(evs) == 3, "3 kernel runs are expected"
-    assert evs[0].is_copy, "kernel should be copy"
-    assert evs[1].name == runner_name, "kernel name is not correct"
-    assert not evs[1].is_copy, "kernel should not be copy"
-    assert evs[2].is_copy, "kernel should be copy"
+    # NOTE: order of events does not matter, the tool is responsible for sorting them
+    copy_events = [e for e in evs if e.is_copy]
+    self.assertEqual(len(copy_events), 2)
 
-    for i in range(1, 3):
-      assert evs[i].st > evs[i-1].en, "timestamp not aranged"
+    prg_events = [e for e in evs if not e.is_copy]
+    assert prg_events[0].name == runner_name, "kernel name is not correct"
+
+    #for i in range(1, 3):
+    #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
   def test_profile_multidev(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
@@ -158,6 +162,24 @@ class TestProfiler(unittest.TestCase):
       jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
       assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5ms"
     print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
+
+  def test_cpu_profile(self):
+    def test_fxn(err=False):
+      time.sleep(0.1)
+      if err: raise Exception()
+      time.sleep(0.1)
+
+    with helper_collect_profile(dev:=TestProfiler.d0) as profile:
+      with cpu_profile("test_1", dev.device):
+        test_fxn(err=False)
+      with self.assertRaises(Exception):
+        with cpu_profile("test_2", dev.device):
+          test_fxn(err=True)
+
+    range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
+    self.assertEqual(len(range_events), 2)
+    # record start/end time up to exit (error or success)
+    self.assertGreater(range_events[0].en-range_events[0].st, range_events[1].en-range_events[1].st)
 
 if __name__ == "__main__":
   unittest.main()

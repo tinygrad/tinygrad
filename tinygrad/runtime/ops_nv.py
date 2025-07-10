@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref, traceback
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
 assert sys.platform != 'win32'
 from typing import cast, Union, ClassVar
 from dataclasses import dataclass
@@ -14,7 +14,7 @@ from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PT
 from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import System, PCIIfaceBase
+from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -296,7 +296,6 @@ class GPFifo:
   token: int
   put_value: int = 0
 
-MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVKIface:
   root = None
   fd_ctl: FileIOInterface
@@ -468,6 +467,12 @@ class PCIIface(PCIIfaceBase):
     # Setup classes for the GPU
     self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
 
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
+    # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
+    page_size = (2 << 20) if size >= (8 << 20) and not uncached and not host else (4 << 10)
+    return super().alloc(round_up(size, page_size), host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, **kwargs)
+
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
@@ -477,6 +482,8 @@ class PCIIface(PCIIfaceBase):
     res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
     return type(params).from_buffer_copy(res) if params is not None else None
 
+  def device_fini(self): self.dev_impl.fini()
+
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
   signal_pages: ClassVar[list[HCQBuffer]] = []
@@ -484,18 +491,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
-  def _select_iface(self):
-    if len(nm:=getenv("NV_IFACE", "")) > 0: return getattr(sys.modules[__name__], f"{nm.upper()}Iface")(self, self.device_id)
-
-    errs:str = ""
-    for iface_t in (NVKIface, PCIIface):
-      try: return iface_t(self, self.device_id)
-      except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
-    raise RuntimeError(f"Cannot find a usable interface for NV:{self.device_id}:\n{errs}")
-
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface()
+    self.iface = self._select_iface(NVKIface, PCIIface)
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)

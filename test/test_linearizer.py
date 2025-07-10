@@ -35,7 +35,6 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   k.apply_tensor_cores(use_tensor_cores, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
   prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
   if use_tensor_cores == 1: assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
-  elif use_tensor_cores == 3: assert len([uop for uop in k.uops if uop.op is Ops.DEFINE_LOCAL]) == 2, "local buffers not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -228,8 +227,8 @@ class TestLinearizer(unittest.TestCase):
     r = a[:-1] + a[1:]
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.DEPRECATED_linearize()
     num_loads = len([uop for uop in k.uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
@@ -241,8 +240,8 @@ class TestLinearizer(unittest.TestCase):
     r = a.expand([2]) + b.expand([2])
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.DEPRECATED_linearize()
     num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
@@ -252,9 +251,9 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.conv2d(x,w,padding=1).relu()
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
+    k.DEPRECATED_linearize()
     accs = [u for u in k.uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in k.uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
@@ -297,8 +296,8 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.stack(a, b)
 
     k = Kernel(r.schedule()[-1].ast)
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.DEPRECATED_linearize()
     num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
@@ -345,13 +344,6 @@ class TestLinearizer(unittest.TestCase):
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_emulation(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
-      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0, use_tensor_cores=3)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
@@ -613,7 +605,7 @@ class TestLinearizer(unittest.TestCase):
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       k = helper_linearizer_opt(t)[-1]
-      uops = list(k.linearize().uops)
+      uops = list(k.DEPRECATED_linearize().uops)
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
@@ -776,11 +768,9 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 dimension
-    k.shift_to(0, 2, insert_before=k.shape_len-1)
-    k.upcast()
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (4, 2)
 
@@ -793,11 +783,11 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(0, 4)
-      k.shift_to(0, shift, insert_before=k.shape_len-1)
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
       k.upcast()
       k.upcast()
-      k.linearize()
+      k.DEPRECATED_linearize()
       return k
 
     sizes = [12, 8, 16]
@@ -829,11 +819,9 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
-    k.upcast()
-    k.shift_to(len(k.full_unupcasted_shape)-1, 2, insert_before=k.shape_len-1)
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=2))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 2)
 
@@ -850,7 +838,7 @@ class TestFloat4(unittest.TestCase):
       k.upcast()
       k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
       k.upcast()
-      k.linearize()
+      k.DEPRECATED_linearize()
       return k
 
     sizes = [13, 9, 17]
@@ -870,8 +858,8 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 0)
 
@@ -886,12 +874,13 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.upcast()
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
+    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) in {(0,1), (1,1)}
 
+  @unittest.skip("no longer supported")
   def test_float4_noncontiguous(self):
     a = Tensor.empty(4, 2).realize()
     b = Tensor.empty(4, 2).realize()
@@ -904,7 +893,7 @@ class TestFloat4(unittest.TestCase):
     k = Kernel(s.ast)
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
-    k.linearize()
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 0)
 
@@ -918,9 +907,8 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 axis
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (0, 1)
 
@@ -933,9 +921,8 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule()[0]
     k = Kernel(s.ast)
-    k.shift_to(0, 4)  # float4 axis
-    k.upcast()
-    k.linearize()
+    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
+    k.DEPRECATED_linearize()
 
     assert TestFloat4.count_float4(k.uops) == (1, 1)
 

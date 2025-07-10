@@ -1,8 +1,8 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
 from dataclasses import dataclass
-from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic
+from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -53,6 +53,7 @@ def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) 
 def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << (end - start + 1)) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
+def is_numpy_ndarray(x) -> bool: return str(type(x)) == "<class 'numpy.ndarray'>"
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
@@ -73,7 +74,11 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
+def word_wrap(x, wrap=80):
+  if len(ansistrip(x)) <= wrap: return x
+  i = 0
+  while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
+  return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
@@ -176,12 +181,34 @@ class Profiling(contextlib.ContextDecorator):
               colored(_format_fcn(fcn).ljust(50), "yellow"),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
+
+@dataclass(frozen=True)
+class TracingKey:
+  display_name:str                       # display name of this trace event
+  keys:tuple[str, ...]=()                # optional keys to search for related traces
+  fmt:str|None=None                      # optional detailed formatting
+  cat:str|None=None                      # optional category to color this by
+
+class ProfileEvent: pass
+
+@dataclass
+class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+
+cpu_events:list[ProfileEvent] = []
+@contextlib.contextmanager
+def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, decimal.Decimal(time.perf_counter_ns()) / 1000, is_copy=is_copy)
+  try: yield res
+  finally:
+    res.en = decimal.Decimal(time.perf_counter_ns()) / 1000
+    if PROFILE and display: cpu_events.append(res)
+
 # *** universal database cache ***
 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 20
+VERSION = 21
 _db_connection = None
 def db_connection():
   global _db_connection
