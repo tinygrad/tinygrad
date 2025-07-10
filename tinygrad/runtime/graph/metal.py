@@ -111,4 +111,6 @@ class MetalGraph(GraphRunner):
     self.dev.profile_events += [ProfileGraphEvent(ents, [], [st+step*i for i in range(len(ents)+1)])]
 
   def __del__(self):
-    if PROFILE: self.collect_timestamps()
+    if PROFILE and self.command_buffer is not None:
+      wait_check(self.command_buffer)
+      self.collect_timestamps()
