@@ -465,7 +465,7 @@ class PCIIface(PCIIfaceBase):
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     # Setup classes for the GPU
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A, nv_gpu.BLACKWELL_COMPUTE_B, nv_gpu.BLACKWELL_DMA_COPY_B
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
@@ -541,7 +541,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self._setup_gpfifos()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False) -> GPFifo:
-    notifier = self.iface.alloc(48 << 20, uncached=True)
+    notifier = self.iface.alloc(48 << 20, uncached=True, cpu_access=True)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.meta.hMemory, hObjectBuffer=gpfifo_area.meta.hMemory,
       gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
@@ -551,13 +551,16 @@ class NVDevice(HCQCompiled[NVSignal]):
       self.debug_compute_obj, self.debug_channel = self.iface.rm_alloc(gpfifo, self.iface.compute_class), gpfifo
       debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
       self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
-    else: self.iface.rm_alloc(gpfifo, self.iface.dma_class)
+    else:
+      self.iface.rm_alloc(gpfifo, self.iface.dma_class)
+      self.cc_va = gpfifo_area.offset(offset + entries * 8).cpu_view()
+      self.cc_notif = notifier.cpu_view()
 
     ws_token_params = self.iface.rm_control(gpfifo, nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN,
       nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))
     self.iface.setup_gpfifo_vm(gpfifo)
 
-    return GPFifo(ring=MMIOInterface(gpfifo_area.va_addr + offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
+    return GPFifo(ring=MMIOInterface(gpfifo_area.va_addr + offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken | 0x40000000,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
   def _query_gpu_info(self, *reqs):
@@ -578,6 +581,17 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
+
+    # cast(NVCopyQueue, NVCopyQueue()).signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # import time
+    # time.sleep(2.5)
+    # from hexdump import hexdump
+    # hexdump(self.cc_va[:0x100])
+    # hexdump(self.cc_notif[:0x20])
+    # self.synchronize()
+
+    # hexdump(self.cc_va[:0x100])
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)

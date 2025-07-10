@@ -30,35 +30,40 @@ class NVReg:
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
 class NVPageTableEntry:
-  def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
+  def __init__(self, nvdev, paddr, lv):
+    # print(f"NVPageTableEntry: {nvdev.devfmt} lv{lv} paddr={hex(paddr)}")
+    self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
     if not table:
       x = self.nvdev.NV_MMU_VER3_PTE.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, pcf=int(uncached), kind=6)
-    elif self.lv == 3:
+    elif self.lv == 4:
       x = self.nvdev.NV_MMU_VER3_DUAL_PDE.encode(is_pte=False, address_small=paddr >> 12, aperture_small=1 if valid else 0, pcf_small=0b10 | int(uncached))
     else:
       x = self.nvdev.NV_MMU_VER3_PDE.encode(is_pte=False, address=paddr >> 12, aperture=1 if valid else 0, pcf=0b10 | int(uncached))
 
-    if self.lv != 3: self.entries[entry_id] = x
+    if self.lv != 4: self.entries[entry_id] = x
     else:
       self.entries[2*entry_id] = x & 0xffffffffffffffff
       self.entries[2*entry_id+1] = x >> 64
 
-  def entry(self, entry_id:int) -> int: return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 3 else self.entries[entry_id]
+  def entry(self, entry_id:int) -> int:
+    x = (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self.lv == 4 else self.entries[entry_id]
+    # print(f"NVPageTableEntry: {self.nvdev.devfmt} lv{self.lv} entry_id={entry_id} paddr={hex(x)}")
+    return x
 
   def read_fields(self, entry_id:int) -> dict:
     if self.is_huge_page(entry_id): return self.nvdev.NV_MMU_VER3_PTE.decode(self.entry(entry_id))
-    return (self.nvdev.NV_MMU_VER3_DUAL_PDE if self.lv == 3 else self.nvdev.NV_MMU_VER3_PDE).decode(self.entry(entry_id))
+    return (self.nvdev.NV_MMU_VER3_DUAL_PDE if self.lv == 4 else self.nvdev.NV_MMU_VER3_PDE).decode(self.entry(entry_id))
 
-  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 3 else True
-  def supports_huge_page(self, paddr:int): return self.lv >= 2 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
+  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv <= 4 else True
+  def supports_huge_page(self, paddr:int): return self.lv >= 5 #and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
     if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
-    return self.read_fields(entry_id)['aperture_small' if self.lv == 3 else 'aperture'] != 0
+    return self.read_fields(entry_id)['aperture_small' if self.lv == 4 else 'aperture'] != 0
 
-  def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small' if self.lv == 3 else ('address_sys' if self.lv == 4 else 'address')] << 12
+  def address(self, entry_id:int) -> int: return self.read_fields(entry_id)['address_small' if self.lv == 4 else ('address_sys' if self.lv == 5 else 'address')] << 12
 
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 44), base=1 << 30) # global for all devices.
