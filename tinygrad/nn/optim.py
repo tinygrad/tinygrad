@@ -101,7 +101,7 @@ class LARS(Optimizer):
         r2 = g.square().sum().sqrt()
         r:Tensor|float = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
-      g = g + self.wd * t.detach()
+      if self.wd > 0: g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:

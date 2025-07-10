@@ -21,12 +21,13 @@ class FakeAM:
   def __init__(self):
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
-    self.vram_mv = memoryview(bytearray(4 << 30))
+    self.vram_size = (4 << 30)
+    self.vram_mv = memoryview(bytearray(self.vram_size))
     self.vram = MMIOInterface(mv_address(self.vram_mv), self.vram_mv.nbytes)
     self.gmc = FakeGMC(self)
-    self.mm = AMMemoryManager(self, 4 << 30, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
-      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, first_page_lv=am.AMDGPU_VM_PDB2,
-      va_base=AMMemoryManager.va_allocator.base)
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
+      first_lv=am.AMDGPU_VM_PDB1, va_base=AMMemoryManager.va_allocator.base,
+      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.is_booting = False
     self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)

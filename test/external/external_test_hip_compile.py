@@ -11,7 +11,7 @@ class TestHIPCompileSpeed(unittest.TestCase):
     a, b = Tensor([1,2,3,4,5]), Tensor([1,2,3,4,5])
     out = a + b
     lin = Kernel(create_schedule([out.uop])[-1].ast[0])
-    lin.linearize()
+    lin.DEPRECATED_linearize()
 
     reference = """
 #include <hip/hip_common.h>
