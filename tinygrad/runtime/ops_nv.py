@@ -478,9 +478,7 @@ class PCIIface(PCIIfaceBase):
   def setup_gpfifo_vm(self, gpfifo): pass
 
   def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
-  def rm_control(self, obj, cmd, params=None):
-    res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
-    return type(params).from_buffer_copy(res) if params is not None else None
+  def rm_control(self, obj, cmd, params=None): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
 
   def device_fini(self): self.dev_impl.fini()
 
