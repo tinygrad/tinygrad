@@ -231,7 +231,7 @@ def buffer_parse(onnx_tensor: dict) -> Tensor:
   if data is None: raise RuntimeError("empty buffer")
   if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
   assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
-  data = data.bitcast(true_dtype).reshape(shape)
+  data = data.bitcast(true_dtype).realize().reshape(shape) # early realize to make sure non disk tensors can const fold
   data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
   if shape == ():
     if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
