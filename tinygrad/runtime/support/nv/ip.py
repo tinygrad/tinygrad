@@ -259,6 +259,8 @@ class NV_GSP(NV_IP):
     self.rpc_set_gsp_system_info()
     self.rpc_set_registry_table()
 
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
     pte_cnt = ((queue_pte_cnt:=(queue_size * 2) // 0x1000)) + round_up(queue_pte_cnt * 8, 0x1000) // 0x1000
@@ -372,16 +374,23 @@ class NV_GSP(NV_IP):
     userd = nv_gpu.NV_MEMORY_DESC_PARAMS(base=gpfifo_area.paddrs[0][0] + 0x20 * 8, size=0x20, addressSpace=2, cacheAttrib=0)
     gg_params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=gpfifo_area.va_addr, gpFifoEntries=32, engineType=0x1, cid=3,
       hVASpace=vaspace, userdOffset=(ctypes.c_uint64*8)(0x20 * 8), userdMem=userd, internalFlags=0x1a, flags=0x200320)
-    ch_gpfifo = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.AMPERE_CHANNEL_GPFIFO_A, params=gg_params)
+    ch_gpfifo = self.rpc_rm_alloc(hParent=dev, hClass=self.gpfifo_class, params=gg_params)
 
-    self.grctx_bufs = {0: GRBufDesc(0x237000, p=1, v=1), 1: GRBufDesc(0x6000, p=1, v=1, lc=1), 2: GRBufDesc(0x6000, p=1, v=1),
-      3: GRBufDesc(0x3000, p=0, v=1), 4: GRBufDesc(0x20000, p=0, v=1), 5: GRBufDesc(0x2600000, p=0, v=1), 6: GRBufDesc(0x80000, p=0, v=1),
-      9: GRBufDesc(0x10000, p=1, v=1), 10: GRBufDesc(0x80000, p=1, v=0), 11: GRBufDesc(0x80000, p=1, v=1)}
+    gr_ctx_bufs_info = self.rpc_rm_control(hObject=subdev, cmd=nv_gpu.NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO,
+      params=nv_gpu.NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO_PARAMS()).engineContextBuffersInfo[0]
+    def _ctx_info(idx, add=0, align=None): return round_up(gr_ctx_bufs_info.engine[idx].size + add, align or gr_ctx_bufs_info.engine[idx].alignment)
 
+    # Setup graphics context
+    gr_size = _ctx_info(nv_gpu.NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS, add=0x40000)
+    patch_size = _ctx_info(nv_gpu.NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PATCH)
+    cfgs_sizes = {x: _ctx_info(x + 14, align=(2 << 20) if x == 5 else None) for x in range(3, 11)} # indices 3–10 are mapped to 17–24
+    self.grctx_bufs = {0: GRBufDesc(gr_size, p=1, v=1), 1: GRBufDesc(patch_size, p=1, v=1, lc=1), 2: GRBufDesc(patch_size, p=1, v=1),
+      **{x: GRBufDesc(cfgs_sizes[x], p=0, v=1) for x in range(3, 7)}, 9: GRBufDesc(cfgs_sizes[9], p=1, v=1),
+      10: GRBufDesc(cfgs_sizes[10], p=1, v=0), 11: GRBufDesc(cfgs_sizes[10], p=1, v=1)} # NOTE: 11 reuses cfgs_sizes[10]
     self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
 
-    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.ADA_COMPUTE_A, params=None)
-    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=nv_gpu.AMPERE_DMA_COPY_B, params=None)
+    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.compute_class, params=None)
+    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.dma_class, params=None)
 
   def init_hw(self):
     self.stat_q = NVRpcQueue(self, self.stat_q_va, self.cmd_q_va)
@@ -396,7 +405,7 @@ class NV_GSP(NV_IP):
   ### RPCs
 
   def rpc_rm_alloc(self, hParent, hClass, params, client=None) -> int:
-    if hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
+    if hClass == self.gpfifo_class:
       ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
       params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
@@ -416,7 +425,7 @@ class NV_GSP(NV_IP):
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == nv_gpu.ADA_COMPUTE_A and client != self.priv_root:
+    if hClass == self.compute_class and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj if hClass != nv_gpu.NV1_ROOT else client
@@ -425,7 +434,8 @@ class NV_GSP(NV_IP):
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
-    return self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)[len(bytes(control_args)):]
+    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
+    return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,

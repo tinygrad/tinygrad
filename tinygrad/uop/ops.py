@@ -815,7 +815,8 @@ def track_matches(func):
       depth = len(active_rewrites)
       tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    ret = func(*args, **kwargs)
+    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
+      ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret
   return _track_func
