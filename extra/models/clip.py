@@ -9,6 +9,16 @@ from PIL import Image
 import numpy as np
 import re, gzip
 
+# to match tokenizer used in mlperf reference of stable diffusion training
+try:
+  import ftfy, html, regex
+  # from open_clip.tokenizer:
+  def basic_clean(text):
+    text = ftfy.fix_text(text)
+    text = html.unescape(html.unescape(text))
+    return text.strip()
+except ImportError: pass
+
 @lru_cache()
 def default_bpe():
   # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -62,11 +72,16 @@ class Tokenizer:
       vocab = vocab + [v+'</w>' for v in vocab]
       for merge in merges:
         vocab.append(''.join(merge))
-      vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+      #vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+      vocab.extend(['<start_of_text>', '<end_of_text>'])
+      self.sot_id, self.eot_id = len(vocab)-2, len(vocab)-1
       self.encoder = dict(zip(vocab, range(len(vocab))))
       self.bpe_ranks = dict(zip(merges, range(len(merges))))
-      self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-      self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
+      #self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
+      self.cache = {'<start_of_text>': '<start_of_text>', '<end_of_text>': '<end_of_text>'}
+      #self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
+      #self.pat = re.compile(r"""<start_of_text>|<end_of_text>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
+      self.pat = regex.compile(r"""<start_of_text>|<end_of_text>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""", regex.IGNORECASE)
 
     def bpe(self, token):
       if token in self.cache:
@@ -110,14 +125,17 @@ class Tokenizer:
 
     def encode(self, text:str, pad_with_zeros:bool=False) -> List[int]:
       bpe_tokens: List[int] = []
-      text = Tokenizer.whitespace_clean(text.strip()).lower()
-      for token in re.findall(self.pat, text):
+      #text = Tokenizer.whitespace_clean(text.strip()).lower()
+      text = Tokenizer.whitespace_clean(basic_clean(text)).lower()
+      #for token in re.findall(self.pat, text):
+      for token in regex.findall(self.pat, text):
         token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
         bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
       # Truncation, keeping two slots for start and end tokens.
       if len(bpe_tokens) > 75:
         bpe_tokens = bpe_tokens[:75]
-      return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
+      #return [49406] + bpe_tokens + [49407] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
+      return [self.sot_id] + bpe_tokens + [self.eot_id] + ([0] if pad_with_zeros else [49407]) * (77 - len(bpe_tokens) - 2)
 
 
 class Embedder(ABC):
