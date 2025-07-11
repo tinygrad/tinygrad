@@ -165,7 +165,7 @@ async function renderProfiler() {
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-    let area = 40;
+    let area = mem.shapes.length === 0 ? 0 : 40;
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = canvasHeight-baseY;
