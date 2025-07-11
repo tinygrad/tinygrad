@@ -11,7 +11,7 @@ from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, all_int, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.kernelize.kernelize import view_left
@@ -115,12 +115,6 @@ class Kernel:
     ret.finalized = self.finalized
 
     return ret
-
-  def upcasted_axis(self, i:int) -> list[tuple[int, Optional[sint], bool]]:
-    upcasted_shape, upcasted_stride = self.sts[i].shape[self.first_upcast:], self.sts[i].real_strides()[self.first_upcast:]
-    assert all_int(upcasted_shape), f"cannot upcast a symbolic amount {upcasted_shape=}"
-    return list(zip(upcasted_shape, upcasted_stride,
-                    [x!=y for x,y in zip(self.sts[0].shape[self.first_upcast:], self.full_shape[self.first_upcast:])]))
 
   @property
   def first_reduce(self) -> int:
