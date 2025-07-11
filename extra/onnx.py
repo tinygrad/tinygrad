@@ -128,6 +128,40 @@ class OnnxParser:
       "opset_version": model["opset_import"][0]["version"]
     }
 
+  def _parse_tensor(self, t: dict) -> Tensor:
+    if t.get('string_data'): raise NotImplementedError("Parsing for buffer with string data is not implemented.")
+    to_dtype, true_dtype = OnnxDataType(t['data_type']).to_dtype_with_fallback("buffer parse"), OnnxDataType(t['data_type']).to_dtype()
+    shape = tuple(t['dims'])
+    data = next((val for k in ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
+                if (val := t.get(k)) is not None), None)
+    if data is None: raise RuntimeError("empty buffer")
+    if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
+    assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
+    data = data.bitcast(true_dtype).realize().reshape(shape)
+    data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
+    if shape == () and data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
+    return Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
+
+  def _parse_attribute(self, a: dict) -> Any:
+    if a['type'] not in AttributeType: raise NotImplementedError(f"attribute type {a['type']} is not supported")
+    return {1: lambda: float(a["f"]), 2: lambda: int(a["i"]),
+            3: lambda: a["s"].data().tobytes().decode("utf8") if isinstance(a["s"], Tensor) else a["s"].decode("utf8"),
+            4: lambda: self._parse_tensor(a["t"]), 6: lambda: tuple(float(x) for x in a["floats"]),
+            7: lambda: tuple(int(x) for x in a["ints"]),
+            8: lambda: tuple(x.data().tobytes().decode("utf8") for x in a["strings"])}[a['type']]()
+
+  def _parse_type(self, t: dict) -> 'OnnxValue':
+    elem_type = t
+    if 'map_type' in elem_type or 'sparse_tensor_type' in elem_type or 'opaque_type' in elem_type:
+      raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
+    if is_optional := "optional_type" in elem_type: elem_type = elem_type["optional_type"]["elem_type"]
+    if is_sequence := "sequence_type" in elem_type: elem_type = elem_type["sequence_type"]["elem_type"]
+    if "tensor_type" in elem_type:
+      shape_dims = elem_type['tensor_type'].get('shape', {}).get('dim', [])
+      return OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
+                      OnnxDataType(elem_type['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
+    raise RuntimeError(f"TypeProto was not parsed properly: {t=}")
+
   def parse_ModelProto(self, reader: PBBufferedReader) -> dict:
     obj = {"opset_import": [], "domain": None, "graph": None}
     while True:
@@ -367,40 +401,6 @@ class OnnxParser:
         case 2: obj["version"] = reader.read_int64()
         case _: reader.skip_field(wire_type)
     return obj
-
-  def _parse_tensor(self, t: dict) -> Tensor:
-    if t.get('string_data'): raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-    to_dtype, true_dtype = OnnxDataType(t['data_type']).to_dtype_with_fallback("buffer parse"), OnnxDataType(t['data_type']).to_dtype()
-    shape = tuple(t['dims'])
-    data = next((val for k in ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
-                if (val := t.get(k)) is not None), None)
-    if data is None: raise RuntimeError("empty buffer")
-    if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
-    assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
-    data = data.bitcast(true_dtype).realize().reshape(shape)
-    data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
-    if shape == () and data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-    return Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
-
-  def _parse_attribute(self, a: dict) -> Any:
-    if a['type'] not in AttributeType: raise NotImplementedError(f"attribute type {a['type']} is not supported")
-    return {1: lambda: float(a["f"]), 2: lambda: int(a["i"]),
-            3: lambda: a["s"].data().tobytes().decode("utf8") if isinstance(a["s"], Tensor) else a["s"].decode("utf8"),
-            4: lambda: self._parse_tensor(a["t"]), 6: lambda: tuple(float(x) for x in a["floats"]),
-            7: lambda: tuple(int(x) for x in a["ints"]),
-            8: lambda: tuple(x.data().tobytes().decode("utf8") for x in a["strings"])}[a['type']]()
-
-  def _parse_type(self, t: dict) -> 'OnnxValue':
-    elem_type = t
-    if 'map_type' in elem_type or 'sparse_tensor_type' in elem_type or 'opaque_type' in elem_type:
-      raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-    if is_optional := "optional_type" in elem_type: elem_type = elem_type["optional_type"]["elem_type"]
-    if is_sequence := "sequence_type" in elem_type: elem_type = elem_type["sequence_type"]["elem_type"]
-    if "tensor_type" in elem_type:
-      shape_dims = elem_type['tensor_type'].get('shape', {}).get('dim', [])
-      return OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
-                      OnnxDataType(elem_type['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
-    raise RuntimeError(f"TypeProto was not parsed properly: {t=}")
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
