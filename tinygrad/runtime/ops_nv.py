@@ -14,7 +14,7 @@ from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PT
 from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import System, PCIIfaceBase
+from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -296,7 +296,6 @@ class GPFifo:
   token: int
   put_value: int = 0
 
-MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVKIface:
   root = None
   fd_ctl: FileIOInterface
@@ -454,7 +453,7 @@ class NVKIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684], bars=[0, 1], vram_bar=1,
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     System.reserve_hugepages(64)
 
@@ -466,7 +465,7 @@ class PCIIface(PCIIfaceBase):
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     # Setup classes for the GPU
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
@@ -479,9 +478,9 @@ class PCIIface(PCIIfaceBase):
   def setup_gpfifo_vm(self, gpfifo): pass
 
   def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
-  def rm_control(self, obj, cmd, params=None):
-    res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
-    return type(params).from_buffer_copy(res) if params is not None else None
+  def rm_control(self, obj, cmd, params=None): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
+
+  def device_fini(self): self.dev_impl.fini()
 
 class NVDevice(HCQCompiled[NVSignal]):
   devices: ClassVar[list[HCQCompiled]] = []
