@@ -455,7 +455,7 @@ class Kernel:
         # NOTE: should group_for_reduces be added to the local_dims?
         return ret.replace(arg=KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
                                           self.global_dims if self.opts.has_local else 0, self.local_dims + self.group_for_reduces,
-                                          self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
+                                          self.upcasted, self.group_for_reduces, self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
         axes = tuple(i for i in range(0, self.shape_len) if self.axis_types[i] in {AxisType.REDUCE, AxisType.UNROLL} and
@@ -493,11 +493,11 @@ class Kernel:
           st = ShapeTracker.from_shape(local_shape).expand(self.full_shape[:self.global_dims]+local_shape[self.global_dims:])
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), ret)))
+          local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
           st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
-          return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
+          return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret
     self.finalized = True

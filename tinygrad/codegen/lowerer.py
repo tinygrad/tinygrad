@@ -29,11 +29,8 @@ def get_index(ast:UOp) -> IndexContext:
   # late indexes (group for reduce)
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
   first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].base.op is Ops.DEFINE_LOCAL]
-  # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
-  group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
   ridxs = idxs[:]
-  for a in range(first_reduce, first_reduce+group_for_reduces):
+  for a in range(first_reduce, first_reduce+ki.group_for_reduces):
     ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
 
   return IndexContext(idxs, ridxs)
