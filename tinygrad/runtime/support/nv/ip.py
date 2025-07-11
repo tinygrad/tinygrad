@@ -460,18 +460,9 @@ class NV_GSP(NV_IP):
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_FUNC_BAR1_BLOCK_LOW_ADDR.write(mode=0, target=0, ptr=0)
-    # from hexdump import hexdump
-    # hexdump(self.nvdev.vram[0x10000:0x10100])
-
-    # from hexdump import hexdump
-    # self.nvdev.vram[0x10000] = 0x10
-    # self.nvdev.vram[0x10003] = 0x14
-    # hexdump(self.nvdev.vram[0x10000:0x10100])
+    if self.nvdev.fmc_boot: self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_FUNC_BAR1_BLOCK_LOW_ADDR.write(mode=0, target=0, ptr=0)
 
     self.priv_root = 0xc1e00004
-    # exit(0)
-
     self.init_golden_image()
 
   ### RPCs
