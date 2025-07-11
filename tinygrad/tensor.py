@@ -413,6 +413,7 @@ class Tensor(MathTrait):
 
     self should be a tensor of the hash to load
     """
+    # TODO: this should work locally as well
     assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
     h = self.contiguous().flatten()
     assert h.shape[0] == 16, "expected hash"
@@ -436,6 +437,7 @@ class Tensor(MathTrait):
     """
     Store a tensor to storage.
     """
+    # TODO: this should work locally as well
     data = self.contiguous().flatten().bitcast(dtypes.uint8)
 
     # pad to a multiple of 1mb
