@@ -313,7 +313,9 @@ class NV_GSP(NV_IP):
     self.rpc_set_gsp_system_info()
     self.rpc_set_registry_table()
 
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A, nv_gpu.BLACKWELL_COMPUTE_B, nv_gpu.BLACKWELL_DMA_COPY_B
+    self.gpfifo_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_CHANNEL_GPFIFO_A
+    self.compute_class = nv_gpu.BLACKWELL_COMPUTE_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.ADA_COMPUTE_A
+    self.dma_class = nv_gpu.BLACKWELL_DMA_COPY_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_DMA_COPY_B
 
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
