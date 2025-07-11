@@ -30,9 +30,7 @@ class NVReg:
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
 class NVPageTableEntry:
-  def __init__(self, nvdev, paddr, lv):
-    # print(f"NVPageTableEntry: {nvdev.devfmt} lv{lv} paddr={hex(paddr)}")
-    self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
+  def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
 
@@ -84,9 +82,9 @@ class NVDev(PCIDevImplBase):
     # 2           PDE1 (or 512M PTE)                  37:29
     # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
     # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=57, va_shifts=[12, 21, 29, 38, 47, 56], va_base=0,
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=56, va_shifts=[12, 21, 29, 38, 47, 56], va_base=0,
       palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
-    self.flcn:NV_FLCN = NV_FLCN(self)
+    self.flcn:NV_FLCN_COT = NV_FLCN_COT(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
     # Turn the booting early, gsp client is loaded from the clean.

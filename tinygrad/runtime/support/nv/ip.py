@@ -460,7 +460,7 @@ class NV_GSP(NV_IP):
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
-    self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
+    # self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
     # from hexdump import hexdump
     # self.nvdev.vram[0x10000] = 0x10
     # self.nvdev.vram[0x10003] = 0x14
@@ -510,10 +510,10 @@ class NV_GSP(NV_IP):
     # from hexdump import hexdump
     # hexdump(self.nvdev.vram[0x10000:0x10100])
 
-    from hexdump import hexdump
-    self.nvdev.vram[0x10000] = 0x10
-    self.nvdev.vram[0x10003] = 0x14
-    hexdump(self.nvdev.vram[0x10000:0x10100])
+    # from hexdump import hexdump
+    # self.nvdev.vram[0x10000] = 0x10
+    # self.nvdev.vram[0x10003] = 0x14
+    # hexdump(self.nvdev.vram[0x10000:0x10100])
 
     self.priv_root = 0xc1e00004
     # exit(0)
