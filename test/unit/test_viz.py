@@ -21,7 +21,7 @@ serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
-class TestViz(unittest.TestCase):
+class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
@@ -34,6 +34,7 @@ class TestViz(unittest.TestCase):
     TRACK_MATCH_STATS.value = self.tms
     PROFILE.value = self.profile
 
+class TestViz(BaseTestViz):
   def test_simple(self):
     a = UOp.variable("a", 0, 10)
     exec_rewrite((a+0)*1, [sym])
@@ -154,7 +155,7 @@ def root_rewrite(root:UOp):
   return root.replace(src=new_src)
 root = TrackedPatternMatcher([(UPat(Ops.SINK, src=UPat(Ops.ADD), name="root"), root_rewrite),])
 
-class TestVizTree(TestViz):
+class TestVizTree(BaseTestViz):
   def assertStepEqual(self, step:dict, want:dict):
     for k,v in want.items():
       self.assertEqual(step[k], v, f"failed at '{k}': {v} != {step[k]}\n{step=}")
@@ -185,7 +186,7 @@ def bufs_allocated() -> int:
   gc.collect()
   return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
-class TestVizGC(TestViz):
+class TestVizGC(BaseTestViz):
   def test_gc(self):
     init = bufs_allocated()
     a = UOp.new_buffer("NULL", 10, dtypes.char)
@@ -212,7 +213,7 @@ class TestVizGC(TestViz):
 from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
-class TestVizIntegration(TestViz):
+class TestVizIntegration(BaseTestViz):
   # kernelize has a custom name function in VIZ
   def test_kernelize_tracing(self):
     a = Tensor.empty(4, 4)
@@ -293,7 +294,7 @@ def _alloc(b:int):
   a.uop.buffer.allocate()
   return a
 
-class TestVizMemoryLayout(TestViz):
+class TestVizMemoryLayout(BaseTestViz):
   def test_double_alloc(self):
     a = _alloc(1)
     _b = _alloc(1)
