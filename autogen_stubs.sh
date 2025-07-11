@@ -182,6 +182,7 @@ nv_status_codes = {}
     $NVKERN_SRC/src/nvidia/inc/kernel/vgpu/rpc_headers.h \
     $NVKERN_SRC/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h \
     $NVKERN_SRC/src/nvidia/generated/g_rpc-structures.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc/fsp/fsp_nvdm_format.h \
     extra/nv_gpu_driver/g_rpc-message-header.h \
     extra/nv_gpu_driver/gsp_static_config.h \
     extra/nv_gpu_driver/vbios.h \

@@ -248,6 +248,60 @@ class NV_FLCN(NV_IP):
       while self.nvdev.NV_PRISCV_RISCV_BCR_CTRL.with_base(base).read_bitfields()['valid'] != 1: pass
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
 
+class NV_FLCN_COT(NV_IP):
+  def init_sw(self):
+    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
+    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
+    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_vm.h")
+    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_fsp_pri.h")
+    self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
+    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
+    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_emem_channels.h")
+
+    self.fmc_boot_args, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
+    self.init_fmc_image()
+
+  def init_fmc_image(self):
+    self.fmc_booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_image_data")
+    self.fmc_booter_hash = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_hash_data")).cast('I')
+    self.fmc_booter_sig = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_sig_data")).cast('I')
+    self.fmc_booter_pkey = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_pkey_data") + b'\x00\x00\x00').cast('I')
+    _, self.fmc_booter_sysmem = System.alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
+
+  def init_hw(self):
+    self.falcon = 0x00110000
+
+    self.fmc_boot_args.bootGspRmParams = nv.GSP_ACR_BOOT_GSP_RM_PARAMS(gspRmDescOffset=self.nvdev.gsp.wpr_meta_sysmem,
+      gspRmDescSize=ctypes.sizeof(nv.GspFwWprMeta), target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM, bIsGspRmBoot=True)
+    self.fmc_boot_args.gspRmParams = nv.GSP_RM_PARAMS(bootArgsOffset=self.nvdev.gsp.libos_args_sysmem[0], target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM)
+
+    cot_payload = nv.NVDM_PAYLOAD_COT(version=0x2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000,
+      gspBootArgsSysmemOffset=self.fmc_boot_args_sysmem, gspFmcSysmemOffset=self.fmc_booter_sysmem[0])
+    for i,x in enumerate(self.fmc_booter_hash): cot_payload.hash384[i] = x
+    for i,x in enumerate(self.fmc_booter_sig): cot_payload.signature[i] = x
+    for i,x in enumerate(self.fmc_booter_pkey): cot_payload.publicKey[i] = x
+
+    self.kfsp_send_msg(nv.NVDM_TYPE_COT, bytes(cot_payload))
+    while self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(self.falcon).read_bitfields()['riscv_br_priv_lockdown'] == 1: pass
+
+  def kfsp_send_msg(self, nvmd:int, buf:bytes):
+    # All single-packets go to seid 0
+    headers = int.to_bytes((1 << 31) | (1 << 30), 4, 'little') + int.to_bytes((0x7e << 0) | (0x10de << 8) | (nvmd << 24), 4, 'little')
+    buf = headers + buf + (4 - (len(buf) % 4)) * b'\x00'
+    assert len(buf) < 0x400, f"FSP message too long: {len(buf)} bytes, max 1024 bytes"
+
+    self.nvdev.NV_PFSP_EMEMC[0].write(offs=0, blk=0, aincw=1, aincr=0)
+    for i in range(0, len(buf), 4): self.nvdev.NV_PFSP_EMEMD[0].write(int.from_bytes(buf[i:i+4], 'little'))
+
+    self.nvdev.NV_PFSP_QUEUE_TAIL[0].write(len(buf) - 4)
+    self.nvdev.NV_PFSP_QUEUE_HEAD[0].write(0)
+
+    # Waiting for a response
+    while self.nvdev.NV_PFSP_MSGQ_HEAD[0].read() == self.nvdev.NV_PFSP_MSGQ_TAIL[0].read(): pass
+
+    self.nvdev.NV_PFSP_EMEMC[0].write(offs=0, blk=0, aincw=0, aincr=1)
+    self.nvdev.NV_PFSP_MSGQ_TAIL[0].write(self.nvdev.NV_PFSP_MSGQ_HEAD[0].read())
+
 class NV_GSP(NV_IP):
   def init_sw(self):
     self.handle_gen = itertools.count(0xcf000000)
@@ -259,7 +313,9 @@ class NV_GSP(NV_IP):
     self.rpc_set_gsp_system_info()
     self.rpc_set_registry_table()
 
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_CHANNEL_GPFIFO_A
+    self.compute_class = nv_gpu.BLACKWELL_COMPUTE_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.ADA_COMPUTE_A
+    self.dma_class = nv_gpu.BLACKWELL_DMA_COPY_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_DMA_COPY_B
 
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
@@ -330,18 +386,23 @@ class NV_GSP(NV_IP):
     self.init_gsp_image()
     self.init_boot_binary_image()
 
-    m = nv.GspFwWprMeta(revision=nv.GSP_FW_WPR_META_REVISION, magic=nv.GSP_FW_WPR_META_MAGIC,
-      fbSize=self.nvdev.vram_size, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),
-      sizeOfRadix3Elf=(radix3_sz:=len(self.gsp_image)), gspFwWprEnd=vga_off, frtsSize=(frts_sz:=0x100000), frtsOffset=(frts_off:=vga_off-frts_sz),
-      sizeOfBootloader=(boot_sz:=len(self.booter_image)), bootBinOffset=(boot_off:=frts_off-boot_sz),
-      gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000),
-      gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_start:=round_down(gsp_heap_off-0x1000, 0x100000)),
-      nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_start-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off,
-      sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0],sysmemAddrOfBootloader=self.booter_sysmem[0],sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
-      bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
-      bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
+    common = {'sizeOfBootloader':(boot_sz:=len(self.booter_image)), 'sysmemAddrOfBootloader':self.booter_sysmem[0],
+      'sizeOfRadix3Elf':(radix3_sz:=len(self.gsp_image)), 'sysmemAddrOfRadix3Elf': self.gsp_radix3_sysmem[0],
+      'sizeOfSignature': 0x1000, 'sysmemAddrOfSignature': self.gsp_signature_sysmem[0],
+      'bootloaderCodeOffset': self.booter_desc.monitorCodeOffset, 'bootloaderDataOffset': self.booter_desc.monitorDataOffset,
+      'bootloaderManifestOffset': self.booter_desc.manifestOffset, 'revision':nv.GSP_FW_WPR_META_REVISION, 'magic':nv.GSP_FW_WPR_META_MAGIC}
+
+    if self.nvdev.fmc_boot:
+      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=0x20000, pmuReservedSize=0x1820000, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000,
+        frtsSize=0x100000)
+    else:
+      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),
+        gspFwWprEnd=vga_off, frtsSize=(frts_sz:=0x100000), frtsOffset=(frts_off:=vga_off-frts_sz), bootBinOffset=(boot_off:=frts_off-boot_sz),
+        gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000), fbSize=self.nvdev.vram_size,
+        gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_st:=round_down(gsp_heap_off-0x1000, 0x100000)),
+        nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_st-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off)
+      assert self.nvdev.flcn.frts_offset == m.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {m.frtsOffset}"
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct(m)
-    assert self.nvdev.flcn.frts_offset == self.wpr_meta.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {self.wpr_meta.frtsOffset}"
 
   def promote_ctx(self, client, subdevice, obj, ctxbufs, bufs=None, virt=None, phys=None):
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
@@ -365,9 +426,9 @@ class NV_GSP(NV_IP):
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=res_sz, numLevelsToCopy=3,
       virtAddrLo=res_va, virtAddrHi=res_va + res_sz - 1)
-    for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=res_sz)[:3]):
-      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
-        pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
+    for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=res_sz)):
+      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr,
+        size=self.nvdev.mm.pte_cnt[0] * 8 if i == 0 else 0x1000, pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
     self.rpc_rm_control(hObject=vaspace, cmd=nv_gpu.NV90F1_CTRL_CMD_VASPACE_COPY_SERVER_RESERVED_PDES, params=bufs_p)
 
     gpfifo_area = self.nvdev.mm.valloc(4 << 10, contiguous=True)
@@ -399,6 +460,8 @@ class NV_GSP(NV_IP):
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
 
     self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
+    if self.nvdev.fmc_boot: self.nvdev.NV_VIRTUAL_FUNCTION_PRIV_FUNC_BAR1_BLOCK_LOW_ADDR.write(mode=0, target=0, ptr=0)
+
     self.priv_root = 0xc1e00004
     self.init_golden_image()
 
@@ -435,7 +498,11 @@ class NV_GSP(NV_IP):
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
-    return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+    st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+
+    # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
+    if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN: st.workSubmitToken |= (1 << 30)
+    return st
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
@@ -448,8 +515,8 @@ class NV_GSP(NV_IP):
     def bdf_as_int(s): return (int(s[5:7],16)<<8) | (int(s[8:10],16)<<3) | int(s[-1],16)
 
     data = nv.GspSystemInfo(gpuPhysAddr=self.nvdev.bars[0][0], gpuPhysFbAddr=self.nvdev.bars[1][0], gpuPhysInstAddr=self.nvdev.bars[3][0],
-      pciConfigMirrorBase=0x88000, pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=bdf_as_int(self.nvdev.devfmt), bIsPassthru=1,
-      PCIDeviceID=self.nvdev.venid, PCISubDeviceID=self.nvdev.subvenid, PCIRevisionID=self.nvdev.rev, maxUserVa=0x7ffffffff000)
+      pciConfigMirrorBase=[0x88000, 0x92000][self.nvdev.fmc_boot], pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=bdf_as_int(self.nvdev.devfmt),
+      bIsPassthru=1, PCIDeviceID=self.nvdev.venid, PCISubDeviceID=self.nvdev.subvenid, PCIRevisionID=self.nvdev.rev, maxUserVa=0x7ffffffff000)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, bytes(data))
 
   def rpc_set_registry_table(self):
