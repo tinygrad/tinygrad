@@ -1,8 +1,14 @@
-// **** graph renderers
+// ** graph helpers
 
 const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
+
+const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 // ** UOp graph
 
@@ -15,8 +21,6 @@ function intersectRect(r1, r2) {
   const scale = Math.min(scaleX, scaleY);
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
-
-const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
@@ -95,10 +99,6 @@ async function renderDag(graph, additions, recenter=false) {
 
 }
 
-const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
-  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
-
 // ** profiler graph
 
 function formatTime(ts, dur=ts) {
@@ -108,9 +108,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["#1B5745", "#1D2E62"],
-                   "DEFAULT":["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"],}
+const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
+                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
+
+const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -126,8 +128,8 @@ async function renderProfiler() {
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
   const { top:canvasTop, height:canvasHeight } = rect(canvas);
-  // color by name
-  const nameMap = new Map();
+  // color by key (name/category/device)
+  const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
@@ -141,15 +143,23 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of timeline.shapes.entries()) {
-      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-      const colorKey = e.cat ?? e.name;
-      if (!nameMap.has(colorKey)) {
+    let colorKey, currentRef;
+    for (const e of timeline.shapes) {
+      if (e.depth === 0) colorKey = e.cat ?? e.name;
+      if (!colorMap.has(colorKey)) {
         const colors = devColors[k] ?? devColors.DEFAULT;
-        nameMap.set(colorKey, { fillColor:colors[i%colors.length] });
+        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
+      }
+      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      if (e.ref != null) currentRef = e.ref;
+      let ref = {ctx:currentRef, step:0};
+      if (e.ref == null && currentRef != null) {
+        const stepIdx = ctxs[currentRef+1].steps.findIndex((s) => s.name == e.name);
+        if (stepIdx !== -1) ref.step = stepIdx;
       }
       // offset y by depth
-      data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, ref:e.ref, label, ...nameMap.get(colorKey) });
+      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -293,7 +303,7 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref.ctx, foundRect.ref.step);
   });
 
   const tooltip = document.body.appendChild(document.createElement("div"));
@@ -402,12 +412,12 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, step=0) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {

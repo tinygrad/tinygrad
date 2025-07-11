@@ -1,7 +1,8 @@
 from typing import cast
 import math, struct, sys
+from tinygrad.opt import tc
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import ClangRenderer, AMDRenderer
+from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
@@ -118,7 +119,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
-  if AMX: tensor_cores = ClangRenderer.amx_tc
+  if AMX: tensor_cores = tc.amx
 
   extra_matcher = PatternMatcher([
     # rewrite RECIP with FDIV
