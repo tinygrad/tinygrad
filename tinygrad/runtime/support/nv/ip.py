@@ -366,8 +366,8 @@ class NV_GSP(NV_IP):
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=res_sz, numLevelsToCopy=3,
       virtAddrLo=res_va, virtAddrHi=res_va + res_sz - 1)
     for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=res_sz)[:3]):
-      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x20 if i == 0 else 0x1000,
-        pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
+      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr,
+        size=self.nvdev.mm.pte_cnt[0] * 8 if i == 0 else 0x1000, pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
     self.rpc_rm_control(hObject=vaspace, cmd=nv_gpu.NV90F1_CTRL_CMD_VASPACE_COPY_SERVER_RESERVED_PDES, params=bufs_p)
 
     gpfifo_area = self.nvdev.mm.valloc(4 << 10, contiguous=True)
