@@ -1363,6 +1363,7 @@ def train_stable_diffusion():
   BS                 = config["BS"]                     = getenv("BS", 1)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
+  SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
 
   BASEDIR = getenv("BASEDIR", "")
   assert BASEDIR, "set BASEDIR to path of datasets"
@@ -1395,11 +1396,15 @@ def train_stable_diffusion():
 
     optimizer.step()
     scheduler.step()
-    #Tensor.realize(loss, optimizer.optimizers[0].lr)
-    #return loss, optimizer.optimizers[0].lr
+    #return loss
 
   dl = batch_load_train_stable_diffusion(BS)
+  # training loop, one iteration = one epoch
   for batch in dl:
+    # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
+    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
+    std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+    latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
     break
 
 if __name__ == "__main__":
