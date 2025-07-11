@@ -121,6 +121,8 @@ async function renderProfiler() {
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -163,7 +165,7 @@ async function renderProfiler() {
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-    let area = 40;
+    let area = mem.shapes.length === 0 ? 0 : 40;
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = canvasHeight-baseY;
@@ -274,7 +276,9 @@ async function renderProfiler() {
   }
 
   function resize() {
-    let { width, height } = rect(".profiler");
+    const profiler = document.querySelector(".profiler");
+    // NOTE: use clientWidth to account for the scrollbar
+    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
     width -= rect("#device-list").width+padding;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
