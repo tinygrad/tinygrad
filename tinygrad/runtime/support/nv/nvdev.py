@@ -3,7 +3,7 @@ import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_GSP
+from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import System, PCIDevImplBase
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
@@ -79,14 +79,16 @@ class NVDev(PCIDevImplBase):
     self._early_init()
 
     # UVM depth   HW level                            VA bits
-    # 0           PDE3                                48:47
-    # 1           PDE2                                46:38
-    # 2           PDE1 (or 512M PTE)                  37:29
-    # 3           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
-    # 4           PTE_64K / PTE_4K                    20:16 / 20:12
-    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=48, va_shifts=[12, 21, 29, 38, 47], va_base=0,
-      palloc_ranges=[(x, x) for x in [0x20000000, 0x200000, 0x1000]])
-    self.flcn:NV_FLCN = NV_FLCN(self)
+    # 0           PDE4                                56:56 (hopper+)
+    # 1           PDE3                                55:47
+    # 2           PDE2                                46:38
+    # 3           PDE1 (or 512M PTE)                  37:29
+    # 4           PDE0 (dual 64k/4k PDE, or 2M PTE)   28:21
+    # 5           PTE_64K / PTE_4K                    20:16 / 20:12
+    bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
+    self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts, va_base=0,
+      palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]])
+    self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
     # Turn the booting early, gsp client is loaded from the clean.
@@ -111,7 +113,7 @@ class NVDev(PCIDevImplBase):
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
     self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
-    self.mmu_ver = 3 if self.chip_details['architecture'] >= 0x1a else 2
+    self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
@@ -149,7 +151,7 @@ class NVDev(PCIDevImplBase):
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
-    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0,
+    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
       'NV_VIRTUAL_FUNCTION':0xb80000}
 
