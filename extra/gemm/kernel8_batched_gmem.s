@@ -1,6 +1,5 @@
 	.text
 	.amdgcn_target "amdgcn-amd-amdhsa--gfx1100"
-	.amdhsa_code_object_version 5
 	.protected	kernel                  ; -- Begin function kernel
 	.globl	kernel
 	.p2align	8
