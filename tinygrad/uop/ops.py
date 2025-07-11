@@ -506,8 +506,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    # TODO: incorrect for bool and unsigned because CAST is not monotone
-    if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
+    # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
+    if self.op is Ops.CAST and self.dtype in (dtypes.floats+dtypes.sints):
+      return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -814,7 +815,8 @@ def track_matches(func):
       depth = len(active_rewrites)
       tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    ret = func(*args, **kwargs)
+    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
+      ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret
   return _track_func
