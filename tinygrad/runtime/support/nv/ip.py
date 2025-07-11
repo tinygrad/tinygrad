@@ -500,7 +500,8 @@ class NV_GSP(NV_IP):
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
     st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
-    if cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN and self.nvdev.chip_name.startswith("GB2"): st.workSubmitToken |= (1 << 30)
+    # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
+    if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN: st.workSubmitToken |= (1 << 30)
     return st
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
