@@ -133,6 +133,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -140,7 +141,9 @@ async function renderProfiler() {
     div.style.padding = `${padding}px`;
     div.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
+      const prevScroll = profiler.node().scrollTop;
       renderProfiler();
+      if (prevScroll) profiler.node().scrollTop = prevScroll;
     }
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
@@ -165,10 +168,11 @@ async function renderProfiler() {
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-    let area = mem.shapes.length === 0 ? 0 : 40;
+    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
-      area = canvasHeight-baseY;
+      area = maxArea*4;
       data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
     }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
