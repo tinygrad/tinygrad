@@ -121,6 +121,8 @@ async function renderProfiler() {
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -131,6 +133,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -138,12 +141,14 @@ async function renderProfiler() {
     div.style.padding = `${padding}px`;
     div.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
+      const prevScroll = profiler.node().scrollTop;
       renderProfiler();
+      if (prevScroll) profiler.node().scrollTop = prevScroll;
     }
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    let colorKey, currentRef;
+    let colorKey, ref;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
@@ -152,21 +157,22 @@ async function renderProfiler() {
       }
       const fillColor = lighten(colorMap.get(colorKey), e.depth);
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-      if (e.ref != null) currentRef = e.ref;
-      let ref = {ctx:currentRef, step:0};
-      if (e.ref == null && currentRef != null) {
-        const stepIdx = ctxs[currentRef+1].steps.findIndex((s) => s.name == e.name);
-        if (stepIdx !== -1) ref.step = stepIdx;
+      if (e.ref != null) ref = {ctx:e.ref, step:0};
+      else if (ref != null) {
+        const start = ref.step>0 ? ref.step+1 : 0;
+        const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
       }
       // offset y by depth
       data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-    let area = 40;
+    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
-      area = canvasHeight-baseY;
+      area = maxArea*4;
       data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
     }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
@@ -274,7 +280,9 @@ async function renderProfiler() {
   }
 
   function resize() {
-    let { width, height } = rect(".profiler");
+    const profiler = document.querySelector(".profiler");
+    // NOTE: use clientWidth to account for the scrollbar
+    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
     width -= rect("#device-list").width+padding;
     canvas.width = width*dpr;
     canvas.height = height*dpr;

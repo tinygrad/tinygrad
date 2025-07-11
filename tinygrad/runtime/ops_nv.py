@@ -453,7 +453,7 @@ class NVKIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684], bars=[0, 1], vram_bar=1,
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     System.reserve_hugepages(64)
 
