@@ -4,7 +4,7 @@ from tinygrad.dtype import DType
 from tinygrad.uop import Ops
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.device import is_dtype_supported
-from extra.onnx import OnnxDataType
+from extra.onnx import data_types
 from hypothesis import given, strategies as st
 
 def check_ast_count(expected: int, tensor: Tensor):
@@ -42,8 +42,9 @@ class TestOnnxRunner(unittest.TestCase):
     check_ast_count(0, results['output'])
 
 
-SUPPORTED_DTYPES = [dt for dt in OnnxDataType if is_dtype_supported(dt.to_dtype())]
-UNSUPPORTED_DTYPES = [dt for dt in OnnxDataType if not is_dtype_supported(dt.to_dtype())]
+SUPPORTED_DTYPES = [dt for dt, tdt in data_types.items() if is_dtype_supported(tdt)]
+UNSUPPORTED_DTYPES = [dt for dt, tdt in data_types.items() if not is_dtype_supported(tdt)]
+
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   def _test_dtype_context(self, onnx_dtype: int, context: str, expected_dtype: DType):
@@ -68,13 +69,13 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
 
   @given(onnx_dtype=st.sampled_from(SUPPORTED_DTYPES), context=st.sampled_from(['input', 'initializer', 'constant']))
   def test_supported_dtypes(self, onnx_dtype: int, context: str):
-    expected = OnnxDataType(onnx_dtype).to_dtype()
+    expected = data_types[onnx_dtype]
     self._test_dtype_context(onnx_dtype, context, expected)
 
   @unittest.skipUnless(UNSUPPORTED_DTYPES, "No unsupported dtypes to test")
   @given( onnx_dtype=st.sampled_from(UNSUPPORTED_DTYPES), context=st.sampled_from(['input', 'initializer', 'constant']))
   def test_unsupported_dtypes(self, onnx_dtype: int, context: str):
-    true_dtype = OnnxDataType(onnx_dtype).to_dtype()
+    true_dtype = data_types[onnx_dtype]
     expected = true_dtype if context == "input" else dtypes.default_int if dtypes.is_int(true_dtype) else dtypes.default_float
     self._test_dtype_context(onnx_dtype, context, expected)
 
