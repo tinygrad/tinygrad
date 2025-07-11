@@ -148,7 +148,7 @@ async function renderProfiler() {
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    let colorKey, currentRef;
+    let colorKey, ref;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
@@ -157,11 +157,11 @@ async function renderProfiler() {
       }
       const fillColor = lighten(colorMap.get(colorKey), e.depth);
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-      if (e.ref != null) currentRef = e.ref;
-      let ref = {ctx:currentRef, step:0};
-      if (e.ref == null && currentRef != null) {
-        const stepIdx = ctxs[currentRef+1].steps.findIndex((s) => s.name == e.name);
-        if (stepIdx !== -1) ref.step = stepIdx;
+      if (e.ref != null) ref = {ctx:e.ref, step:0};
+      else if (ref != null) {
+        const start = ref.step>0 ? ref.step+1 : 0;
+        const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
       }
       // offset y by depth
       data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
