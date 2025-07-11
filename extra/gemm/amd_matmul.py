@@ -1,4 +1,5 @@
 # kernel8_batched_gmem.s from https://seb-v.github.io/optimization/update/2025/01/20/Fast-GPU-Matrix-multiplication.html
+# sudo PATH=/opt/homebrew/Cellar/llvm/20.1.6/bin:$PATH AMD_LLVM=0 AMD=1 DEBUG=2 python3 extra/gemm/amd_matmul.py
 import pathlib
 import numpy as np
 from dataclasses import replace
@@ -18,6 +19,7 @@ if __name__ == "__main__":
   src = (pathlib.Path(__file__).parent / "kernel5_lds_optim.cpp").read_text()
   prgfast = replace(prg, name="kernel5_lds_optim", src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
   runner = CompiledRunner(prgfast)
+  Device.default.compiler.disassemble(runner.lib)
 
   a = Tensor.randn(N, N).realize()
   b = Tensor.randn(N, N).realize()
@@ -26,6 +28,13 @@ if __name__ == "__main__":
   GlobalCounters.reset()
   with Context(BEAM=4):
     for _ in range(run_count): tc = (a@b).realize()
+
+  # hand spec
+  # Block Tile size  . 128x128
+  # Thread Tile size . 4x4
+  # Wave Tile size   . 128x32
+  # A wave is        . 8x4
+
 
   GlobalCounters.reset()
   ei = ExecItem(runner, [a.uop.buffer, b.uop.buffer, c.uop.buffer])
