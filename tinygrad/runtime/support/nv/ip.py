@@ -516,7 +516,10 @@ class NV_GSP(NV_IP):
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
-    return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+    st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+
+    if cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN and self.nvdev.chip_name.startswith("GB2"): st.workSubmitToken |= (1 << 30)
+    return st
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
