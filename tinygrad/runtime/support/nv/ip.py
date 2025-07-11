@@ -460,21 +460,14 @@ class NV_GSP(NV_IP):
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
-    # self.nvdev.NV_PBUS_BAR1_BLOCK.write(mode=0, target=0, ptr=0)
-    # from hexdump import hexdump
-    # self.nvdev.vram[0x10000] = 0x10
-    # self.nvdev.vram[0x10003] = 0x14
-    # hexdump(self.nvdev.vram[0x10000:0x10100])
-
     # reserve 512MB for the reserved PDES
     res_va = self.nvdev.mm.alloc_vaddr(res_sz:=(512 << 20))
 
     bufs_p = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(pageSize=res_sz, numLevelsToCopy=3,
       virtAddrLo=res_va, virtAddrHi=res_va + res_sz - 1)
     for i,pt in enumerate(self.nvdev.mm.page_tables(res_va, size=res_sz)[:4]):
-      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr, size=0x10 if i == 0 else 0x1000,
-        pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
-      print(f"Level {i}: {pt.paddr:#x}, size: {bufs_p.levels[i].size:#x}, pageShift: {bufs_p.levels[i].pageShift}, aperture: {bufs_p.levels[i].aperture}")
+      bufs_p.levels[i] = nv_gpu.struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_0(physAddress=pt.paddr,
+        size=self.nvdev.mm.pte_cnt[0] * 8 if i == 0 else 0x1000, pageShift=self.nvdev.mm.pte_covers[i].bit_length() - 1, aperture=1)
     self.rpc_rm_control(hObject=vaspace, cmd=nv_gpu.NV90F1_CTRL_CMD_VASPACE_COPY_SERVER_RESERVED_PDES, params=bufs_p)
 
     gpfifo_area = self.nvdev.mm.valloc(4 << 10, contiguous=True)
