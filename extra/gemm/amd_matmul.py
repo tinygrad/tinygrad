@@ -16,8 +16,12 @@ if __name__ == "__main__":
   ast = (Tensor.empty(N, N)@Tensor.empty(N, N)).schedule()[-1].ast
   prg = get_program(ast, Device.default.renderer)
 
-  src = (pathlib.Path(__file__).parent / "kernel5_lds_optim.cpp").read_text()
-  prgfast = replace(prg, name="kernel5_lds_optim", src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
+  if getenv("ASM"):
+    src = (pathlib.Path(__file__).parent / "kernel8_batched_gmem.s").read_text()
+    prgfast = replace(prg, name="kernel", src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
+  else:
+    src = (pathlib.Path(__file__).parent / "kernel5_lds_optim.cpp").read_text()
+    prgfast = replace(prg, name="kernel5_lds_optim", src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])
   runner = CompiledRunner(prgfast)
   Device.default.compiler.disassemble(runner.lib)
 
