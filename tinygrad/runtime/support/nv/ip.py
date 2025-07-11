@@ -258,9 +258,7 @@ class NV_FLCN_COT(NV_IP):
     self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
     self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_emem_channels.h")
 
-    self.falcon = 0x00110000
     self.fmc_boot_args, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
-
     self.init_fmc_image()
 
   def init_fmc_image(self):
@@ -271,35 +269,20 @@ class NV_FLCN_COT(NV_IP):
     _, self.fmc_booter_sysmem = System.alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
 
   def init_hw(self):
-    self.fmc_boot_args.bootGspRmParams.gspRmDescOffset = self.nvdev.gsp.wpr_meta_sysmem
-    self.fmc_boot_args.bootGspRmParams.gspRmDescSize = ctypes.sizeof(nv.GspFwWprMeta)
-    self.fmc_boot_args.bootGspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
-    self.fmc_boot_args.bootGspRmParams.bIsGspRmBoot = True
+    self.falcon = 0x00110000
 
-    self.fmc_boot_args.gspRmParams.bootArgsOffset = self.nvdev.gsp.libos_args_sysmem[0]
-    self.fmc_boot_args.gspRmParams.target = nv.GSP_DMA_TARGET_COHERENT_SYSTEM
+    self.fmc_boot_args.bootGspRmParams = nv.GSP_ACR_BOOT_GSP_RM_PARAMS(gspRmDescOffset=self.nvdev.gsp.wpr_meta_sysmem,
+      gspRmDescSize=ctypes.sizeof(nv.GspFwWprMeta), target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM, bIsGspRmBoot=True)
+    self.fmc_boot_args.gspRmParams = nv.GSP_RM_PARAMS(bootArgsOffset=self.nvdev.gsp.libos_args_sysmem[0], target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM)
 
-    cot_payload = nv.NVDM_PAYLOAD_COT(version=0x2, size=0x35c, frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000)
-    cot_payload.gspBootArgsSysmemOffset = self.fmc_boot_args_sysmem
-    cot_payload.gspFmcSysmemOffset = self.fmc_booter_sysmem[0]
+    cot_payload = nv.NVDM_PAYLOAD_COT(version=0x2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000,
+      gspBootArgsSysmemOffset=self.fmc_boot_args_sysmem, gspFmcSysmemOffset=self.fmc_booter_sysmem[0])
     for i,x in enumerate(self.fmc_booter_hash): cot_payload.hash384[i] = x
     for i,x in enumerate(self.fmc_booter_sig): cot_payload.signature[i] = x
     for i,x in enumerate(self.fmc_booter_pkey): cot_payload.publicKey[i] = x
 
-    # print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
-    # while self.rreg(self.NV_THERM_I2CS_SCRATCH) & 0xff != 0xff: time.sleep(0.01)
-    # print(hex(self.rreg(self.NV_THERM_I2CS_SCRATCH)))
-
-    # time.sleep(1)
-
-    self.kfsp_send_msg(0x14, bytes(cot_payload))
-
-    # time.sleep(1)
-
-    # print(hex(self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(self.falcon).read()))
-    # print(hex(self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(self.falcon).read()))
-    while True:
-      if self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(self.falcon).read() == 0x818787f7: break
+    self.kfsp_send_msg(nv.NVDM_TYPE_COT, bytes(cot_payload))
+    while self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(self.falcon).read_bitfields()['riscv_br_priv_lockdown'] == 1: pass
 
   def kfsp_send_msg(self, nvmd:int, buf:bytes):
     # All single-packets go to seid 0
@@ -316,21 +299,8 @@ class NV_FLCN_COT(NV_IP):
     # Waiting for a response
     while self.nvdev.NV_PFSP_MSGQ_HEAD[0].read() == self.nvdev.NV_PFSP_MSGQ_TAIL[0].read(): pass
 
-    head, tail = self.nvdev.NV_PFSP_MSGQ_HEAD[0].read(), self.nvdev.NV_PFSP_MSGQ_TAIL[0].read()
-    msg_len = tail - head + 4
-
     self.nvdev.NV_PFSP_EMEMC[0].write(offs=0, blk=0, aincw=0, aincr=1)
-
-    msg = bytearray()
-    for i in range(0, msg_len, 4): msg += int.to_bytes(self.nvdev.NV_PFSP_EMEMD[0].read(), 4, 'little')
-
-    self.nvdev.NV_PFSP_MSGQ_TAIL[0].write(head)
-
-    # print(f"Received {len(msg)} bytes: {msg.hex()}")
-    # som, eom, seid, seq = self.read_num("MCTP_HEADER", int.from_bytes(msg[:4], 'little'), "SOM", "EOM", "SEID", "SEQ")
-    # typ, vendor_id = self.read_num("MCTP_MSG_HEADER", int.from_bytes(msg[4:8], 'little'), "TYPE", "VENDOR_ID")
-    # assert som == 1 and eom == 1, f"Invalid MCTP header: {som}, {eom}, {seid}, {seq}"
-    # assert typ == self.MCTP_MSG_HEADER_TYPE_VENDOR_PCI and vendor_id == 0x10de, f"Invalid NVDM header: {typ:x}, {vendor_id:x}"
+    self.nvdev.NV_PFSP_MSGQ_TAIL[0].write(self.nvdev.NV_PFSP_MSGQ_HEAD[0].read())
 
 class NV_GSP(NV_IP):
   def init_sw(self):
