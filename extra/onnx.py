@@ -56,7 +56,7 @@ class PBBufferedReader(BufferedReader):
       shift += 7
       if shift >= 70: raise ValueError("Varint too long")
 
-  def handle_delimited(self, use_tensor=False) -> Tensor|bytes:
+  def read_delimited(self, use_tensor=False) -> Tensor|bytes:
     str_len = self.decode_varint()
     if not use_tensor: return self.read(str_len)
     raw = self.raw
@@ -65,14 +65,14 @@ class PBBufferedReader(BufferedReader):
     self.seek(str_len, os.SEEK_CUR)
     return res
 
-  def handle_string(self) -> str: return self.handle_delimited().decode("utf-8")
-  def handle_bytes(self) -> Tensor: return self.handle_delimited(use_tensor=True)
-  def handle_float(self) -> float: return struct.unpack("<f", self.read(4))[0]
-  def handle_packed_floats(self) -> Tensor: return self.handle_delimited(use_tensor=True)
-  def handle_int64(self) -> int:
+  def read_string(self) -> str: return self.read_delimited().decode("utf-8")
+  def read_bytes(self) -> Tensor: return self.read_delimited(use_tensor=True)
+  def read_float(self) -> float: return struct.unpack("<f", self.read(4))[0]
+  def read_packed_floats(self) -> Tensor: return self.read_delimited(use_tensor=True)
+  def read_int64(self) -> int:
     val = self.decode_varint()
     return val - 2**64 if val & (1 << 63) else val
-  def handle_packed_int64s(self) -> list[int]:
+  def read_packed_int64s(self) -> list[int]:
     total_bytes_len = self.decode_varint()
     old_pos = self.tell()
     values = []
@@ -237,30 +237,30 @@ class OnnxParser:
         # handle different attribute types inline
         if attr == PBType.BYTES:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{name}'")
-          gen_result(obj, name, reader.handle_bytes(), repeated)
-        elif attr == PBType.SUB:
+          gen_result(obj, name, reader.read_bytes(), repeated)
+        if attr == PBType.SUB:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{name}'")
-          value = reader.handle_delimited(use_tensor=True)
+          value = reader.read_delimited(use_tensor=True)
           assert isinstance(value, Tensor)
           if isinstance(parser_fn, str): sub_obj = self._parse_message(PBBufferedReader(value), parser_fn)
           elif isinstance(parser_fn, tuple): sub_obj = self._parse_message(PBBufferedReader(value), parser_fn[0], parser_fn[1])
           else: sub_obj = parser_fn(PBBufferedReader(value))
           gen_result(obj, name, sub_obj, repeated)
-        elif attr == PBType.FLOATS:
+        if attr == PBType.FLOATS:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
-          obj[name] = reader.handle_packed_floats()
-        elif attr == PBType.INT:
+          obj[name] = reader.read_packed_floats()
+        if attr == PBType.INT:
           if wire_type != WireType.VARINT: raise ValueError(f"Expected varint for int64 field '{name}'")
-          gen_result(obj, name, reader.handle_int64(), repeated)
-        elif attr == PBType.INTS:
+          gen_result(obj, name, reader.read_int64(), repeated)
+        if attr == PBType.INTS:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
-          obj[name] = reader.handle_packed_int64s()
-        elif attr == PBType.STRING:
+          obj[name] = reader.read_packed_int64s()
+        if attr == PBType.STRING:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for string field '{name}'")
-          gen_result(obj, name, reader.handle_string(), repeated)
-        elif attr == PBType.FLOAT:
+          gen_result(obj, name, reader.read_string(), repeated)
+        if attr == PBType.FLOAT:
           if wire_type != WireType.FIXED32: raise ValueError(f"Expected fixed32 for float field '{name}'")
-          gen_result(obj, name, reader.handle_float(), repeated)
+          gen_result(obj, name, reader.read_float(), repeated)
 
       except EOFError:
         break
