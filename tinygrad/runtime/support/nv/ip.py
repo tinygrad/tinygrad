@@ -384,34 +384,23 @@ class NV_GSP(NV_IP):
     self.init_gsp_image()
     self.init_boot_binary_image()
 
-    # m = nv.GspFwWprMeta(revision=nv.GSP_FW_WPR_META_REVISION, magic=nv.GSP_FW_WPR_META_MAGIC,
-    #   fbSize=self.nvdev.vram_size, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),
-    #   sizeOfRadix3Elf=(radix3_sz:=len(self.gsp_image)), gspFwWprEnd=vga_off, frtsSize=(frts_sz:=0x100000), frtsOffset=(frts_off:=vga_off-frts_sz),
-    #   sizeOfBootloader=(boot_sz:=len(self.booter_image)), bootBinOffset=(boot_off:=frts_off-boot_sz),
-    #   gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000),
-    #   gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_start:=round_down(gsp_heap_off-0x1000, 0x100000)),
-    #   nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_start-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off,
-    #   sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0],sysmemAddrOfBootloader=self.booter_sysmem[0],sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
-    #   bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
-    #   bootloaderManifestOffset=self.booter_desc.manifestOffset, sizeOfSignature=0x1000)
+    common = {'sizeOfBootloader':(boot_sz:=len(self.booter_image)), 'sysmemAddrOfBootloader':self.booter_sysmem[0],
+      'sizeOfRadix3Elf':(radix3_sz:=len(self.gsp_image)), 'sysmemAddrOfRadix3Elf': self.gsp_radix3_sysmem[0],
+      'sizeOfSignature': 0x1000, 'sysmemAddrOfSignature': self.gsp_signature_sysmem[0],
+      'bootloaderCodeOffset': self.booter_desc.monitorCodeOffset, 'bootloaderDataOffset': self.booter_desc.monitorDataOffset,
+      'bootloaderManifestOffset': self.booter_desc.manifestOffset, 'revision':nv.GSP_FW_WPR_META_REVISION, 'magic':nv.GSP_FW_WPR_META_MAGIC}
 
-    # GH100+
-    m = nv.GspFwWprMeta(revision=nv.GSP_FW_WPR_META_REVISION, magic=nv.GSP_FW_WPR_META_MAGIC,
-      vgaWorkspaceSize=128 * 1024, pmuReservedSize=0x1820000,
-      sizeOfBootloader=(boot_sz:=len(self.booter_image)), sysmemAddrOfBootloader=self.booter_sysmem[0],
-      sizeOfRadix3Elf=(radix3_sz:=len(self.gsp_image)), sysmemAddrOfRadix3Elf=self.gsp_radix3_sysmem[0],
-      sizeOfSignature=0x1000, sysmemAddrOfSignature=self.gsp_signature_sysmem[0],
-      bootloaderCodeOffset=self.booter_desc.monitorCodeOffset, bootloaderDataOffset=self.booter_desc.monitorDataOffset,
-      bootloaderManifestOffset=self.booter_desc.manifestOffset, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000, frtsSize=0x100000)
-
-    # print(f"Booter image size: {len(self.booter_image)} bytes", hex(self.booter_sysmem[0]))
-    # print(f"Radix3 image size: {len(self.gsp_image)} bytes")
-    # print(f"Signature size: {0x1000} bytes")
-    # print(f"Booter code offset: {self.booter_desc.monitorCodeOffset:#x}, size: {self.booter_desc.monitorCodeSize:#x}")
-    # print(f"Booter data offset: {self.booter_desc.monitorDataOffset:#x}, size: {self.booter_desc.monitorDataSize:#x}")
-    # print(hex(self.booter_desc.monitorCodeOffset), hex(self.booter_desc.monitorDataOffset), hex(self.booter_desc.manifestOffset))
+    if self.nvdev.fmc_boot:
+      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=0x20000, pmuReservedSize=0x1820000, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000,
+        frtsSize=0x100000)
+    else:
+      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),
+        gspFwWprEnd=vga_off, frtsSize=(frts_sz:=0x100000), frtsOffset=(frts_off:=vga_off-frts_sz), bootBinOffset=(boot_off:=frts_off-boot_sz),
+        gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000), fbSize=self.nvdev.vram_size,
+        gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_st:=round_down(gsp_heap_off-0x1000, 0x100000)),
+        nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_st-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off)
+      assert self.nvdev.flcn.frts_offset == m.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {m.frtsOffset}"
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct(m)
-    # assert self.nvdev.flcn.frts_offset == self.wpr_meta.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {self.wpr_meta.frtsOffset}"
 
   def promote_ctx(self, client, subdevice, obj, ctxbufs, bufs=None, virt=None, phys=None):
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
