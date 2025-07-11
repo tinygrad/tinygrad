@@ -64,7 +64,6 @@ class PBBufferedReader(BufferedReader):
     res = raw._tensor[self.tell():(self.tell()+str_len)]
     self.seek(str_len, os.SEEK_CUR)
     return res
-
   def read_string(self) -> str: return self.read_delimited().decode("utf-8")
   def read_bytes(self) -> Tensor: return self.read_delimited(use_tensor=True)
   def read_float(self) -> float: return struct.unpack("<f", self.read(4))[0]
@@ -147,12 +146,9 @@ class OnnxParser:
       self.file_path = pathlib.Path(inp)
       self.tensor = Tensor(self.file_path)
     else: self.tensor = inp
-    self._parsed_model = None
 
   def parse(self):
     """Parse the ONNX model and return structured data."""
-    if self._parsed_model is not None: return self._parsed_model
-
     reader = PBBufferedReader(self.tensor)
     model = self._parse_message(reader, "ModelProto", lambda: {"opset_import": [], "domain": None, "graph": None})
 
@@ -173,12 +169,11 @@ class OnnxParser:
                                 {attr_dict["name"]: self._parse_attribute(attr_dict) for attr_dict in node_dict["attribute"]})
                        for num, node_dict in enumerate(graph["node"]))
 
-    self._parsed_model = {
+    return {
       "is_training": is_training, "graph_values": graph_values, "graph_inputs": graph_inputs,
       "graph_outputs": tuple(x["name"] for x in graph["output"]), "graph_nodes": graph_nodes,
       "opset_version": model["opset_import"][0]["version"]
     }
-    return self._parsed_model
 
   def _parse_tensor(self, t: dict) -> Tensor:
     if t.get('string_data'): raise NotImplementedError("Parsing for buffer with string data is not implemented.")
@@ -227,14 +222,14 @@ class OnnxParser:
           reader.skip_field(wire_type)
           continue
 
+        # parse field config
         name, attr = cfg[0], cfg[1]
-        # optional cfg extras
         repeated = False
         parser_fn = None
         if len(cfg) == 3: repeated = cfg[2]
         elif len(cfg) == 4: repeated, parser_fn = cfg[2], cfg[3]
 
-        # handle different attribute types inline
+        # handle different protobuf types
         if attr == PBType.BYTES:
           if wire_type != WireType.LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{name}'")
           gen_result(obj, name, reader.read_bytes(), repeated)
@@ -265,32 +260,31 @@ class OnnxParser:
       except EOFError:
         break
 
-    # handle external tensors lazily
-    if message_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1: self._parse_external_data(obj)
-    return obj
+    # handle external tensors
+    if message_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1:
+      if "external_data" not in obj: raise ValueError("no external_data")
+      location = None
+      length = None
+      offset = 0
+      for kv in obj["external_data"]:
+        if kv["key"] == "location": location = kv["value"]
+        if kv["key"] == "offset": offset = int(kv["value"])
+        if kv["key"] == "length": length = int(kv["value"])
+      if location is None: raise ValueError("no location in external_data")
+      if self.file_path is None:
+        # get onnx file path from Tensor
+        if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
+          self.file_path = pathlib.Path(self.tensor.device[5:])
+          if not (ext_path := self.file_path.parent.joinpath(location)).exists():
+            raise Exception(f"external location not exists: {ext_path}, may caused by symbolic link, try passing onnx file path to onnx_load")
+        else: raise Exception("onnx external_data need the origin file path, try passing onnx file path to onnx_load")
+      ext_path = self.file_path.parent.joinpath(location)
+      if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
+      ext_tensor = Tensor(ext_path)
+      obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
+      obj["data_location"] = 0
 
-  def _parse_external_data(self, obj):
-    if "external_data" not in obj: raise ValueError("no external_data")
-    location = None
-    length = None
-    offset = 0
-    for kv in obj["external_data"]:
-      if kv["key"] == "location": location = kv["value"]
-      if kv["key"] == "offset": offset = int(kv["value"])
-      if kv["key"] == "length": length = int(kv["value"])
-    if location is None: raise ValueError("no location in external_data")
-    if self.file_path is None:
-      # get onnx file path from Tensor
-      if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
-        self.file_path = pathlib.Path(self.tensor.device[5:])
-        if not (ext_path := self.file_path.parent.joinpath(location)).exists():
-          raise Exception(f"external location not exists: {ext_path}, may caused by symbolic link, try passing onnx file path to onnx_load")
-      else: raise Exception("onnx external_data need the origin file path, try passing onnx file path to onnx_load")
-    ext_path = self.file_path.parent.joinpath(location)
-    if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
-    ext_tensor = Tensor(ext_path)
-    obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
-    obj["data_location"] = 0
+    return obj
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)

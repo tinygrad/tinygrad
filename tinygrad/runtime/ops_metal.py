@@ -83,7 +83,8 @@ class MetalDevice(Compiled):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
-      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None:
+      # NOTE: command buffers from MetalGraph are not profiled here
+      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
@@ -198,7 +199,8 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): msg("release")(opaque.buf)
+  def _free(self, opaque:MetalBuffer, options):
+    if msg is not None and libobjc is not None: msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)

@@ -465,7 +465,7 @@ class PCIIface(PCIIfaceBase):
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     # Setup classes for the GPU
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
@@ -478,9 +478,7 @@ class PCIIface(PCIIfaceBase):
   def setup_gpfifo_vm(self, gpfifo): pass
 
   def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
-  def rm_control(self, obj, cmd, params=None):
-    res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
-    return type(params).from_buffer_copy(res) if params is not None else None
+  def rm_control(self, obj, cmd, params=None): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
 
   def device_fini(self): self.dev_impl.fini()
 
