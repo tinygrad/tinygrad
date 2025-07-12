@@ -507,9 +507,6 @@ class Kernel:
   @property
   def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
 
-  def DEPRECATED_linearize(self):
-    self.to_program()
-    return self
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
     from tinygrad.engine.realize import get_program
     ret = get_program(self.get_optimized_ast(name_override), self.opts)
