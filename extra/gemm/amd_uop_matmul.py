@@ -72,20 +72,23 @@ def hand_spec():
   ls0 = ShapeTracker.from_shape((BM, BK))
   ls1 = ShapeTracker.from_shape((BN, BK))
 
-  axis_types = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
-                AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
-                AxisType.REDUCE, AxisType.UNROLL]
-  #axis_types = [AxisType.LOOP]*8 + [AxisType.REDUCE]*2
-  s0 = s0.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
-  s1 = s1.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
-  s2 = s2.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, 1))
+  #axis_types = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
+  #              AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
+  #              AxisType.REDUCE, AxisType.UNROLL]
 
-  ls0 = ls0.reshape((1, nbIterWaveM, (BM//nbIterWaveM)//TM, TM,
-                     1, 1, 1, 1,
-                     1, BK)).expand(s0.shape)
-  ls1 = ls1.reshape((1, 1, 1, 1,
-                     1, nbIterWaveN, (BN//nbIterWaveN)//TN, TN,
-                     1, BK)).expand(s1.shape)
+  buf_at = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL,  AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.UPCAST, AxisType.UPCAST]
+  buf_bt = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.UPCAST, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.UPCAST, AxisType.UPCAST]
+  axis_types = buf_at + buf_bt + [AxisType.REDUCE, AxisType.UNROLL, AxisType.UNROLL, AxisType.UNROLL]
+
+  # 128 x 128 x 8
+  full_shape = (N//BM, 2, 2, 2, 2, 2, 2, 2, N//BN, 2, 2, 2, 2, 2, 2, 2, N//BK, 2, 2, 2)
+
+  s0 = s0.reshape(full_shape)
+  s1 = s1.reshape(full_shape)
+  s2 = s2.reshape(full_shape[:-4] + (1,)*4)
+
+  ls0 = ls0.reshape((1, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2)).expand(s0.shape)
+  ls1 = ls1.reshape((1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2)).expand(s1.shape)
   assert ls0.real_size() == LDS_A_SZ
   assert ls1.real_size() == LDS_B_SZ
 
@@ -96,7 +99,7 @@ def hand_spec():
   print(ls1)
 
   permaxis = []
-  for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.GROUP_REDUCE, AxisType.REDUCE, AxisType.UNROLL, AxisType.UPCAST]:
+  for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST, AxisType.GROUP_REDUCE, AxisType.REDUCE, AxisType.UNROLL]:
     permaxis += [i for i,a in enumerate(axis_types) if a == axis_order]
   axis_types = [axis_types[x] for x in permaxis]
   s0, s1, s2, ls0, ls1 = [x.permute(tuple(permaxis)) for x in [s0, s1, s2, ls0, ls1]]
@@ -105,12 +108,39 @@ def hand_spec():
   lw0, lr0 = ls0, ls0
   lw1, lr1 = ls1, ls1
 
-  print(ls0)
-  print(ls1)
-
   # global_load-local_store optimizations. you have to apply the same permutation to both sides of the load/store
-  #s0 = s0.permute((0,1,2,5,4,3,6,7))
-  #lw0 = lw0.permute((0,1,2,5,4,3,6,7))
+  # (0, 512, 256, 128, 64, 32, 16, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2, 1)
+  """
+  p0 = (0, 1, 19, 18, 17, 12, 11, 4, 3, 2, 10, 9, 5, 6, 7, 8, 16, 13, 14, 15)
+  s0 = s0.permute(p0)
+  lw0 = lw0.permute(p0)
+
+  p1 = (0, 1, 19, 18, 17, 15, 14, 8, 7, 11, 10, 9, 5, 6, 13, 12, 16, 2, 3, 4)
+  s1 = s1.permute(p1)
+  lw1 = lw1.permute(p1)
+  """
+
+  """
+  32(524288)_32(0)_2(65536)_2(32768)_2(16384)_2(0)_2(0)_2(0)_2(0)_2(262144)_2(131072)_2(8192)_2(4096)_2(0)_2(0)_2(0)_512(8)_2(4)_2(2)_2(1)
+  32(0)_32(128)_2(0)_2(0)_2(0)_2(32)_2(16)_2(8)_2(4)_2(0)_2(0)_2(0)_2(0)_2(64)_2(2)_2(1)_512(32768)_2(16384)_2(8192)_2(4096)
+  lw
+  32(0)_32(0)_2(1)_2(2)_2(4)_2(8)_2(16)_2(32)_2(64)_2(128)_2(256)_2(512)_2(0)_2(0)_2(0)_2(0)_512(0)_2(0)_2(0)_2(0)
+  32(0)_32(0)_2(0)_2(0)_2(0)_2(256)_2(128)_2(64)_2(32)_2(0)_2(0)_2(0)_2(0)_2(512)_2(16)_2(8)_512(0)_2(4)_2(2)_2(1)
+  lr
+  32(0)_32(0)_2(1)_2(2)_2(4)_2(8)_2(16)_2(32)_2(64)_2(128)_2(256)_2(512)_2(0)_2(0)_2(0)_2(0)_512(0)_2(0)_2(0)_2(0)
+  32(0)_32(0)_2(0)_2(0)_2(0)_2(256)_2(128)_2(64)_2(32)_2(0)_2(0)_2(0)_2(0)_2(512)_2(16)_2(8)_512(0)_2(4)_2(2)_2(1)
+  """
+
+  from tinygrad.opt.kernel import axis_colors, colored
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(s0.shape, s0.views[0].strides, axis_types)]))
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(s1.shape, s1.views[0].strides, axis_types)]))
+  print("lw")
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(lw0.shape, lw0.views[0].strides, axis_types)]))
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(lw1.shape, lw1.views[0].strides, axis_types)]))
+  print("lr")
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(lr0.shape, lr0.views[0].strides, axis_types)]))
+  print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(lr1.shape, lr1.views[0].strides, axis_types)]))
+
   #s1 = s1.permute((0,1,6,3,4,5,2,7))
   #lw1 = lw1.permute((0,1,6,3,4,5,2,7))
   #print(lw0)
@@ -148,4 +178,6 @@ if __name__ == "__main__":
   ei = ExecItem(hrunner, [hc.uop.buffer, a.uop.buffer, b.uop.buffer])
   with Context(DEBUG=2):
     for _ in range(run_count): ei.run(wait=True)
-  print(f"hrunner {(hc-tc).square().mean().item()}")
+  err = (hc-tc).square().mean().item()
+  print(f"hrunner {err}")
+  assert err < 1e-06
