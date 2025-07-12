@@ -2036,7 +2036,7 @@ class Tensor(MathTrait):
     ```
     """
 
-    data = self.contiguous().flatten().bitcast(dtypes.uint8)
+    data = self.flatten().bitcast(dtypes.uint8)
     if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
     base_chunks = ceildiv(data.shape[0], 2**20)
     tree_depth = math.ceil(math.log(base_chunks, 65536)) if base_chunks > 1 else 0
