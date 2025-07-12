@@ -240,6 +240,7 @@ class OnnxPBParser:
         case _: self.reader.skip_field(wire_type)
 
     # parse type
+    if "type" not in obj: return {**obj, "parsed_type": None}
     type_obj = obj["type"]
     if is_optional := "optional_type" in type_obj: type_obj = type_obj["optional_type"]["elem_type"]
     if is_sequence := "sequence_type" in type_obj: type_obj = type_obj["sequence_type"]["elem_type"]
