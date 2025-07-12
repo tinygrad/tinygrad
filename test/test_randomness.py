@@ -252,7 +252,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   def test_randn_device(self):
-    assert (rdev:=Tensor.randn(3,3,device="CPU").device) == "CPU", f"{rdev} != CPU"
+    self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
