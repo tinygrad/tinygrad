@@ -53,8 +53,10 @@ def hand_spec():
   BK = 8             # depth of K-tile
   BN = BM = 128      # block-tile (output) sizes
   # the real thread is 16x8 = 128 regs
-  TM = 4 * 2
-  TN = 4 * 4
+  TM = 4
+  nbIterWaveM = 2
+  TN = 4
+  nbIterWaveN = 4
 
   # ────── shared-memory tile sizes (unchanged) ───────────────────────────────────
   LDS_A_SZ = BK * BM          # 1024 floats
@@ -75,46 +77,56 @@ def hand_spec():
   ls0 = ShapeTracker.from_shape((BM, BK))
   ls1 = ShapeTracker.from_shape((BN, BK))
 
-  axis_types = [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.UPCAST,
-                AxisType.GLOBAL, AxisType.LOCAL, AxisType.UPCAST,
+  axis_types = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
+                AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
                 AxisType.REDUCE, AxisType.UNROLL]
-  s0 = s0.reshape((N//BM, 2, BM//TM//2, TM, N//BN, BN//TN, TN, N//BK, BK))
-  s1 = s1.reshape((N//BM, 2, BM//TM//2, TM, N//BN, BN//TN, TN, N//BK, BK))
-  s2 = s2.reshape((N//BM, 2, BM//TM//2, TM, N//BN, BN//TN, TN, 1, 1))
+  s0 = s0.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
+  s1 = s1.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
+  s2 = s2.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, 1))
 
-  ls0 = ls0.reshape((1, 2, BM//TM//2, TM, 1, 1, 1, 1, BK)).expand(s0.shape)
-  ls1 = ls1.reshape((1, 1, 1, 1,    1, BN//TN, TN, 1, BK)).expand(s1.shape)
+  ls0 = ls0.reshape((1, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, 1, 1, 1, 1, 1, BK)).expand(s0.shape)
+  ls1 = ls1.reshape((1, 1, 1, 1, 1, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, BK)).expand(s1.shape)
   assert ls0.real_size() == LDS_A_SZ
   assert ls1.real_size() == LDS_B_SZ
 
-  permaxis = (0,4,1,2,5,7,3,6,8)
+  permaxis = []
+  for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.REDUCE, AxisType.UNROLL, AxisType.UPCAST]:
+    permaxis += [i for i,a in enumerate(axis_types) if a == axis_order]
   axis_types = [axis_types[x] for x in permaxis]
-  s0, s1, s2, ls0, ls1 = [x.permute(permaxis) for x in [s0, s1, s2, ls0, ls1]]
+  s0, s1, s2, ls0, ls1 = [x.permute(tuple(permaxis)) for x in [s0, s1, s2, ls0, ls1]]
+  print(axis_types)
 
-  lw0, lr0 = lAs.view(ls0), lAs.view(ls0)
-  lw1, lr1 = lBs.view(ls1), lBs.view(ls1)
+  lw0, lr0 = ls0, ls0
+  lw1, lr1 = ls1, ls1
+
+  print(ls0)
+  print(ls1)
 
   # global_load-local_store optimizations. you have to apply the same permutation to both sides of the load/store
-  # (32, 32, 2, 8, 8, 512, 8, 16, 8)
-  s0 = s0.permute((0,1,2,3,8,5,6,7,4))
-  lw0 = lw0.permute((0,1,2,3,8,5,6,7,4))
-  s1 = s1.permute((0,1,2,8,4,5,6,7,3))
-  lw1 = lw1.permute((0,1,2,8,4,5,6,7,3))
+  #s0 = s0.permute((0,1,2,5,4,3,6,7))
+  #lw0 = lw0.permute((0,1,2,5,4,3,6,7))
+  #s1 = s1.permute((0,1,6,3,4,5,2,7))
+  #lw1 = lw1.permute((0,1,6,3,4,5,2,7))
+  #print(lw0)
+  #print(lw1)
 
+  # loads and stores
   bs0 = bA.view(s0).load()
   bs1 = bB.view(s1).load()
-  bs0 = lr0.load(lw0.store(bs0))
-  bs1 = lr1.load(lw1.store(bs1))
+  bs0 = lAs.view(lr0).load(lAs.view(lw0).store(bs0))
+  bs1 = lBs.view(lr1).load(lBs.view(lw1).store(bs1))
 
-  mat = (bs0 * bs1).r(Ops.ADD, (5, 8), permute=False)
+  mat = (bs0 * bs1).r(Ops.ADD, tuple([i for i,a in enumerate(axis_types) if a in (AxisType.REDUCE, AxisType.UNROLL)]), permute=False)
   st = bC.view(s2).store(mat)
 
-  ast = st.sink(arg=KernelInfo(global_dims=2, local_dims=3, upcasted=3, name="tinygemm"))
+  global_dims = sum([1 for a in axis_types if a == AxisType.GLOBAL])
+  local_dims = sum([1 for a in axis_types if a == AxisType.LOCAL])
+  upcasted_dims = sum([1 for a in axis_types if a in (AxisType.UPCAST, AxisType.UNROLL)])
+  ast = st.sink(arg=KernelInfo(global_dims=global_dims, local_dims=local_dims, upcasted=upcasted_dims, name="tinygemm"))
   ast = graph_rewrite(ast, merge_views)
   prg = get_program(ast, Device.default.renderer)
-  #print(prg.src)
+  print(prg.src)
   return prg
-
 
 if __name__ == "__main__":
   RUN_AMD = Device.DEFAULT in ("HIP", "AMD")
