@@ -5,10 +5,10 @@ import numpy as np
 from tinygrad.helpers import CI
 
 def to_mv_old(ptr: int, sz: int) -> memoryview:
-    return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
+  return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 
 def to_mv_new(ptr: int, sz: int) -> memoryview:
-    return memoryview((ctypes.c_uint8 * sz).from_address(ptr)).cast("B")
+  return memoryview((ctypes.c_uint8 * sz).from_address(ptr)).cast("B")
 
 class TestMemoryview(unittest.TestCase):
   @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
