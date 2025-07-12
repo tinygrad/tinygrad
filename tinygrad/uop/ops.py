@@ -543,8 +543,6 @@ class KernelInfo:
   def global_dims(self): return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
   @property
   def local_dims(self): return sum([1 for x in self.axis_types if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)])
-  @property
-  def upcasted(self): return sum([1 for x in self.axis_types if x in (AxisType.UPCAST, AxisType.UNROLL)])
 
 # ******** ops in python ********
 
