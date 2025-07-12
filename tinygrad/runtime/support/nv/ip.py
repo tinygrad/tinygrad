@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
+from typing import cast
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch
 from tinygrad.runtime.support.system import System
@@ -501,7 +502,8 @@ class NV_GSP(NV_IP):
     st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
     # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
-    if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN: st.workSubmitToken |= (1 << 30)
+    if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
+      cast(nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS, st).workSubmitToken |= (1 << 30)
     return st
 
   def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
