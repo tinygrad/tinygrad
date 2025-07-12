@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestHashing(unittest.TestCase):
-  def test_small(self):
+  def test_abc(self):
     data = Tensor(b"abc", dtype=dtypes.uint8)
     out = data.hash()
     print(out.data().hex())
