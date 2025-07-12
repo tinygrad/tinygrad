@@ -93,7 +93,7 @@ kernel5_lds_optim(float *a, float *b, float *c)
     As[(index_x % BK)][(index_y % BM)] = a[N * index_y + index_x];
   }
 
-    __syncthreads();
+  __syncthreads();
   // Iteration over BK blocks.
   for (int kId = 0; kId < N; kId += BK) {
     float regA[nbReadsA];
