@@ -124,14 +124,14 @@ class PCIIfaceBase:
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
-    if len(self.gpus) == 0:
-      self.gpus = System.pci_scan_bus(vendor, devices)
+    if len((cls:=type(self)).gpus) == 0:
+      cls.gpus = System.pci_scan_bus(vendor, devices)
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', '')).split(',') if x.strip()]
-      self.gpus = [self.gpus[x] for x in visible_devices] if visible_devices else self.gpus
+      cls.gpus = [cls.gpus[x] for x in visible_devices] if visible_devices else cls.gpus
 
       # Acquire va range to avoid collisions.
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)
-    self.pci_dev, self.dev, self.vram_bar = PCIDevice(self.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
+    self.pci_dev, self.dev, self.vram_bar = PCIDevice(cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
