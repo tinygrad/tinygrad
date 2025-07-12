@@ -2020,11 +2020,10 @@ class Tensor(MathTrait):
     assert self.ndim == 2, "only support batched 1d tensors"
     assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
 
-    bs = self.shape[0]
-    blocks = bs * self.shape[1] // 4096
+    blocks = self.shape[0] * self.shape[1] // 4096
     data = self.reshape(blocks, 4096)
-    block_hashes = data.keccak("shake_128").reshape(blocks, 16)
-    return block_hashes.reshape(bs, 4096).keccak("shake_128").reshape(bs, 16)
+    block_hashes = data.keccak("shake_128").reshape(self.shape[0], 4096)
+    return block_hashes.keccak("shake_128").reshape(self.shape[0], 16)
 
   def hash(self) -> Tensor:
     """
