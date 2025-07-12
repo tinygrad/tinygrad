@@ -452,6 +452,8 @@ class NVKIface:
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
 class PCIIface(PCIIfaceBase):
+  gpus:ClassVar[list[str]] = []
+
   def __init__(self, dev, dev_id):
     super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
