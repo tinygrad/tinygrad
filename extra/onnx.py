@@ -15,6 +15,15 @@ class WireType(IntEnum):
   """
   VARINT = 0; FIXED64 = 1; LENGTH_DELIMITED = 2; START_GROUP = 3; END_GROUP = 4; FIXED32 = 5 # noqa: E702
 
+class AttributeType(IntEnum):
+  """
+  ONNX attribute type identifiers.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
+  """
+  FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
+
+  def to_field_name(self) -> str: return {1: "f", 2: "i", 3: "s", 4: "t", 6: "floats", 7: "ints", 8: "strings"}[self.value]
+
 class OnnxDataType(IntEnum):
   """
   ONNX tensor data type identifiers.
@@ -24,25 +33,20 @@ class OnnxDataType(IntEnum):
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
   def to_dtype(self) -> DType: return dtypes.fields()[self.name.lower()]
-  def to_dtype_with_fallback(self, fallback_context: str) -> DType:
-    if is_dtype_supported(dtype := self.to_dtype()): return dtype
-    # if fallback_context is provided, we can fall back to a default dtype
-    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-    warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
-    assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
-    return default_dtype
 
-class AttributeType(IntEnum):
-  """
-  ONNX attribute type identifiers.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
-  """
-  FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
+def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
+  if is_dtype_supported(dtype): return dtype
+  default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+  warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
+  assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
+  return default_dtype
 
 # ***** protobuf parsing ******
 class PBBufferedReader(BufferedReader):
   def __init__(self, tensor: Tensor):
+    assert tensor.dtype is dtypes.uint8, tensor
     super().__init__(TensorIO(tensor))
+    self.len = tensor.nbytes()
 
   def decode_varint(self) -> int:
     """Reference: https://protobuf.dev/programming-guides/encoding/#varints"""
@@ -99,14 +103,14 @@ class OnnxParser:
       self.file_path = pathlib.Path(inp)
       self.tensor = Tensor(self.file_path)
     else: self.tensor = inp
+    self.reader = PBBufferedReader(self.tensor)
 
   def parse(self):
     """Parse the ONNX model and return structured data."""
-    reader = PBBufferedReader(self.tensor)
-    model = self.parse_ModelProto(reader)
+    model = self.parse_ModelProto()
 
     graph = model["graph"]
-    is_training = any(n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
+    is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
 
     # Parse initializers as Tensors
     graph_values = {"": None}
@@ -118,19 +122,20 @@ class OnnxParser:
                    for input_dict in graph["input"] if input_dict["name"] not in graph_values}
 
     # Parse nodes with attributes
-    graph_nodes = tuple(OnnxNode(num, node_dict["op_type"], tuple(node_dict["input"]), tuple(node_dict["output"]),
-                                {attr_dict["name"]: self._parse_attribute(attr_dict) for attr_dict in node_dict["attribute"]})
-                       for num, node_dict in enumerate(graph["node"]))
+    graph_nodes = []
+    for num, node_dict in enumerate(graph["node"]):
+      attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in node_dict["attribute"]}
+      graph_nodes.append(OnnxNode(num, node_dict["op_type"], tuple(node_dict["input"]), tuple(node_dict["output"]), attributes))
 
     return {
       "is_training": is_training, "graph_values": graph_values, "graph_inputs": graph_inputs,
-      "graph_outputs": tuple(x["name"] for x in graph["output"]), "graph_nodes": graph_nodes,
+      "graph_outputs": tuple(x["name"] for x in graph["output"]), "graph_nodes": tuple(graph_nodes),
       "opset_version": model["opset_import"][0]["version"]
     }
 
   def _parse_tensor(self, t: dict) -> Tensor:
     if t.get('string_data'): raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-    to_dtype, true_dtype = OnnxDataType(t['data_type']).to_dtype_with_fallback("buffer parse"), OnnxDataType(t['data_type']).to_dtype()
+    to_dtype, true_dtype = dtype_fallback(OnnxDataType(t['data_type']).to_dtype(), "buffer parse"), OnnxDataType(t['data_type']).to_dtype()
     shape = tuple(t['dims'])
     data = next((val for k in ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
                 if (val := t.get(k)) is not None), None)
@@ -142,99 +147,81 @@ class OnnxParser:
     if shape == () and data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
     return Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
 
-  def _parse_attribute(self, a: dict) -> Any:
-    if a['type'] not in AttributeType: raise NotImplementedError(f"attribute type {a['type']} is not supported")
-    return {1: lambda: float(a["f"]), 2: lambda: int(a["i"]),
-            3: lambda: a["s"].data().tobytes().decode("utf8") if isinstance(a["s"], Tensor) else a["s"].decode("utf8"),
-            4: lambda: self._parse_tensor(a["t"]), 6: lambda: tuple(float(x) for x in a["floats"]),
-            7: lambda: tuple(int(x) for x in a["ints"]),
-            8: lambda: tuple(x.data().tobytes().decode("utf8") for x in a["strings"])}[a['type']]()
-
   def _parse_type(self, t: dict) -> 'OnnxValue':
-    elem_type = t
-    if 'map_type' in elem_type or 'sparse_tensor_type' in elem_type or 'opaque_type' in elem_type:
+    if 'map_type' in t or 'sparse_tensor_type' in t or 'opaque_type' in t:
       raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-    if is_optional := "optional_type" in elem_type: elem_type = elem_type["optional_type"]["elem_type"]
-    if is_sequence := "sequence_type" in elem_type: elem_type = elem_type["sequence_type"]["elem_type"]
-    if "tensor_type" in elem_type:
-      shape_dims = elem_type['tensor_type'].get('shape', {}).get('dim', [])
+    if is_optional := "optional_type" in t: t = t["optional_type"]["elem_type"]
+    if is_sequence := "sequence_type" in t: t = t["sequence_type"]["elem_type"]
+    if "tensor_type" in t:
+      shape_dims = t['tensor_type'].get('shape', {}).get('dim', [])
       return OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
-                      OnnxDataType(elem_type['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
+                      OnnxDataType(t['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
     raise RuntimeError(f"TypeProto was not parsed properly: {t=}")
 
-  def parse_ModelProto(self, reader: PBBufferedReader) -> dict:
-    obj = {"opset_import": [], "domain": None, "graph": None}
-    while True:
-      try:
-        tag = reader.decode_varint()
-        fid, wire_type = tag >> 3, WireType(tag & 0x07)
-        match fid:
-          case 4: obj["domain"] = reader.read_string()
-          case 5: obj["model_version"] = reader.read_int64()
-          case 7: obj["graph"] = self.parse_GraphProto(reader)
-          case 8: obj["opset_import"].append(self.parse_OperatorSetIdProto(reader))
-          case _: reader.skip_field(wire_type)
-      except EOFError: break
+  # ***** protobuf parsing *****
+  def _parse_message(self, end_pos: int):
+    while self.reader.tell() < end_pos:
+      tag = self.reader.decode_varint()
+      yield tag >> 3, WireType(tag & 0x07)
+
+  def _decode_end_pos(self):
+    str_len = self.reader.decode_varint()
+    start_pos = self.reader.tell()
+    return start_pos + str_len
+
+  def parse_ModelProto(self) -> dict:
+    obj = {"opset_import": []}
+    for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
+      match fid:
+        case 4: obj["domain"] = self.reader.read_string()
+        case 5: obj["model_version"] = self.reader.read_int64()
+        case 7: obj["graph"] = self.parse_GraphProto()
+        case 8: obj["opset_import"].append(self.parse_OperatorSetIdProto())
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_GraphProto(self, reader: PBBufferedReader) -> dict:
-    obj = {"node": [], "initializer": [], "input": [], "output": [], "value_info": []}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+  def parse_GraphProto(self) -> dict:
+    obj = {"node": [], "initializer": [], "input": [], "output": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["node"].append(self.parse_NodeProto(reader))
-        case 2: obj["name"] = reader.read_string()
-        case 5: obj["initializer"].append(self.parse_TensorProto(reader))
-        case 11: obj["input"].append(self.parse_ValueInfoProto(reader))
-        case 12: obj["output"].append(self.parse_ValueInfoProto(reader))
-        case _: reader.skip_field(wire_type)
+        case 1: obj["node"].append(self.parse_NodeProto())
+        case 2: obj["name"] = self.reader.read_string()
+        case 5: obj["initializer"].append(self.parse_TensorProto())
+        case 11: obj["input"].append(self.parse_ValueInfoProto())
+        case 12: obj["output"].append(self.parse_ValueInfoProto())
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_NodeProto(self, reader: PBBufferedReader) -> dict:
-    obj = {"input": [], "output": [], "attribute": [], "domain": None}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+  def parse_NodeProto(self) -> dict:
+    obj = {"input": [], "output": [], "attribute": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["input"].append(reader.read_string())
-        case 2: obj["output"].append(reader.read_string())
-        case 3: obj["name"] = reader.read_string()
-        case 4: obj["op_type"] = reader.read_string()
-        case 5: obj["attribute"].append(self.parse_AttributeProto(reader))
-        case 6: obj["doc_string"] = reader.read_string()
-        case 7: obj["domain"] = reader.read_string()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["input"].append(self.reader.read_string())
+        case 2: obj["output"].append(self.reader.read_string())
+        case 3: obj["name"] = self.reader.read_string()
+        case 4: obj["op_type"] = self.reader.read_string()
+        case 5: obj["attribute"].append(self.parse_AttributeProto())
+        case 6: obj["doc_string"] = self.reader.read_string()
+        case 7: obj["domain"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorProto(self, reader: PBBufferedReader) -> dict:
-    obj = {"dims": [], "float_data": None, "int32_data": None, "string_data": None,
-           "int64_data": None, "double_data": None, "uint64_data": None, "raw_data": None}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+  def parse_TensorProto(self) -> dict:
+    obj = {"dims": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["dims"].append(reader.read_int64())
-        case 2: obj["data_type"] = reader.read_int64()
-        case 4: obj["float_data"] = reader.read_packed_floats()
-        case 5: obj["int32_data"] = reader.read_packed_int64s()
-        case 7: obj["int64_data"] = reader.read_packed_int64s()
-        case 8: obj["name"] = reader.read_string()
-        case 9: obj["raw_data"] = reader.read_bytes()
-        case 10: obj["double_data"] = reader.read_packed_floats()
-        case 11: obj["uint64_data"] = reader.read_packed_int64s()
-        case 13: obj.setdefault("external_data", []).append(self.parse_StringStringEntryProto(reader))
-        case 14: obj["data_location"] = reader.read_int64()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["dims"].append(self.reader.read_int64())
+        case 2: obj["data_type"] = self.reader.read_int64()
+        case 4: obj["float_data"] = self.reader.read_packed_floats()
+        case 5: obj["int32_data"] = self.reader.read_packed_int64s()
+        case 7: obj["int64_data"] = self.reader.read_packed_int64s()
+        case 8: obj["name"] = self.reader.read_string()
+        case 9: obj["raw_data"] = self.reader.read_bytes()
+        case 10: obj["double_data"] = self.reader.read_packed_floats()
+        case 11: obj["uint64_data"] = self.reader.read_packed_int64s()
+        case 13: obj.setdefault("external_data", []).append(self.parse_StringStringEntryProto())
+        case 14: obj["data_location"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
 
     if self.load_external_data and obj.get("data_location", 0) == 1:
       if "external_data" not in obj: raise ValueError("no external_data")
@@ -257,149 +244,100 @@ class OnnxParser:
       obj["data_location"] = 0
     return obj
 
-  def parse_AttributeProto(self, reader: PBBufferedReader) -> dict:
+  def parse_AttributeProto(self) -> dict:
     obj = {"floats": [], "ints": [], "strings": []}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["name"] = reader.read_string()
-        case 2: obj["f"] = reader.read_float()
-        case 3: obj["i"] = reader.read_int64()
-        case 4: obj["s"] = reader.read_bytes()
-        case 5: obj["t"] = self.parse_TensorProto(reader)
-        case 7: obj["floats"].append(reader.read_float())
-        case 8: obj["ints"].append(reader.read_int64())
-        case 9: obj["strings"].append(reader.read_bytes())
-        case 20: obj["type"] = reader.read_int64()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["name"] = self.reader.read_string()
+        case 2: obj["f"] = self.reader.read_float()
+        case 3: obj["i"] = self.reader.read_int64()
+        case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
+        case 5: obj["t"] = self._parse_tensor(self.parse_TensorProto())
+        case 7: obj["floats"].append(self.reader.read_float())
+        case 8: obj["ints"].append(self.reader.read_int64())
+        case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
+        case 20: obj["type"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
+    obj["floats"], obj["ints"], obj["strings"] = tuple(obj["floats"]), tuple(obj["ints"]), tuple(obj["strings"])
     return obj
 
-  def parse_ValueInfoProto(self, reader: PBBufferedReader) -> dict:
+  def parse_ValueInfoProto(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["name"] = reader.read_string()
-        case 2: obj["type"] = self.parse_TypeProto(reader)
-        case _: reader.skip_field(wire_type)
+        case 1: obj["name"] = self.reader.read_string()
+        case 2: obj["type"] = self.parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProto(self, reader: PBBufferedReader) -> dict:
+  def parse_TypeProto(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["tensor_type"] = self.parse_TypeProtoTensor(reader)
-        case 4: obj["sequence_type"] = self.parse_TypeProtoSequence(reader)
-        case 9: obj["optional_type"] = self.parse_TypeProtoOptional(reader)
-        case _: reader.skip_field(wire_type)
+        case 1: obj["tensor_type"] = self.parse_TypeProtoTensor()
+        case 4: obj["sequence_type"] = self.parse_TypeProtoSequence()
+        case 9: obj["optional_type"] = self.parse_TypeProtoOptional()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoTensor(self, reader: PBBufferedReader) -> dict:
+  def parse_TypeProtoTensor(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["elem_type"] = reader.read_int64()
-        case 2: obj["shape"] = self.parse_TensorShapeProto(reader)
-        case _: reader.skip_field(wire_type)
+        case 1: obj["elem_type"] = self.reader.read_int64()
+        case 2: obj["shape"] = self.parse_TensorShapeProto()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoSequence(self, reader: PBBufferedReader) -> dict:
+  def parse_TypeProtoSequence(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["elem_type"] = self.parse_TypeProto(reader)
-        case _: reader.skip_field(wire_type)
+        case 1: obj["elem_type"] = self.parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoOptional(self, reader: PBBufferedReader) -> dict:
+  def parse_TypeProtoOptional(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["elem_type"] = self.parse_TypeProto(reader)
-        case _: reader.skip_field(wire_type)
+        case 1: obj["elem_type"] = self.parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorShapeProto(self, reader: PBBufferedReader) -> dict:
+  def parse_TensorShapeProto(self) -> dict:
     obj = {"dim": []}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["dim"].append(self.parse_TensorShapeProtoDimension(reader))
-        case _: reader.skip_field(wire_type)
+        case 1: obj["dim"].append(self.parse_TensorShapeProtoDimension())
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorShapeProtoDimension(self, reader: PBBufferedReader) -> dict:
+  def parse_TensorShapeProtoDimension(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["dim_value"] = reader.read_int64()
-        case 2: obj["dim_param"] = reader.read_string()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["dim_value"] = self.reader.read_int64()
+        case 2: obj["dim_param"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_StringStringEntryProto(self, reader: PBBufferedReader) -> dict:
+  def parse_StringStringEntryProto(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["key"] = reader.read_string()
-        case 2: obj["value"] = reader.read_string()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["key"] = self.reader.read_string()
+        case 2: obj["value"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_OperatorSetIdProto(self, reader: PBBufferedReader) -> dict:
+  def parse_OperatorSetIdProto(self) -> dict:
     obj = {}
-    str_len = reader.decode_varint()
-    start_pos = reader.tell()
-    end_pos = start_pos + str_len
-    while reader.tell() < end_pos:
-      tag = reader.decode_varint()
-      fid, wire_type = tag >> 3, WireType(tag & 0x07)
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["domain"] = reader.read_string()
-        case 2: obj["version"] = reader.read_int64()
-        case _: reader.skip_field(wire_type)
+        case 1: obj["domain"] = self.reader.read_string()
+        case 2: obj["version"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
     return obj
 
 # ***** onnx spec *****
@@ -620,7 +558,7 @@ def get_onnx_ops():
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype_with_fallback("EyeLike op") if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_fallback(OnnxDataType(dtype).to_dtype(), "EyeLike op") if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -674,7 +612,7 @@ def get_onnx_ops():
 
   # ***** Casting Ops *****
   # TODO: saturate
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(OnnxDataType(to).to_dtype_with_fallback("Cast op"))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_fallback(OnnxDataType(to).to_dtype(), "Cast op"))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -1074,7 +1012,7 @@ def get_onnx_ops():
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
-    elif output_dtype != 0: out_dtype = OnnxDataType(output_dtype).to_dtype_with_fallback("QuantizeLinear op")
+    elif output_dtype != 0: out_dtype = dtype_fallback(OnnxDataType(output_dtype).to_dtype(), "QuantizeLinear op")
     else: out_dtype = dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:

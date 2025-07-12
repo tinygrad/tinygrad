@@ -1,4 +1,4 @@
-import unittest, onnx
+import unittest, onnx, tempfile, pathlib, numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.dtype import DType
 from tinygrad.uop import Ops
@@ -41,6 +41,43 @@ class TestOnnxRunner(unittest.TestCase):
     _, results = run_onnx(nodes, outputs=outputs, initializers=[inp, const])
     check_ast_count(0, results['output'])
 
+  def test_external_data_loading(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      tmpdir_path = pathlib.Path(tmpdir)
+
+      external_data_file = tmpdir_path / "weights.bin"
+      weights_data = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+      external_data_file.write_bytes(weights_data.tobytes())
+
+      weights_tensor = onnx.TensorProto()
+      weights_tensor.name = 'weights'
+      weights_tensor.data_type = onnx.TensorProto.FLOAT
+      weights_tensor.dims[:] = [4]
+
+      weights_tensor.data_location = onnx.TensorProto.EXTERNAL
+      weights_tensor.external_data.append(
+        onnx.StringStringEntryProto(key="location", value="weights.bin")
+      )
+
+      inputs = [onnx.helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, (4,))]
+      outputs = [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (4,))]
+      nodes = [onnx.helper.make_node('Add', ['input', 'weights'], ['output'])]
+
+      graph = onnx.helper.make_graph(nodes, 'test_external', inputs, outputs, [weights_tensor])
+      model = onnx.helper.make_model(graph)
+      model_path = tmpdir_path / "model.onnx"
+      with open(model_path, 'wb') as f:
+        f.write(model.SerializeToString())
+
+      runner = OnnxRunner(model_path)
+      input_data = {'input': np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)}
+      results = runner(input_data)
+
+      expected = np.array([2.0, 3.0, 4.0, 5.0], dtype=np.float32)
+      np.testing.assert_array_equal(results['output'].numpy(), expected)
+
+      self.assertTrue('weights' in runner.graph_values)
+      np.testing.assert_array_equal(runner.graph_values['weights'].numpy(), weights_data)
 
 SUPPORTED_DTYPES = [dt for dt in OnnxDataType if is_dtype_supported(dt.to_dtype())]
 UNSUPPORTED_DTYPES = [dt for dt in OnnxDataType if not is_dtype_supported(dt.to_dtype())]
