@@ -1,0 +1,648 @@
+import struct, copy, sys
+from typing import cast
+from functools import cached_property
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
+from tinygrad.renderer import Renderer
+from tinygrad.codegen.devectorizer import no_vectorized_alu, no_vectorized_acc
+from tinygrad.uop.symbolic import partial_gep_pushing
+from tinygrad import dtypes
+from tinygrad.dtype import DType, PtrDType, truncate
+
+def to_hex(x, dt:DType) -> str:
+  if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
+  if dt is dtypes.float32: return hex(struct.unpack('<I', struct.pack('<f', x))[0])
+  if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
+  return cast(str, int(truncate[dt](x)))
+
+base_rewrite = PatternMatcher([
+  # local/global load
+  (UPat(Ops.LOAD, src=(UPat.var("x"),), name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
+  # register move
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="cp"), lambda ctx,x,cp: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[cp]}, {ctx[x]}"),
+  # accumulator
+  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
+  # a bit hacky, if an assign moves to memory it's a store
+  (UPat.var("x").assign(UPat.var("y")), lambda ctx,x,y: ctx.string_rewrite.rewrite(x.store(y), ctx) if not ctx.is_reg(ctx.r[x]) else None),
+  (UPat.var("x").assign(UPat.var("y"), name="a"), lambda ctx,x,y,a: f"{ctx.ops[x.dtype][a.op]} {ctx[x]}, {ctx[y]}" if ctx[x] != ctx[y] else None),
+  # binary ops
+  (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+  # unary ops
+  (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
+  # branches
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.const_like(0)]}\n.LOOP_{x.arg}:"),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: f"{ctx.ops[x.src[0].dtype][Ops.CMPNE]} {ctx[x.src[0]]}, {ctx[x.src[0].const_like(0)]}\n"
+   f"{ctx.ops[x.dtype][x.op]} .L{ctx.uops.index(x)}"),
+  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
+])
+
+asm_matcher = PatternMatcher([
+  # move mask from INDEX to the load/store
+  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt")),
+   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
+  (UPat.var("buf").index(UPat.var("idx"), UPat()).store(UPat.var("val"), UPat.var("gate")),
+   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
+  # rewrite cast to bool to CMPNE 0
+  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
+  # cast to pointer is a noop
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+  # can't cast from float16 to ints/float64 directly and vice versa
+  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  # can't cast from float to int8/16 directly and vice versa
+  (UPat.var("y", dtypes.floats).cast((dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), name="x"),
+   lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)).cast(dtypes.floats, name="x"),
+   lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  # scalar cast to <= int, or zero extending int32 is a noop
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if (x.dtype.itemsize <= y.dtype.itemsize or y.dtype is dtypes.uint32) and y.dtype.count == 1 else None),
+  # vector cast between signed and unsigned is a noop
+  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize and y.dtype.count > 1 else None),
+  # bitcast between signed and unsigned is a noop
+  (UPat.var("y", dtypes.ints).bitcast(dtypes.ints).named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
+  # bitcast between vectors is a noop
+  (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.count > 1 and y.dtype.count > 1 else None),
+  # moving elements of a single register to another without shuffling is a noop and we get rid of the geps
+  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
+   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src, ()) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
+  # TODO: fold gep in store with vpextrd and arg is imm
+  # a gep in a vectorize is folded and its arg is the imm of the instruction
+  (UPat(Ops.VECTORIZE, name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
+  # rewrite RECIP to FDIV
+  (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
+  # rewrite MAX to CMPLT + WHERE
+  (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # bool CMPNE is XOR, bool CMPLT is XOR+AND
+  (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
+  (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
+])
+
+powers_of_two = {2**i:i for i in range(64)}
+def split_vectorized_alu(alu:UOp):
+  dt = alu.src[-1].dtype
+  if alu.op in (Ops.LOG2, Ops.EXP2, Ops.SIN) or dt.scalar() != dtypes.float32: return no_vectorized_alu(alu)
+  if dt.itemsize <= 16 and dt.count in powers_of_two: return None
+  l = next(x for x in [4,2,1] if dt.count % x == 0 and dt.scalar().vec(x).itemsize <= 16)
+  alus = tuple(UOp(alu.op, alu.dtype.scalar().vec(l), tuple(s.gep(tuple(range(i, i+l)) if s.dtype.count == alu.dtype.count else i//l)
+                                                             for s in alu.src), alu.arg) for i in range(0, alu.dtype.count, l))
+  return UOp(Ops.CAT, alu.dtype, alus)
+
+def split_vectorized_acc(acc:UOp):
+  if acc.dtype.scalar() != dtypes.float32: return no_vectorized_acc(acc)
+  if acc.dtype.itemsize <= 16 and acc.dtype.count in powers_of_two: return None
+  l = next(x for x in [4,2,1] if acc.dtype.count % x == 0 and acc.dtype.scalar().vec(x).itemsize <= 16)
+  accs = tuple(UOp(acc.op, acc.dtype.scalar().vec(l),
+    tuple(s.gep(tuple(range(i, i+l))) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(0, acc.dtype.count, l))
+  return UOp(Ops.CAT, acc.dtype, accs)
+
+# don't want to push geps through alus
+asm_pre_matcher = partial_gep_pushing+PatternMatcher([
+  # split vectors to fit in max vector length
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
+  (UPat(Ops.DEFINE_REG, name="acc"), split_vectorized_acc),
+])
+
+# reg alloc based on https://dash.harvard.edu/server/api/core/bitstreams/7312037d-c641-6bd4-e053-0100007fdf3b/content
+# TODO: right now a spilled var loaded into a register can't be coalesced at its last use but it should, maybe don't extend live ranges
+class AsmRenderer(Renderer):
+  regs: dict[DType, list[str]] = {}
+  ops: dict[DType, dict[Ops, str]] = {}
+  callee_saved: list[str] = []
+  string_rewrite = base_rewrite
+  pre_matcher = asm_pre_matcher
+  @cached_property
+  def all_regs(self) -> set[str]: return {reg for regs in self.regs.values() for reg in regs}
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    # because of spill hoisting need to ensure acc is in memory before assign if it was spilled
+    if u.op is Ops.ASSIGN and s is self.srcs(u)[0] and s in self.mem: return [self.mem[s]]
+    return []
+  def can_coalesce(self, x:UOp, s:UOp) -> bool:
+    if x.op is Ops.VECTORIZE: return False
+    if x.op is Ops.LOAD and len(x.src) == 6 and s is not x.src[-2]: return False
+    return True
+  def render_imm(self, imm:str): raise NotImplementedError("arch specific")
+  def render_mem(self, sz:int): raise NotImplementedError("arch specific")
+  def render_reg(self, reg:str, dt:DType, alias:bool=False): raise NotImplementedError("arch specific")
+  #def two_address(self, x:UOp, y:UOp) -> str: return cast(str, l)+"\n" if (l:=self.string_rewrite.rewrite(x.assign(y), self)) is not None else ""
+  def two_address(self, x:UOp, y:UOp) -> str: return f"{self.ops[x.dtype][Ops.ASSIGN]} {self[x]}, {self[y]}\n" if self[x] != self[y] else ""
+  def reg_class(self, x:UOp) -> list[str]: return self.regs[x.dtype]
+  def bypass(self, x:UOp) -> UOp: return self.bypass(x.src[0]) if x.op in (Ops.ASSIGN, Ops.NOOP) else x
+  def srcs(self, x:UOp) -> tuple[UOp, ...]: return tuple(self.bypass(s) for s in x.src)
+  def is_reg(self, r:str) -> bool: return r in self.all_regs
+  def __getitem__(self, x:UOp) -> str: # hacky helper
+    if x.op is Ops.CONST: return self.render_imm(to_hex(x.arg, x.dtype))
+    r, dt = self.r[self.bypass(x)], x.dtype
+    return self.render_reg(r, dt) if self.is_reg(r) else r
+  def _render(self, uops:list[UOp]):
+    self.uops = uops
+    regs = copy.deepcopy(self.regs)
+    callee_saved: list[str] = []
+    kernel: list[str] = []
+    live: dict[UOp, str] = {}
+    loc: dict[UOp, str] = {}
+    self.r = loc
+    mem: dict[UOp, str] = {}
+    self.mem = mem
+    live_at_range: dict[UOp, dict[UOp, str]] = {}
+    spill_place: dict[UOp, UOp] = {}
+    self.stack_size: int = 0
+    inst_map: dict[UOp, list[str]] = {}
+    # live ranges, first pass builds ranges
+    live_range: dict[UOp, list[int]] = {}
+    for i,u in enumerate(uops):
+      if u.dtype != dtypes.void and u.op not in (Ops.CONST, Ops.NOOP, Ops.ASSIGN): live_range[u] = [i]
+      for v in set(self.srcs(u)):
+        if v in live_range: live_range[v].append(i)
+    # second pass updates end of range, a var defined before a range and used inside it is needed for the whole range
+    ranges: list[UOp] = []
+    for i,u in enumerate(reversed(uops)):
+      for s in (s for s in self.srcs(u) if s in live_range):
+        end = next((live_range[rng][-1] for rng in ranges if live_range[s][0] < live_range[rng][0]), 0)
+        if end > live_range[s][-1]: live_range[s].append(end)
+      if u.op is Ops.ENDRANGE: ranges.append(u.src[0])
+      if u.op is Ops.RANGE: ranges.pop()
+
+    def reg_class(x:UOp): return regs[x.dtype]
+    def _alloc(x:UOp, cons:list[str]):
+      # assign free register, otherwise spill one
+      if (free:=next((r for r in reg_class(x) if r in cons), None)) is not None: return reg_class(x).pop(reg_class(x).index(free))
+      # we choose the var whose next use is the latest, this also prioritizes vars defined outside loops
+      spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next(j for j in live_range[k] if j >= i))
+      if spilled not in mem:
+        offset = self.stack_size + (spilled.dtype.itemsize - self.stack_size % spilled.dtype.itemsize) % spilled.dtype.itemsize
+        self.stack_size = offset + spilled.dtype.itemsize
+        mem[spilled] = self.render_mem(offset)
+        # accumulator isn't safe to hoist as value may change
+        if spilled.op is Ops.DEFINE_REG and spilled not in spill_place: spill_place[spilled] = u
+        inst = spill_place.get(spilled, spilled)
+        inst_map[inst].append(cast(str, self.string_rewrite.rewrite(spilled.store(), ctx=self)))
+      loc[spilled] = mem[spilled]
+      return live.pop(spilled)
+
+    def alloc(x:UOp, cons:list[str]):
+      # if x already had a reg we free it
+      if x in live: reg_class(x).insert(0, live.pop(x))
+      # memory constraint, should only be one
+      if not self.is_reg(cons[0]):
+        assert len(cons) == 1
+        mem[x] = cons[0]
+        return mem[x]
+      live[x] = ret = _alloc(x, cons)
+      if x in loc:
+        # if x already in reg and we move to another reg the spill place changes
+        if self.is_reg(loc[x]): spill_place[x] = u
+        move = UOp(Ops.COPY, x.dtype, (x,)) if self.is_reg(self.r[x]) else x.load()
+        loc[move] = ret
+        inst_map[u].append(cast(str, self.string_rewrite.rewrite(move, ctx=self)))
+      if ret in self.callee_saved and ret not in callee_saved: callee_saved.append(ret)
+      return ret
+
+    name = "test"
+    for i,u in enumerate(uops):
+      inst_map[u] = []
+      if u.op is Ops.SINK:
+        if u.arg is not None: name = u.arg.function_name
+        continue
+      if u.op in (Ops.NOOP, Ops.CONST): continue
+      # free dead registers
+      for v in [v for v in live if live_range[v][-1] < i]: reg_class(v).insert(0, live.pop(v))
+      # reload necessary vars
+      if u.op is Ops.ENDRANGE:
+        for k,reg in live_at_range.pop(u.src[0], {}).items():
+          if loc[k] != reg: loc[k] = alloc(k, [reg])
+      # assign srcs, ignore srcs without live ranges
+      src = tuple(s for s in self.srcs(u) if s in live_range)
+      for s in src:
+        cons = self.constraints(u, s)
+        if s in loc and loc[s] not in cons:
+          # if var first use in range is a load we don't need to reload, NOTE: accumulator isn't hoisted so rule doesn't apply
+          if live_at_range:
+            rng, rng_live = list(live_at_range.items())[-1]
+            if s.op != Ops.DEFINE_REG and s in rng_live and not \
+              (self.is_reg(loc[s]) or any(live_range[rng][0] < l < i for l in live_range[s])): rng_live.pop(s)
+          loc[s] = alloc(s, cons)
+      # when valid free srcs before assigning destination to coalesce
+      for s in src:
+        if s in live and live_range[s][-1] == i and self.can_coalesce(u, s): reg_class(s).insert(0, live.pop(s))
+      # assign destination
+      if u in live_range: loc[u] = alloc(u, self.constraints(u))
+      if u.op not in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.BARRIER):
+        # render assembly
+        if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
+          raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        inst_map[u].append(cast(str, l))
+      # define local allocates stack space
+      if u.op is Ops.DEFINE_LOCAL: self.stack_size += u.arg
+      # save live vars at loop entry
+      if u.op is Ops.RANGE: live_at_range[u] = live.copy()
+      # making sure nothing got lost
+      assert len(set(live.values()) | set(regs[dtypes.int]) | set(regs[dtypes.float])) == len(self.regs[dtypes.int] + self.regs[dtypes.float])
+
+    for u in uops: kernel.extend(inst_map[u])
+    # stack must be aligned to 16 bytes
+    return (name, kernel, self.stack_size + (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16, callee_saved)
+
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]): raise NotImplementedError("arch specific")
+  def render(self, uops:list[UOp]): return self.render_kernel(*self._render(uops))
+
+# x18 clobbered on macos/windows, x29 is frame pointer, kept for stack arg access
+arm64_gen_regs = ['x' + str(i) for i in range(31) if i != 29 and not (i == 18 and sys.platform in ("darwin", "win32"))]
+arm64_float_regs = ['v' + str(i) for i in range(32)]
+arm64_regs = {**{x:arm64_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:arm64_float_regs for x in dtypes.floats}}
+arm64_reg_map = {**{f"x{i}": {4: f"w{i}"} for i in range(31)}, **{f"v{i}": {16: f"q{i}", 8: f"d{i}", 4: f"s{i}", 2: f"h{i}"} for i in range(32)}}
+
+arm64_mov_ops = {Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "mov"}
+arm64_branch_ops = {Ops.ENDRANGE: "b.lt", Ops.IF: "b.eq"}
+arm64_unsigned_ops = {**arm64_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.MULACC: "madd", Ops.IDIV: "udiv",
+                Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "orr", Ops.XOR: "eor", Ops.SHL: "lsl", Ops.SHR: "lsr", Ops.WHERE: "csel"}
+arm64_signed_ops = {**arm64_unsigned_ops, Ops.IDIV: "sdiv", Ops.SHR: "asr"}
+# NOTE: int16/int8 alus are casted to int32
+arm64_16bit_ops = {Ops.STORE: "strh", Ops.LOAD: "ldrh", Ops.ASSIGN: "mov"}
+arm64_8bit_ops = {Ops.STORE: "strb", Ops.LOAD: "ldrb", Ops.ASSIGN: "mov"}
+arm64_bool_ops = {**arm64_unsigned_ops, **arm64_8bit_ops}
+arm64_float_ops = {Ops.ADD: "fadd", Ops.SUB: "fsub", Ops.MUL: "fmul", Ops.FDIV: "fdiv", Ops.CMPLT: "fcmp", Ops.CMPNE: "fcmp",
+                  Ops.SQRT: "fsqrt", Ops.MULACC: "fmadd", Ops.WHERE: "fcsel", Ops.STORE: "str", Ops.LOAD: "ldr", Ops.ASSIGN: "fmov"}
+arm64_vec_ops = arm64_mov_ops
+arm64_ops = {**{x:arm64_unsigned_ops for x in dtypes.uints}, **{x:arm64_signed_ops for x in dtypes.sints},
+             **{x:arm64_float_ops for x in dtypes.floats}, **{x:arm64_16bit_ops for x in (dtypes.int16, dtypes.uint16)},
+             **{x:arm64_8bit_ops for x in (dtypes.int8, dtypes.uint8)}, dtypes.bool:arm64_bool_ops, dtypes.void:arm64_branch_ops,
+             **{x:arm64_vec_ops for x in (dtypes.float16.vec(2), dtypes.float16.vec(4), dtypes.float32.vec(2), dtypes.float32.vec(4))}}
+arm64_vec = {1: "b", 2: "h", 4: "s", 8: "d"}
+arm64_cast_suffix = {1: "b", 2: "h", 4: "w"}
+def arm64_cflag(x:UOp) -> str: return "ne" if x.op is Ops.CMPNE else "lo" if x.src[0].dtype in dtypes.uints else "lt"
+
+arm64_rewrite = PatternMatcher([
+  # const load
+  (UPat(Ops.LOAD, src=(UPat.cvar('idx'),), name="x"), lambda ctx,x,idx: f"ldr {ctx[x]}, ={ctx[idx][1:]}"),
+  # gated load
+  (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
+   f"{ctx.two_address(x, alt)}tst {ctx[mask]}, #1\n"
+   f"b.eq .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+  # local/global load
+  (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx.render_reg(ctx.r[x], x.dtype, True)}, [{ctx[x.src[0]]}]"),
+  # local/global store
+  (UPat(Ops.STORE, src=(UPat.var("x"),), name="st"), lambda ctx,x,st:
+   f"{ctx.ops[x.dtype][st.op]} {ctx.render_reg(ctx.r[ctx.bypass(x)], x.dtype, True)}, [{ctx.mem[ctx.bypass(x)]}]"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x:
+   f"{ctx.ops[x.src[1].dtype][x.op]} {ctx.render_reg(ctx.r[ctx.bypass(x.src[1])], x.src[1].dtype, True)}, [{ctx[x.src[0]]}]"),
+  # devectorize/vectorize
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx.r[x.src[0]]}.{arm64_vec[x.dtype.itemsize]}[{x.arg[0]}]"),
+  (UPat(Ops.VECTORIZE, name="x"),
+   lambda ctx,x: "\n".join(f"mov {ctx.r[x]}.{arm64_vec[s.dtype.itemsize]}[{i}], {ctx.r[ctx.bypass(s)]}.{arm64_vec[s.dtype.itemsize]}[{0}]"
+     for i,s in enumerate(x.src))),
+  # casts
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"),
+   lambda ctx,x: f"uxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, '')} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
+   lambda ctx,x: f"sxt{arm64_cast_suffix.get(x.src[0].dtype.itemsize, '')} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats),), name="x"), lambda ctx,x: f"fcvt {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.sints),), name="x"), lambda ctx,x: f"scvtf {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uints),), name="x"), lambda ctx,x: f"ucvtf {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.sints, src=(UPat(dtype=dtypes.floats),), name="x"), lambda ctx,x: f"fcvtzs {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.uints, src=(UPat(dtype=dtypes.floats),), name="x"), lambda ctx,x: f"fcvtzu {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"{ctx.ops[dtypes.float32][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}"),
+   # ternary ops
+  (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"tst {ctx[x.src[0]]}, #1\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, ne"),
+  (UPat(Ops.MULACC, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}"),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda ctx,x: f"{ctx.ops[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\ncset {ctx[x]}, {arm64_cflag(x)}"),
+  # endrange #TODO: should be in base rewrite
+  (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"),
+   lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
+   f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
+]) + base_rewrite
+
+def arm64_load_consts(x:UOp) -> UOp|None:
+  if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
+  nsrc = []
+  for s in x.src:
+    if s.op is Ops.CONST:
+      # NOTE: apparently just loading the consts works cause the assembler generates the correct instructions
+      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
+      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
+      elif abs(int(truncate[s.dtype](s.arg))) > (2 ** 12) - 1: s = s.load(dtype=s.dtype)
+    nsrc.append(s)
+  return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
+
+# TODO: technically loading to w reg doesn't zero extend upper 32 bits so not a NOOP, use 64 regs when loading?
+arm64_matcher = asm_matcher + PatternMatcher([
+  # load/store use pointer arithmetic and we get rid of the buf pointer, size in arg for define local
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
+   lambda buf,idx: buf.replace(dtype=dtypes.uint64, arg=(buf.dtype.size*buf.dtype.itemsize) if buf.dtype.local else buf.arg) +
+    idx.cast(dtypes.uint64)*buf.dtype.itemsize),
+  (UPat(GroupOp.All, name="x"), arm64_load_consts),
+  # some ops can't take imm in srcs
+  (UPat((Ops.CMPNE, Ops.CMPLT, Ops.XOR, Ops.IDIV, Ops.MUL, Ops.MULACC, Ops.WHERE, Ops.STORE), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
+  # no modulo in arm64
+  (UPat(Ops.MOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - (a // b) * b),
+  # int8/int16 alus perform instruction in int32
+  (UPat(GroupOp.ALU, dtype=(dtypes.int8, dtypes.int16), name="x"),
+   lambda x: UOp(x.op, dtypes.int32, tuple(s.cast(dtypes.int32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+  (UPat(GroupOp.ALU, dtype=(dtypes.uint8, dtypes.uint16), name="x"),
+   lambda x: UOp(x.op, dtypes.uint32, tuple(s.cast(dtypes.uint32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.int) for s in x.src)) if any(s.dtype in (dtypes.int8, dtypes.int16) for s in x.src) else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.uint) for s in x.src)) \
+   if any(s.dtype in (dtypes.uint8, dtypes.uint16) for s in x.src) else None),
+])
+
+class Arm64Renderer(AsmRenderer):
+  device = "ARM64"
+  has_local = False
+  global_max = None
+  extra_matcher = arm64_matcher
+  string_rewrite = arm64_rewrite
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.MULACC)}
+  ops = arm64_ops
+  regs = arm64_regs
+
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    if (base:=super().constraints(u, s)): return base
+    if s is not None: return self.reg_class(s)
+    # stack args are offset by 8
+    if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+      return [("x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7")[i]] if (i:=self.uops.index(u)) < 8 else [f"x29, #{(i-7)*8+8}"]
+    return self.reg_class(u)
+  def render_imm(self, imm:str) -> str: return f"#{imm}"
+  def render_mem(self, sz:int) -> str: return f"sp, #{sz}"
+  # arm64 vec load/store use q/d instead of v.suffix
+  def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
+    if dt.count > 1 and not alias: return f"{reg}.{dt.count}{arm64_vec[dt.scalar().itemsize]}"
+    if dtypes.is_float(dt): return arm64_reg_map[reg][dt.itemsize]
+    return reg if dt.itemsize == 8 else arm64_reg_map[reg][max(dt.itemsize, dtypes.int32.itemsize)]
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
+    return "\n".join([".text", f".global {name}", f"{name}:", "stp x29, x30, [sp, #-16]!", "mov x29, sp", f"sub sp, sp, #{stack_size}"] + \
+                      kernel + [f"add sp, sp, #{stack_size}", "ldp x29, x30, [sp], #16", "ret", "\n"])
+
+# *** x86 registers ***
+# rbp is frame pointer, kept for stack arg access
+x86_gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14", "r15"]
+x86_float_regs = ["ymm" + str(i) for i in range(0,16)]
+x86_regs = {**{x:x86_gen_regs for x in (dtypes.bool,)+dtypes.ints}, **{x:x86_float_regs for x in dtypes.floats},
+            **{x.vec(sz):x86_float_regs for x in dtypes.all for sz in [2,4,8,16,32]}}
+x86_reg_map = {**{"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 1: "sil"}, "rdx": {4: "edx", 2: "dx", 1: "dl"},
+                "rcx": {4: "ecx", 2: "cx", 1: "cl"}, "rax": {4: "eax", 2: "ax", 1: "al"}, "rbx": {4: "ebx", 2: "bx", 1: "bl"},
+               **{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"} for i in range(8,16)}},
+               **{f"ymm{i}": {sz: f"xmm{i}" for sz in [16,8,4,2]} for i in range(0,16)}}
+# NOTE: avx512 instructions aren't used
+# *** x86 scalar ops ***
+x86_branch_ops = {Ops.ENDRANGE: "jl", Ops.IF: "je"}
+x86_unsigned_ops = {Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
+                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr", Ops.WHERE: "cmove",
+                    Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov"}
+x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR: "sar"}
+x86_float32_ops = {Ops.ADD: "vaddss", Ops.SUB: "vsubss", Ops.MUL: "vmulss", Ops.FDIV: "vdivss", Ops.CMPLT: "vucomiss", Ops.CMPNE: "vucomiss",
+                 Ops.SQRT: "sqrtss", Ops.MULACC: "vfmadd213ss", Ops.STORE: "vmovss", Ops.LOAD: "vmovss", Ops.ASSIGN: "movss"}
+x86_float64_ops = {**{k:v[:-1]+"d" for k,v in x86_float32_ops.items()}}
+# NOTE: these are just for local moves
+x86_float16_ops = {Ops.STORE: "vmovss", Ops.LOAD: "vmovss", Ops.ASSIGN: "movss"}
+# *** x86 vector ops ***
+x86_vec_mov_sz = {4: {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"},
+                  8: {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "vmovq"},
+                  16: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"},
+                  32: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"}}
+x86_int_suf = {1: "b", 2: "w", 4: "d", 8: "q"}
+x86_int_sz = {1: dtypes.int8, 2: dtypes.int16, 4: dtypes.int32, 8: dtypes.int64}
+# NOTE: no cmpne and cmplt for int vec cmp
+# NOTE: vec cmove is done at the byte level, x86 doesn't support 2 byte mask granularity
+x86_vec_int_shared = {Ops.WHERE: "vpblendvb", Ops.AND: "vpand", Ops.OR: "vpor", Ops.XOR: "vpxor"}
+x86_vec_sint_base = {Ops.ADD: "vpadd", Ops.SUB: "vpsub", Ops.MUL: "vpmull", Ops.SHL: "vpsllv", Ops.SHR: "vpsrav", Ops.CMPLT: "vpcmpgt"}
+x86_vec_uint_base = {**x86_vec_sint_base, Ops.SHR: "vpsrlv"}
+x86_vec_sint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_sint_base.items()}, **x86_vec_int_shared,
+                **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in (dtypes.bool,)+dtypes.sints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
+x86_vec_uint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_uint_base.items()}, **x86_vec_int_shared,
+                               **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in dtypes.uints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
+x86_vec_float16_ops = {x.vec(l):{**x86_vec_mov_sz[x.vec(l).itemsize]} for x in (dtypes.float16,) for l in [2,4,8,16]}
+x86_vec_float32_ops = {x.vec(l):{**{k:v[:-2]+"ps" for k,v in x86_float32_ops.items()}, **x86_vec_mov_sz[x.vec(l).itemsize], Ops.CMPLT: "vcmpltps",
+                          Ops.CMPNE: "vcmpneqps", Ops.WHERE: "vblendvps"} for x in (dtypes.float32,) for l in [2,4,8]}
+x86_vec_float64_ops = {x.vec(l):{**{k:v[:-2]+"pd" for k,v in x86_float32_ops.items()}, **x86_vec_mov_sz[x.vec(l).itemsize], Ops.CMPLT: "vcmpltpd",
+                          Ops.CMPNE: "vcmpneqpd", Ops.WHERE: "vblendvpd"} for x in (dtypes.float64,) for l in [2,4]}
+# final mapping
+x86_ops = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
+          dtypes.float16:x86_float16_ops, dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops,
+          **x86_vec_sint_ops, **x86_vec_uint_ops, **x86_vec_float16_ops, **x86_vec_float32_ops, **x86_vec_float64_ops,
+          dtypes.void:x86_branch_ops}
+
+gep_imm = {(0,0): "0x00", (0,1): "0x10", (0,2): "0x20", (0,3): "0x30",
+           (1,0): "0x40", (1,1): "0x50", (1,2): "0x60", (1,3): "0x70",
+           (2,0): "0x80", (2,1): "0x90", (2,2): "0xA0", (2,3): "0xB0",
+           (3,0): "0xC0", (3,1): "0xD0", (3,2): "0xE0", (3,3): "0xF0",}
+#size_prefix = {1: "byte ptr", 2: "word ptr", 4: "dword ptr", 8: "qword ptr", 16: "xmmword ptr"}
+idiv_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
+def x86_cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
+def x86_cast(y:UOp, x:UOp): return x86_int_suf[y.dtype.scalar().itemsize] + x86_int_suf[x.dtype.scalar().itemsize]
+def vec_imm(x:UOp) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(x.src))
+
+x86_vec_rewrite = PatternMatcher([
+  # vectorize, if srcs all share same src it's a single instruction otherwise they are inserted individually
+  (UPat(Ops.VECTORIZE, dtypes.float, src=(UPat.var(name="y"),), allow_any_len=True, name="x"),
+   lambda ctx,y,x: f"vshufps {ctx[x]}, {ctx[y]}, {ctx[y]}, {vec_imm(x)}" if all(s.src == y.src for s in x.src) else None),
+  (UPat(Ops.VECTORIZE, dtypes.ints, name="x"), lambda ctx,x:
+   "\n".join(f"vpinsr{x86_int_suf[x.dtype.scalar().itemsize]} {ctx[x]}, {ctx[x]}, {ctx[s]}, {i}" for i,s in enumerate(x.src))),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x:
+   "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {gep_imm[(s.arg[0] if isinstance(s.arg, tuple) else 0,i)]}" for i,s in enumerate(x.src))),
+  # casts with floats
+  (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda ctx,y,x: f"vcvtpd2ps {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda ctx,y,x: f"vcvtps2pd {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float32, name="x"), lambda ctx,y,x: f"vcvtdq2ps {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float64, name="x"), lambda ctx,y,x: f"vcvtdq2pd {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float32).cast((dtypes.uint, dtypes.int), name="x"), lambda ctx,y,x: f"vcvttps2dq {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float64).cast((dtypes.uint, dtypes.int), name="x"), lambda ctx,y,x: f"vcvttpd2dq {ctx[x]}, {ctx[y]}"),
+  # cmove, cmp
+  (UPat.var("m").where(UPat.var("a"), UPat.var("b")).named("x"),
+   lambda ctx,m,a,b,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[b]}, {ctx[a]}, {ctx[m]}" if x.dtype.count > 1 else None),
+  (UPat((Ops.CMPNE, Ops.CMPLT), src=(UPat.var("x"), UPat.var("y")), name="cmp"),
+   lambda ctx,x,y,cmp: f"{ctx.ops[x.dtype][cmp.op]} {ctx[cmp]}, {ctx[x]}, {ctx[y]}" if cmp.dtype.count > 1 else None),
+]) + base_rewrite
+
+x86_rewrite = PatternMatcher([
+  # define local points to the start of the next stack slot, NOTE: unaligned, could cause issues
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"mov {ctx[x]}, rsp\nadd {ctx[x]}, {ctx.stack_size}"),
+  # const load
+  (UPat.cvar("c").load(name="x"), lambda ctx,c,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[c]}"),
+  # local load/store
+  (UPat.var("x").load(name="ld"), lambda ctx,x,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[x]}]"),
+  (UPat.var("x").store(name="st"), lambda ctx,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx.mem[x]}], {ctx[x]}"),
+  (UPat.var("x").store(UPat.var("y"), name="st"), lambda ctx,x,y,st: f"{ctx.ops[x.dtype][st.op]} [{ctx[x]}], {ctx[y]}"),
+  # global load/store
+  (UPat.var("b").load(UPat.var("i"), UPat.var("s"), UPat.var("d"), name="ld"),
+   lambda ctx,b,i,s,d,ld: f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}]"),
+  (UPat.var("b").store(UPat.var("i"), UPat.var("s"), UPat.var("d"), UPat.var("x"), allow_any_len=True, name="st"),
+   lambda ctx,b,i,s,d,x,st: f"{ctx.ops[x.dtype][st.op]} [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}], {ctx[x]}"),
+  # global gated load
+  (UPat.var("b").load(UPat.var("i"), UPat.var("s"), UPat.var("d"), UPat.var("a"), UPat.var("m"), name="ld"),
+   lambda ctx,b,i,s,d,a,m,ld: f"{ctx.two_address(ld, a)}test {ctx[m]}, 1\nje .L{ctx.uops.index(ld)}\n"
+   f"{ctx.ops[ld.dtype][ld.op]} {ctx[ld]}, [{ctx[b]} + {ctx[i]}*{ctx[s]} + {ctx[d]}]\n.L{ctx.uops.index(ld)}:"),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_rewrite.rewrite(x, ctx) if x.dtype.count > 1 else None),
+  # devectorize
+  (UPat(Ops.GEP, dtypes.ints, name="x"), lambda ctx,x: f"vpextr{x86_int_suf[x.dtype.itemsize]} {ctx[x]}, {ctx[x.src[0]]}, {x.arg[0]}"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[(x.arg[0],0)]}"),
+  # casts to > int (to <= int is a noop)
+  (UPat.var("y", (dtypes.bool,)+dtypes.uints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movzx {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.sints).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"movs{'x' if y.dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[y]}"),
+  # casts with floats, float16 cast assumes packed
+  (UPat.var("y", dtypes.float16).cast(dtypes.float32, name="x"), lambda ctx,y,x: f"vcvtph2ps {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float32).cast(dtypes.float16, name="x"), lambda ctx,y,x: f"vcvtps2ph {ctx[x]}, {ctx[y]}, 0x4"),
+  (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda ctx,y,x: f"vcvtsd2ss {ctx[x]}, {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda ctx,y,x: f"vcvtss2sd {ctx[x]}, {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float32, name="x"), lambda ctx,y,x: f"vcvtsi2ss {ctx[x]}, {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float64, name="x"), lambda ctx,y,x: f"vcvtsi2sd {ctx[x]}, {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float32).cast(dtypes.ints, name="x"), lambda ctx,y,x: f"vcvttss2si {ctx[x]}, {ctx[y]}"),
+  (UPat.var("y", dtypes.float64).cast((dtypes.ints), name="x"), lambda ctx,y,x: f"vcvttsd2si {ctx[x]}, {ctx[y]}"),
+  # bitcast, only between 32bit and 64bit
+  (UPat.var("y").bitcast().named("x"), lambda ctx,y,x: f"vmov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[y]}"),
+  # ternary ops (no cmov for floats)
+  (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
+   lambda ctx,x: f"{ctx.two_address(x, x.src[1])}test {ctx[x.src[0]]}, 1\n"
+   f"jne .L{ctx.uops.index(x)}\n{ctx.ops[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uops.index(x)}:"),
+  (UPat(Ops.WHERE, name="x"),
+   lambda ctx,x: f"{ctx.two_address(x, x.src[1])}test {ctx[x.src[0]]}, 1\n{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[2]]}"),
+  (UPat(Ops.MULACC, name="x"),
+   lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}"),
+  # binary ops, instructions that allow 3 operands (avx) use the base rewrite
+  # float cmp requires nan check
+  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("x", dtypes.floats), UPat.var("y")), name="cmp"), lambda ctx,x,y,cmp:
+   f"{ctx.ops[x.dtype][cmp.op]} {ctx[x]}, {ctx[y]}\n{x86_cflag(cmp)} {ctx[cmp]}\nsetp {ctx[cmp][:-1]+'h'}\nxor {ctx[cmp]}, {ctx[cmp][:-1]+'h'}"),
+  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("x"), UPat.var("y")), name="cmp"),
+   lambda ctx,x,y,cmp: f"{ctx.ops[x.dtype][cmp.op]} {ctx[x]}, {ctx[y]}\n{x86_cflag(cmp)} {ctx[cmp]}"),
+   # TODO: get rid of push/pop somehow, some new constraint maybe
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x:
+   f"{ctx.two_address(x, x.src[0])}push rdx\n"
+   f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\npop rdx"),
+  (UPat(Ops.MOD, name="x"), lambda ctx,x:
+   f"push rax\nmov rax, {ctx.r[x.src[0]]}\n"
+   f"{('xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah') if x.dtype in dtypes.uints else idiv_signex[x.dtype.itemsize]}\n"
+   f"{ctx.ops[x.dtype][x.op]} {ctx[x.src[1]]}\n"+('mov dl, ah\n' if x.dtype.itemsize == 1 else '')+"pop rax"),
+  (UPat(GroupOp.Binary, dtypes.ints + (dtypes.bool,), name="x"),
+   lambda ctx,x: f"{ctx.two_address(x, x.src[0])}{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
+  # endrange
+  (UPat(Ops.ENDRANGE, src=(UPat.var("rng")), name="x"), lambda ctx,x,rng: f"{ctx.ops[rng.dtype][Ops.ADD]} {ctx[rng]}, {ctx[rng.const_like(1)]}\n"
+   f"{ctx.ops[rng.dtype][Ops.CMPLT]} {ctx[rng]}, {ctx[rng.src[0]]}\n{ctx.ops[x.dtype][x.op]} .LOOP_{rng.arg}"),
+]) + base_rewrite
+
+def x86_load_consts(x:UOp) -> UOp|None:
+  if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
+  nsrc = []
+  for i,s in enumerate(x.src):
+    if s.op is Ops.CONST:
+      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
+      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
+      elif (x.dtype.count > 1 and x.op not in (Ops.LOAD, Ops.STORE)) or abs(s.arg) > dtypes.max(dtypes.int32): s = s.load()
+      # don't allow store of const, assembler complains about operand size, TODO: shouldn't really be here
+      elif x.op == Ops.STORE and i == len(x.src)-1: s = s.load()
+    nsrc.append(s)
+  return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
+
+x86_matcher = asm_matcher + PatternMatcher([
+  # we use general registers to load/store the 2 bytes of float16
+  (UPat.var("idx").load(UPat.var("alt"), UPat.var("mask"), dtype=dtypes.float16),
+   lambda idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(dtypes.float16)),
+  (UPat.var("idx").load(dtype=dtypes.float16), lambda idx: idx.load(dtype=dtypes.int16).bitcast(dtypes.float16)),
+  (UPat.var("idx").store(UPat.var("val", dtypes.float16)), lambda idx,val: idx.store(val.bitcast(dtypes.int16))),
+  # add scale to index, get rid of pointers
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
+   lambda buf,idx: UOp(Ops.INDEX, dtypes.uint64, (buf.replace(dtype=dtypes.uint64), idx, UOp.const(dtypes.int32, buf.dtype.itemsize)))),
+  # fold displacement into index
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx")+UPat.cvar("disp"), UPat.cvar("scale", dtypes.int32))),
+   lambda buf,idx,disp,scale: UOp(Ops.INDEX, buf.dtype, (buf, idx.cast(dtypes.uint64), scale, disp*scale))),
+  # if no displacement, displacement becomes 0 (to standardize index)
+   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.cvar("scale", dtypes.int32))),
+   lambda buf,idx,scale: UOp(Ops.INDEX, buf.dtype, (buf, idx.cast(dtypes.uint64), scale, UOp.const(dtypes.int32, 0)))),
+  # fold index into load/store
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx"),), allow_any_len=True, name="x"), lambda x,idx: x.replace(src=idx.src+x.src[1:])),
+  # some consts can't be immediates
+  (UPat(GroupOp.All, name="x"), x86_load_consts),
+  # some ops can't take imm in srcs
+  (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load() if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
+  # boolean vector is a mask, each element all 1s or 0s
+  (UPat(Ops.VECTORIZE, src=(UPat(dtype=dtypes.bool),), allow_any_len=True, name="x"),
+   lambda x: x.replace(dtype=dtypes.int32.vec(x.dtype.count), src=tuple(s.cast(dtypes.int32) * -1 for s in x.src))),
+  # vector boolean is a mask of same size as src
+  (UPat(GroupOp.ALU, dtypes.bool, name="x"), lambda x:
+   x.replace(dtype=x86_int_sz[x.src[0].dtype.scalar().itemsize].vec(x.dtype.count)) if x.dtype.count > 1 else None),
+  # mask of vector conditional move must have the same size as the other operands
+  (UPat.var("m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: m.cast_vec(x86_int_sz[a.dtype.scalar().itemsize]).where(a, b)
+   if a.dtype.count > 1 and m.dtype.itemsize != a.dtype.itemsize else None),
+  # a boolean gep is the mask dtype casted to bool
+  (UPat(Ops.GEP, dtypes.bool, (UPat.var("y"),), name="x"), lambda y,x: x.replace(dtype=y.dtype.scalar()).cast(x.dtype)),
+  # float16 alus are done in float32
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"),
+   lambda x: UOp(x.op, dtypes.float32.vec(x.dtype.count),
+                 tuple(s.cast_vec(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+  # float16 accumulator are done in float32 as there's no register move for float16
+  (UPat(Ops.ASSIGN, dtypes.float16, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x:
+   x.replace(dtype=dtypes.float32, src=(a.replace(dtype=dtypes.float32,
+    src=(a.src[0].cast(dtypes.float32),) + a.src[1:]), b.cast(dtypes.float32))).cast(dtypes.float16)),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
+  # can't bitcast from uint16/int16 to float16 directly and vice versa
+  (UPat.var("y", dtypes.float16).bitcast((dtypes.uint16, dtypes.int16)).named("x"), lambda y,x: y.bitcast(dtypes.uint32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.uint16, dtypes.int16)).bitcast(dtypes.float16).named("x"), lambda y,x: y.cast(dtypes.uint32).bitcast(x.dtype)),
+  # int float casts assume signed int so unsigned int32 gets casted to int64 first
+  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
+  # casting uint64 to float requires special handling if msb is 1
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
+   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
+                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # no int8 mul or cmove, cast to int16
+  (UPat.var("a", (dtypes.uint8, dtypes.int8)) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
+  (UPat.var("m").where(UPat.var("a", (dtypes.bool, dtypes.uint8, dtypes.int8)), UPat.var("b")),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype)),
+  # mulacc only available for floats
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+])
+
+# TODO: add x86 support for folding loads into instruction if last use of uop
+class X86Renderer(AsmRenderer):
+  device = "X86"
+  has_local = False
+  global_max = None
+  extra_matcher = x86_matcher
+  string_rewrite = x86_rewrite
+  # TODO: fix this
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR)}
+  ops = x86_ops
+  regs = x86_regs
+  callee_saved = ["rbx", "rsi", "rdi", "r12", "r13", "r14", "r15"] if sys.platform == "win32" else []
+
+  def constraints(self, u:UOp, s:UOp|None=None) -> list[str]:
+    if (base:=super().constraints(u, s)): return base
+    # constraints for srcs
+    if u.dtype.count == 1:
+      if u.op in (Ops.IDIV, Ops.MOD) and s in self.srcs(u): return [r for r in self.reg_class(s) if r not in ("rdx", "rax")]
+      if u.op in (Ops.SHL, Ops.SHR) and s is self.srcs(u)[1] and s.op != Ops.CONST: return ["rcx"]
+    if s is not None: return self.reg_class(s)
+    # constraints for destination
+    # abi constraints, stack args are offset by 8
+    if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+      # on windows, caller reserves 32 bytes for arg registers
+      if sys.platform == "win32": return [("rcx", "rdx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 4 else [f"rbp + {(i-3)*8+40}"]
+      return [("rdi", "rsi", "rdx", "rcx", "r8", "r9")[i]] if (i:=self.uops.index(u)) < 6 else [f"rbp + {(i-5)*8+8}"]
+    if u.dtype.count == 1:
+      if u.op is Ops.IDIV: return ["rax"]
+      if u.op is Ops.MOD: return ["rdx"]
+      # float cmp requires nan check, to avoid reserving temp reg we constrain dest to regs that have a high 8 bit portion
+      if u.op in (Ops.CMPLT, Ops.CMPNE) and self.srcs(u)[0].dtype in dtypes.floats: return ["rax", "rbx", "rcx", "rdx"]
+    return self.reg_class(u)
+  def can_coalesce(self, x:UOp, s:UOp) -> bool:
+    if not super().can_coalesce(x, s): return False
+    if x.op is Ops.WHERE and s is not x.src[1]: return False
+    if x.op is Ops.MULACC and s is not x.src[0]: return False
+    if x.op in GroupOp.Binary - {Ops.CMPLT, Ops.CMPNE} and x.dtype in dtypes.ints + (dtypes.bool,) and s is not x.src[0]: return False
+    return True
+  def render_imm(self, imm:str) -> str: return imm
+  def render_mem(self, sz:int) -> str: return f"rsp + {sz}"
+  def render_reg(self, reg:str, dt:DType, alias:bool=False) -> str:
+    if dtypes.is_float(dt) or dt.count > 1: return reg if dt.itemsize == 32 else x86_reg_map[reg][dt.itemsize]
+    return reg if dt.itemsize == 8 else x86_reg_map[reg][dt.itemsize]
+  def render_kernel(self, name:str, kernel:list[str], stack_size:int, callee_saved:list[str]) -> str:
+    return "\n".join([".text", f".global {name}", f"{name}:"] + ["push rbp", "mov rbp, rsp"] + [f"push {r}" for r in reversed(callee_saved)] +
+                    [f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}"] + [f"pop {r}" for r in callee_saved] + ["pop rbp", "ret", "\n"])
