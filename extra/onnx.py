@@ -60,7 +60,7 @@ class PBBufferedReader(BufferedReader):
       shift += 7
       if shift >= 70: raise ValueError("Varint too long")
 
-  def read_delimited(self, use_tensor=False) -> Tensor|bytes:
+  def read_delimited(self, use_tensor=False):
     str_len = self.decode_varint()
     if not use_tensor: return self.read(str_len)
     raw = self.raw
@@ -120,7 +120,7 @@ class OnnxPBParser:
 
   def parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
-    obj = {"opset_import": []}
+    obj: dict[str, Any] = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
@@ -131,7 +131,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_GraphProto(self) -> dict:
-    obj = {"node": [], "initializer": [], "input": [], "output": []}
+    obj: dict[str, Any] = {"node": [], "initializer": [], "input": [], "output": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["node"].append(self._parse_NodeProto())
@@ -143,7 +143,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_NodeProto(self) -> dict:
-    obj = {"input": [], "output": [], "attribute": []}
+    obj: dict[str, Any] = {"input": [], "output": [], "attribute": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["input"].append(self.reader.read_string())
@@ -161,7 +161,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_TensorProto(self) -> dict:
-    obj = {"dims": []}
+    obj: dict[str, Any] = {"dims": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["dims"].append(self.reader.read_int64())
@@ -215,7 +215,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_AttributeProto(self) -> dict:
-    obj = {"floats": [], "ints": [], "strings": []}
+    obj: dict[str, Any] = {"floats": [], "ints": [], "strings": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["name"] = self.reader.read_string()
@@ -232,7 +232,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_ValueInfoProto(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["name"] = self.reader.read_string()
@@ -251,7 +251,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_TypeProto(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["tensor_type"] = self._parse_TypeProtoTensor()
@@ -261,7 +261,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_TypeProtoTensor(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["elem_type"] = self.reader.read_int64()
@@ -286,7 +286,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_TensorShapeProto(self) -> dict:
-    obj = {"dim": []}
+    obj: dict[str, Any] = {"dim": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["dim"].append(self._parse_TensorShapeProtoDimension())
@@ -294,7 +294,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_TensorShapeProtoDimension(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["dim_value"] = self.reader.read_int64()
@@ -303,7 +303,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_StringStringEntryProto(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["key"] = self.reader.read_string()
@@ -312,7 +312,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_OperatorSetIdProto(self) -> dict:
-    obj = {}
+    obj: dict[str, Any] = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["domain"] = self.reader.read_string()
@@ -468,7 +468,7 @@ def get_onnx_ops():
     return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
   def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
-    if auto_pad == "VALID": return [0]*(len(k_)*2)
+    if auto_pad == "VALID": return (0,)*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
@@ -672,13 +672,13 @@ def get_onnx_ops():
   # ***** Processing Ops *****
   def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                   dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
-    return X.avg_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad),
+    return X.avg_pool2d(tuple(kernel_shape), strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad),
                         ceil_mode=ceil_mode, count_include_pad=count_include_pad)
 
   def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
               storage_order:int=0, strides:list[int]|int=1):
     pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
-    ret, idx = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True)
+    ret, idx = cast(tuple[Tensor, Tensor], X.max_pool2d(tuple(kernel_shape), strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True))
     return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
