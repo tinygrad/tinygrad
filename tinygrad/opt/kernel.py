@@ -76,7 +76,7 @@ class Kernel:
       self.sts.append(unwrap(x.src[0].st))
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
-    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*self.shape_len))
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*len(self.sts[0].shape)))
 
     # parameters for optimization
     self.tensor_core: Optional[TensorCore] = None
@@ -173,10 +173,9 @@ class Kernel:
   # ******************** base simplifiers ********************
 
   # apply reshape and permute to all shapetrackers
-  def reshape_and_permute(self, new_shape_fxn:Optional[Callable[[tuple[sint, ...]], Sequence[sint]]], axis:Optional[Sequence[int]]):
-    def reshape(st:ShapeTracker): return st.reshape(tuple(new_shape_fxn(st.shape))) if new_shape_fxn is not None else st
-    def permute(st:ShapeTracker): return st.permute(tuple(axis)) if axis is not None else st
-    self.sts = [permute(reshape(st)) for st in self.sts]
+  def reshape(self, new_shape_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
+    self.sts = [st.reshape(tuple(new_shape_fxn(st.shape))) for st in self.sts]
+  def permute(self, new_axes:Sequence[int]): self.sts = [st.permute(tuple(new_axes)) for st in self.sts]
 
   # axis : the axis to pull from
   # amount : the amount to take
@@ -187,9 +186,10 @@ class Kernel:
     self.axis_types.insert(insert_before, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_before: insert_before += 1
-    self.reshape_and_permute(
-      lambda x: x[0:axis] + (((amount, x[axis]//amount) if top else (x[axis]//amount, amount)) if x[axis] > 1 else (1,1)) + x[axis+1:],
-      [i for i in range(insert_before) if i != move_axis] + [move_axis] + [i for i in range(insert_before, self.shape_len+1) if i != move_axis])
+    def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
+    new_axes = [i for i in range(insert_before) if i != move_axis]+[move_axis]+[i for i in range(insert_before, self.shape_len+1) if i != move_axis]
+    self.reshape(new_shape_fxn)
+    self.permute(new_axes)
 
   # ******************** complex simplifiers ********************
 
@@ -198,7 +198,7 @@ class Kernel:
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
+      self.reshape(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]])
       return True
     return False
 
@@ -313,7 +313,7 @@ class Kernel:
       check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
-      self.reshape_and_permute(None, tuple(permute))
+      self.permute(tuple(permute))
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
