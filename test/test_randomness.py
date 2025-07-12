@@ -252,10 +252,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   def test_randn_device(self):
-    if Device.DEFAULT == "CPU": self.skipTest("no diff dev to test this")
-    try: _, _ = Device[Device.DEFAULT], Device["CPU"]
-    except Exception: self.skipTest("no diff dev to test this")
-    assert Tensor.randn(3,3,device="CPU").device == "CPU", f"{Tensor.randn(3,3,device='CPU').device} != CPU"
+    assert (rdev:=Tensor.randn(3,3,device="CPU").device) == "CPU", f"{rdev} != CPU"
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
