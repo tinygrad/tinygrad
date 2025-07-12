@@ -281,7 +281,7 @@ class MetalRenderer(CStyleLanguage):
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
-  kernel_typedef = "kernel void"
+  kernel_typedef = "[[kernel, max_total_threads_per_threadgroup({launch_bounds})]] void"
   buffer_prefix = "device "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
   arg_int_prefix = "constant int&"
