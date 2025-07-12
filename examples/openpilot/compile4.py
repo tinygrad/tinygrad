@@ -1,4 +1,4 @@
-import sys, onnx
+import sys
 from tinygrad import Tensor, fetch, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.frontend.onnx import OnnxRunner
@@ -12,10 +12,8 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 if __name__ == "__main__":
-  fn = fetch(OPENPILOT_MODEL)
   onnx_file = fetch(OPENPILOT_MODEL)
-  onnx_model = onnx.load(onnx_file)
-  run_onnx = OnnxRunner(onnx_model)
+  run_onnx = OnnxRunner(onnx_file)
 
   inputs = run_onnx.get_empty_input_data("npy", dtypes.float32)
   out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')
