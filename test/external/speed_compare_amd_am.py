@@ -77,7 +77,7 @@ if __name__ == "__main__":
     with run_amd():
       amdlin = ast_str_to_lin(ast, opts=amddev.renderer)
       amdlin.apply_opts(hand_coded_optimizations(amdlin))
-      has_bf16 = any(b.dtype == dtypes.bfloat16 for b in amdlin.membufs)
+      has_bf16 = any(b.dtype == dtypes.bfloat16 for b in amdlin.bufs)
 
       amd_prg = CompiledRunner(amdlin.to_program())
       amdbufs = bufs_from_lin(amdlin)

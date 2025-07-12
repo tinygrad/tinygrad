@@ -207,8 +207,10 @@ class Kernel:
     first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      base_shape = self.membufs[0].dtype.shape
+    # TODO: remove membufs
+    membufs = dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+    if isinstance(membufs[0].base.dtype, ImageDType):
+      base_shape = membufs[0].base.dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
@@ -503,9 +505,6 @@ class Kernel:
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
 
   # TODO: update the tests and delete these methods
-
-  @property
-  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
 
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
     from tinygrad.engine.realize import get_program
