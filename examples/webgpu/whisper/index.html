@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>whisper tinygrad WebGPU</title>
+    <script>
+        window.moduleReady = new Promise(resolve => window._resolveModule = resolve);
+    </script>
+    <script type="module">
+        import mel from "./mel.js"; window.mel = mel;
+        import encoder from "./encoder.js"; window.encoder = encoder;
+        import decoder from "./decoder.js"; window.decoder = decoder;
+        window._resolveModule();
+    </script>
+    <style>
+        body {
+            background-color: #333;
+            color: #f0f0f0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container { max-width: 800px; width: 100%; }
+        h2 { text-align: center; color: #fff; margin-bottom: 2rem; }
+        #wgpu-error { color: #ff6b6b; }
+
+        #transcription-container {
+            background-color: #444;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            height: 60vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        #transcription-log { flex-grow: 1; }
+        .transcription-chunk { padding: 0.75rem 0; border-bottom: 1px solid #555; }
+        .transcription-chunk:empty { display: none; }
+        #current-transcription {
+            color: #fff;
+            min-height: 1.5em;
+            padding: 0.75rem 0;
+        }
+        #current-transcription::after {
+            content: '▋';
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        .loading-container {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.8); z-index: 10;
+        }
+        .loader {
+            width: 48px; height: 48px; border: 5px solid #FFF; border-bottom-color: #888;
+            border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite;
+        }
+        @keyframes rotation { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .loading-text { font-size: 1.5rem; color: white; margin-bottom: 1.5rem; }
+
+        #overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 2em;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>Whisper Tinygrad WebGPU</h2>
+        <h2 id="wgpu-error" style="display: none;">Error: WebGPU is not supported in this browser</h2>
+        <div id="transcription-container">
+            <div id="transcription-log"></div>
+            <div id="current-transcription"></div>
+        </div>
+        <div id="drop-zone">Drop files here</div>
+        <div id="overlay">Drop your file</div>
+    </div>
+    <div id="div-loading" class="loading-container">
+        <p class="loading-text">Loading model</p>
+        <span class="loader"></span>
+    </div>
+
+    <script>
+        let net_encoder = null;
+        const wgpuError = document.getElementById('wgpu-error');
+        const loadingContainer = document.getElementById('div-loading');
+        const transcriptionLog = document.getElementById('transcription-log');
+        const currentTranscription = document.getElementById('current-transcription');
+        const transcriptionContainer = document.getElementById('transcription-container');
+
+        const SAMPLES_PER_SEGMENT = 480000;
+        const BASE_URL = '.';
+        // const AUDIO_PATH = 'RED_16k.wav';
+        const AUDIO_PATH = 'test.wav';
+        // const AUDIO_PATH = 'test2.wav';
+        // const AUDIO_PATH = 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.webm';
+
+        async function fetchMonoFloat32Array(url) {
+            const response = await fetch(url);
+            return await fetchMonoFloat32ArrayFile(response);
+        }
+
+        async function fetchMonoFloat32ArrayFile(response) {
+            const arrayBuffer = await response.arrayBuffer();
+            const audioCtx = new AudioContext({ sampleRate: 16000 });
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            const mono = new Float32Array(audioBuffer.length);
+            for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+                const data = audioBuffer.getChannelData(c);
+                for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
+            }
+            return { sampleRate: audioBuffer.sampleRate, samples: mono };
+        }
+
+
+        const getProgressDlForPart = async (part, progressCallback) => {
+            const response = await fetch(part);
+            const total = parseInt(response.headers.get('content-length'), 10);
+            const res = new Response(new ReadableStream({
+                async start(controller) {
+                    const reader = response.body.getReader();
+                    for (;;) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        progressCallback(part, value.byteLength, total);
+                        controller.enqueue(value);
+                    }
+                    controller.close();
+                },
+            }));
+            return res.arrayBuffer();
+        };
+
+        let totalLoaded = 0, totalSize = 0, partSize = {};
+        const loadingText = document.querySelector("#div-loading > p");
+        const progressCallback = (part, loaded, total) => {
+            totalLoaded += loaded;
+            if (!partSize[part]) { totalSize += total; partSize[part] = true; }
+            loadingText.innerHTML = `Loading model ${part.split('/').pop().split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
+        };
+
+        async function transcribeAudio(audioFetcher) {
+            if (!net_encoder) {
+                await window.moduleReady;
+                const device = await getDevice();
+                if (!device) {
+                    wgpuError.style.display = "block";
+                    loadingContainer.style.display = "none";
+                    return;
+                }
+                net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/mel.safetensors`, progressCallback)));
+                net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/encoder.safetensors`, progressCallback)));
+                net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/decoder.safetensors`, progressCallback)));
+                loadingContainer.style.display = "none";
+            }
+
+            // const { samples } = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
+            const { samples } = await audioFetcher();
+            let log_specs = [];
+            for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
+                let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
+                if (chunk.length < SAMPLES_PER_SEGMENT) {
+                    const padded = new Float32Array(SAMPLES_PER_SEGMENT);
+                    padded.set(chunk);
+                    chunk = padded;
+                }
+                log_specs.push((await net_mel(chunk))[0]);
+            }
+
+            const mapping = await fetch('./vocab.json').then(res => res.json());
+
+            let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+            const updateLoop = (now) => {
+                if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
+                    currentTranscription.innerText = pendingText;
+                    lastDisplayed = pendingText;
+                    lastUpdateTime = now;
+                    transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+                }
+                if (!inferenceDone) requestAnimationFrame(updateLoop);
+            };
+            requestAnimationFrame(updateLoop);
+            currentTranscription.style.display = 'block';
+
+            let previous_context = [];
+            for (const log_spec of log_specs) {
+                const [audio_features] = await net_encoder(log_spec);
+                const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
+                const TOK_STARTOFPREV = 50360;
+                const TOK_TRANSCRIBE = 50358;
+                const TOK_NOSPEECH = 50361;
+                const MAX_TOKENS_TO_DECODE = 224;
+                let context = [];
+                if (previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
+                    context.push(TOK_STARTOFPREV);
+                    // NOTE(irwin): adding timestamp tokens to context seems to stabilize gen. Why?
+                    context.push(...(previous_context.filter((tok) => tok < TOK_EOS || (tok >= 50363 && tok <= 51863)).slice(-MAX_TOKENS_TO_DECODE+3+1)));
+                    context.push(TOK_TRANSCRIBE, TOK_BEGIN_TRANSCRIPTION);
+                } else {
+                    context = [TOK_TRANSCRIBE, TOK_BEGIN_TRANSCRIPTION];
+                }
+                console.log(context);
+
+                const offset = context.length;
+                if (offset >= MAX_TOKENS_TO_DECODE) {
+                    console.error("Context length exceeds 224");
+                    return;
+                }
+                const suppress = [ 1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50257, 50357, 50358, 50359, 50360, 50361 ];
+                // var v = new Int32Array(51864);
+                // v.fill(0);
+                // v[0] = TOK_NO_TIMESTAMPS;
+                for(let i = offset; i < (MAX_TOKENS_TO_DECODE*2); ++i) {
+                    let [nextToken] = await net_decoder(context, audio_features, [i]);
+                    nextToken = nextToken.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
+                    // for (const tok of nextToken) {
+                    //     // if (suppress.includes(tok)) {
+                    //     //     console.log(`${tok} wasn't filtered by suppress mask`);
+                    //     // }
+                    //     // if (!suppress.includes(tok) && tok != TOK_NO_TIMESTAMPS) {
+                    //     if (tok != TOK_NO_TIMESTAMPS) {
+                    //         nextToken = [tok];
+                    //         break;
+                    //     }
+                    // }
+                    context.push(nextToken[0]);
+                    pendingText = context.slice(offset).map(j => mapping[j]).join('');
+                    if (nextToken[0] == TOK_EOS) break;
+                }
+                previous_context = context.slice();
+
+                const newChunk = document.createElement('div');
+                newChunk.className = 'transcription-chunk';
+                newChunk.innerText = pendingText;
+                transcriptionLog.appendChild(newChunk);
+                pendingText = '';
+                currentTranscription.innerText = '';
+            }
+            inferenceDone = true;
+            currentTranscription.style.display = 'none';
+        }
+
+        const getDevice = async () => {
+            if (!navigator.gpu) return false;
+            const adapter = await navigator.gpu.requestAdapter();
+            return adapter?.requestDevice({ requiredFeatures: ["shader-f16"], powerPreference: "high-performance" });
+        };
+
+        // async function dropHandler(ev) {
+        //     console.log("File(s) dropped");
+
+        //     // Prevent default behavior (Prevent file from being opened)
+        //     ev.preventDefault();
+
+        //     if (ev.dataTransfer.items) {
+        //         // Use DataTransferItemList interface to access the file(s)
+        //         [...ev.dataTransfer.items].forEach(async (item, i) => {
+        //         // If dropped items aren't files, reject them
+        //         if (item.kind === "file") {
+        //             const file = item.getAsFile();
+        //             console.log(`… file[${i}].name = ${file.name}`);
+        //             // if (file.name.endsWith('.glb')) {
+        //                 // modelChunks = await loadGLBFile(file);
+        //                 await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
+        //             // }
+        //         }
+        //         });
+        //     } else {
+        //         // Use DataTransfer interface to access the file(s)
+        //         [...ev.dataTransfer.files].forEach((file, i) => {
+        //         console.log(`… file[${i}].name = ${file.name}`);
+        //         });
+        //     }
+        // }
+
+        // function dragOverHandler(ev) {
+        //     console.log("File(s) in drop zone");
+
+        //     // Prevent default behavior (Prevent file from being opened)
+        //     ev.preventDefault();
+        // }
+
+        /*
+        ondrop="dropHandler(event);" ondragover="dragOverHandler(event);"
+        */
+        const overlay = document.getElementById('overlay');
+        // overlay.ondrop = dropHandler;
+        // overlay.ondragover = dragOverHandler;
+        // transcriptionLog.ondragstart = function (event) { event.target.style.border = "3px dotted red"; }
+        // transcriptionLog.ondrag = function (event) { event.target.style.color = "black"; }
+
+        let counter = 0;
+
+        document.addEventListener('dragenter', e => {
+            e.preventDefault();
+            counter++;
+            overlay.style.display = 'flex';
+        });
+
+        document.addEventListener('dragleave', e => {
+            e.preventDefault();
+            counter--;
+            if (counter === 0) overlay.style.display = 'none';
+        });
+
+        document.addEventListener('dragover', e => {
+            console.log("File(s) in drop zone");
+
+            // Prevent default behavior (Prevent file from being opened)
+            e.preventDefault(); // Needed to allow drop
+        });
+
+        document.addEventListener('drop', e => {
+            e.preventDefault();
+            counter = 0;
+            overlay.style.display = 'none';
+
+            console.log("File(s) dropped");
+
+            // Prevent default behavior (Prevent file from being opened)
+            e.preventDefault();
+
+            if (e.dataTransfer.items) {
+                // Use DataTransferItemList interface to access the file(s)
+                [...e.dataTransfer.items].forEach(async (item, i) => {
+                    // If dropped items aren't files, reject them
+                    if (item.kind === "file") {
+                        const file = item.getAsFile();
+                        console.log(`… file[${i}].name = ${file.name}`);
+                        // if (file.name.endsWith('.glb')) {
+                            // modelChunks = await loadGLBFile(file);
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
+                        // }
+                    }
+                });
+            } else {
+                // Use DataTransfer interface to access the file(s)
+                [...e.dataTransfer.files].forEach((file, i) => {
+                    console.log(`… file[${i}].name = ${file.name}`);
+                });
+            }
+        });
+
+        transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`));
+    </script>
+</body>
+</html>
