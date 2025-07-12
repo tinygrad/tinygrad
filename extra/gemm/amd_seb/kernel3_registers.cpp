@@ -79,61 +79,42 @@ extern "C" __attribute__((global)) void kernel3_registers(float *a, float *b, fl
   float c_regs[TM * nbIterWaveM * TN * nbIterWaveN] = {0.0f};
 
   // Iteration over BK blocks.
-  for (int kId = 0; kId < N; kId += BK)
-  {
+  for (int kId = 0; kId < N; kId += BK) {
     // We populate the Shared Memory with Ks row and columns
-    for (int i = 0; i < nbReadsB; i++)
-    {
+    for (int i = 0; i < nbReadsB; i++) {
       int index_x = BN * blockIdx.x + rBIdx;
       int index_y = rBIdy + i * strideReadB + kId;
       Bs[index_y % BK][index_x % BN] = b[N * index_y + index_x];
     }
 
-    for (int i = 0; i < nbReadsA; i++)
-    {
+    for (int i = 0; i < nbReadsA; i++) {
       int index_x = rAIdx + kId;
       int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
       As[(index_x % BK)][(index_y % BM)] = a[N * index_y + index_x];
     }
 
     __syncthreads();
-    for (int k = 0; k < BK; k += 1)
-    {
+    for (int k = 0; k < BK; k++) {
       // we cache A & B for the entire Wave tile
-      for (int iterWave = 0; iterWave < nbIterWaveN; iterWave++)
-      {
-        for (int i = 0; i < TN; i++)
-        {
-          int index = waveIdx * WN +   // waveId
-                iterWave * SUBWN + // wave subtile
-                TN * idxInWave +
-                +i;
+      for (int iterWave = 0; iterWave < nbIterWaveN; iterWave++) {
+        for (int i = 0; i < TN; i++) {
+          int index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i;
           B_row[iterWave * TN + i] = Bs[k][index];
         }
       }
 
-      for (int iterWave = 0; iterWave < nbIterWaveM; iterWave++)
-      {
-        for (int i = 0; i < TM; i++)
-        {
-          int index = waveIdy * WM +   // waveId
-                iterWave * SUBWM + // wave subtile
-                TM * idyInWave +
-                i;
-
+      for (int iterWave = 0; iterWave < nbIterWaveM; iterWave++) {
+        for (int i = 0; i < TM; i++) {
+          int index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i;
           A_col[iterWave * TM + i] = As[k][index];
         }
       }
 
       // we accumulate to C_regs
-      for (int iterWaveM = 0; iterWaveM < nbIterWaveM; iterWaveM++)
-      {
-        for (int iterWaveN = 0; iterWaveN < nbIterWaveN; iterWaveN++)
-        {
-          for (int yt = 0; yt < TM; yt++)
-          {
-            for (int xt = 0; xt < TN; xt++)
-            {
+      for (int iterWaveM = 0; iterWaveM < nbIterWaveM; iterWaveM++) {
+        for (int iterWaveN = 0; iterWaveN < nbIterWaveN; iterWaveN++) {
+          for (int yt = 0; yt < TM; yt++) {
+            for (int xt = 0; xt < TN; xt++) {
               const int x = iterWaveN * TN + xt;
               const int y = iterWaveM * TM + yt;
               c_regs[y * TN * nbIterWaveN + x] += A_col[y] * B_row[x];
@@ -143,19 +124,14 @@ extern "C" __attribute__((global)) void kernel3_registers(float *a, float *b, fl
       }
     }
     __syncthreads();
-
   }
 
-  for (int iterWaveM = 0; iterWaveM < nbIterWaveM; iterWaveM++)
-  {
-    for (int iterWaveN = 0; iterWaveN < nbIterWaveN; iterWaveN++)
-    {
+  for (int iterWaveM = 0; iterWaveM < nbIterWaveM; iterWaveM++) {
+    for (int iterWaveN = 0; iterWaveN < nbIterWaveN; iterWaveN++) {
       int xOut = blockIdx.x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave;
       int yOut = blockIdx.y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave;
-      for (int yt = 0; yt < TM; yt++)
-      {
-        for (int xt = 0; xt < TN; xt++)
-        {
+      for (int yt = 0; yt < TM; yt++) {
+        for (int xt = 0; xt < TN; xt++) {
           int indexC = N * (yOut + yt) + xOut + xt;
           c[indexC] = beta * c[indexC] + alpha * c_regs[TN * nbIterWaveN * (iterWaveM * TM + yt) + (iterWaveN * TN + xt)];
         }
