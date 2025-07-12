@@ -762,7 +762,7 @@ class Tensor(MathTrait):
     print(Tensor.randn(2, 3).numpy())
     ```
     """
-    return Tensor.empty(*shape).randn_like(dtype=dtype, requires_grad=requires_grad)
+    return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype, requires_grad=requires_grad)
 
   @staticmethod
   def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
