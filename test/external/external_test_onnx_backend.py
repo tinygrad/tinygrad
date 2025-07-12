@@ -6,11 +6,10 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
+from tinygrad.frontend.onnx import OnnxRunner
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
-
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -31,7 +30,7 @@ class TinygradBackend(Backend):
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
     model = Tensor(model.SerializeToString(), device="PYTHON")
-    run_onnx = OnnxRunner(onnx_load(model))
+    run_onnx = OnnxRunner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
