@@ -4,7 +4,8 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv
+from tinygrad.shape.shapetracker import ShapeTracker, apply_mop
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect
@@ -59,7 +60,8 @@ view_ops = {
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
-  "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
+  "aten.as_strided": Tensor.as_strided,
+  "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)]
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
@@ -165,27 +167,9 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
 def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
+  mops = st.to_movement_ops()
+  if mops[0] == (Ops.RESHAPE, shape): mops = mops[1:]
   return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
-@torch.library.impl("aten::as_strided", "privateuseone")
-def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  storage_offset = storage_offset or tensor.storage_offset()
-  @wrap_view_op
-  def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-    # multiple as_strided do not compound
-    base = canonical_base(tensor)
-    # TODO: this is heavyweight
-    st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-    ret = base
-    if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-    if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-    for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-    return ret
-  return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -216,15 +200,15 @@ def max_unpool2d(self:torch.Tensor, indices:torch.Tensor, output_size):
   return wrap(unwrap(self).max_unpool2d(unwrap(indices), output_size=output_size))
 
 @torch.library.impl("aten::arange", "privateuseone")
-def arange(end, dtype=None, device=None, pin_memory=None):
+def arange(end, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(0, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::arange.start", "privateuseone")
-def arange_start(start, end, dtype=None, device=None, pin_memory=None):
+def arange_start(start, end, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(start, end, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::arange.start_step", "privateuseone")
-def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None):
+def arange_start_step(start, end, step, dtype=None, device=None, pin_memory=None, layout=None):
   return wrap(Tensor.arange(start, end, step, dtype=_from_torch_dtype(dtype or torch.get_default_dtype())))
 
 @torch.library.impl("aten::convolution_overrideable", "privateuseone")
@@ -307,6 +291,18 @@ def scatter_add(self, dim, index, src, out):
   self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
   if self.shape == (): return wrap(out.assign(src))
   return wrap(out.assign(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')))
+
+@torch.library.impl("aten::index_add.out", "privateuseone")
+@inplace_fn("out")
+def index_add(self, dim, index, src, out, alpha=1):
+  self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
+  if alpha != 1: src = src * alpha
+  if self.shape == (): return wrap(out.assign(src))
+  # reshape and expand 1D index to full src shape
+  prefix = (1,)*dim
+  suffix = (1,)*(src.ndim - dim - 1)
+  idx = index.reshape(*prefix, -1, *suffix).expand(src.shape)
+  return wrap(out.assign(Tensor.scatter_reduce(self, dim, idx, src, reduce='sum')))
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
