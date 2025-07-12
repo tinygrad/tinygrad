@@ -330,8 +330,8 @@ class Kernel:
       check(padded, "nothing was padded")
 
     if append_opt: self.applied_opts.append(opt)
-    if self.simplify_ones() and self.tensor_core_opts:
-      self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+    #if self.simplify_ones() and self.tensor_core_opts:
+    #  self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
   def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
     for opt in opts: self.apply_opt(opt)
@@ -441,6 +441,10 @@ class Kernel:
     return ret
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
+  def finalize(self):
+    self.finalized = True
+    self.simplify_ones()
+
   def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
@@ -499,7 +503,7 @@ class Kernel:
           return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret
-    self.finalized = True
+    self.finalize()
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
