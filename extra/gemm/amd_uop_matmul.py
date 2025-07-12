@@ -104,6 +104,21 @@ def hand_spec():
   lw0, lr0 = ls0, ls0
   lw1, lr1 = ls1, ls1
 
+  # first round of permutes
+
+  permaxis = (0, 1, 19, 18, 17, 12, 11, 10, 5, 4, 3, 2, 6, 7, 8, 9, 16, 13, 14, 15)
+  s0 = s0.permute(permaxis)
+  lw0 = lw0.permute(permaxis)
+
+  permaxis = (0, 1, 15, 14, 9, 8, 7, 6, 13, 19, 18, 17, 5, 4, 3, 2, 16, 12, 11, 10)
+  s1 = s1.permute(permaxis)
+  lw1 = lw1.permute(permaxis)
+
+  # second round of permutes
+  #permaxis = (0, 1, 12, 11, 5, 4, 3, 2, 10, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18, 19)
+  #lw0 = lw0.permute(permaxis)
+  #lr0 = lr0.permute(permaxis)
+
   from tinygrad.opt.kernel import axis_colors, colored
   print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(s0.shape, s0.views[0].strides, axis_types)]))
   print('_'.join([colored(f"{s}({st})", axis_colors[x]) for s,st,x in zip(s1.shape, s1.views[0].strides, axis_types)]))
