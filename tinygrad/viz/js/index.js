@@ -129,7 +129,7 @@ async function renderProfiler() {
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
-  const { top:canvasTop, height:canvasHeight } = rect(canvas);
+  const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
@@ -254,7 +254,6 @@ async function renderProfiler() {
       ctx.lineTo(x, tickSize);
       ctx.stroke();
       // tick label
-      ctx.fontSize = "10px";
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
@@ -314,18 +313,17 @@ async function renderProfiler() {
     if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref.ctx, foundRect.ref.step);
   });
 
-  const tooltip = document.body.appendChild(document.createElement("div"));
-  tooltip.id = "tooltip";
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.tooltipText != null) {
+      const tooltip = document.getElementById("tooltip");
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
       tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
-  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
+  canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
 // ** zoom and recentering
