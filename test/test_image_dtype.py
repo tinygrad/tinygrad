@@ -141,6 +141,13 @@ class TestImageDType(unittest.TestCase):
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 10)
 
+  def test_gemm_fp16_image_path_dtype(self):
+    with Context(IMAGE=2):
+      x = Tensor.rand(64, 64)
+      y = Tensor.rand(64, 64)
+      z = x.half().matmul(y.half()) # don't realize
+      assert z.dtype == dtypes.half, f"Expected half, got {z.dtype}"
+
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
