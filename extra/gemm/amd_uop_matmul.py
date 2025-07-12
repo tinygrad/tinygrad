@@ -72,10 +72,9 @@ def hand_spec():
   ls0 = ShapeTracker.from_shape((BM, BK))
   ls1 = ShapeTracker.from_shape((BN, BK))
 
-  buf_at = [AxisType.GLOBAL, AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.GLOBAL, AxisType.GLOBAL, AxisType.GLOBAL]
-  buf_bt = [AxisType.GLOBAL, AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.GLOBAL, AxisType.GLOBAL, AxisType.GLOBAL]
-  #axis_types = buf_at + buf_bt + [AxisType.REDUCE, AxisType.UNROLL, AxisType.UNROLL, AxisType.UNROLL]
-  axis_types = buf_at + buf_bt + [AxisType.REDUCE, AxisType.REDUCE, AxisType.REDUCE, AxisType.REDUCE]
+  buf_at = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.UPCAST, AxisType.UPCAST]
+  buf_bt = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.LOCAL, AxisType.UPCAST, AxisType.UPCAST]
+  axis_types = buf_at + buf_bt + [AxisType.REDUCE, AxisType.UNROLL, AxisType.UNROLL, AxisType.UNROLL]
 
   # 128 x 128 x 8
   full_shape = (N//BM, 2, 2, 2, 2, 2, 2, 2, N//BN, 2, 2, 2, 2, 2, 2, 2, N//BK, 2, 2, 2)
@@ -119,8 +118,8 @@ def hand_spec():
   # loads and stores
   bs0 = bA.view(s0).load()
   bs1 = bB.view(s1).load()
-  #bs0 = lAs.view(lr0).load(lAs.view(lw0).store(bs0))
-  #bs1 = lBs.view(lr1).load(lBs.view(lw1).store(bs1))
+  bs0 = lAs.view(lr0).load(lAs.view(lw0).store(bs0))
+  bs1 = lBs.view(lr1).load(lBs.view(lw1).store(bs1))
 
   mat = (bs0 * bs1).r(Ops.ADD, tuple([i for i,a in enumerate(axis_types) if a in (AxisType.REDUCE, AxisType.UNROLL)]), permute=False)
   st = bC.view(s2).store(mat)
@@ -141,7 +140,7 @@ if __name__ == "__main__":
   hc = Tensor.zeros(N, N).contiguous().realize()
 
   GlobalCounters.reset()
-  with Context(DEBUG=2):
+  with Context(DEBUG=2, BEAM=4):
     for _ in range(run_count): tc = (a@b).realize()
 
   GlobalCounters.reset()
