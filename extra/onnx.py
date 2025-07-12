@@ -117,7 +117,7 @@ class OnnxParser:
     return start_pos + str_len
 
   def parse_ModelProto(self) -> dict:
-    """ Entry point for parsing the ONNX model. """
+    """Entry point for parsing the ONNX model."""
     obj = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
       match fid:
@@ -152,6 +152,10 @@ class OnnxParser:
         case 6: obj["doc_string"] = self.reader.read_string()
         case 7: obj["domain"] = self.reader.read_string()
         case _: self.reader.skip_field(wire_type)
+
+    # parse node
+    attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
+    obj["parsed_node"] = OnnxNode(obj["op_type"], tuple(obj["input"]), tuple(obj["output"]), attributes)
     return obj
 
   def _parse_TensorProto(self) -> dict:
@@ -199,13 +203,13 @@ class OnnxParser:
     assert len(present_fields) == 1, f"only 1 data field is allowed from {obj=}"
     data = obj[present_fields[0]]
     if not isinstance(data, Tensor):
-      obj["tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
+      obj["parsed_tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
     data = data.bitcast(true_dtype).realize().reshape(shape)
     data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
     if shape == () and data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-    obj["tensor"] = Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
+    obj["parsed_tensor"] = Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
     return obj
 
   def _parse_AttributeProto(self) -> dict:
@@ -216,7 +220,7 @@ class OnnxParser:
         case 2: obj["f"] = self.reader.read_float()
         case 3: obj["i"] = self.reader.read_int64()
         case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
-        case 5: obj["t"] = self._parse_TensorProto()['tensor']
+        case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
         case 7: obj["floats"].append(self.reader.read_float())
         case 8: obj["ints"].append(self.reader.read_int64())
         case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
@@ -239,8 +243,8 @@ class OnnxParser:
     if is_sequence := "sequence_type" in type_obj: type_obj = type_obj["sequence_type"]["elem_type"]
     assert "tensor_type" in type_obj, type_obj
     shape_dims = type_obj['tensor_type'].get('shape', {}).get('dim', [])
-    obj['spec'] = OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
-                            OnnxDataType(type_obj['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
+    obj['parsed_type'] = OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
+                                   OnnxDataType(type_obj['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
     return obj
 
   def _parse_TypeProto(self) -> dict:
@@ -323,7 +327,6 @@ class OnnxValue:
 
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
-  num: int
   op: str
   inputs: tuple[str, ...]
   outputs: tuple[str, ...]
@@ -370,14 +373,10 @@ class OnnxRunner:
     graph = model["graph"]
     self.opset_version = model["opset_import"][0]["version"]
     self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
-    self.graph_values = {"": None, **{tensor_dict["name"]: tensor_dict["tensor"] for tensor_dict in graph["initializer"]}}
-    self.graph_inputs = {input_dict["name"]: input_dict["spec"] for input_dict in graph["input"] if input_dict["name"] not in self.graph_values}
+    self.graph_values = {"": None, **{tensor_dict["name"]: tensor_dict["parsed_tensor"] for tensor_dict in graph["initializer"]}}
+    self.graph_inputs = {input_dict["name"]: input_dict["parsed_type"] for input_dict in graph["input"] if input_dict["name"] not in self.graph_values}
     self.graph_outputs = tuple(x["name"] for x in graph["output"])
-    self.graph_nodes = []
-    for num, node_dict in enumerate(graph["node"]):
-      attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in node_dict["attribute"]}
-      self.graph_nodes.append(OnnxNode(num, node_dict["op_type"], tuple(node_dict["input"]), tuple(node_dict["output"]), attributes))
-    self.graph_nodes = tuple(self.graph_nodes)
+    self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
 
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
@@ -418,7 +417,7 @@ class OnnxRunner:
 
   def to(self, device:str|None):
     self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
-    self.graph_nodes = tuple(OnnxNode(n.num, n.op, tuple(n.inputs), tuple(n.outputs),
+    self.graph_nodes = tuple(OnnxNode(n.op, tuple(n.inputs), tuple(n.outputs),
                                       {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
     return self
 
@@ -427,7 +426,7 @@ class OnnxRunner:
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
-    for node in self.graph_nodes:
+    for num, node in enumerate(self.graph_nodes):
       inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
@@ -435,7 +434,7 @@ class OnnxRunner:
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
 
-      if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
+      if debug >= 1: print(f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
       ret = self._dispatch_op(node.op, inps, opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
@@ -443,7 +442,7 @@ class OnnxRunner:
 
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
-      if node.num == limit:
+      if num == limit:
         Tensor.training = self.old_training
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training = self.old_training
