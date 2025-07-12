@@ -93,9 +93,11 @@ class PBBufferedReader(BufferedReader):
       case WireType.LENGTH_DELIMITED: self.seek(self.decode_varint(), os.SEEK_CUR)
       case _: raise ValueError(f"Unknown wire type: {wire_type}")
 
-# # NOTE: this is the onnx protobuf schema
-# # Reference: https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
-class OnnxParser:
+class OnnxPBParser:
+  """
+  ONNX protobuf parser.
+  Reference: https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
+  """
   def __init__(self, inp: Tensor|str|pathlib.Path, load_external_data: bool=True):
     self.file_path: pathlib.Path|None = None
     self.load_external_data = load_external_data
@@ -369,13 +371,13 @@ class OnnxRunner:
     model_path: The ONNX model, provided as a file path (a string or Path object) or a Tensor.
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
-    model = OnnxParser(model_path, load_external_data=True).parse_ModelProto()
+    model = OnnxPBParser(model_path, load_external_data=True).parse_ModelProto()
     graph = model["graph"]
     self.opset_version = model["opset_import"][0]["version"]
     self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
-    self.graph_values = {"": None, **{tensor_dict["name"]: tensor_dict["parsed_tensor"] for tensor_dict in graph["initializer"]}}
-    self.graph_inputs = {input_dict["name"]: input_dict["parsed_type"] for input_dict in graph["input"] if input_dict["name"] not in self.graph_values}
-    self.graph_outputs = tuple(x["name"] for x in graph["output"])
+    self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
+    self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
+    self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
 
     self.old_training = Tensor.training
