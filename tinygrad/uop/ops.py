@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -526,17 +527,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
-  global_dims: int = 0          # number of global dimensions (this is remapping RANGE to SPECIAL)
-  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
+  axis_types: tuple[AxisType, ...] = tuple()
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+  @property
+  def global_dims(self): return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
+  @property
+  def local_dims(self): return sum([1 for x in self.axis_types if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)])
 
 # ******** ops in python ********
 
