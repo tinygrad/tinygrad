@@ -16,8 +16,12 @@ if __name__ == "__main__":
   dev = Device["CPU"]
   asm = X86Renderer() if platform.machine() in ("x86_64", "amd64") else Arm64Renderer()
 
-  # kernel 209, 997, 1693, 2263 are invalid, all dividing by 0
-  ast_strs = ast_strs[:209] + ast_strs[210:997] + ast_strs[998:1693] + ast_strs[1694:2263] + ast_strs[2264:]
+  # these kernels are all dividing by 0
+  ast_strs = ast_strs[:460] + ast_strs[461:]
+  ast_strs = ast_strs[:1863] + ast_strs[1864:]
+  ast_strs = ast_strs[:3362] + ast_strs[3363:]
+  ast_strs = ast_strs[:3362] + ast_strs[3363:]
+  ast_strs = ast_strs[:3720] + ast_strs[3721:]
 
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
