@@ -80,6 +80,7 @@ def hand_spec():
   axis_types = [AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
                 AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
                 AxisType.REDUCE, AxisType.UNROLL]
+  #axis_types = [AxisType.LOOP]*8 + [AxisType.REDUCE]*2
   s0 = s0.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
   s1 = s1.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
   s2 = s2.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, 1))
@@ -90,7 +91,7 @@ def hand_spec():
   assert ls1.real_size() == LDS_B_SZ
 
   permaxis = []
-  for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.REDUCE, AxisType.UNROLL, AxisType.UPCAST]:
+  for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.GROUP_REDUCE, AxisType.REDUCE, AxisType.UNROLL, AxisType.UPCAST]:
     permaxis += [i for i,a in enumerate(axis_types) if a == axis_order]
   axis_types = [axis_types[x] for x in permaxis]
   s0, s1, s2, ls0, ls1 = [x.permute(tuple(permaxis)) for x in [s0, s1, s2, ls0, ls1]]
