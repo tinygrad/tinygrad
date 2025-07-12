@@ -105,33 +105,6 @@ class OnnxParser:
     else: self.tensor = inp
     self.reader = PBBufferedReader(self.tensor)
 
-  def parse(self):
-    """Parse the ONNX model and return structured data."""
-    model = self.parse_ModelProto()
-
-    graph = model["graph"]
-    is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
-
-    # Parse initializers as Tensors
-    graph_values = {"": None}
-    for tensor_dict in graph["initializer"]:
-      graph_values[tensor_dict["name"]] = tensor_dict["tensor"]
-
-    # Parse inputs with type information
-    graph_inputs = {input_dict["name"]: input_dict["spec"] for input_dict in graph["input"] if input_dict["name"] not in graph_values}
-
-    # Parse nodes with attributes
-    graph_nodes = []
-    for num, node_dict in enumerate(graph["node"]):
-      attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in node_dict["attribute"]}
-      graph_nodes.append(OnnxNode(num, node_dict["op_type"], tuple(node_dict["input"]), tuple(node_dict["output"]), attributes))
-
-    return {
-      "is_training": is_training, "graph_values": graph_values, "graph_inputs": graph_inputs,
-      "graph_outputs": tuple(x["name"] for x in graph["output"]), "graph_nodes": tuple(graph_nodes),
-      "opset_version": model["opset_import"][0]["version"]
-    }
-
   # ***** protobuf parsing *****
   def _parse_message(self, end_pos: int):
     while self.reader.tell() < end_pos:
@@ -144,29 +117,30 @@ class OnnxParser:
     return start_pos + str_len
 
   def parse_ModelProto(self) -> dict:
+    """ Entry point for parsing the ONNX model. """
     obj = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
         case 5: obj["model_version"] = self.reader.read_int64()
-        case 7: obj["graph"] = self.parse_GraphProto()
-        case 8: obj["opset_import"].append(self.parse_OperatorSetIdProto())
+        case 7: obj["graph"] = self._parse_GraphProto()
+        case 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_GraphProto(self) -> dict:
+  def _parse_GraphProto(self) -> dict:
     obj = {"node": [], "initializer": [], "input": [], "output": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["node"].append(self.parse_NodeProto())
+        case 1: obj["node"].append(self._parse_NodeProto())
         case 2: obj["name"] = self.reader.read_string()
-        case 5: obj["initializer"].append(self.parse_TensorProto())
-        case 11: obj["input"].append(self.parse_ValueInfoProto())
-        case 12: obj["output"].append(self.parse_ValueInfoProto())
+        case 5: obj["initializer"].append(self._parse_TensorProto())
+        case 11: obj["input"].append(self._parse_ValueInfoProto())
+        case 12: obj["output"].append(self._parse_ValueInfoProto())
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_NodeProto(self) -> dict:
+  def _parse_NodeProto(self) -> dict:
     obj = {"input": [], "output": [], "attribute": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -174,13 +148,13 @@ class OnnxParser:
         case 2: obj["output"].append(self.reader.read_string())
         case 3: obj["name"] = self.reader.read_string()
         case 4: obj["op_type"] = self.reader.read_string()
-        case 5: obj["attribute"].append(self.parse_AttributeProto())
+        case 5: obj["attribute"].append(self._parse_AttributeProto())
         case 6: obj["doc_string"] = self.reader.read_string()
         case 7: obj["domain"] = self.reader.read_string()
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorProto(self) -> dict:
+  def _parse_TensorProto(self) -> dict:
     obj = {"dims": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -193,7 +167,7 @@ class OnnxParser:
         case 9: obj["raw_data"] = self.reader.read_bytes()
         case 10: obj["double_data"] = self.reader.read_packed_floats()
         case 11: obj["uint64_data"] = self.reader.read_packed_int64s()
-        case 13: obj.setdefault("external_data", []).append(self.parse_StringStringEntryProto())
+        case 13: obj.setdefault("external_data", []).append(self._parse_StringStringEntryProto())
         case 14: obj["data_location"] = self.reader.read_int64()
         case _: self.reader.skip_field(wire_type)
 
@@ -234,7 +208,7 @@ class OnnxParser:
     obj["tensor"] = Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
     return obj
 
-  def parse_AttributeProto(self) -> dict:
+  def _parse_AttributeProto(self) -> dict:
     obj = {"floats": [], "ints": [], "strings": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -242,7 +216,7 @@ class OnnxParser:
         case 2: obj["f"] = self.reader.read_float()
         case 3: obj["i"] = self.reader.read_int64()
         case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
-        case 5: obj["t"] = self.parse_TensorProto()['tensor']
+        case 5: obj["t"] = self._parse_TensorProto()['tensor']
         case 7: obj["floats"].append(self.reader.read_float())
         case 8: obj["ints"].append(self.reader.read_int64())
         case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
@@ -251,12 +225,12 @@ class OnnxParser:
     obj["floats"], obj["ints"], obj["strings"] = tuple(obj["floats"]), tuple(obj["ints"]), tuple(obj["strings"])
     return obj
 
-  def parse_ValueInfoProto(self) -> dict:
+  def _parse_ValueInfoProto(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["name"] = self.reader.read_string()
-        case 2: obj["type"] = self.parse_TypeProto()
+        case 2: obj["type"] = self._parse_TypeProto()
         case _: self.reader.skip_field(wire_type)
 
     # parse type
@@ -269,50 +243,50 @@ class OnnxParser:
                             OnnxDataType(type_obj['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
     return obj
 
-  def parse_TypeProto(self) -> dict:
+  def _parse_TypeProto(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["tensor_type"] = self.parse_TypeProtoTensor()
-        case 4: obj["sequence_type"] = self.parse_TypeProtoSequence()
-        case 9: obj["optional_type"] = self.parse_TypeProtoOptional()
+        case 1: obj["tensor_type"] = self._parse_TypeProtoTensor()
+        case 4: obj["sequence_type"] = self._parse_TypeProtoSequence()
+        case 9: obj["optional_type"] = self._parse_TypeProtoOptional()
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoTensor(self) -> dict:
+  def _parse_TypeProtoTensor(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["elem_type"] = self.reader.read_int64()
-        case 2: obj["shape"] = self.parse_TensorShapeProto()
+        case 2: obj["shape"] = self._parse_TensorShapeProto()
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoSequence(self) -> dict:
+  def _parse_TypeProtoSequence(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["elem_type"] = self.parse_TypeProto()
+        case 1: obj["elem_type"] = self._parse_TypeProto()
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TypeProtoOptional(self) -> dict:
+  def _parse_TypeProtoOptional(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["elem_type"] = self.parse_TypeProto()
+        case 1: obj["elem_type"] = self._parse_TypeProto()
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorShapeProto(self) -> dict:
+  def _parse_TensorShapeProto(self) -> dict:
     obj = {"dim": []}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
-        case 1: obj["dim"].append(self.parse_TensorShapeProtoDimension())
+        case 1: obj["dim"].append(self._parse_TensorShapeProtoDimension())
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_TensorShapeProtoDimension(self) -> dict:
+  def _parse_TensorShapeProtoDimension(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -321,7 +295,7 @@ class OnnxParser:
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_StringStringEntryProto(self) -> dict:
+  def _parse_StringStringEntryProto(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -330,7 +304,7 @@ class OnnxParser:
         case _: self.reader.skip_field(wire_type)
     return obj
 
-  def parse_OperatorSetIdProto(self) -> dict:
+  def _parse_OperatorSetIdProto(self) -> dict:
     obj = {}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
@@ -392,14 +366,19 @@ class OnnxRunner:
     model_path: The ONNX model, provided as a file path (a string or Path object) or a Tensor.
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
-    parser = OnnxParser(model_path, load_external_data=True)
-    parsed = parser.parse()
-    self.is_training = parsed["is_training"]
-    self.graph_values = parsed["graph_values"]
-    self.graph_inputs = parsed["graph_inputs"]
-    self.graph_outputs = parsed["graph_outputs"]
-    self.graph_nodes = parsed["graph_nodes"]
-    self.opset_version = parsed["opset_version"]
+    model = OnnxParser(model_path, load_external_data=True).parse_ModelProto()
+    graph = model["graph"]
+    self.opset_version = model["opset_import"][0]["version"]
+    self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
+    self.graph_values = {"": None, **{tensor_dict["name"]: tensor_dict["tensor"] for tensor_dict in graph["initializer"]}}
+    self.graph_inputs = {input_dict["name"]: input_dict["spec"] for input_dict in graph["input"] if input_dict["name"] not in self.graph_values}
+    self.graph_outputs = tuple(x["name"] for x in graph["output"])
+    self.graph_nodes = []
+    for num, node_dict in enumerate(graph["node"]):
+      attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in node_dict["attribute"]}
+      self.graph_nodes.append(OnnxNode(num, node_dict["op_type"], tuple(node_dict["input"]), tuple(node_dict["output"]), attributes))
+    self.graph_nodes = tuple(self.graph_nodes)
+
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
 
