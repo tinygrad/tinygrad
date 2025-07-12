@@ -1,6 +1,5 @@
 	.text
 	.amdgcn_target "amdgcn-amd-amdhsa--gfx1100"
-	;.amdhsa_code_object_version 5
 	.protected	kernel                  ; -- Begin function kernel
 	.globl	kernel
 	.p2align	8
@@ -9,7 +8,7 @@ kernel:                                 ; @kernel
 ; %bb.0:                                ; %.preheader193
 
 	;; Init code for matrix A and B buffer Loads  - START
-	s_load_b128 s[20:23], s[0:1], 0x8 ; Matrix A and B
+	s_load_b128 s[20:23], s[0:1], 0x0 ; Matrix A and B
 	s_waitcnt lgkmcnt(0)
 
 	; Matrix B offsets:
@@ -76,14 +75,12 @@ kernel:                                 ; @kernel
 
 
 	s_clause 0x1
-	;s_load_b128 s[4:7], s[0:1], 0x18 ; N, alpha, beta, ???
-	s_load_b128 s[8:11], s[0:1], 0x8 ; Matrix A and B
-
-	s_mov_b32 s4, 4096 ; hardcode 4096
-	s_mov_b32 s5, 0x3f800000 ; alpha
-	s_mov_b32 s6, 0    ; beta
-	s_mov_b32 s7, 0
-
+	; s_load_b128 s[4:7], s[0:1], 0x18
+	; N=4096, alpha=1.0, beta=0.0
+	s_mov_b32 s4, 4096
+	s_mov_b32 s5, 0x3F800000
+	s_mov_b32 s6, 0
+	s_load_b128 s[8:11], s[0:1], 0x0
 	s_lshl_b32 s2, s14, 7
 	v_lshrrev_b32_e32 v4, 3, v0
 	v_or_b32_e32 v1, s2, v0
@@ -93,7 +90,7 @@ kernel:                                 ; @kernel
 	v_or_b32_e32 v22, s3, v4
 	v_ashrrev_i32_e32 v2, 31, v1
 	s_lshr_b32 s12, s12, 25
-	s_load_b64 s[0:1], s[0:1], 0  ; Matrix C
+	s_load_b64 s[0:1], s[0:1], 0x10
 	v_lshlrev_b32_e32 v135, 2, v118
 	s_delay_alu instid0(VALU_DEP_2) | instskip(SKIP_3) | instid1(VALU_DEP_3)
 	v_lshlrev_b64 v[5:6], 2, v[1:2]
@@ -463,7 +460,7 @@ kernel:                                 ; @kernel
 
 	v_mov_b32_e32 v5, 0
 	v_mov_b32_e32 v3, 0
-	s_add_i32 s7, s4, -1
+	s_add_i32 s7, s4, -8
 	s_add_u32 s8, s8, 32
 	s_addc_u32 s9, s9, 0
 	s_mov_b32 s12, 0
@@ -2398,18 +2395,9 @@ amdhsa.kernels:
         .offset:         16
         .size:           8
         .value_kind:     global_buffer
-      - .offset:         24
-        .size:           4
-        .value_kind:     by_value
-      - .offset:         28
-        .size:           4
-        .value_kind:     by_value
-      - .offset:         32
-        .size:           4
-        .value_kind:     by_value
     .group_segment_fixed_size: 8320
     .kernarg_segment_align: 8
-    .kernarg_segment_size: 36
+    .kernarg_segment_size: 24
     .language:       OpenCL C
     .language_version:
       - 2
