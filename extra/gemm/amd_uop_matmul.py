@@ -80,10 +80,20 @@ def hand_spec():
   s1 = s1.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, N//BK, BK))
   s2 = s2.reshape((N//BM, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, N//BN, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, 1))
 
-  ls0 = ls0.reshape((1, nbIterWaveM, (BM//nbIterWaveM)//TM, TM, 1, 1, 1, 1, 1, BK)).expand(s0.shape)
-  ls1 = ls1.reshape((1, 1, 1, 1, 1, nbIterWaveN, (BN//nbIterWaveN)//TN, TN, 1, BK)).expand(s1.shape)
+  ls0 = ls0.reshape((1, nbIterWaveM, (BM//nbIterWaveM)//TM, TM,
+                     1, 1, 1, 1,
+                     1, BK)).expand(s0.shape)
+  ls1 = ls1.reshape((1, 1, 1, 1,
+                     1, nbIterWaveN, (BN//nbIterWaveN)//TN, TN,
+                     1, BK)).expand(s1.shape)
   assert ls0.real_size() == LDS_A_SZ
   assert ls1.real_size() == LDS_B_SZ
+
+  # BK is a loop of 8
+  #  each loop reads 8 in A, 16 in B
+
+  print(ls0)
+  print(ls1)
 
   permaxis = []
   for axis_order in [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.GROUP_REDUCE, AxisType.REDUCE, AxisType.UNROLL, AxisType.UPCAST]:
@@ -115,10 +125,7 @@ def hand_spec():
   mat = (bs0 * bs1).r(Ops.ADD, tuple([i for i,a in enumerate(axis_types) if a in (AxisType.REDUCE, AxisType.UNROLL)]), permute=False)
   st = bC.view(s2).store(mat)
 
-  global_dims = sum([1 for a in axis_types if a == AxisType.GLOBAL])
-  local_dims = sum([1 for a in axis_types if a == AxisType.LOCAL])
-  upcasted_dims = sum([1 for a in axis_types if a in (AxisType.UPCAST, AxisType.UNROLL)])
-  ast = st.sink(arg=KernelInfo(global_dims=global_dims, local_dims=local_dims, upcasted=upcasted_dims, name="tinygemm"))
+  ast = st.sink(arg=KernelInfo(axis_types=tuple(axis_types), name="tinygemm"))
   ast = graph_rewrite(ast, merge_views)
   prg = get_program(ast, Device.default.renderer)
   print(prg.src)

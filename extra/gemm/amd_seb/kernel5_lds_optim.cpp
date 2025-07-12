@@ -2,16 +2,14 @@ typedef long unsigned int size_t;
 extern "C" __attribute__((device, const)) size_t __ockl_get_local_id(unsigned int);
 extern "C" __attribute__((device, const)) size_t __ockl_get_group_id(unsigned int);
 struct Dim3 { size_t x, y, z; };
-
-#define BLOCK_SIZE 128
 #define __shared__ __attribute__((shared, aligned(16)))
-
 __attribute__((device)) inline void __syncthreads() {
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
   __builtin_amdgcn_s_barrier();
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 
+#define BLOCK_SIZE 128
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, BLOCK_SIZE)))
 kernel5_lds_optim(float *a, float *b, float *c)
 {
