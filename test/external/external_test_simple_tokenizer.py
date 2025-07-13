@@ -6,8 +6,8 @@ from tinygrad.helpers import tqdm, getenv
 # use ALLOW_FAILED=-1 to go over the entire dataset without printing.
 if __name__ == "__main__":
   base_tokenizer = AutoTokenizer.from_pretrained("NousResearch/Meta-Llama-3-8B-Instruct")
-  vocab_words = [ word for word, id in sorted(base_tokenizer.get_vocab().items(), key=lambda t: t[1]) ]
-  inv_vocab = { id: word for word, id in base_tokenizer.get_vocab().items() }
+  vocab_words = [ word for word, _ in sorted(base_tokenizer.get_vocab().items(), key=lambda t: t[1]) ]
+  inv_vocab = { tid: word for word, tid in base_tokenizer.get_vocab().items() }
   simple_tokenizer = SimpleTokenizer(vocab_words)
 
   color_codes = [ 91, 92, 94, 93, 95 ]
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     total += 1
 
     try: simple_tokens = tuple(simple_tokenizer.encode(el["text"]))
-    except: simple_tokens = ()
+    except RuntimeError: simple_tokens = ()
     base_tokens = tuple(base_tokenizer.encode(el["text"], add_special_tokens=False))
 
     if simple_tokens != base_tokens:
