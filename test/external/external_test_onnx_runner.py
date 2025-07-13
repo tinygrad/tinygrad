@@ -1,15 +1,23 @@
 import unittest, onnx, tempfile, pathlib
 from tinygrad import dtypes, Tensor
+from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from tinygrad.frontend.onnx import OnnxRunner
 from hypothesis import given, strategies as st
 
-def build_onnx(nodes, disk:bool=True, **kwargs):
+# copied from test_const_folding.py
+def _check_ast_count(desired_count:int, t:Tensor):
+  # NOTE: this has side effect because everything can be scheduled only once
+  schedule = t.schedule()
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
+
+def build_onnx(nodes, from_disk:bool=True, **kwargs):
   """Helper to build and return an OnnxRunner from ONNX nodes."""
   graph = onnx.helper.make_graph(nodes, 'test', kwargs.get('inputs', []), kwargs.get('outputs', []), kwargs.get('initializers', []))
   model = onnx.helper.make_model(graph)
-  if disk:
+  if from_disk:
     with tempfile.TemporaryDirectory() as tmpdir:
       tmp_path = pathlib.Path(tmpdir)
       model_path = tmp_path / "model.onnx"
@@ -20,6 +28,41 @@ def build_onnx(nodes, disk:bool=True, **kwargs):
     runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
   return runner
 
+class TestOnnxRunner(unittest.TestCase):
+  def _test_const_fold_unary_op(self, from_disk):
+    runner = build_onnx(
+        nodes=[
+          onnx.helper.make_node('Expand', ['inp', 'shape'], ['expanded']),
+          onnx.helper.make_node('Exp', ['expanded'], ['output'])
+        ],
+        outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (5,))],
+        initializers=[
+          onnx.helper.make_tensor('inp', onnx.TensorProto.FLOAT, (), [1.0]),
+          onnx.helper.make_tensor('shape', onnx.TensorProto.INT64, (1,), [5])
+        ],
+        from_disk=from_disk)
+    output = runner({'inp': Tensor([1.0])})['output']
+    _check_ast_count(0, output)
+
+  def _test_const_fold_binary_op(self, from_disk):
+    runner = build_onnx(
+        nodes=[onnx.helper.make_node('Add', ['inp', 'const'], ['output'])],
+        outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (4,))],
+        initializers=[
+          onnx.helper.make_tensor('inp', onnx.TensorProto.FLOAT, (4,), [1, 2, 3, 4]),
+          onnx.helper.make_tensor('const', onnx.TensorProto.FLOAT, (), [0])
+        ],
+        from_disk=from_disk)
+    output = runner({'inp': Tensor([1, 2, 3, 4])})['output']
+    _check_ast_count(0, output)
+
+  def test_const_folding(self):
+    self._test_const_fold_unary_op(True)
+    self._test_const_fold_unary_op(False)
+    self._test_const_fold_binary_op(True)
+    # TODO: fix this
+    # self._test_const_fold_binary_op(False)
+
 all_dtypes = list(data_types.keys())
 device_supported_dtypes = {odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)}
 
@@ -27,7 +70,9 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
   """
   Initializer Tensors and attribute Tensors are Tensors internal to the ONNX model,
   so they should fallback to default dtype if device does not support.
+
   Input Tensors are external to the ONNX model, so they should preserve their true dtype.
+  It is up to the user to ensure that the input dtype is supported on the device.
   """
   def _get_expected_dtype(self, onnx_dtype: int, is_input: bool):
     true_dtype = data_types[onnx_dtype]
@@ -47,7 +92,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
         nodes=[onnx.helper.make_node('Identity', ['input'], ['output'])],
         inputs=[onnx.helper.make_tensor_value_info('input', onnx_dtype, ())],
         outputs=[onnx.helper.make_tensor_value_info('output', onnx_dtype, ())],
-        disk=False)
+        from_disk=False)
     self.assertEqual(runner.graph_inputs['input'].dtype, expected_dtype)
 
   @given(onnx_dtype=st.sampled_from(all_dtypes))
@@ -57,7 +102,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
         nodes=[onnx.helper.make_node('Identity', ['initializer'], ['output'])],
         outputs=[onnx.helper.make_tensor_value_info('output', onnx_dtype, (2,))],
         initializers=[onnx.helper.make_tensor('initializer', onnx_dtype, (2,), [1, 2])],
-        disk=False)
+        from_disk=False)
     self.assertEqual(runner.graph_values['initializer'].dtype, expected_dtype)
 
   @given(onnx_dtype=st.sampled_from(all_dtypes))
@@ -67,7 +112,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
     runner = build_onnx(
         nodes=[onnx.helper.make_node('Constant', [], ['output'], value=value_tensor)],
         outputs=[onnx.helper.make_tensor_value_info('output', onnx_dtype, (2,))],
-        disk=False)
+        from_disk=False)
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, expected_dtype)
 
 if __name__ == '__main__':

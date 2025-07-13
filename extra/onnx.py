@@ -54,7 +54,7 @@ def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   data = next((val for k in keys if (val := getattr(onnx_tensor, k)) is not None), None)
   if data is None: raise RuntimeError("empty buffer")
   if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
-  assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
+  assert data.dtype is dtypes.uint8, data.dtype
   data = data.bitcast(true_dtype).reshape(shape)
   data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
   if shape == ():

@@ -156,7 +156,7 @@ class OnnxParser:
 
   def _handle_float(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_FIXED32: raise ValueError(f"Expected fixed32 for float field '{key_name}'")
-    val, *_ = struct.unpack("<f", reader.read(4))
+    val, = struct.unpack("<f", reader.read(4))
     gen_result(obj, key_name, val, repeated)
 
   def _handle_packed_int64s(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
