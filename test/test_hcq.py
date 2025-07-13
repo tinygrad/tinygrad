@@ -5,7 +5,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.system import PCIIfaceBase
-from tinygrad.engine.realize import get_runner, CompiledRunner
+from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
 from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad import Variable
 
@@ -164,7 +164,7 @@ class TestHCQ(unittest.TestCase):
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
     for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, arg=3))
 
-    runner = CompiledRunner(k.to_program())
+    runner = CompiledRunner(get_program(k.get_optimized_ast(), k.opts))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()

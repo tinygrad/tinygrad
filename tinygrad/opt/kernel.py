@@ -9,7 +9,7 @@ from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Va
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
-from tinygrad.renderer import Renderer, ProgramSpec
+from tinygrad.renderer import Renderer
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -503,11 +503,3 @@ class Kernel:
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
-
-  # TODO: update the tests and delete these methods
-
-  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
-    from tinygrad.engine.realize import get_program
-    ret = get_program(self.get_optimized_ast(name_override), self.opts)
-    self.uops = ret.uops
-    return ret
