@@ -107,7 +107,7 @@ class OnnxPBParser:
     else: self.tensor = inp
     self.reader = PBBufferedReader(self.tensor)
 
-  # ***** protobuf parsing *****
+  # ***** parsing helpers *****
   def _parse_message(self, end_pos: int):
     while self.reader.tell() < end_pos:
       tag = self.reader.decode_varint()
@@ -118,6 +118,7 @@ class OnnxPBParser:
     start_pos = self.reader.tell()
     return start_pos + str_len
 
+  # ***** protobuf parsing *****
   def parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
     obj: dict[str, Any] = {"opset_import": []}
@@ -208,10 +209,14 @@ class OnnxPBParser:
       obj["parsed_tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
+    # TODO: early realize here is for const folding for non disk tensor models (PYTHON)
     data = data.bitcast(true_dtype).realize().reshape(shape)
     data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
-    if shape == () and data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-    obj["parsed_tensor"] = Tensor(data.item(), dtype=to_dtype).reshape(shape) if shape == () else data
+    # const folding
+    if shape == ():
+      if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
+      data = Tensor(data.item(), dtype=to_dtype).reshape(shape)
+    obj["parsed_tensor"] = data
     return obj
 
   def _parse_AttributeProto(self) -> dict:
