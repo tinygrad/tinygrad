@@ -316,6 +316,12 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
+def wait_cond(cb, value=True, timeout_ms=10000, msg="") -> bool:
+  start_time = int(time.perf_counter() * 1000)
+  while int(time.perf_counter() * 1000) - start_time < timeout_ms:
+    if (val:=cb()) == value: return val
+  raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
+
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)
