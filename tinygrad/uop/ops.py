@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
@@ -253,14 +254,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
-  def r(self, op:Ops, axis:tuple[int, ...]):
+  def r(self, op:Ops, axis:tuple[int, ...], permute=True):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
-    if move_early:
-      permute = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
-      ret = self.permute(permute)
+    if move_early and permute:
+      permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
+      ret = self.permute(permaxis)
       new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
       assert len(axis) == len(new_axis)
     else:
@@ -526,17 +527,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
-  global_dims: int = 0          # number of global dimensions (this is remapping RANGE to SPECIAL)
-  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
+  axis_types: tuple[AxisType, ...] = tuple()
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+  @property
+  def global_dims(self): return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
+  @property
+  def local_dims(self): return sum([1 for x in self.axis_types if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)])
 
 # ******** ops in python ********
 
