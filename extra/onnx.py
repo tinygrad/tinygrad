@@ -682,8 +682,9 @@ def get_onnx_ops():
 
   def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
               storage_order:int=0, strides:list[int]|int=1):
-    pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
-    ret, idx = cast(tuple[Tensor, Tensor], X.max_pool2d(tuple(kernel_shape), strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True))
+    pool_pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
+
+    ret, idx = cast(tuple[Tensor, Tensor], X.max_pool2d(tuple(kernel_shape), strides, dilations, pool_pads, ceil_mode=ceil_mode, return_indices=True))
     return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
@@ -694,20 +695,23 @@ def get_onnx_ops():
   def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
                     kernel_shape:list[int]|None=None, pads:list[int]|None=None, output_shape:list[int]|None=None, output_padding:list[int]|int=0,
                     strides:list[int]|int=1):
-    input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
-    strides, dilations, output_padding = (make_tuple(x, len(input_shape)) for x in (strides, dilations, output_padding))
-    if output_shape is not None: # we pad according to output_shape
-      pads = _auto_pad([s*(i-1) + op + ((k-1)*d+1) - os for s,i,op,k,d,os in
-                        zip(strides, input_shape, output_padding, kernel_shape, dilations, output_shape)], auto_pad)
-    if pads is None: # we generate pads
-      output_shape = output_shape or [X.shape[i+2] * strides[i] for i in range(len(strides))]
-      pads = [strides[i]*(input_shape[i]-1)+output_padding[i]+((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
-      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape) * 2
-    pads = _onnx_pads_to_tiny_pads(pads)
-    return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
+    input_shape_, kernel_shape_ = X.shape[2:], (kernel_shape or W.shape[2:])
 
-  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):
-    return Tensor.max_unpool2d(xT, xI, kernel_shape, strides, 1, pads, outshape if outshape is None else tuple(outshape))
+    strides_, dilations_, output_padding_ = (make_tuple(x, len(input_shape_)) for x in (strides, dilations, output_padding))
+    if output_shape is not None: # we pad according to output_shape
+      pads = _auto_pad([s_*(i-1) + op_ + ((k_-1)*d_+1) - os for s_,i,op_,k_,d_,os in
+                        zip(strides_, input_shape_, output_padding_, kernel_shape_, dilations_, output_shape)], auto_pad)
+    if pads is None: # we generate pads
+      output_shape = output_shape or [X.shape[i+2] * strides_[i] for i in range(len(strides_))]
+      pads = [strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i]
+              for i in range(len(input_shape_))]
+      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
+    pads = _onnx_pads_to_tiny_pads(pads)
+    return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
+
+  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=[], pads:list[int]|int=0, strides:list[int]|int=1):
+    pads_: int | tuple[int, ...] = tuple(pads) if isinstance(pads, list) else pads
+    return Tensor.max_unpool2d(xT, xI, tuple(kernel_shape), strides, 1, pads_, outshape if outshape is None else tuple(outshape))
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -765,6 +769,7 @@ def get_onnx_ops():
       else:
         scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
     else:
+      assert scales is not None, "either sizes or scales must be provided"
       sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
@@ -788,7 +793,7 @@ def get_onnx_ops():
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
-    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
+    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, bool(largest), bool(sorted))
     return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
@@ -810,7 +815,7 @@ def get_onnx_ops():
     x = x.reshape(x.shape[0], num_groups, -1).layernorm(eps=epsilon).reshape(x.shape)
     return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def InstanceNormalization(x:Tensor, scale:Tensor, bias:Tensor, epsilon:float=1e-05):
-    return GroupNormalization(x, scale, bias, num_groups=x.shape[1], epsilon=epsilon)
+    return GroupNormalization(x, scale, bias, num_groups=cast(int, x.shape[1]), epsilon=epsilon)
   def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
@@ -906,6 +911,7 @@ def get_onnx_ops():
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
     batch_size, seq_len, _ = x.shape
+    assert num_heads is not None, "num_heads must be provided"
     q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
     q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
 
@@ -919,6 +925,7 @@ def get_onnx_ops():
 
     if mask_index is not None:
       assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      assert isinstance(batch_size, int)
       if mask_index.ndim != 1: mask = mask_index.bool()
       else:
         if mask_index.shape[0] == batch_size:
@@ -945,12 +952,12 @@ def get_onnx_ops():
 
   def Gather(x:Tensor, indices:Tensor, axis:int=0):
     if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
-      x_sh = list(x.shape)
+      x_sh = cast(list[int], list(x.shape))
       ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
       if indices.ndim > 1: indices = indices.flatten()
-      indices = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
-      indices = [x_sh[axis]+x if x<0 else x for x in indices]
-      args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices] # type: ignore
+      py_indices: list[int] = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
+      py_indices = [x_sh[axis]+x if x<0 else x for x in py_indices]
+      args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in py_indices]
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
     # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
     return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
@@ -981,7 +988,8 @@ def get_onnx_ops():
   def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     if reduction == "none": return x.scatter(axis, indices, updates)
-    return x.scatter_reduce(axis, indices, updates, {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}.get(reduction))
+    reduction_ = cast(Literal["sum", "prod", "amin", "amax"], {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}[reduction])
+    return x.scatter_reduce(axis, indices, updates, reduction_)
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     return x.gather(axis, indices)
@@ -1019,12 +1027,12 @@ def get_onnx_ops():
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-  def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
-                  y_zero_point: Tensor|int, B:Tensor|None=None, **opts):
+  def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor, w:Tensor, w_scale:Tensor, w_zero_point:Tensor, y_scale:Tensor,
+                  y_zero_point:Tensor, B:Tensor|None=None, **opts):
     return _qlinearop_quantized(Conv, [x,w], [x_zero_point,w_zero_point], [x_scale,w_scale], y_scale, y_zero_point, **{"B":B, **opts})
 
-  def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
-                    y_zero_point:Tensor|int) -> Tensor:
+  def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, y_scale:Tensor,
+                    y_zero_point:Tensor) -> Tensor:
     return _qlinearop_quantized(Tensor.matmul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], y_scale, y_zero_point)
 
   def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
@@ -1037,10 +1045,10 @@ def get_onnx_ops():
     assert channels_last == 0, "TODO NHWC"
     return _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
 
-  def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None, **opts) -> Tensor:
+  def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), B: Tensor | None = None, **opts) -> Tensor:
     return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **{"B":B, **opts})
 
-  def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_point: Tensor | int = 0) -> Tensor:
+  def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor = Tensor(0), b_zero_point: Tensor = Tensor(0)) -> Tensor:
     return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
 
   # ***** Training Ops *****
