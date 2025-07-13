@@ -27,9 +27,9 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           return k.applied_opts
   if k.opts.has_local and k.opts.has_shared and all_int(x[0] for x in k.pointer_dims):
     # are we grouping? (requires local shape support)
-    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
+    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(x[0] for x in k.pointer_dims) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ([256, 16] if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
+      for sz in ([256, 16] if prod(x[0] for x in k.pointer_dims) <= 32 else [16]):
         try: # may fail due to excessive smem usage
           k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
           break
@@ -40,10 +40,10 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
     if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and \
     all(k.axis_types[x] not in {AxisType.UNROLL,AxisType.UPCAST} for x in unit_stride_axes_mul_4):
-      if unit_stride_axes_mul_4[0] < k.first_reduce:
+      if unit_stride_axes_mul_4[0] < len(k.pointer_dims):
         k.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
       else:
-        k.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-k.first_reduce, 4))
+        k.apply_opt(Opt(OptOps.UNROLL, unit_stride_axes_mul_4[0]-len(k.pointer_dims), 4))
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k.applied_opts
