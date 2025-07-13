@@ -197,12 +197,15 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    const zoomDomain = transform != null ? xscale.domain() : null;
     let yscale = null;
     if (data.axes.y != null) {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
     // draw shapes
     for (const e of data.shapes) {
+      const [start, end] = Array.isArray(e.x) ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.dur];
+      if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
       if (Array.isArray(e.x)) {
         const x = e.x.map(xscale);
         ctx.beginPath();
@@ -217,8 +220,8 @@ async function renderProfiler() {
         continue;
       }
       // zoom only changes x and width
-      const x = xscale(e.x);
-      const width = xscale(e.x+e.dur)-x;
+      const x = xscale(start);
+      const width = xscale(end)-x;
       ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
