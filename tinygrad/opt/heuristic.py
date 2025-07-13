@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
-from tinygrad.helpers import getenv, DEBUG, all_int, prod, NOLOCALS
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
 
@@ -26,15 +26,13 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
           return k.applied_opts
 
-  if k.opts.has_local and k.opts.has_shared and all_int(k.sts[0].shape[:k.first_reduce]):
-    # are we grouping? (requires local shape support)
-    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
-      # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ([256, 16] if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
-        try: # may fail due to excessive smem usage
-          k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
-          break
-        except KernelOptError: pass
+  # are we grouping? (requires local shape support)
+  if resolve(prod(k.sts[0].shape[:k.first_reduce]) <= 2048, False):
+    for sz in [16]:
+      try: # may fail due to excessive smem usage
+        k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+        break
+      except KernelOptError: pass
 
   # upcast float4 images
   for buf_index,buf in enumerate(k.bufs):
