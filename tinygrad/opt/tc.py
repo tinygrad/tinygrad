@@ -1,4 +1,4 @@
-import math
+import math, functools
 from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import getenv
@@ -14,11 +14,14 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   # (local_swizzle, upcast_swizzle, reduce_swizzle)
   # l<num> is the num axis of the locals, similar for u<num> and upcasts, r<num> and reduces
   swizzle: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]]
-  def n_swizzle(self) -> tuple[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]], ...]:
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def _remaps(self) -> list[dict[str, str]]:
     local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
-    fwd_st = [f"l{i}" for i in range(local_axes)] + [f"r{i}" for i in range(reduce_axes)] + [f"u{i}" for i in range(upcast_axes)]
-    st = {s:i for i,s in enumerate(fwd_st)}
-    return tuple((tuple([st[x] for x in s[0]]), tuple([st[x] for x in s[1]]), tuple([st[x] for x in s[2]])) for s in self.swizzle)
+    fwd_st = [f"l{i}" for i in range(local_axes)] + [f"u{i}" for i in range(upcast_axes)] + [f"r{i}" for i in range(reduce_axes)]
+    return [dict(zip(fwd_st, sum(s, ()))) for s in self.swizzle]
+  def permutes_for_shape_str(self, shape_str:list[str]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    ret = [[shape_str.index(remap[ss]) if ss in remap else i for i,ss in enumerate(shape_str)] for remap in self._remaps()]
+    return tuple(ret[0]), tuple(ret[1])
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
@@ -36,7 +39,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     assert len(self.swizzle[0][0]) == len(self.swizzle[1][0]) == local_axes, "local swizzle size is wrong"
     assert len(self.swizzle[0][1]) == len(self.swizzle[1][1]) == upcast_axes, "upcast swizzle size is wrong"
     assert len(self.swizzle[0][2]) == len(self.swizzle[1][2]) == reduce_axes, "reduce swizzle size is wrong"
-    assert all(sorted(s[0]+s[1]+s[2]) == list(range(local_axes+upcast_axes+reduce_axes)) for s in self.n_swizzle()), "swizzle missing some dims"
+    assert all(len(s) == local_axes+upcast_axes+reduce_axes for s in self._remaps()), "remaps are the wrong size"
 
 # ***** NVIDIA *****
 

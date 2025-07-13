@@ -762,7 +762,7 @@ class Tensor(MathTrait):
     print(Tensor.randn(2, 3).numpy())
     ```
     """
-    return Tensor.empty(*shape).randn_like(dtype=dtype, requires_grad=requires_grad)
+    return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype, requires_grad=requires_grad)
 
   @staticmethod
   def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
@@ -1982,37 +1982,38 @@ class Tensor(MathTrait):
     rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
     # calculated from π step
-    reorder_indexes = [0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21]
+    reorder_indexes = ctensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21])
     rnd_const_masks = [ctensor([v]).pad((0, 24)) for v in (1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081,
     0x8000000000008009, 0x8a, 0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
     0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008)]
 
-    rate, dsbyte = { "sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31) }[cfg] if isinstance(cfg, str) else cfg
-    data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), -1), rate - (self.shape[-1] * self.dtype.itemsize % rate)
+    rate, dsbyte = {"sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31)}[cfg] if isinstance(cfg, str) else cfg
+    data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1]), rate - (self.shape[-1] * self.dtype.itemsize % rate)
     # pad batches then pad blocks
-    data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate))).flatten(1)
+    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
 
     # create pad mask
-    lbe = data.shape[1] + rate - data_pad - 200
-    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (data.shape[-1] - lbe - 1, 0)]
-    else: mb = [(lbe, 0), (1, dsbyte), (data.shape[-1] + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0))
+    lbe = (blen := prod(data.shape[1:])) + rate - data_pad - 200
+    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (blen - lbe - 1, 0)]
+    else: mb = [(lbe, 0), (1, dsbyte), (blen + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
+    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
-    data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
+    data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 
-    state = Tensor.zeros((data.shape[0], 25), device=self.device, dtype=dtypes.uint64)
+    state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
-      state = state.bitwise_xor(data[:,k].reshape(-1, 25))
+      state = state.bitwise_xor(data[:,k].reshape(bs, 25))
       for i in range(24): # f1600
         # θ step
-        p = state.reshape((-1, 5, 5)).transpose(2, 1)
+        p = state.reshape(bs, 5, 5).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
-        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
+        state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand(bs, 5, 5).transpose(2, 1).flatten(1))
         # ρ and π steps
-        state = state[:,reorder_indexes]
-        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape((-1, 5, 5))
+        state = state[:, reorder_indexes]
+        state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(bs, 5, 5)
         # χ and ι step
-        state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
+        state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
+        state = state.flatten(1) ^ rnd_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:

@@ -2,7 +2,7 @@ import unittest, onnx, tempfile
 from tinygrad import dtypes, Tensor
 from tinygrad.dtype import DType
 from tinygrad.uop import Ops
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.device import is_dtype_supported
 from extra.onnx import data_types
 from hypothesis import given, strategies as st
@@ -20,7 +20,7 @@ def run_onnx(nodes, inputs=None, outputs=None, initializers=None, input_data=Non
   with tempfile.NamedTemporaryFile(suffix='.onnx') as tmp:
     onnx.save(model, tmp.name)
     tmp.flush()
-    runner = OnnxRunner(onnx_load(tmp.name))
+    runner = OnnxRunner(tmp.name)
     return runner, runner(input_data or {})
 
 
