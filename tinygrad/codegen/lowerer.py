@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
 from tinygrad.helpers import prod, partition, flatten
 
 # ***** indexing *****
@@ -13,28 +13,24 @@ class IndexContext:
   ridxs: list[UOp]
 
 def get_index(ast:UOp) -> IndexContext:
-  ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
-  # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
-  full_shape = ast.full_shape
-  first_upcasted = len(full_shape)-ki.upcasted
+  axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
+  if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
 
-  # all loops are RANGES
-  idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(g),), i) for i,g in enumerate(full_shape[:first_upcasted])]
-
-  # upcast loops
-  for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
-    assert isinstance(g, int), "needs to be int to upcast/unroll"
-    idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
+  # indexes
+  idxs = []
+  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
+    if at in (AxisType.UPCAST, AxisType.UNROLL):
+      assert isinstance(s, int), "needs to be int to upcast/unroll"
+      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)))
+    else:
+      # all others are RANGES
+      idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), i))
 
   # late indexes (group for reduce)
-  # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort() if x.op is Ops.REDUCE_AXIS))
-  local_loads = [x for x in ast.toposort() if x.op is Ops.LOAD and x.src[0].base.op is Ops.DEFINE_LOCAL]
-  # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
-  group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
   ridxs = idxs[:]
-  for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(full_shape[a]),), 1000+a)
+  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
+    if at == AxisType.GROUP_REDUCE:
+      ridxs[i] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), 1000+i)
 
   return IndexContext(idxs, ridxs)
 
