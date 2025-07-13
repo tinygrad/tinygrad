@@ -27,9 +27,9 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           return k.applied_opts
   if k.opts.has_local and k.opts.has_shared and all_int(x[0] for x in k.pointer_dims):
     # are we grouping? (requires local shape support)
-    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(x[0] for x in k.pointer_dims) <= 2048:
+    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ([256, 16] if prod(x[0] for x in k.pointer_dims) <= 32 else [16]):
+      for sz in ([256, 16] if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
         try: # may fail due to excessive smem usage
           k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
           break
