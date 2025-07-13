@@ -566,11 +566,16 @@ x86_matcher = asm_matcher + PatternMatcher([
   ((UPat.var("y", dtypes.ints) < UPat.var("x")).named("cmp"), lambda y,x,cmp: UOp(Ops.CMPGT, cmp.dtype, (x, y)) if y.dtype.count > 1 else None),
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat.var("y", dtypes.ints).ne(UPat.var("x")).named("cmp"), lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
+  # no packed idiv, TODO: for int32 can cast to float64 instead of devectorizing
+  (UPat(Ops.IDIV, name="x"), lambda x: no_vectorized_alu(x) if x.dtype.count > 1 else None),
   # boolean vector is a mask, each element all 1s or 0s
   (UPat(Ops.VECTORIZE, src=(UPat(dtype=dtypes.bool),), allow_any_len=True, name="x"),
    lambda x: x.replace(dtype=dtypes.int32.vec(x.dtype.count), src=tuple(s.cast(dtypes.int32) * -1 for s in x.src))),
-  # vector boolean is a mask of same size as src
-  (UPat(GroupOp.ALU, dtypes.bool, name="x"), lambda x:
+   # cast const bool mask to match element size of first operand
+  (UPat(GroupOp.Binary, dtypes.bool, src=(UPat.var("x"), UPat(Ops.VECTORIZE, name="y")), name="b"),
+   lambda x,y,b: b.replace(src=(x, y.cast(x.dtype))) if x.dtype.itemsize != y.dtype.itemsize else None),
+  # vector boolean is a mask of same size as src, also cast second operand to match size
+  (UPat(GroupOp.Binary, dtypes.bool, name="x"), lambda x:
    x.replace(dtype=x86_int_sz[x.src[0].dtype.scalar().itemsize].vec(x.dtype.count)) if x.dtype.count > 1 else None),
   # mask of vector conditional move must have the same size as the other operands
   (UPat.var("m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: m.cast_vec(x86_int_sz[a.dtype.scalar().itemsize]).where(a, b)
