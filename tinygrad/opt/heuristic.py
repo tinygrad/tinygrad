@@ -38,7 +38,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # upcast float4 images
   for buf_index,buf in enumerate(k.bufs):
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
-    if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and all(k.axis_types[x] not in {AxisType.UNROLL,AxisType.UPCAST} for x in unit_stride_axes_mul_4):
+    if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and \
+    all(k.axis_types[x] not in {AxisType.UNROLL,AxisType.UPCAST} for x in unit_stride_axes_mul_4):
       if unit_stride_axes_mul_4[0] < k.first_reduce:
         k.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
       else:
