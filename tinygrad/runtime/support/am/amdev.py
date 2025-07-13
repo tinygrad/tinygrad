@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, os, hashlib
+import ctypes, collections, dataclasses, functools, os, hashlib
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface

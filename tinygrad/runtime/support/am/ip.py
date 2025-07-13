@@ -58,7 +58,7 @@ class AM_GMC(AM_IP):
     self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
       invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read() & (1 << vmid), value=(1 << vmid), msg=f"flush_tlb timeout")
+    wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read() & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
     if ip == "MM":
       self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
