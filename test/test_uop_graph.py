@@ -776,5 +776,14 @@ class TestUOpTags(unittest.TestCase):
     g = graph_rewrite(g, pm_plus_1)
     assert g.ssimplify() == 6
 
+class TestLateRewritePatterns(unittest.TestCase):
+  def test_vector_shl(self):
+    from tinygrad.renderer.cstyle import ClangRenderer
+    from tinygrad import Context
+    mul = UOp(Ops.DEFINE_VAR, dtypes.int.vec(4)) * 2
+    with Context(DEVECTORIZE=0):
+      sink = full_rewrite_to_sink(UOp.sink(*[mul]), ClangRenderer)
+    self.assertEqual(sink.src[0].op, Ops.SHL)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
