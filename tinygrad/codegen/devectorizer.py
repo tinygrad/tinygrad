@@ -339,7 +339,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
   acci = acc.index(UOp.const(dtypes.int, 0))
-  return acci.load(acci.store(ret))
+  return acci.load(acci.store(ret, *reduce_range))
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
