@@ -574,7 +574,7 @@ x86_matcher = asm_matcher + PatternMatcher([
    # cast const bool mask to match element size of first operand
   (UPat(GroupOp.Binary, dtypes.bool, src=(UPat.var("x"), UPat(Ops.VECTORIZE, name="y")), name="b"),
    lambda x,y,b: b.replace(src=(x, y.cast(x.dtype))) if x.dtype.itemsize != y.dtype.itemsize else None),
-  # vector boolean is a mask of same size as src, also cast second operand to match size
+  # vector boolean is a mask of same size as src
   (UPat(GroupOp.Binary, dtypes.bool, name="x"), lambda x:
    x.replace(dtype=x86_int_sz[x.src[0].dtype.scalar().itemsize].vec(x.dtype.count)) if x.dtype.count > 1 else None),
   # mask of vector conditional move must have the same size as the other operands
