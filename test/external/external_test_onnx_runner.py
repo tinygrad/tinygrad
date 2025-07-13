@@ -91,11 +91,8 @@ device_supported_dtypes = {odt for odt, dtype in data_types.items() if is_dtype_
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   """
-  Initializer Tensors and attribute Tensors are Tensors internal to the ONNX model,
-  so they should fallback to default dtype if device does not support.
-
-  Input Tensors are external to the ONNX model, so they should preserve their true dtype.
-  It is up to the user to ensure that the input dtype is supported on the device.
+  Internal tensors (initializers, attributes) fallback to default dtype if unsupported by device.
+  External tensors (inputs) preserve their original dtype - user must ensure compatibility with device.
   """
   def _get_expected_dtype(self, onnx_dtype: int, is_input: bool):
     true_dtype = data_types[onnx_dtype]
