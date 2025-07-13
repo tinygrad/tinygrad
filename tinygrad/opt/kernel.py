@@ -125,7 +125,7 @@ class Kernel:
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
   @property
-  def last_unupcasted_dim(self) -> int: 
+  def last_unupcasted_dim(self) -> int:
     return max([i for i, x in enumerate(self.axis_types) if x in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}],default = self.shape_len)
   @property
   def upcasted_dims(self): return [(x,i) for x,i in zip(self.full_shape, self.axis_types) if i in {AxisType.UNROLL, AxisType.UPCAST}]
