@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
+from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
 from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
@@ -797,20 +797,16 @@ class TestFloat4(unittest.TestCase):
       s = c.schedule()[0]
       k = Kernel(s.ast)
       k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
-      # TODO: broken and not tested
-      k.upcast()
-      k.upcast()
-      k.to_program()
-      return k
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=shift))
+      return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
-    excepted_upcast_size = [4, 8, 16]
+    expected_upcast_size = [4, 8, 16]
     expected_output = [(6,3), (2,1), (2,1)]
 
     for i in range(len(sizes)):
-      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), expected_upcast_size[i]) == expected_output[i]
 
   def test_float4_unaligned_load(self):
     a = Tensor.empty(9).realize().shrink(((1, 9),))
@@ -848,21 +844,17 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
-      # TODO: broken and not tested
-      k.upcast()
-      k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
-      k.upcast()
-      k.to_program()
-      return k
+      k.shift_to(len(k.full_unupcasted_shape)-1, 4, AxisType.UPCAST)  # manual trigger float4 dim
+      k.shift_to(len(k.full_unupcasted_shape)-1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
+      return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
-    excepted_upcast_size = [4, 8, 16]
+    expected_upcast_size = [4, 8, 16]
     expected_output = [(0,3), (0,1), (0,1)]
 
     for i in range(len(sizes)):
-      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]).uops, excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), expected_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 8).realize()
