@@ -25,7 +25,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
           return k.applied_opts
-  if k.opts.has_local and k.opts.has_shared and all_int(x[0] for x in k.pointer_dims):
+  if k.opts.has_local and k.opts.has_shared and all_int([x[0] for x in k.pointer_dims]):
     # are we grouping? (requires local shape support)
     if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
