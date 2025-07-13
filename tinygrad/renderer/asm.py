@@ -25,7 +25,7 @@ base_rewrite = PatternMatcher([
   (UPat.var("x").assign(UPat.var("y")), lambda ctx,x,y: ctx.string_rewrite.rewrite(x.store(y), ctx) if not ctx.is_reg(ctx.r[x]) else None),
   (UPat.var("x").assign(UPat.var("y"), name="a"), lambda ctx,x,y,a: f"{ctx.ops[x.dtype][a.op]} {ctx[x]}, {ctx[y]}" if ctx[x] != ctx[y] else None),
   # binary ops
-  (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+  (UPat(GroupOp.Binary, src=(UPat.var("x"), UPat.var("y")), name="b"), lambda ctx,x,y,b: f"{ctx.ops[x.dtype][b.op]} {ctx[b]}, {ctx[x]}, {ctx[y]}"),
   # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # branches
@@ -82,7 +82,8 @@ asm_matcher = PatternMatcher([
 powers_of_two = {2**i:i for i in range(64)}
 def split_vectorized_alu(alu:UOp):
   dt = alu.src[-1].dtype
-  if alu.op in (Ops.LOG2, Ops.EXP2, Ops.SIN) or dt.scalar() != dtypes.float32: return no_vectorized_alu(alu)
+  #alu.op in (Ops.LOG2, Ops.EXP2, Ops.SIN) or
+  if dt.scalar() != dtypes.float32: return no_vectorized_alu(alu)
   if dt.itemsize <= 16 and dt.count in powers_of_two: return None
   l = next(x for x in [4,2,1] if dt.count % x == 0 and dt.scalar().vec(x).itemsize <= 16)
   alus = tuple(UOp(alu.op, alu.dtype.scalar().vec(l), tuple(s.gep(tuple(range(i, i+l)) if s.dtype.count == alu.dtype.count else i//l)
@@ -410,7 +411,8 @@ x86_int_sz = {1: dtypes.int8, 2: dtypes.int16, 4: dtypes.int32, 8: dtypes.int64}
 # NOTE: no cmpne and cmplt for int vec cmp
 # NOTE: vec cmove is done at the byte level, x86 doesn't support 2 byte mask granularity
 x86_vec_int_shared = {Ops.WHERE: "vpblendvb", Ops.AND: "vpand", Ops.OR: "vpor", Ops.XOR: "vpxor"}
-x86_vec_sint_base = {Ops.ADD: "vpadd", Ops.SUB: "vpsub", Ops.MUL: "vpmull", Ops.SHL: "vpsllv", Ops.SHR: "vpsrav", Ops.CMPLT: "vpcmpgt"}
+x86_vec_sint_base = {Ops.ADD: "vpadd", Ops.SUB: "vpsub", Ops.MUL: "vpmull", Ops.SHL: "vpsllv", Ops.SHR: "vpsrav", Ops.CMPGT: "vpcmpgt",
+                     Ops.CMPEQ: "vpcmpeq"}
 x86_vec_uint_base = {**x86_vec_sint_base, Ops.SHR: "vpsrlv"}
 x86_vec_sint_ops = {dt.vec(l):{**{k:v+x86_int_suf[dt.itemsize] for k,v in x86_vec_sint_base.items()}, **x86_vec_int_shared,
                 **x86_vec_mov_sz[dt.vec(l).itemsize]} for dt in (dtypes.bool,)+dtypes.sints for l in [2,4,8,16,32] if 4 <= dt.vec(l).itemsize <= 32}
@@ -454,9 +456,7 @@ x86_vec_rewrite = PatternMatcher([
   (UPat.var("y", dtypes.float64).cast((dtypes.uint, dtypes.int), name="x"), lambda ctx,y,x: f"vcvttpd2dq {ctx[x]}, {ctx[y]}"),
   # cmove, cmp
   (UPat.var("m").where(UPat.var("a"), UPat.var("b")).named("x"),
-   lambda ctx,m,a,b,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[b]}, {ctx[a]}, {ctx[m]}" if x.dtype.count > 1 else None),
-  (UPat((Ops.CMPNE, Ops.CMPLT), src=(UPat.var("x"), UPat.var("y")), name="cmp"),
-   lambda ctx,x,y,cmp: f"{ctx.ops[x.dtype][cmp.op]} {ctx[cmp]}, {ctx[x]}, {ctx[y]}" if cmp.dtype.count > 1 else None),
+   lambda ctx,m,a,b,x: f"{ctx.ops[x.dtype][x.op]} {ctx[x]}, {ctx[b]}, {ctx[a]}, {ctx[m]}"),
 ]) + base_rewrite
 
 x86_rewrite = PatternMatcher([
@@ -562,6 +562,10 @@ x86_matcher = asm_matcher + PatternMatcher([
   (UPat((Ops.WHERE, Ops.IDIV, Ops.MOD), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load() if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.cvar("c"), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
+  # no cmplt for packed ints, y < x => x > y
+  ((UPat.var("y", dtypes.ints) < UPat.var("x")).named("cmp"), lambda y,x,cmp: UOp(Ops.CMPGT, cmp.dtype, (x, y)) if y.dtype.count > 1 else None),
+  # no cmpne for packed ints, y != x => !(y==x)
+  (UPat.var("y", dtypes.ints).ne(UPat.var("x")).named("cmp"), lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
   # boolean vector is a mask, each element all 1s or 0s
   (UPat(Ops.VECTORIZE, src=(UPat(dtype=dtypes.bool),), allow_any_len=True, name="x"),
    lambda x: x.replace(dtype=dtypes.int32.vec(x.dtype.count), src=tuple(s.cast(dtypes.int32) * -1 for s in x.src))),
