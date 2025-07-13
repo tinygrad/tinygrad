@@ -1,6 +1,6 @@
-import ctypes, gzip, unittest
+import ctypes, gzip, unittest, timeit
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
 from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
@@ -185,6 +185,30 @@ class TestMemoryview(unittest.TestCase):
     mv = to_mv(ctypes.addressof(ct), len(base))
     mv[0] = 2
     assert base[0] == 2
+
+  @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
+  def test_to_mv(self):
+    sizes = [
+      (16, "16 B"),
+      (64, "64 B"),
+      (256, "256 B"),
+      (1024, "1 KB"),
+      (4 * 1024, "4 KB"),
+      (16 * 1024, "16 KB"),
+      (64 * 1024, "64 KB"),
+      (256 * 1024, "256 KB"),
+      (1 * 1024 * 1024, "1 MB"),
+      (10 * 1024 * 1024, "10 MB"),
+      (200 * 1024 * 1024, "200 MB"),
+    ]
+
+    for sz, label in sizes:
+      buf = np.random.randint(0, 256, sz, dtype=np.uint8)
+      ptr = buf.ctypes.data
+
+      iters = 100_000
+      t_us = timeit.timeit(lambda: to_mv(ptr, sz), number=iters) * 1e6 / iters
+      print(f"Size {label:>9} | Time: {t_us:8.3f} µs")
 
 class TestGetContraction(unittest.TestCase):
   def test_contraction_with_reduce(self):

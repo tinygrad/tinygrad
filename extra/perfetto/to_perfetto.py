@@ -1,6 +1,6 @@
 import sys, pickle, decimal, json
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
-from tinygrad.helpers import tqdm, temp
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent
+from tinygrad.helpers import tqdm, temp, ProfileEvent, ProfileRangeEvent
 
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])

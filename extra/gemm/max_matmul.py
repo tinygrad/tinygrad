@@ -2,6 +2,7 @@ import numpy as np, os
 from tinygrad.helpers import getenv, flat_mv
 from tinygrad import dtypes
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Self
+from tinygrad.engine.realize import get_program
 
 # for copied uops
 from tinygrad.opt.kernel import Kernel, KernelOptError
@@ -55,7 +56,7 @@ def randoms():
 def ast_to_cuda_prog(compiler, ast, opts):
   k = Kernel(ast)
   k.apply_opts(opts)
-  p = k.to_program()
+  p = get_program(k.get_optimized_ast(), k.opts)
   return CUDAProgram(device, p.function_name, compiler.compile(p.src))
 
 if __name__ == "__main__":
