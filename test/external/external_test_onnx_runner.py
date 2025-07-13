@@ -1,4 +1,5 @@
 import unittest, onnx, tempfile, pathlib
+import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
@@ -29,7 +30,7 @@ def build_onnx(nodes, from_disk:bool=True, **kwargs):
   return runner
 
 class TestOnnxRunner(unittest.TestCase):
-  def _test_const_fold_unary_op(self, from_disk):
+  def _test_const_fold_unary_op(self, from_disk:bool):
     runner = build_onnx(
         nodes=[
           onnx.helper.make_node('Expand', ['inp', 'shape'], ['expanded']),
@@ -44,7 +45,7 @@ class TestOnnxRunner(unittest.TestCase):
     output = runner({'inp': Tensor([1.0])})['output']
     _check_ast_count(0, output)
 
-  def _test_const_fold_binary_op(self, from_disk):
+  def _test_const_fold_binary_op(self, from_disk:bool):
     runner = build_onnx(
         nodes=[onnx.helper.make_node('Add', ['inp', 'const'], ['output'])],
         outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (4,))],
@@ -56,12 +57,34 @@ class TestOnnxRunner(unittest.TestCase):
     output = runner({'inp': Tensor([1, 2, 3, 4])})['output']
     _check_ast_count(0, output)
 
-  def test_const_folding(self):
+  def test_const_fold_from_disk(self):
     self._test_const_fold_unary_op(True)
-    self._test_const_fold_unary_op(False)
     self._test_const_fold_binary_op(True)
+
+  def test_const_fold_from_memory(self):
+    self._test_const_fold_unary_op(False)
     # TODO: fix this
     # self._test_const_fold_binary_op(False)
+
+  def test_external_data_loading(self):
+    weights = np.arange(4, dtype=np.float32)
+    tensor_with_data = onnx.helper.make_tensor('weights', onnx.TensorProto.FLOAT, weights.shape, weights.tobytes(), raw=True)
+    graph = onnx.helper.make_graph(
+        nodes=[onnx.helper.make_node('Add', ['inp', 'weights'], ['output'])],
+        name='test_external',
+        inputs=[onnx.helper.make_tensor_value_info('inp', onnx.TensorProto.FLOAT, (1,))],
+        outputs=[onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, weights.shape)],
+        initializer=[tensor_with_data]
+    )
+    model = onnx.helper.make_model(graph)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      tmp_path = pathlib.Path(tmpdir)
+      model_path = tmp_path / "model.onnx"
+      onnx.save_model(model, model_path, save_as_external_data=True, all_tensors_to_one_file=True, size_threshold=0, location="weights.onnx_data")
+      runner = OnnxRunner(model_path)
+      output = runner({'inp': Tensor([1])})['output']
+      np.testing.assert_equal(output.numpy(), weights + 1)
 
 all_dtypes = list(data_types.keys())
 device_supported_dtypes = {odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)}
