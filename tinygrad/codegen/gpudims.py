@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, AxisType, ssimplify
 from tinygrad.helpers import all_int
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
@@ -56,7 +56,8 @@ def add_gpudims(ctx:Renderer, s:UOp):
   if ki.global_dims == 0 and ki.local_dims == 0: return None
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
-  ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg < (ki.global_dims+ki.local_dims)], key=lambda x: x.arg)
+  num_ranges = sum([1 for x in ki.axis_types if x in {AxisType.GLOBAL,AxisType.LOCAL,AxisType.UPCAST,AxisType.GROUP_REDUCE}])
+  ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg < (num_ranges)], key=lambda x: x.arg)
   if not len(ranges): return None
   global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg < ki.global_dims])
   local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg >= ki.global_dims])

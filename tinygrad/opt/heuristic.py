@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
 from tinygrad.helpers import getenv, DEBUG, all_int, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
@@ -25,8 +25,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
           return k.applied_opts
-
-  if k.opts.has_local and k.opts.has_shared and all_int(k.sts[0].shape[:k.first_reduce]):
+  if k.opts.has_local and k.opts.has_shared and all_int(x[0] for x in k.pointer_dims):
     # are we grouping? (requires local shape support)
     if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
@@ -39,7 +38,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # upcast float4 images
   for buf_index,buf in enumerate(k.bufs):
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
-    if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and all(x < k.first_upcast for x in unit_stride_axes_mul_4):
+    if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and all(k.axis_types[x] not in {AxisType.UNROLL,AxisType.UPCAST} for x in unit_stride_axes_mul_4):
       if unit_stride_axes_mul_4[0] < k.first_reduce:
         k.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
       else:
@@ -54,7 +53,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # this can be made much smarter
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
-  for axis in range(k.first_reduce):
+  for axis in (i for i,axis in enumerate(zip(k.full_shape, k.axis_types)) if axis[1] in {AxisType.GLOBAL, AxisType.LOOP}):
     # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
     # for now skip upcasting here if there is a symbolic axis
     if isinstance(k.full_shape[axis], int) and k.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in k.sts) and \
@@ -66,14 +65,14 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.sts[0].shape[:k.first_reduce]) >= 1024):
+  while resolve(prod(x[0] for x in k.pointer_dims) >= 1024):
     xb_choices = []
     # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
     for axis, upcast_amount in itertools.product(range(k.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and isinstance(k.full_shape[axis], int) and k.full_shape[axis]%upcast_amount == 0 and \
-        any(st.views[-1].strides[axis] == 0 and not any(x == 0 for x in k.sts[buf_index].real_strides()[k.first_upcast:]) \
-        for buf_index, st in enumerate(k.sts)):
+        any(st.views[-1].strides[axis] == 0 and not any(k.sts[buf_index].real_strides()[x] == 0 for x,i in enumerate(k.axis_types) if i in {AxisType.UNROLL,AxisType.UPCAST}) \
+             for buf_index, st in enumerate(k.sts)):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts),
                            sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if xb_choices:
@@ -84,26 +83,24 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else: break
 
   # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
-  if k.first_reduce < k.first_upcast and \
-      (prod(k.full_shape[k.first_upcast:]) <= 4 or (k.sts[0].shape[k.first_upcast:] == k.full_shape[k.first_upcast:])) and \
-      (k.upcasted == 0 or prod(k.full_shape[-k.upcasted:]) < 64):
-    if isinstance(s:=k.full_unupcasted_shape[-1], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
-      k.apply_opt(Opt(OptOps.UNROLL, len(k.full_unupcasted_shape)-1-k.first_reduce, 0))
+  if any(x is AxisType.REDUCE for x in k.axis_types) and (prod(x[0] for x in k.upcasted_dims) <= 4 or \
+    not any(x is AxisType.UNROLL for x in k.axis_types)) and \
+      (k.upcasted == 0 or prod(x[0] for x in k.upcasted_dims) < 64) and k.last_unupcasted_dim < k.shape_len:
+    if isinstance(s:=k.full_shape[k.last_unupcasted_dim], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
+      k.apply_opt(Opt(OptOps.UNROLL, k.last_unupcasted_dim-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too
-      if k.first_reduce < k.first_upcast and s <= 3 and isinstance(s2:=k.full_unupcasted_shape[-1], int) and s2 <= 3:
-        k.apply_opt(Opt(OptOps.UNROLL, len(k.full_unupcasted_shape)-1-k.first_reduce, 0))
+      if any(x is AxisType.REDUCE for x in k.axis_types) and k.axis_types[k.first_reduce] is AxisType.REDUCE and s <= 3 and isinstance(s2:=k.full_shape[k.last_unupcasted_dim], int) and s2 <= 3:
+        k.apply_opt(Opt(OptOps.UNROLL, k.last_unupcasted_dim-k.first_reduce, 0))
     else:
       for splits in [4]:
-        if k.full_unupcasted_shape[-1]%splits == 0:
-          k.apply_opt(Opt(OptOps.UNROLL, len(k.full_unupcasted_shape)-1-k.first_reduce, splits))
+        if k.full_shape[k.last_unupcasted_dim]%splits == 0:
+          k.apply_opt(Opt(OptOps.UNROLL, k.last_unupcasted_dim-k.first_reduce, splits))
           break
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
-    if k.upcasted == 0 and k.full_unupcasted_shape and k.full_unupcasted_shape[-1] % splits == 0:
-      k.apply_opt(Opt(OptOps.UPCAST, len(k.full_unupcasted_shape)-1, splits))
-
-  # **** local groups ****
+    if k.upcasted == 0 and k.shape_len > 0 and k.last_unupcasted_dim < k.shape_len and k.full_shape[k.last_unupcasted_dim] % splits == 0:
+      k.apply_opt(Opt(OptOps.UPCAST, k.last_unupcasted_dim, splits))
 
   if k.opts.has_local:
     if NOLOCALS:
@@ -111,7 +108,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(k.sts))), axis) \
-                            for axis in range(len(k.full_shape[:k.first_reduce]))]
+                            for axis in range(len(k.full_shape[:k.global_dims+k.local_dims]))]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
@@ -123,5 +120,4 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         will_delete_shape = local_sz == k.full_shape[axis]
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
-
   return k.applied_opts

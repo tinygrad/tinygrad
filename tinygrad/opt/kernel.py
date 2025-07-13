@@ -116,19 +116,20 @@ class Kernel:
 
   @property
   def first_reduce(self) -> int:
-    for i in range(self.first_upcast):
+    for i in range(self.shape_len):
       if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE): return i
-    return self.first_upcast
-  @property
-  def first_upcast(self) -> int: return self.shape_len-self.upcasted
+    return self.shape_len
 
   @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
   @property
-  def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
-
+  def last_unupcasted_dim(self) -> int: return max([i for i, x in enumerate(self.axis_types) if x in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}],default = self.shape_len)
+  @property
+  def upcasted_dims(self): return [(x,i) for x,i in zip(self.full_shape, self.axis_types) if i in {AxisType.UNROLL, AxisType.UPCAST}]
+  @property
+  def pointer_dims(self): return [(x,i) for x,i in zip(self.full_shape, self.axis_types) if i in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}]
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
   @property
@@ -204,7 +205,7 @@ class Kernel:
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
     # NOTE: we can't use self.first_reduce yet
-    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.shape_len]+(0,), self.full_shape[:self.shape_len]+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
@@ -279,8 +280,8 @@ class Kernel:
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
                                       (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
-      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
-      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
+      upcast_sz = prod(x[0] for x in self.upcasted_dims if x[1] is AxisType.UPCAST)
+      local_sz = prod(x for x,i in zip(self.full_shape,self.axis_types) if i in {AxisType.LOCAL,AxisType.GROUP_REDUCE})
       smem_sz = amt*acc_sz*upcast_sz*local_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
@@ -289,22 +290,22 @@ class Kernel:
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
-      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=self.first_reduce)
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=len(self.pointer_dims))
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
-      check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
+      check(self.axis_types[axis] is AxisType.REDUCE, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
     elif opt.op is OptOps.UNROLL:                     # purple
-      check(axis < self.first_upcast, "can't upcasted already upcasted")
+      check(self.axis_types[axis] not in {AxisType.UNROLL,AxisType.UPCAST}, "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=self.first_reduce)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
@@ -316,7 +317,7 @@ class Kernel:
       self.permute(tuple(permute))
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
-      check(axis < self.first_upcast, "cannot pad upcasted")
+      check(self.axis_types[axis] not in {AxisType.UPCAST,AxisType.UNROLL}, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
