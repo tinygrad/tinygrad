@@ -63,7 +63,7 @@ class TestOnnxRunner(unittest.TestCase):
 
   def test_const_fold_from_memory(self):
     self._test_const_fold_unary_op(False)
-    # TODO: fix this
+    # TODO: understand this and fix this, bitcast related
     # self._test_const_fold_binary_op(False)
 
   def test_external_data_loading(self):
