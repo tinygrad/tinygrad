@@ -40,7 +40,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
     if buf.src[0].dtype.__class__ is ImageDType and len(unit_stride_axes_mul_4) and (axis:=unit_stride_axes_mul_4[0]) and \
     k.axis_types[axis] not in {AxisType.UPCAST, AxisType.UNROLL}:
-      if axis < k.first_reduce:
+      if k.axis_types[axis] is not AxisType.REDUCE:
         k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
       else:
         k.apply_opt(Opt(OptOps.UNROLL, axis-k.first_reduce, 4))
