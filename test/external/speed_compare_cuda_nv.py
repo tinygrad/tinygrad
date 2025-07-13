@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # cuda compile
     culin = ast_str_to_lin(ast, opts=cudev.renderer)
     culin.apply_opts(hand_coded_optimizations(culin))
-    has_bf16 = any(b.dtype == dtypes.bfloat16 for b in culin.membufs)
+    has_bf16 = any(b.dtype == dtypes.bfloat16 for b in culin.bufs)
 
     cuda_prg = CompiledRunner(culin.to_program())
     cubufs = bufs_from_lin(culin)

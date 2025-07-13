@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax, AxisType
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
@@ -28,12 +28,9 @@ class Opt:
   arg: Optional[int | tuple] = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
 
-class AxisType(Enum):
-  GLOBAL = auto(); LOCAL = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
-
-axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.UPCAST: "u",
+axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.UPCAST: "yellow",
+axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
                AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
 class KernelOptError(Exception): pass
@@ -91,7 +88,8 @@ class Kernel:
     self.simplify_merge_adjacent()
 
     # axis types
-    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else AxisType.GLOBAL for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+    global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
+    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
 
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
@@ -209,8 +207,10 @@ class Kernel:
     first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      base_shape = self.membufs[0].dtype.shape
+    # TODO: remove membufs
+    membufs = dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
+    if isinstance(membufs[0].base.dtype, ImageDType):
+      base_shape = membufs[0].base.dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
@@ -453,9 +453,8 @@ class Kernel:
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
-        return ret.replace(arg=KernelInfo(ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override,
-                                          self.global_dims if self.opts.has_local else 0, self.local_dims + self.group_for_reduces,
-                                          self.upcasted, self.dont_use_locals, tuple(self.applied_opts)))
+        kernel_name = ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override
+        return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
         axes = tuple(i for i in range(0, self.shape_len) if self.axis_types[i] in {AxisType.REDUCE, AxisType.UNROLL} and
@@ -493,11 +492,11 @@ class Kernel:
           st = ShapeTracker.from_shape(local_shape).expand(self.full_shape[:self.global_dims]+local_shape[self.global_dims:])
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), ret)))
+          local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
           st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
-          return UOp(Ops.LOAD, op.dtype, (local_buffer.view(st), UOp.store(local_buffer.view(st), grouped_reduce)))
+          return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret
     self.finalized = True
@@ -507,12 +506,6 @@ class Kernel:
 
   # TODO: update the tests and delete these methods
 
-  @property
-  def membufs(self) -> list[UOp]: return dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
-
-  def DEPRECATED_linearize(self):
-    self.to_program()
-    return self
   def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
     from tinygrad.engine.realize import get_program
     ret = get_program(self.get_optimized_ast(name_override), self.opts)
