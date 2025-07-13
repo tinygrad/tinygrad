@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
+from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
@@ -684,8 +684,8 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(out, opts=[opt])[-1]
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = get_program(k.get_optimized_ast(), k.opts).uops
-    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
-    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
+    # local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
+    # global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER][0]
     # check that the float4 cast collapses for all stores
     # for store in local_stores+global_stores:
