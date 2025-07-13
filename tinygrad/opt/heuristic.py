@@ -27,9 +27,9 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           return k.applied_opts
   if k.opts.has_local and k.opts.has_shared and all_int(x[0] for x in k.pointer_dims):
     # are we grouping? (requires local shape support)
-    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(k.sts[0].shape[:k.first_reduce]) <= 2048:
+    if k.first_reduce <= 2 and k.first_reduce < k.shape_len and prod(x[0] for x in k.pointer_dims) <= 2048:
       # TODO: use 1024 if it's allowed in a smarter way
-      for sz in ([256, 16] if prod(k.sts[0].shape[:k.first_reduce]) <= 32 else [16]):
+      for sz in ([256, 16] if prod(x[0] for x in k.pointer_dims) <= 32 else [16]):
         try: # may fail due to excessive smem usage
           k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
           break
@@ -69,11 +69,12 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   while resolve(prod(x[0] for x in k.pointer_dims) >= 1024):
     xb_choices = []
     # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
-    for axis, upcast_amount in itertools.product(range(k.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    for axis, upcast_amount in itertools.product(range(len(k.pointer_dims)), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and isinstance(k.full_shape[axis], int) and k.full_shape[axis]%upcast_amount == 0 and \
-        any(st.views[-1].strides[axis] == 0 and not any(k.sts[buf_index].real_strides()[x] == 0 for x,i in enumerate(k.axis_types) if i in {AxisType.UNROLL,AxisType.UPCAST}) \
-             for buf_index, st in enumerate(k.sts)):
+        any(st.views[-1].strides[axis] == 0 and \
+        not any(k.sts[buf_index].real_strides()[x] == 0 for x,i in enumerate(k.axis_types) if i in {AxisType.UNROLL,AxisType.UPCAST}) \
+        for buf_index, st in enumerate(k.sts)):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts),
                            sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if xb_choices:
@@ -90,7 +91,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     if isinstance(s:=k.full_shape[k.last_unupcasted_dim], int) and s <= 32:  # NOTE: cannot loop unroll symbolic axis
       k.apply_opt(Opt(OptOps.UNROLL, k.last_unupcasted_dim-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too
-      if any(x is AxisType.REDUCE for x in k.axis_types) and k.axis_types[k.first_reduce] is AxisType.REDUCE and s <= 3 and isinstance(s2:=k.full_shape[k.last_unupcasted_dim], int) and s2 <= 3:
+      if any(x is AxisType.REDUCE for x in k.axis_types) and k.axis_types[k.first_reduce] is AxisType.REDUCE and \
+      s <= 3 and isinstance(s2:=k.full_shape[k.last_unupcasted_dim], int) and s2 <= 3:
         k.apply_opt(Opt(OptOps.UNROLL, k.last_unupcasted_dim-k.first_reduce, 0))
     else:
       for splits in [4]:
