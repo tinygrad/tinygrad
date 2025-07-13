@@ -90,7 +90,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_multioutput(self):
     dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    g0, g1, g2, g3 = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), arg=i) for i in range(4)]
+    g0, g1, g2, g3 = [UOp(Ops.DEFINE_REG, dtype.ptr(), arg=("global", i)) for i in range(4)]
     a = UOp(Ops.LOAD, dtype, src=(g2.view(st),))
     b = UOp(Ops.LOAD, dtype, src=(g3.view(st),))
     out0 = UOp(Ops.STORE, dtypes.void, src=(g0.view(st), a + b))
@@ -103,7 +103,7 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
 
     stores = [u for u in uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_REG and x.arg[0] == "global"] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
@@ -118,9 +118,9 @@ class TestLinearizer(unittest.TestCase):
   @unittest.expectedFailure
   def test_const_alu_indexing(self):
     st = ShapeTracker.from_shape((4,)).to_uop()
-    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
+    load = UOp.load(UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 1), src=()), st, dtype=dtypes.float)
     op = load+UOp.const(dtypes.float, 1.0)*UOp.const(dtypes.float, -1)
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, op)
+    store = UOp.store(UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 0), src=()), st, op)
     Tensor.manual_seed(0)
     x = Tensor.randn(4,).realize()
     helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1*-1], opts=[])
@@ -129,9 +129,9 @@ class TestLinearizer(unittest.TestCase):
   @unittest.expectedFailure
   def test_const_alu_indexing_one_const_fine(self):
     st = ShapeTracker.from_shape((4,)).to_uop()
-    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
+    load = UOp.load(UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 1), src=()), st, dtype=dtypes.float)
     op = load+UOp.const(dtypes.float, 1.0)
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, op)
+    store = UOp.store(UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 0), src=()), st, op)
     Tensor.manual_seed(0)
     x = Tensor.randn(4,).realize()
     helper_linearizer_ast(store.sink(), [x], wanna_output=[x.numpy()+1], opts=[])
@@ -294,10 +294,10 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
+    assert any(x.op is Ops.DEFINE_REG and x.arg[0] == "local" for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[-1].dtype == dtypes.float
-    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
+    assert any(x.op is Ops.DEFINE_REG and x.arg[0] == "global" for x in stores[1].toposort())
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
@@ -684,8 +684,8 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(out, opts=[opt])[-1]
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = get_program(k.get_optimized_ast(), k.opts).uops
-    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
-    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
+    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_REG and x.arg[0] == "local" for x in get_recursive(u.src[0]))]
+    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_REG and x.arg[0] == "global" for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
@@ -719,10 +719,10 @@ class TestLinearizer(unittest.TestCase):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.float.ptr(9600), arg=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9600), arg=0, src=()),)),
+          UOp(Ops.DEFINE_REG, dtypes.float.ptr(9600), arg=("global", 0), src=()),)),
         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
           UOp(Ops.VIEW, dtypes.float.ptr(9600), arg=ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-            UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9600), arg=1, src=()),)),)),)),))
+            UOp(Ops.DEFINE_REG, dtypes.float.ptr(9600), arg=("global", 1), src=()),)),)),)),))
     opt = [
         Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=16),
         Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)
@@ -738,10 +738,10 @@ class TestLinearizer(unittest.TestCase):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.float.ptr(256), arg=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=0, src=()),)),
+          UOp(Ops.DEFINE_REG, dtypes.float.ptr(256), arg=("global", 0), src=()),)),
         UOp(Ops.LOAD, dtypes.float, arg=None, src=(
           UOp(Ops.VIEW, dtypes.float.ptr(256), arg=ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-            UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=1, src=()),)),)),)),))
+            UOp(Ops.DEFINE_REG, dtypes.float.ptr(256), arg=("global", 1), src=()),)),)),)),))
     opt = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=1, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
@@ -921,16 +921,16 @@ class TestFloat4(unittest.TestCase):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(96000), arg=0, src=()),)),
+          UOp(Ops.DEFINE_REG, dtypes.float.ptr(96000), arg=("global", 0), src=()),)),
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
           UOp(Ops.CAST, dtypes.float, arg=None, src=(
             UOp(Ops.MUL, dtypes.half, arg=None, src=(
               UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.half.ptr(9216), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(9216), arg=1, src=()),)),)),
+                  UOp(Ops.DEFINE_REG, dtypes.half.ptr(9216), arg=("global", 1), src=()),)),)),
               UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.half.ptr(32768000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 0, 1024, 1), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(32768000), arg=2, src=()),)),)),)),)),)),)),))
+                  UOp(Ops.DEFINE_REG, dtypes.half.ptr(32768000), arg=("global", 2), src=()),)),)),)),)),)),)),))
 
     # TODO: fix this, expected might change but should be positive
     for expected, opts in [
@@ -950,19 +950,19 @@ class TestFloat4(unittest.TestCase):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.float.ptr(33554432), arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 262144, 512, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(33554432), arg=0, src=()),)),
+          UOp(Ops.DEFINE_REG, dtypes.float.ptr(33554432), arg=("global", 0), src=()),)),
         UOp(Ops.ADD, dtypes.float, arg=None, src=(
           UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (5, 6, 7)), src=(
             UOp(Ops.MUL, dtypes.float, arg=None, src=(
               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.float.ptr(67108864), arg=ShapeTracker(views=(View(shape=(1, 1, 1, 256, 4, 514, 4, 514), strides=(0, 0, 0, 262144, 0, 512, 0, 1), offset=-513, mask=((0, 1), (0, 1), (0, 1), (0, 256), (0, 4), (1, 513), (0, 4), (1, 513)), contiguous=False), View(shape=(1, 1, 128, 512, 512, 256, 3, 3), strides=(0, 0, 0, 2056, 1, 4227136, 1058840, 515), offset=0, mask=None, contiguous=False))), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(67108864), arg=1, src=()),)),)),
+                  UOp(Ops.DEFINE_REG, dtypes.float.ptr(67108864), arg=("global", 1), src=()),)),)),
               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.float.ptr(294912), arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 256, 3, 3), strides=(0, 0, 2304, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(294912), arg=2, src=()),)),)),)),)),
+                  UOp(Ops.DEFINE_REG, dtypes.float.ptr(294912), arg=("global", 2), src=()),)),)),)),)),
           UOp(Ops.LOAD, dtypes.float, arg=None, src=(
             UOp(Ops.VIEW, dtypes.float.ptr(128), arg=ShapeTracker(views=(View(shape=(1, 1, 128, 512, 512, 1, 1, 1), strides=(0, 0, 1, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(128), arg=3, src=()),)),)),)),)),))
+              UOp(Ops.DEFINE_REG, dtypes.float.ptr(128), arg=("global", 3), src=()),)),)),)),)),))
 
     for expected, opts in [
       (1, [Opt(op=OptOps.UPCAST, axis=2, arg=4)]),
@@ -979,13 +979,13 @@ class TestFloat4(unittest.TestCase):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.VIEW, dtypes.half.ptr(212926464), arg=ShapeTracker(views=(View(shape=(1, 256, 1, 64, 1, 114, 1, 114), strides=(0, 831744, 0, 12996, 0, 114, 0, 1), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(212926464), arg=0, src=()),)),
+          UOp(Ops.DEFINE_REG, dtypes.half.ptr(212926464), arg=("global", 0), src=()),)),
         UOp(Ops.CAST, dtypes.half, arg=None, src=(
           UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4, 6)), src=(
             UOp(Ops.CAST, dtypes.float, arg=None, src=(
               UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.half.ptr(462422016), arg=ShapeTracker(views=(View(shape=(256, 64, 3, 56, 2, 3, 56, 2), strides=(1806336, 28224, 3, 504, 0, 1, 9, 0), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 56), (0, 1), (0, 3), (0, 56), (0, 1)), contiguous=False), View(shape=(256, 64, 3, 115, 3, 115), strides=(7225344, 112896, 37632, 336, 112, 1), offset=0, mask=((0, 256), (0, 64), (0, 3), (0, 112), (0, 3), (0, 112)), contiguous=False), View(shape=(256, 64, 456, 456), strides=(7617600, 119025, 345, 1), offset=0, mask=((0, 256), (0, 64), (0, 345), (0, 345)), contiguous=False), View(shape=(1, 256, 1, 64, 4, 114, 4, 114), strides=(0, 13307904, 0, 207936, 51984, 456, 114, 1), offset=0, mask=None, contiguous=True))), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(462422016), arg=1, src=()),)),)),)),)),)),)),))
+                  UOp(Ops.DEFINE_REG, dtypes.half.ptr(462422016), arg=("global", 1), src=()),)),)),)),)),)),)),))
     for expected, opts in [
       (16, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=2, arg=3), Opt(op=OptOps.UPCAST, axis=3, arg=4)]),  # noqa: E501
       (4, [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=2)]),
@@ -1096,7 +1096,7 @@ def reset_bufs(bufs:list[Buffer]):
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> list[Kernel]:
   lins: list[Kernel] = []
-  outbufs = [real_bufs[x.src[0].base.arg] for x in realized_ast.src]
+  outbufs = [real_bufs[x.src[0].base.arg[1] if isinstance(x.src[0].base.arg, tuple) else x.src[0].base.arg] for x in realized_ast.src]
   device = real_bufs[0].device
 
   def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.get_optimized_ast(), k.opts), device=device))

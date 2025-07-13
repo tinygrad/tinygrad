@@ -91,15 +91,16 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == Ops.DEFINE_REG: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == Ops.CONST: r[u] = define_scalar([], dtype, args)
     elif uop == Ops.ASSIGN:
+      # TODO: ASSIGN should be replaced with STORE for registers 
       kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
       r[u] = r[vin[0]]
     elif uop == Ops.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
       kk(f"{'if '+r[vin[3]]+': ' if len(vin)>3 else ''}tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
-    elif uop == Ops.DEFINE_GLOBAL:
-      bufs.append(args)
+    elif uop == Ops.DEFINE_REG and args[0] == "global":
+      bufs.append(args[1])
       signatures.append("*" if isinstance(dtype, PtrDType) else "" +  signature_dtypes[dtype])
-      r[u] = args
+      r[u] = args[1]
     elif uop == Ops.SPECIAL:
       dims.append(args[1])
       valid.append(f"{args[1]}<{get_max(args[2])}")

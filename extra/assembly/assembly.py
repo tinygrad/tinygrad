@@ -98,15 +98,15 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   lang.ins.clear()
   lang.tor.clear()
   lang.cnts.clear()
-  buf_to_dtype = {args:dtype for uop,dtype,_,args,_ in uops if uop == Ops.DEFINE_GLOBAL}
+  buf_to_dtype = {args[1]:dtype for uop,dtype,_,args,_ in uops if uop == Ops.DEFINE_REG and args[0] == "global"}
   global_size, local_size = [], []
   skipload_branch = 0
   lang.ins += [AssemblyInstruction(Ops.SPECIAL, lang.newreg(buf, dtype=dtypes.uint64, scalar=True), [], buf) for buf in buf_to_dtype]
   for u in uops:
     uop,dtype,vin,args,_ = u
-    if uop == Ops.DEFINE_LOCAL:
-      lang.ins.append(AssemblyInstruction(Ops.DEFINE_LOCAL, None, [], args))
-      lang.ins.append(AssemblyInstruction(Ops.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+    if uop == Ops.DEFINE_REG and args[0] == "local":
+      lang.ins.append(AssemblyInstruction(Ops.DEFINE_REG, None, [], args))
+      lang.ins.append(AssemblyInstruction(Ops.ALU, lang.newreg(args[1], dtype=dtypes.uint64), [args[1]], UnaryOps.NOOP))
     elif uop == Ops.LOOP:
       if args[1] == "global":
         for i,var in enumerate(args[0]):

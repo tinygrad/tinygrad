@@ -192,12 +192,12 @@ print(rewritten_ast)
 UOp(Ops.SINK, dtypes.void, arg=None, src=(
   UOp(Ops.STORE, dtypes.void, arg=None, src=(
     UOp(Ops.INDEX, dtypes.int.ptr(4), arg=None, src=(
-      UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(4), arg=0, src=()),
+      UOp(Ops.DEFINE_REG, dtypes.int.ptr(4), arg=("global", 0), src=()),
       x3:=UOp(Ops.SPECIAL, dtypes.int, arg=('gidx0', 4), src=()),)),
     UOp(Ops.ADD, dtypes.int, arg=None, src=(
       UOp(Ops.LOAD, dtypes.int, arg=None, src=(
         UOp(Ops.INDEX, dtypes.int.ptr(4), arg=None, src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(4), arg=1, src=()),
+          UOp(Ops.DEFINE_REG, dtypes.int.ptr(4), arg=("global", 1), src=()),
            x3,)),)),
       UOp(Ops.CONST, dtypes.int, arg=7, src=()),)),)),))
 """

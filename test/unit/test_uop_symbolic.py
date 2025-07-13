@@ -12,7 +12,7 @@ from tinygrad.uop.spec import z3_renderer
 
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
-  glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+  glbl = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), arg=("global", 0))
   uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink())
   rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
   return rewritten_uop.render(simplify=False), rewritten_uop.vmin, rewritten_uop.vmax
@@ -640,7 +640,7 @@ class TestSymbolic(unittest.TestCase):
     expr = cond.where(a, b).cast(dtypes.half)
 
     # TODO: copied from render, render does not support cast
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    glbl = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), arg=("global", 0))
     uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
 

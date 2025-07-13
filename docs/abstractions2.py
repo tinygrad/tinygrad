@@ -49,12 +49,12 @@ b = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struc
 # NOTE: a._buf is the same as the return from MallocAllocator.alloc
 
 # describe the computation
-buf_1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 1)
-buf_2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 2)
+buf_1 = UOp(Ops.DEFINE_REG, dtypes.int32.ptr(), (), ("global", 1))
+buf_2 = UOp(Ops.DEFINE_REG, dtypes.int32.ptr(), (), ("global", 2))
 ld_1 = UOp(Ops.LOAD, dtypes.int32, (buf_1.view(ShapeTracker.from_shape((1,))),))
 ld_2 = UOp(Ops.LOAD, dtypes.int32, (buf_2.view(ShapeTracker.from_shape((1,))),))
 alu = ld_1 + ld_2
-output_buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
+output_buf = UOp(Ops.DEFINE_REG, dtypes.int32.ptr(), (), ("global", 0))
 st_0 = UOp(Ops.STORE, dtypes.void, (output_buf.view(ShapeTracker.from_shape((1,))), alu))
 s = UOp(Ops.SINK, dtypes.void, (st_0,))
 

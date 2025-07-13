@@ -75,6 +75,10 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
+  # Handle LOAD from registers (just return the register value)
+  (UPat(Ops.LOAD, src=(UPat(Ops.DEFINE_REG, arg=("register",)),), allow_any_len=True, name="x"),
+   lambda ctx,x: f"  {ctx[x]} = {ctx[x.src[0]]}  ; load from register"),
+  # Handle LOAD from memory
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), allow_any_len=True, name="x"),
    lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
@@ -152,10 +156,11 @@ class LLVMRenderer(Renderer):
     local_args: list[str] = []
     acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN: # prealloc all assigns
+      # prealloc all STORE to registers
+      if u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register":
         vc += 1
-        r[u] = r[u.src[1]] = f"%assign{vc}"
-        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
+        r[u.src[1]] = f"%assign{vc}"
+        assert u.src[0] not in acc_to_assign, "can't store to register twice"
         acc_to_assign[u.src[0]] = u.src[1]
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
@@ -169,18 +174,27 @@ class LLVMRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
+      if u.op is Ops.DEFINE_VAR:
+        r[u] = f"%{u.arg[0]}"
         args.append((r[u], u.dtype))
-      elif u.op == Ops.DEFINE_LOCAL:
-        r[u] = f"%local_{u.arg}"
-        assert isinstance(u.dtype, PtrDType)
-        if self.device == "LLVM": kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
-        else:
-          local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
-          kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
-      elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
-      elif u.op is Ops.DEFINE_REG: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
+      elif u.op is Ops.DEFINE_REG:
+        if isinstance(u.arg[0], str):
+          if u.arg[0] == "global":
+            r[u] = f"%data{u.arg[1]}"
+            args.append((r[u], u.dtype))
+          elif u.arg[0] == "local":
+            r[u] = f"%local_{u.arg[1]}"
+            assert isinstance(u.dtype, PtrDType)
+            if self.device == "LLVM": kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
+            else:
+              local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
+              kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} " \
+                            f"to [{u.dtype.size} x {ldt(u.dtype)}]*")
+          elif u.arg[0] == "register":
+            # Register case - check if it was stored to in the first pass
+            r[u] = r[acc_to_assign.get(u, u.src[0] if len(u.src) > 0 else u)] if u in acc_to_assign else f"%reg_{id(u)}"
+      elif u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register":
+        pass  # register stores are already handled by the first pass
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast

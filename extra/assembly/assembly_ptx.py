@@ -39,8 +39,8 @@ def specialize_to_ptx(lang, function_name):
   for uop, out, vin, arg in lang.ins:
     if uop == Ops.ENDLOOP:
       ins.append("bar.sync 0;")
-    elif uop == Ops.DEFINE_LOCAL:
-      ins.append(f".shared .align 4 .b8 {arg[0]}[{arg[1]*4}];")
+    elif uop == Ops.DEFINE_REG and arg[0] == "local":
+      ins.append(f".shared .align 4 .b8 {arg[1][0]}[{arg[1][1]*4}];")
     elif uop == Ops.SPECIAL:
       if arg.startswith('data'):
         param_cnt += 1

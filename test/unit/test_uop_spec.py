@@ -26,9 +26,9 @@ def helper_test_verify_ast(*stores:UOp):
 class TestUOpSpec(unittest.TestCase):
   def test_tiny_add(self):
     dtype = dtypes.int
-    buf_0 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
-    buf_1 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 1)
-    buf_2 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 2)
+    buf_0 = UOp(Ops.DEFINE_REG, dtype.ptr(), (), ("global", 0))
+    buf_1 = UOp(Ops.DEFINE_REG, dtype.ptr(), (), ("global", 1))
+    buf_2 = UOp(Ops.DEFINE_REG, dtype.ptr(), (), ("global", 2))
     a = UOp(Ops.LOAD, dtype, (buf_1.view(ShapeTracker.from_shape((32, 1))),))
     b = UOp(Ops.LOAD, dtype, (buf_2.view(ShapeTracker.from_shape((32, 1))),))
     store = UOp(Ops.STORE, dtypes.void, (buf_0.view(ShapeTracker.from_shape((32, 1))), a+b))
@@ -36,7 +36,7 @@ class TestUOpSpec(unittest.TestCase):
 
   def test_exactly_one_full_shape(self):
     dtype = dtypes.int
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), i) for i in range(6)]
+    bufs = [UOp(Ops.DEFINE_REG, dtype.ptr(), (), ("global", i)) for i in range(6)]
     a = UOp(Ops.LOAD, dtype, (bufs[2].view(ShapeTracker.from_shape((32, 1))),))
     b = UOp(Ops.LOAD, dtype, (bufs[3].view(ShapeTracker.from_shape((32, 1))),))
     st0 = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), a+b)
@@ -46,28 +46,28 @@ class TestUOpSpec(unittest.TestCase):
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st0, st1)
 
   def test_no_implicit_broadcasting(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
+    bufs = [UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", i)) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((4, 32))),))
     b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.MAX, (1,)))
     st = UOp(Ops.STORE, dtypes.void, (bufs[0].view(ShapeTracker.from_shape((4, 32))), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_shrink_ok(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
+    bufs = [UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", i)) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker((View((32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),))),))
     b = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker((View((32, 32), strides=(0, 1), offset=0, mask=None, contiguous=False),))),))
     st = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 32))), a+b)
     helper_test_verify_ast(st)
 
   def test_reduce_store(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
+    bufs = [UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", i)) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_reduce_add_store(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
+    bufs = [UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", i)) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
@@ -82,14 +82,14 @@ class TestUOpSpec(unittest.TestCase):
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    buf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
     with self.assertRaisesRegex(InvalidASTException, "UOp verification failed"): helper_test_verify_ast(st)
 
   def test_const_view_always_valid(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    buf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
     a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)

@@ -30,8 +30,8 @@ class Ops(FastEnum):
   # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
   VALID = auto()
 
-  # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto() # noqa: E702
+  # unified memory definition op
+  DEFINE_REG = auto()
 
   # this is for symbolic shapes
   DEFINE_VAR = auto(); BIND = auto() # noqa: E702

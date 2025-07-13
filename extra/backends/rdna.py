@@ -67,8 +67,8 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
       ins.append("s_waitcnt vmcnt(0)")
     elif u.uop == UOps.STORE:
       ins.append(f"global_store_b32 {r[u.vin[1]]}, {r[u.vin[2]]}, {r[u.vin[0]]}")
-    elif u.uop == UOps.DEFINE_GLOBAL:
-      i = u.arg[0]
+    elif u.uop == UOps.DEFINE_REG and u.arg[0] == "global":
+      i = u.arg[1]
       args.append({'.address_space': 'global', '.name': f'buf_{i}', '.offset': i*8, '.size': 8,
                    '.type_name': u.dtype.name+"*", '.value_kind': 'global_buffer'})
       s_cnt += s_cnt%2  # skip

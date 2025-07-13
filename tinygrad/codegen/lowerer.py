@@ -47,8 +47,9 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
-  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
-  barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[1],)),) if buf.op is Ops.DEFINE_LOCAL else ()
+  is_local = buf.op is Ops.DEFINE_REG and buf.arg[0] == "local"
+  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if is_local else ctx.idxs)
+  barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[1],)),) if is_local else ()
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):

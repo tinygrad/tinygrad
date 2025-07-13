@@ -243,7 +243,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
-    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
+    d0 = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 0))
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(Ops.LOAD, dtypes.float.vec(2), (d0, idx))
     vec = UOp(Ops.VECTORIZE, dtypes.float.vec(2), (ld,))
@@ -254,9 +254,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.VECTORIZE]), 0)
 
   def test_gep_vec_fold(self):
-    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
-    d2 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 2)
+    d0 = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
+    d1 = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 1))
+    d2 = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 2))
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(Ops.VECTORIZE, dtypes.float.vec(count), geps)
@@ -360,8 +360,8 @@ class TestUOpGraph(unittest.TestCase):
       self.assertEqual(uops[-1], wmma)
 
   def test_cast_alu_fold(self):
-    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(), arg=0)
-    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1)
+    d0 = UOp(Ops.DEFINE_REG, dtypes.bool.ptr(), arg=("global", 0))
+    d1 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), arg=("global", 1))
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
     alu = (ld<1).cast(dtypes.bool)
@@ -370,8 +370,8 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
   def test_double_cast_fold(self):
-    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
-    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1)
+    d0 = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), arg=("global", 0))
+    d1 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), arg=("global", 1))
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
     alu = ld.cast(dtypes.float).cast(dtypes.float)
@@ -394,14 +394,14 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
-      d0 = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), arg=0)
+      d0 = UOp(Ops.DEFINE_REG, dt.ptr(), arg=("global", 0))
       v = UOp(Ops.LOAD, dt, (d0.index(UOp.const(dtypes.int, 0)),))
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
   def test_in_out_of_bounds_access(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 0)),))
       to_uops_list([ld0])
       ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 15)),))
@@ -414,7 +414,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_in_out_of_bounds_access_symbolic(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 1, 10)),))
       to_uops_list([ld0])
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 15)),))
@@ -425,7 +425,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_in_out_of_bounds_access_gated_store(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       v = Variable("v", 0, 20)
       st0 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), UOp.const(dtypes.int, 0), v<16))
       to_uops_list([st0])
@@ -436,8 +436,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_in_bounds_access_gated_local(self):
     with Context(IGNORE_OOB=0):
       # Define buffers
-      gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(400), (), 0)
-      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, local=True), (), "temp0")
+      gbuf = UOp(Ops.DEFINE_REG, dtypes.uint.ptr(400), (), ("global", 0))
+      sbuf = UOp(Ops.DEFINE_REG, dtypes.uint.ptr(8, local=True), (), ("local", "temp0"))
 
       # Define indices, valids and barrier
       gidx = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 416))
@@ -459,13 +459,13 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_out_of_bounds_off_by_one_access(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(dtypes.int, 16)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
   def test_in_out_bounds_access_with_mask(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, (5<gidx0)&(gidx0<16)),))
       ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<16),))
@@ -476,7 +476,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_in_out_of_bounds_access_symbolic_mask(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
       i = Variable("i", 1, 80)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<10),))
       to_uops_list([ld0])
@@ -488,8 +488,8 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_in_out_of_bounds_access_index_load(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
-      glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
+      glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(16), (), ("global", 0))
+      glbl1 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(64), (), ("global", 0))
       gidx0 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 42))
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<8),))
       ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<32)),))
@@ -499,9 +499,9 @@ class TestUOpGraph(unittest.TestCase):
       with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
   def test_fold_gated_load(self):
-    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
-    glbl2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
+    glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 0))
+    glbl1 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 1))
+    glbl2 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 2))
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(idx, UOp.const(dtypes.bool, False)),))
     ld1 = UOp(Ops.LOAD, dtypes.int, (glbl2.index(idx, UOp.const(dtypes.bool, True)),))
@@ -511,8 +511,8 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(ld0, UOp.load(glbl2.index(idx), dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
-    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, local=True), (), "temp")
+    glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 0))
+    smem = UOp(Ops.DEFINE_REG, dtypes.int.ptr(size=18, local=True), (), ("local", "temp"))
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -525,7 +525,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(ld0.src[0], smem.index(lidx+2))
 
   def test_fold_gated_store(self):
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    glbl = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 0))
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
@@ -538,13 +538,13 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
-    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    glbl0 = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 0))
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
   def test_switched_range_order(self):
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    glbl = UOp(Ops.DEFINE_REG, dtypes.int.ptr(), (), ("global", 0))
     c2 = UOp.const(dtypes.int, 2)
     cf = UOp.const(dtypes.float, 0.0)
     r1 = UOp(Ops.RANGE, dtypes.int, (c2,), 0)
@@ -709,8 +709,8 @@ class TestExpander(unittest.TestCase):
 
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
-    gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
+    gbuf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
+    sbuf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(size=4, local=True), (), ("local", "smem"))
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -728,8 +728,8 @@ class TestIFUOps(unittest.TestCase):
       self.assertEqual(len(st.src), 2)
 
   def test_expand_ifs_one_gate(self):
-    gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
+    gbuf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
+    sbuf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(size=16, local=True), (), ("local", "smem"))
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))
@@ -748,7 +748,7 @@ class TestIFUOps(unittest.TestCase):
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    buf = UOp(Ops.DEFINE_REG, dtypes.float.ptr(), (), ("global", 0))
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))

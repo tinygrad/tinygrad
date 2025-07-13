@@ -49,7 +49,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + buf_dt.fmt, *data)))
-  g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
+  g = UOp(Ops.DEFINE_REG, uop.dtype.ptr(), arg=("global", 0), src=())
   opts = PythonRenderer()
   lst = full_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), opts)
   prog = PythonProgram("run", PythonCompiler().compile(opts.render(lst)))

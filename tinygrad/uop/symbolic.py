@@ -417,6 +417,8 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # VECTORIZE void is SINK
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, src=UPat(Ops.BARRIER, name='b')), lambda b: b),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"))),
+   lambda buf,vec: buf.index(vec.src[0]) if all(vec.src[i].arg == vec.src[0].arg + i for i in range(len(vec.src))) else None),
   (UPat(Ops.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(Ops.SINK, dtypes.void, x.src)),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),

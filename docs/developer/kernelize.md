@@ -78,11 +78,11 @@ print(child.uop.src[1].arg.ast)
 ```
 UOp(Ops.SINK, dtypes.void, arg=None, src=(
   UOp(Ops.STORE, dtypes.void, arg=None, src=(
-    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), arg=0, src=()),
+    UOp(Ops.DEFINE_REG, dtypes.int.ptr(1), arg=("global", 0), src=()),
     x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),
     UOp(Ops.ADD, dtypes.int, arg=None, src=(
       UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-        UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), arg=1, src=()),
+        UOp(Ops.DEFINE_REG, dtypes.int.ptr(1), arg=("global", 1), src=()),
          x2,)),
       UOp(Ops.CONST, dtypes.int, arg=2, src=(
          x2,)),)),)),))

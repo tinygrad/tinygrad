@@ -57,13 +57,13 @@ def hand_spec():
   LDS_A_SZ = BK * BM          # 1024 floats
   LDS_B_SZ = BK * BN          # 1024 floats
 
-  bC = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0)   # output C
-  bA = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)   # input A
-  bB = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)   # input B
+  bC = UOp(Ops.DEFINE_REG, dtypes.float.ptr(N*N), arg=("global", 0))   # output C
+  bA = UOp(Ops.DEFINE_REG, dtypes.float.ptr(N*N), arg=("global", 1))   # input A
+  bB = UOp(Ops.DEFINE_REG, dtypes.float.ptr(N*N), arg=("global", 2))   # input B
 
   # TODO: this should not be a string, just a number
-  lAs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_A_SZ, local=True), arg="As")
-  lBs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_B_SZ, local=True), arg="Bs")
+  lAs = UOp(Ops.DEFINE_REG, dtypes.float.ptr(LDS_A_SZ, local=True), arg=("local", "As"))
+  lBs = UOp(Ops.DEFINE_REG, dtypes.float.ptr(LDS_B_SZ, local=True), arg=("local", "Bs"))
 
   s0 = ShapeTracker.from_shape((N, N, N), (N, 0, 1))
   s1 = ShapeTracker.from_shape((N, N, N), (0, 1, N))

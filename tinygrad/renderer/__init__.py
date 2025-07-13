@@ -68,9 +68,9 @@ class ProgramSpec:
       # single pass through the uops
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
-        if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
-        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.DEFINE_REG and u.arg[0] == "global": self.globals.append(u.arg[1])
+        if u.op is Ops.STORE: self.outs.extend([x.arg[1] for x in u.src[0].toposort() if x.op is Ops.DEFINE_REG and x.arg[0] == "global"])
+        if u.op is Ops.LOAD: self.ins.extend([x.arg[1] for x in u.src[0].toposort() if x.op is Ops.DEFINE_REG and x.arg[0] == "global"])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
@@ -86,8 +86,9 @@ class ProgramSpec:
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     return sum(max(x.src[0].dtype.nbytes() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].base.arg)))
+      for _, group in itertools.groupby(
+        [x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_REG and x.src[0].base.arg[0] == "global"],
+        key=lambda x: (x.op, x.src[0].base.arg)))
 
   @functools.cached_property
   def estimates(self) -> Estimates:
