@@ -461,11 +461,13 @@ class Kernel:
           for axis_type in axis_types:
             if axis_type != current_type:
               if current_group:
+                assert current_type is not None  # current_type cannot be None if current_group is not empty
                 groups.append((current_type, current_group))
               current_group = []
               current_type = axis_type
             current_group.append(axis_type)
           if current_group:
+            assert current_type is not None  # current_type cannot be None if current_group is not empty
             groups.append((current_type, current_group))
 
           reordered: list[AxisType] = []
