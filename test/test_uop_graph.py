@@ -241,6 +241,22 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.op, Ops.CONST)
     self.assertEqual(out.arg, 0)
 
+  def test_const_bitcast(self):
+    bf = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    out = UOp(Ops.BITCAST, dtypes.uint32, (bf,))
+    uops = to_uops_list([out])
+    self.assertEqual(len(uops), 1)
+    out = uops[-1]
+    self.assertEqual(out.op, Ops.CONST)
+    self.assertEqual(out.arg, 0x3F800000)
+
+  @unittest.expectedFailure
+  def test_const_shape_change_bitcast(self):
+    bf = UOp(Ops.CONST, dtypes.uint8, arg=0x3F)
+    out = UOp(Ops.BITCAST, dtypes.half, (bf,))
+    uops = to_uops_list([out])
+    self.assertEqual(len(uops), 1)
+
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
