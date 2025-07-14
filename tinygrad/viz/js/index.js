@@ -178,9 +178,9 @@ async function renderProfiler() {
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y1 = e.y.map(yscale);
-      const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      const y0 = e.y.map(yscale);
+      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+      data.shapes.push({ x, y0, y1, arg:e.arg, color:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -209,14 +209,15 @@ async function renderProfiler() {
       if (Array.isArray(e.x)) {
         const x = e.x.map(xscale);
         ctx.beginPath();
-        ctx.moveTo(x[0], e.y1[0]);
-        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
-        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
+        ctx.moveTo(x[0], e.y0[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y0[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y1[i]);
         ctx.closePath();
         ctx.fillStyle = e.color;
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        // NOTE: y coordinates are in reverse order
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], tooltipText });
         continue;
       }
       // zoom only changes x and width
