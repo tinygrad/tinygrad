@@ -189,8 +189,8 @@ async function renderProfiler() {
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
-  function render(transform=null) {
-    if (transform != null) zoomLevel = transform;
+  function render(transform) {
+    zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
