@@ -9,13 +9,8 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
-  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:
-   f"{ctx.render_dtype(x.src[0].dtype)}(0)" if x.arg[0] == "register" and len(x.src) == 1 and x.src[0].op == Ops.CONST else
-   ctx[x.src[0]] if x.arg[0] == "register" and len(x.src) == 1 else
-   # For registers with multiple sources or non-CONST sources, initialize to 0
-   "0.0f" if x.arg[0] == "register" and x.dtype == dtypes.float else
-   "0" if x.arg[0] == "register" else
-   ctx[x] if x.arg[0] == "register" else None),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: str(x.src[0].arg) if x.arg[0] == "register" and x.src[0].op == Ops.CONST else None),
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx[x.src[0]]} = {ctx[x.src[1]]};"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.ENDRANGE)), lambda ctx: "}"),
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
@@ -51,24 +46,21 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
   # new load/store
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
-   lambda ctx,buf,idx: (
-     f"({ctx[buf]}+{ctx[idx.src[0]]})" if idx.op is Ops.VECTORIZE and len(idx.src) > 0
-     else f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"
-   )),
+   lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("gate"))).or_casted("bidx"), UPat.var("var")), allow_any_len=True, name="load"),
    lambda ctx,bidx,var,gate,load:
-     f"({ctx[gate]}?{f'*({ctx.render_dtype(load.dtype)}*)({ctx[bidx]})' if load.dtype.count > 1 else f'*{ctx[bidx]}'}:{ctx[var]})"),
+     f"({ctx[gate]}?{f'*({ctx.render_dtype(load.dtype)}*)({ctx[bidx]})' if load.dtype.count > 1 and ctx.render_dtype(load.dtype) != ctx.render_dtype(load.dtype.scalar()) else f'*{ctx[bidx]}'}:{ctx[var]})"),  # noqa: E501
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True, name="load"), lambda ctx,bidx,load:
-   ctx[bidx] if bidx.op == Ops.DEFINE_REG and bidx.arg[0] == "register" else
-   (f"*({ctx.render_dtype(load.dtype)}*)({ctx[bidx]})" if load.dtype.count > 1 else f"*{ctx[bidx]}")),
+   ctx[bidx] if bidx.op == Ops.DEFINE_REG and bidx.arg and bidx.arg[0] == "register" else f"*{ctx[bidx]}"),  # noqa: E501
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var:
    f"{ctx[bidx]} = {ctx[var]};" if bidx.op == Ops.DEFINE_REG and bidx.arg[0] == "register" else
-   (f"*({ctx.render_dtype(var.dtype)}*)({ctx[bidx]}) = {ctx[var]};" if var.dtype.count > 1 else f"*{ctx[bidx]} = {ctx[var]};")),
+   (f"*({ctx.render_dtype(var.dtype)}*)({ctx[bidx]}) = {ctx[var]};" if var.dtype.count > 1 and ctx.render_dtype(var.dtype) != ctx.render_dtype(var.dtype.scalar()) else f"*{ctx[bidx]} = {ctx[var]};")),  # noqa: E501
   # alu/gep
   # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
+  (UPat(Ops.GEP, name="x"), lambda ctx,x:
+    (f"({ctx[x.src[0]]})" if x.src[0].op == Ops.LOAD and x.src[0].dtype.count > 1 else ctx[x.src[0]]) + \
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > ctx.gep_arr_threshold else f".{'xyzwabcd'[x.arg[0]]}")),
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
@@ -81,7 +73,7 @@ extra_pm = PatternMatcher([
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   # devectorize any bools
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
   # CAST (from bool) can't be vectorized
   (UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="alu"), no_vectorized_alu),
   # WHERE can't be vectorized
@@ -137,7 +129,14 @@ class CStyleLanguage(Renderer):
     if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
-  def __getitem__(self, key): return self.r[key]  # hacky helper
+  def __getitem__(self, key):
+    if key not in self.r and key.op == Ops.DEFINE_REG and key.arg and key.arg[0] == "register":
+      # Try to find a matching DEFINE_REG that was already processed
+      for k, v in self.r.items():
+        if k.op == Ops.DEFINE_REG and k.arg == key.arg and k.dtype == key.dtype:
+          # Found a matching DEFINE_REG, use its value
+          return v
+    return self.r[key]  # hacky helper
   def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[DType,bool]]]]:
     r: dict[UOp, str] = {}
     self.r = r
@@ -189,8 +188,26 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op in {Ops.RANGE, Ops.STORE} or (u.op is Ops.DEFINE_REG and u.arg[0] == "local") or u.dtype == dtypes.void:
-          pass
+        if u.op in {Ops.RANGE, Ops.ASSIGN, Ops.STORE} or (u.op is Ops.DEFINE_REG and u.arg[0] in ["local", "register"]) or u.dtype == dtypes.void:
+          if u.op is Ops.ASSIGN:
+            # ASSIGN needs special handling for register DEFINE_REGs
+            if u.src[0].op == Ops.DEFINE_REG and u.src[0].arg and u.src[0].arg[0] == "register":
+              # Try to find the matching DEFINE_REG that was already processed
+              found = False
+              for k, v in r.items():
+                if k.op == Ops.DEFINE_REG and k.arg == u.src[0].arg and k.dtype == u.src[0].dtype:
+                  r[u] = v
+                  found = True
+                  break
+              if not found:
+                # Fallback - use the name we assigned earlier
+                r[u] = r.get(u.src[0], f"acc{c['acc']}")
+            else:
+              r[u] = r[u.src[0]]
+          elif u.op is Ops.DEFINE_REG and u.arg[0] == "register":
+            # For registers, declare and initialize them
+            # The pattern returns "0", so l is "0"
+            l = f"{self.render_dtype(u.dtype)} {r[u]} = {l};"
         else:
           l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         # Special handling for STORE operations that might reference undefined variables
@@ -279,6 +296,12 @@ class OpenCLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}({ctx[x.src[0]]})"),
+    # Handle VECTORIZE operations for unsupported vector sizes
+    (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x:
+      # For unsupported vector sizes in OpenCL, don't create vector literals
+      # Instead, just return the first source as a scalar (this is a simplification)
+      f"({ctx[x.src[0]]})" if x.dtype.count > 1 and x.dtype.count not in {2, 3, 4, 8, 16}
+      else None),
     # load/store image (OpenCL)
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
       lambda ctx,buf,idx,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, {ctx[idx]}):{ctx[var]})"),
@@ -287,6 +310,17 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
       lambda ctx,buf,idx,var: f"write_imagef({ctx[buf]}, {ctx[idx]}, {ctx[var]});"),
   ]) + base_rewrite
+
+  def render_dtype(self, dt:DType, mutable=True) -> str:
+    if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
+    if isinstance(dt, PtrDType):
+      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
+    # OpenCL only supports vector types of size 2, 3, 4, 8, 16
+    if dt.count > 1 and dt.count not in {2, 3, 4, 8, 16}:
+      # For unsupported vector sizes, fall back to scalar type
+      return self.type_map.get(scalar:=dt.scalar(), scalar.name)
+    if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
+    return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))

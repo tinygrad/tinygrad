@@ -131,7 +131,9 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda x: (
     (x.arg[0] == "global" and isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local and len(x.src) == 0) or
     (x.arg[0] == "local" and isinstance(x.dtype, PtrDType) and x.dtype.local and len(x.src) == 0) or
-    (x.arg[0] == "register" and len(x.src) >= 1 and all(y.op in {Ops.RANGE, Ops.BLOCKFINAL, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCK} for y in x.src[1:]) and x.src[0].dtype == x.dtype)
+    (x.arg[0] == "register" and len(x.src) >= 1 and
+     all(y.op in {Ops.RANGE, Ops.BLOCKFINAL, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCK} for y in x.src[1:]) and
+     x.src[0].dtype == x.dtype)
   )),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
@@ -180,6 +182,7 @@ spec = PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.DEFINE_REG), UPat()), name="x"), lambda x: x.src[0].arg[0] == "register"),
   (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # WMMA has a <a, b, acc>

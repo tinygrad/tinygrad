@@ -124,6 +124,12 @@ def gep_on_store(gep:UOp, st:UOp):
   return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
 
 load_store_folding = PatternMatcher([
+  # Handle INDEX directly on DEFINE_REG (when vec is vectorized)
+  (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_REG, name="buf"), UPat.var("vec"))),
+   lambda buf, vec: expand_index(buf, vec) if vec.dtype.count > 1 and buf.arg[0] in ["global", "local"] else None),
+  (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_REG, name="buf"), UPat.var("vec"), UPat.var("mask"))),
+   lambda buf, vec, mask: expand_index(buf, vec, mask) if vec.dtype.count > 1 and buf.arg[0] in ["global", "local"] else None),
+  # Original patterns for VECTORIZE(DEFINE_REG)
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_REG, name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_REG, name="buf")), UPat.var("vec"),
                         UPat.var("mask"))), expand_index),
@@ -288,7 +294,7 @@ def no_vectorized_acc(acc:UOp):
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
 ])
@@ -334,7 +340,11 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     lst = [acc] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.store(ret) if len(reduce_range) != 0 else ret
+  # For now, use ASSIGN for registers until LOAD/STORE is fully implemented
+  # TODO: convert to STORE + LOAD pattern when rendering is fixed
+  if len(reduce_range) != 0:
+    return UOp(Ops.ASSIGN, red.dtype, (acc, ret))
+  return ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
