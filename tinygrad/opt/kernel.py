@@ -133,7 +133,7 @@ class Kernel:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def global_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GLOBAL]) if hasattr(self, 'axis_types') else 0
+  def global_dims(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.GLOBAL,AxisType.LOOP}]) if hasattr(self, 'axis_types') else 0
   @property
   def local_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.LOCAL]) if hasattr(self, 'axis_types') else 0
   @property

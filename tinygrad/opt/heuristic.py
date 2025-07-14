@@ -27,7 +27,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           return k.applied_opts
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.sts[0].shape[:k.first_reduce]) <= 2048, False):
+  if resolve(prod(k.sts[0].shape[:k.global_dims+k.local_dims]) <= 2048, False):
     for sz in [16]:
       try: # may fail due to excessive smem usage
         k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -52,7 +52,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # this can be made much smarter
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
-  for axis in range(k.first_reduce):
+  for axis in range(k.global_dims+k.local_dims):
     # we might want to be able to split axes that are masked, or refuse to merge them in simplify_merge_adjacent
     # for now skip upcasting here if there is a symbolic axis
     if isinstance(k.full_shape[axis], int) and k.full_shape[axis] <= 7 and any(st.axis_is_masked(axis) for st in k.sts) and \
@@ -64,10 +64,10 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.sts[0].shape[:k.first_reduce]) >= 1024):
+  while resolve(prod(k.sts[0].shape[:k.global_dims+k.local_dims]) >= 1024):
     xb_choices = []
     # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
-    for axis, upcast_amount in itertools.product(range(k.first_reduce), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    for axis, upcast_amount in itertools.product(range(k.global_dims+k.local_dims), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it's not symbolic, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis not in upcasted_axis and isinstance(k.full_shape[axis], int) and k.full_shape[axis]%upcast_amount == 0 and \
         any(st.views[-1].strides[axis] == 0 and not any(x == 0 for x in st.real_strides()[k.first_upcast:]) \
@@ -109,7 +109,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(k.sts))), axis) \
-                            for axis in range(len(k.full_shape[:k.first_reduce]))]
+                            for axis in range(k.global_dims+k.local_dims)]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
