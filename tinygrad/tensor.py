@@ -1262,17 +1262,20 @@ class Tensor(MathTrait):
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
+    ##cast dtype to v to dtype
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
-    res = self.realize()._getitem(indices, v)
+    #print(v.numpy())
+    res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
       self.assign(res).realize()
     else: # no copy, basic setitem
+      print(v.dtype)
+      print(v.dtype.__str__() + " " + v.numpy().__str__())
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      res.assign(v)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
