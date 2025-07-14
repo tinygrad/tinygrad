@@ -113,6 +113,23 @@ python3 -m pip install git+https://github.com/tinygrad/tinygrad.git
 
 Documentation along with a quick start guide can be found on the [docs website](https://docs.tinygrad.org/) built from the [docs/](/docs) directory.
 
+## Development
+
+To contribute to tinygrad, you'll need to set up the pre-commit hooks:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The pre-commit hooks run:
+- ruff (linting)
+- mypy (type checking)
+- pytest for core functionality
+- GPU device tests
+- BEAM search optimization tests
+- pylint
+
 ### Quick example comparing to PyTorch
 
 ```python
