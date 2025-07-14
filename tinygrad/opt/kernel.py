@@ -126,8 +126,6 @@ class Kernel:
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
-  @property
-  def full_unupcasted_shape(self) -> tuple[sint, ...]: return self.full_shape[:self.first_upcast]
 
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
@@ -142,6 +140,14 @@ class Kernel:
   def upcasted(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.UPCAST, AxisType.UNROLL}]) if hasattr(self, 'axis_types') else 0
   @property
   def group_for_reduces(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GROUP_REDUCE]) if hasattr(self, 'axis_types') else 0
+
+  # heuristic helpers
+  @property
+  def upcastable_dims(self) -> list[int]: return [i for i,(a,s) in enumerate(zip(self.axis_types, self.full_shape)) \
+                                                  if a in (AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) and isinstance(s, int) and s > 1]
+  @property
+  def unrollable_dims(self) -> list[int]: return [i for i,(a,s) in enumerate(zip(self.axis_types, self.full_shape)) \
+                                                  if a in (AxisType.REDUCE, AxisType.GROUP_REDUCE) and isinstance(s, int) and s > 1]
 
   # ******************** colors and names ********************
 

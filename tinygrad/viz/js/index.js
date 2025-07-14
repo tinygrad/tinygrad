@@ -178,9 +178,9 @@ async function renderProfiler() {
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y1 = e.y.map(yscale);
-      const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      const y0 = e.y.map(yscale);
+      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+      data.shapes.push({ x, y0, y1, arg:e.arg, color:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -189,36 +189,40 @@ async function renderProfiler() {
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
-  function render(transform=null) {
-    if (transform != null) zoomLevel = transform;
+  function render(transform) {
+    zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    const zoomDomain = transform != null ? xscale.domain() : null;
     let yscale = null;
     if (data.axes.y != null) {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
     // draw shapes
     for (const e of data.shapes) {
+      const [start, end] = Array.isArray(e.x) ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.dur];
+      if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
       if (Array.isArray(e.x)) {
         const x = e.x.map(xscale);
         ctx.beginPath();
-        ctx.moveTo(x[0], e.y1[0]);
-        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
-        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
+        ctx.moveTo(x[0], e.y0[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y0[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y1[i]);
         ctx.closePath();
         ctx.fillStyle = e.color;
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        // NOTE: y coordinates are in reverse order
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], tooltipText });
         continue;
       }
       // zoom only changes x and width
-      const x = xscale(e.x);
-      const width = xscale(e.x+e.dur)-x;
+      const x = xscale(start);
+      const width = xscale(end)-x;
       ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
@@ -288,15 +292,16 @@ async function renderProfiler() {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    render();
+    d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
+
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(canvasZoom);
+  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   resize();
   window.addEventListener("resize", resize);
-  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
-    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
-  d3.select(canvas).call(canvasZoom).call(canvasZoom.transform, zoomLevel);
-  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   function findRectAtPosition(x, y) {
     const { top, left, width, height } = rect(canvas);
