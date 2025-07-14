@@ -9,6 +9,7 @@ from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
 from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
+from tinygrad.device import Buffer
 
 # creation can recurse a lot
 import sys
@@ -311,7 +312,7 @@ create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 # ** add metadata of KERNEL outputs
 
 def append_metadata(root:UOp, k:UOp):
-  if PROFILE and root.src[0].op is Ops.BUFFER: root.src[0].buffer._profile_args["metadata"] = str(k.arg.metadata)
+  if PROFILE and isinstance(buf:=root.src[0].buffer, Buffer): buf._profile_args["metadata"] = str(k.arg.metadata)
   if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
   return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
 
