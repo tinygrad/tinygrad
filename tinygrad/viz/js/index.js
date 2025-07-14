@@ -291,15 +291,16 @@ async function renderProfiler() {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    render();
+    d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  resize();
-  window.addEventListener("resize", resize);
   canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+
+  resize();
+  window.addEventListener("resize", resize);
 
   function findRectAtPosition(x, y) {
     const { top, left, width, height } = rect(canvas);
