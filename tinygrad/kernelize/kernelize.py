@@ -70,7 +70,8 @@ sym = symbolic_simple+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x: reduce.const_like(identity_element(parse_reduce_args(reduce.arg).op, reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+   lambda reduce,x: reduce.const_like(identity_element(parse_reduce_args(reduce.arg).op, reduce.dtype))
+   if x.size == 0 and reduce.size != 0 else None),
   # reduce on stride 0 is collapsed
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_stride0_reduce),
   # split_reduceop
@@ -261,7 +262,9 @@ view_right = merge_views+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK, Ops.REDUCE_AXIS}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
-   lambda r1,r2: (lambda r1_args, r2_args: r1.replace(arg=ReduceArgs(r1_args.op, r2_args.axes+r1_args.axes, r1_args.keepdims, r1_args.fuse)) if r1_args.op is r2_args.op else None)(parse_reduce_args(r1.arg), parse_reduce_args(r2.arg))),
+   lambda r1,r2: (lambda r1_args, r2_args:
+     r1.replace(arg=ReduceArgs(r1_args.op, r2_args.axes+r1_args.axes, r1_args.keepdims, r1_args.fuse))
+     if r1_args.op is r2_args.op else None)(parse_reduce_args(r1.arg), parse_reduce_args(r2.arg))),
 ])
 
 # **** fix kernel AST
@@ -342,9 +345,10 @@ pm_fuse = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
    lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
 
-  # FUSE on reduce (without view) adds fuse marker to grouper  
+  # FUSE on reduce (without view) adds fuse marker to grouper
   (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
-   lambda r: r.replace(src=(r.src[0].fuse(),), arg=(parsed_args := parse_reduce_args(r.arg))._replace(fuse=True)) if not parsed_args.fuse else None),
+   lambda r: (lambda parsed_args: r.replace(src=(r.src[0].fuse(),), arg=parsed_args._replace(fuse=True))
+             if not parsed_args.fuse else None)(parse_reduce_args(r.arg))),
 
   # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),
