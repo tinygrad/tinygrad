@@ -455,7 +455,7 @@ class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     System.reserve_hugepages(64)
 
@@ -580,13 +580,13 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
-                    .signal(self.timeline_signal, self.timeline_value).submit(self)
+                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value)) \
-                                   .setup(copy_class=self.iface.dma_class) \
-                                   .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
+    NVCopyQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                 .setup(copy_class=self.iface.dma_class) \
+                 .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    self.timeline_value += 2
+    self.synchronize()
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return
