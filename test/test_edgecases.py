@@ -280,7 +280,6 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
-  @unittest.expectedFailure
   def test_arange_float_step(self):
     # float steps should match PyTorch exactly
     torch_out = torch.arange(0, 2, 0.3).numpy()

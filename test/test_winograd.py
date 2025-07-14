@@ -65,6 +65,7 @@ class TestWinograd(unittest.TestCase):
     assert GlobalCounters.kernel_count == 4
     out.numpy()
 
+  @unittest.skip("depends on hcopt, not supported now")
   @unittest.skipIf(getenv("PTX"), "winograd uses too much in PTX")
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
