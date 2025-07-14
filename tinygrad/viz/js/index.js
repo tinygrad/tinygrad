@@ -298,7 +298,7 @@ async function renderProfiler() {
   window.addEventListener("resize", resize);
   canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
-  d3.select(canvas).call(canvasZoom).call(canvasZoom.transform, zoomLevel);
+  d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   function findRectAtPosition(x, y) {
