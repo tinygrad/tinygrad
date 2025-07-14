@@ -11,9 +11,23 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 
 def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
+  from tinygrad.uop.ops import buffers as uop_buffers
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
     for buf in u:
+      # Skip buffers from DEFINE_REG with arg[0]="register"
+      # Check if this buffer was created from a UOp that has DEFINE_REG with register in its dependency tree
+      skip_register = False
+      for uop, uop_buf in uop_buffers.items():
+        if uop_buf is buf and uop.op is Ops.BUFFER:
+          # Check if this BUFFER UOp has any DEFINE_REG with arg[0]="register" in its dependency tree
+          for dep_uop in uop.toposort():
+            if dep_uop.op is Ops.DEFINE_REG and dep_uop.arg[0] == "register":
+              skip_register = True
+              break
+          break
+
+      if skip_register: continue
       should_skip = buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers)
       if not ignore_checks and should_skip: continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
