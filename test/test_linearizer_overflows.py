@@ -2,8 +2,8 @@
 import unittest
 from tinygrad import dtypes, Device
 from tinygrad.helpers import CI
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.search import Opt, OptOps, bufs_from_lin
+from tinygrad.opt.kernel import Kernel
+from tinygrad.opt.search import Opt, OptOps, bufs_from_lin
 from extra.optimization.helpers import time_linearizer
 
 # stuff needed to unpack a kernel
@@ -14,7 +14,6 @@ from tinygrad.shape.view import View
 def _test_overflow(ast, opts):
   lin = Kernel(ast)
   lin.apply_opts(opts)
-  lin.linearize()
   bufs = bufs_from_lin(lin)
   print(bufs)
   time_linearizer(lin, bufs)

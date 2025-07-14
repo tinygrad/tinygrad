@@ -1,4 +1,14 @@
-// **** graph renderers
+// ** graph helpers
+
+const displayGraph = (cls) => {
+  for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
+}
+
+const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 // ** UOp graph
 
@@ -11,8 +21,6 @@ function intersectRect(r1, r2) {
   const scale = Math.min(scaleX, scaleY);
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
-
-const rect = (s) => document.querySelector(s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
@@ -30,9 +38,9 @@ async function renderDag(graph, additions, recenter=false) {
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
+    displayGraph("graph");
     progressMessage.style.display = "none";
     clearTimeout(timeout);
-    d3.select("#bars").html("");
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -45,8 +53,17 @@ async function renderDag(graph, additions, recenter=false) {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-    }).selectAll("text").data(d => [d.label.split("\n")]).join("text").selectAll("tspan").data(d => d).join("tspan").text(d => d).attr("x", "0")
-      .attr("dy", 14).attr("xml:space", "preserve");
+    }).selectAll("text").data(d => {
+      const ret = [[]];
+      for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
+        for (const [i, l] of st.split("\n").entries()) {
+          if (i > 0) ret.push([]);
+          ret.at(-1).push({ st:l, color });
+        }
+      }
+      return [ret];
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
+      .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
     const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
     tags.selectAll("circle").data(d => [d]).join("circle");
@@ -82,133 +99,236 @@ async function renderDag(graph, additions, recenter=false) {
 
 }
 
-// ** Memory graph (WIP)
+// ** profiler graph
 
-DTYPE_SIZE = {"bool": 1, "char": 1, "uchar": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
-              "long": 8, "ulong": 8, "half": 2, "bfloat": 2, "float": 4, "double": 8}
-function getBuffer(e) {
-  const [_, size, dtype, num, device] = e.label.split("\n");
-  return {nbytes:size*DTYPE_SIZE[dtype.split("dtypes.")[1]], dtype, device:device.split(" ")[1], num:parseInt(num.split(" ")[1])};
+function formatTime(ts, dur=ts) {
+  if (dur<=1e3) return `${ts.toFixed(2)}us`;
+  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
+  return `${(ts*1e-6).toFixed(2)}s`;
 }
+const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-function pluralize(num, name, alt=null) {
-  return num === 1 ? `${num} ${name}` : `${num} ${alt ?? name+'s'}`
-}
+const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
+                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
+const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
-function renderMemoryGraph(graph) {
-  // ** construct alloc/free traces
-  // we can map reads/writes from the kernel graph
-  const actions = [];
-  const children = new Map(); // {buffer: [...assign]}
-  for (const [k,v] of Object.entries(graph)) {
-    if (!v.label.startsWith("ASSIGN")) continue;
-    actions.push({ op: "write", buffer: v.src[0] });
-    for (const ks of graph[v.src[1]].src) {
-      const node = graph[ks];
-      const s = node.label.startsWith("ASSIGN") ? node.src[0] : ks;
-      if (!children.has(s)) children.set(s, []);
-      children.get(s).push(v);
-      if (s !== v.src[0]) actions.push({ op: "read", buffer: s });
+const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
+
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+async function renderProfiler() {
+  displayGraph("profiler");
+  d3.select(".metadata").html("");
+  const profiler = d3.select(".profiler").html("");
+  const deviceList = profiler.append("div").attr("id", "device-list").node();
+  const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
+  if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
+  const { layout, st, et } = profileRet;
+  // place devices on the y axis and set vertical positions
+  const [tickSize, padding] = [10, 8];
+  deviceList.style.paddingTop = `${tickSize+padding}px`;
+  const ctx = canvas.getContext("2d");
+  const canvasTop = rect(canvas).top;
+  // color by key (name/category/device)
+  const colorMap = new Map();
+  const data = {shapes:[], axes:{}};
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
+  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+    if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
+    const div = deviceList.appendChild(document.createElement("div"));
+    div.innerText = k;
+    div.style.padding = `${padding}px`;
+    div.onclick = () => { // TODO: make this feature more visible
+      focusedDevice = k === focusedDevice ? null : k;
+      const prevScroll = profiler.node().scrollTop;
+      renderProfiler();
+      if (prevScroll) profiler.node().scrollTop = prevScroll;
     }
-  }
-  const prealloc = new Set();
-  const traces = [];
-  for (const a of actions) {
-    // a buffer is allocated immediately before the first write
-    // TODO: we don't know the buffer is preallocated if there's only an assign in the graph
-    if (a.op === "write") {
-      traces.push({ type: "alloc", buffer: a.buffer });
-    }
-    else {
-      if (traces.find(t => t.buffer === a.buffer && t.type === "alloc") == null) {
-        prealloc.add(a.buffer);
+    const { y:baseY, height:baseHeight } = rect(div);
+    const levelHeight = baseHeight-padding;
+    const offsetY = baseY-canvasTop+padding/2;
+    let colorKey, ref;
+    for (const e of timeline.shapes) {
+      if (e.depth === 0) colorKey = e.cat ?? e.name;
+      if (!colorMap.has(colorKey)) {
+        const colors = devColors[k] ?? devColors.DEFAULT;
+        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
-      else if (a === actions.findLast(({ buffer }) => buffer === a.buffer)) {
-        traces.push({type: "free", buffer: a.buffer });
+      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      if (e.ref != null) ref = {ctx:e.ref, step:0};
+      else if (ref != null) {
+        const start = ref.step>0 ? ref.step+1 : 0;
+        const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
       }
+      // offset y by depth
+      data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
     }
+    // position shapes on the canvas and scale to fit fixed area
+    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
+    if (k === focusedDevice) {
+      // expand memory graph for the focused device
+      area = maxArea*4;
+      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
+    }
+    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+    for (const [i,e] of mem.shapes.entries()) {
+      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+      const y0 = e.y.map(yscale);
+      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+      data.shapes.push({ x, y0, y1, arg:e.arg, color:bufColors[i%bufColors.length] });
+    }
+    // lastly, adjust device rect by number of levels
+    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
-  // ** get coordinates and layout for each buffer
-  const ret = {};
-  let timestep = 0; // x
-  let memUsed = 0; // y
-  for (const id of prealloc) {
-    const buf = getBuffer(graph[id]);
-    ret[id] = { x: [timestep], y: [memUsed], buf, id };
-    memUsed += buf.nbytes;
-  }
-  let peak = memUsed;
-  const liveBufs = [...prealloc];
-  for (const t of traces) {
-    const buf = getBuffer(graph[t.buffer]);
-    const idx = liveBufs.findLastIndex(b => t.buffer === b);
-    // alloc
-    if (idx === -1) {
-      liveBufs.push(t.buffer);
-      ret[t.buffer] = { x: [timestep], y: [memUsed], buf, id: t.buffer };
-      memUsed += buf.nbytes;
-      peak = Math.max(memUsed, peak);
-      timestep += 1;
-    } // free
-    else {
-      memUsed -= buf.nbytes;
-      timestep += 1;
-      const removed = ret[liveBufs.splice(idx, 1)[0]];
-      removed.x.push(timestep);
-      removed.y.push(removed.y.at(-1));
-      if (idx < liveBufs.length) {
-        for (let j=idx; j<liveBufs.length; j++) {
-          const b = ret[liveBufs[j]];
-          b.x.push(timestep, timestep);
-          b.y.push(b.y.at(-1), b.y.at(-1)-buf.nbytes);
+  // draw events on a timeline
+  const dpr = window.devicePixelRatio || 1;
+  const ellipsisWidth = ctx.measureText("...").width;
+  const rectLst = [];
+  function render(transform) {
+    zoomLevel = transform;
+    rectLst.length = 0;
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    // rescale to match current zoom
+    const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
+    xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    const zoomDomain = transform != null ? xscale.domain() : null;
+    let yscale = null;
+    if (data.axes.y != null) {
+      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
+    }
+    // draw shapes
+    for (const e of data.shapes) {
+      const [start, end] = Array.isArray(e.x) ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.dur];
+      if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
+      if (Array.isArray(e.x)) {
+        const x = e.x.map(xscale);
+        ctx.beginPath();
+        ctx.moveTo(x[0], e.y0[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y0[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y1[i]);
+        ctx.closePath();
+        ctx.fillStyle = e.color;
+        ctx.fill();
+        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
+        // NOTE: y coordinates are in reverse order
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], tooltipText });
+        continue;
+      }
+      // zoom only changes x and width
+      const x = xscale(start);
+      const width = xscale(end)-x;
+      ctx.fillStyle = e.fillColor;
+      ctx.fillRect(x, e.y, width, e.height);
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
+      // add label
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      let [labelX, labelWidth] = [x+2, 0];
+      const labelY = e.y+e.height/2;
+      for (const [i,l] of e.label.entries()) {
+        if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
+          if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
+          break;
         }
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.st, labelX, labelY);
+        labelWidth += l.width;
+        labelX += l.width;
       }
     }
-  }
-  for (const id of liveBufs) {
-    const b = ret[id];
-    b.x.push(timestep);
-    b.y.push(b.y.at(-1));
-  }
-  // ** render traces
-  // clear existing groups
-  document.querySelector(".progress-message").style.display = "none";
-  for (c of document.getElementById("render").children) c.innerHTML = "";
-  const render = d3.select("#bars");
-  const yscale = d3.scaleLinear().domain([0, peak]).range([576, 0]);
-  const xscale = d3.scaleLinear().domain([0, timestep]).range([0, 1024]);
-  const axesGroup = render.append("g").attr("id", "axes");
-  const nbytes_format = (d) => d3.format(".3~s")(d)+"B";
-  axesGroup.append("g").call(d3.axisLeft(yscale).tickFormat(nbytes_format));
-  axesGroup.append("g").attr("transform", `translate(0, ${yscale.range()[0]})`).call(d3.axisBottom(xscale).tickFormat(() => ""));
-  const polygonGroup = render.append("g").attr("id", "polygons");
-  const colors = ["7aa2f7", "ff9e64", "f7768e", "2ac3de", "7dcfff", "1abc9c", "9ece6a", "e0af68", "bb9af7", "9d7cd8", "ff007c"];
-  const polygons = polygonGroup.selectAll("polygon").data(Object.values(ret)).join("polygon").attr("points", (d) => {
-    const xs = d.x.map(t => xscale(t));
-    const y1 = d.y.map(t => yscale(t));
-    const y2 = d.y.map(t => yscale(t+d.buf.nbytes));
-    const p0 = xs.map((x, i) => `${x},${y1[i]}`);
-    const p1 = xs.map((x, i) => `${x},${y2[i]}`).reverse();
-    return `${p0.join(' ')} ${p1.join(' ')}`;
-  }).attr("fill", d => `#${colors[d.buf.num % colors.length]}`).on("mouseover", (e, { id, buf, x }) => {
-    d3.select(e.currentTarget).attr("stroke", "rgba(26, 27, 38, 0.8)").attr("stroke-width", 0.8);
-    const metadata = document.querySelector(".metadata");
-    document.getElementById("current-buf")?.remove();
-    const { num, dtype, nbytes, ...rest } = buf;
-    let label = `<BUFFER n${num} ${dtype} ${nbytes_format(nbytes)}>\nalive for ${pluralize(x[x.length-1]-x[0], 'timestep')}`;
-    label += '\n'+Object.entries(rest).map(([k, v]) => `${k}=${v}`).join('\n');
-    const buf_children = children.get(id);
-    if (buf_children) {
-      label += `\n${pluralize(buf_children.length, 'child', 'children')}\n`;
-      label += buf_children.map((c,i) => `[${i+1}] `+graph[c.src[1]].label.split("\n")[1]).join("\n");
+    // draw axes
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(canvas.clientWidth, 0);
+    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    const ticks = xscale.ticks();
+    for (const [i, tick] of ticks.entries()) {
+      ctx.beginPath();
+      // tick line
+      const x = xscale(tick);
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, tickSize);
+      ctx.stroke();
+      // tick label
+      ctx.textBaseline = "top";
+      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
+      const padding = i === ticks.length-1 ? -1 : 1;
+      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
     }
-    metadata.appendChild(Object.assign(document.createElement("pre"), { innerText: label, id: "current-buf", className: "wrap" }));
-  }).on("mouseout", (e, _) => {
-    d3.select(e.currentTarget).attr("stroke", null).attr("stroke-width", null);
-    document.getElementById("current-buf")?.remove()
+    if (yscale != null) {
+      ctx.beginPath();
+      ctx.moveTo(0, yscale.range()[1]);
+      ctx.lineTo(0, yscale.range()[0]);
+      ctx.stroke();
+      for (const tick of yscale.ticks()) {
+        const y = yscale(tick);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(tickSize, y);
+        ctx.stroke();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
+      }
+    }
+    ctx.restore();
+  }
+
+  function resize() {
+    const profiler = document.querySelector(".profiler");
+    // NOTE: use clientWidth to account for the scrollbar
+    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
+    width -= rect("#device-list").width+padding;
+    canvas.width = width*dpr;
+    canvas.height = height*dpr;
+    canvas.style.height = `${height}px`;
+    canvas.style.width = `${width}px`;
+    ctx.scale(dpr, dpr);
+    d3.select(canvas).call(canvasZoom.transform, zoomLevel);
+  }
+
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(canvasZoom);
+  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+
+  resize();
+  window.addEventListener("resize", resize);
+
+  function findRectAtPosition(x, y) {
+    const { top, left, width, height } = rect(canvas);
+    const X = ((x-left) * (canvas.width/width))/dpr;
+    const Y = ((y-top) * (canvas.height/height))/dpr;
+    for (const r of rectLst) {
+      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r;
+    }
+  }
+
+  canvas.addEventListener("click", e => {
+    e.preventDefault();
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref.ctx, foundRect.ref.step);
   });
-  // TODO: add the kernel line here
-  document.getElementById("zoom-to-fit-btn").click();
+
+  canvas.addEventListener("mousemove", e => {
+    const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect?.tooltipText != null) {
+      const tooltip = document.getElementById("tooltip");
+      tooltip.style.display = "block";
+      tooltip.style.left = (e.pageX+10)+"px";
+      tooltip.style.top = (e.pageY)+"px";
+      tooltip.innerText = foundRect.tooltipText;
+    } else tooltip.style.display = "none";
+  });
+  canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
 // ** zoom and recentering
@@ -218,6 +338,10 @@ d3.select("#graph-svg").call(svgZoom);
 
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
+  const canvas = d3.select("#timeline");
+  if (!canvas.empty() && rect(canvas.node()).width !== 0) {
+    return canvas.call(canvasZoom.transform, d3.zoomIdentity);
+  }
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
@@ -242,7 +366,7 @@ function codeBlock(st, language, { loc, wrap }) {
   if (wrap) ret.className = "wrap";
   if (loc != null) {
     const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file"+loc.join(":");
+    link.href = "vscode://file/"+loc.join(":");
     link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
   }
   ret.appendChild(code);
@@ -250,6 +374,7 @@ function codeBlock(st, language, { loc, wrap }) {
 }
 
 function setActive(e) {
+  if (e == null) return;
   e.classList.add("active");
   requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
@@ -298,12 +423,12 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, step=0) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
@@ -313,16 +438,14 @@ window.addEventListener("popstate", (e) => {
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
-    ctxs = await (await fetch("/ctxs")).json();
+    ctxs = [{ name:"Profiler", steps:[] }];
+    for (const r of (await (await fetch("/ctxs")).json())) ctxs.push(r);
     const ctxList = document.querySelector(".ctx-list");
     for (const [i,{name, steps}] of ctxs.entries()) {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      p.innerHTML = name.replace(/\u001b\[(\d+)m(.*?)\u001b\[0m/g, (_, code, st) => {
-        const colors = ['gray','red','green','yellow','blue','magenta','cyan','white'];
-        return `<span style="${`color: color-mix(in srgb, ${colors[(parseInt(code)-30+60)%60]} 60%, white)`}">${st}</span>`;
-      });
+      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
@@ -343,8 +466,9 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
+  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx}&idx=${currentStep}`;
+  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
@@ -372,14 +496,10 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  if (step.name == "View Memory Graph") {
-    renderMemoryGraph(ret[currentRewrite].graph);
-  } else {
-    renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
-  }
+  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {
@@ -415,6 +535,7 @@ document.querySelector(".collapse-btn").addEventListener("click", (e) => {
   document.querySelector(".main-container").classList.toggle("collapsed", isCollapsed);
   e.currentTarget.blur();
   e.currentTarget.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+  window.dispatchEvent(new Event("resize"));
 });
 
 // **** resizer

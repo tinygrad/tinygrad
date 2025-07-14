@@ -8,8 +8,9 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.engine.search import Opt, OptOps
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.opt.search import Opt, OptOps
+from tinygrad.opt.kernel import Kernel
+from tinygrad.engine.realize import get_program
 
 class TestLinearizerDumb(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
@@ -37,12 +38,12 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.TC, axis=2, arg=(-1, 2, 1)), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0)]
     k = Kernel(ast, opts=Device["METAL"].renderer)
     k.apply_opts(opts)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     gate_count = len([x for x in prg.src.splitlines() if "if" in x])
     assert gate_count == 1, f"must have only one gate {gate_count} != 1"
-    assert len([u for u in k.uops if u.op is Ops.IF]) == 1, "must have a single IF"
+    assert len([u for u in prg.uops if u.op is Ops.IF]) == 1, "must have a single IF"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_max_simplify_and_cancel(self):
@@ -76,7 +77,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.apply_opts(opts)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
 
@@ -93,9 +94,9 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.apply_opts(opts)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
-    if_uops = [u for u in k.uops if u.op is Ops.IF]
+    if_uops = [u for u in prg.uops if u.op is Ops.IF]
     self.assertIn(len(if_uops), {1,2,3})
     conditions = if_uops[0].src[0].toposort()
     self.assertLessEqual(len(conditions), 9)
@@ -134,7 +135,7 @@ class TestLinearizerDumb(unittest.TestCase):
                   UOp(Ops.VIEW, dtypes.half.ptr(131072000), arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(1, 4096, 0), offset=0, mask=None, contiguous=False),)), src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(131072000), arg=2, src=()),)),)),)),)),)),)),)),))
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
 
   @unittest.expectedFailure
@@ -163,7 +164,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.apply_opts(opts)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
@@ -187,7 +188,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=3, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.apply_opts(opts)
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     print(prg.src)
     store_idxs = [x.src[1] for x in k.uops if x.op is Ops.STORE]
     for i in range(len(store_idxs) - 1):

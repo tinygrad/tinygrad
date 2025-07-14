@@ -21,11 +21,12 @@ class Optimizer:
     # store lr in at least float32 precision
     self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
-    if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.flatten().shape[0], initial=0))
+    if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
-    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous()]
-    return [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    param_dtype = getenv("OPTIM_DTYPE", "float32")
+    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
+    return [Tensor.zeros(*t.shape, dtype=param_dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
     """
@@ -47,7 +48,7 @@ class Optimizer:
             f"""Tensor.training={Tensor.training}, Tensor.training must be enabled to use the optimizer.
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     if self.fused:
-      # optimizer fusion just concatentates all the buffers, runs the _step, then splits them back up
+      # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
                               [Tensor.cat(*[unwrap(t.grad).flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
@@ -100,7 +101,7 @@ class LARS(Optimizer):
         r2 = g.square().sum().sqrt()
         r:Tensor|float = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
-      g = g + self.wd * t.detach()
+      if self.wd > 0: g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
@@ -150,8 +151,8 @@ class LAMB(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, (t, g) in enumerate(zip(params, grads)):
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g))
+      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
+      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()

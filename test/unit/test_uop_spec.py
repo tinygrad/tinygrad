@@ -2,28 +2,28 @@ from __future__ import annotations
 import unittest
 
 from tinygrad import Tensor
-from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
-from tinygrad.uop.spec import type_verify, ast_spec
+from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
+from tinygrad.engine.realize import get_program
+from tinygrad.device import Device
 
 class InvalidASTException(Exception): pass
-def helper_test_verify_ast(*stores:UOp) -> Kernel:
+def helper_test_verify_ast(*stores:UOp):
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
   try: type_verify(list(sink.toposort()), ast_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
-  k = Kernel(sink)
-  k.linearize()
-  if DEBUG >= 6: print_uops(k.uops)
-  if DEBUG >= 4: print(k.to_program().src)
-  return k
+  program = get_program(sink, Device[Device.DEFAULT].renderer)
 
-class TestVerifyAST(unittest.TestCase):
+  if DEBUG >= 6: print_uops(program.uops)
+  if DEBUG >= 4: print(program.src)
+
+class TestUOpSpec(unittest.TestCase):
   def test_tiny_add(self):
     dtype = dtypes.int
     buf_0 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
@@ -93,6 +93,12 @@ class TestVerifyAST(unittest.TestCase):
     a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
+
+  def test_assert_masked_view_in_const(self):
+    t = Tensor(6).uop
+    a = t.replace(src=(t.src[0].replace(arg=t.st.reshape((1,)).pad(((0, 1),))),))
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      type_verify([a], tensor_uop_spec)
 
 if __name__ == '__main__':
   unittest.main()
