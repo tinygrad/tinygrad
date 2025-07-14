@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP, PROFILE
 from tinygrad.dtype import ImageDType
 from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -311,6 +311,7 @@ create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 # ** add metadata of KERNEL outputs
 
 def append_metadata(root:UOp, k:UOp):
+  if PROFILE: root.src[0].buffer._metadata = str(k.arg.metadata)
   if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
   return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
 
