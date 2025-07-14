@@ -26,6 +26,12 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
 
 def is_packed(dt:DType) -> bool: return dt.itemsize < 4 and dt.base != dtypes.half
 
+def mem_type(x: UOp) -> str:
+  for _x in x.src[0].toposort():
+    if _x.op is Ops.DEFINE_REG:
+      return _x.arg[0]
+  return "global"
+
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
@@ -66,8 +72,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.load(UPat.var("b"), allow_any_len=True), lambda ctx, b: ctx.render_load(ctx[b], b.dtype)),
     (UPat.store(UPat.var("b"), UPat.var("v"), allow_any_len=True),lambda ctx,b,v:\
      # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
-     f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
-      else f"{ctx[b]} = {ctx[v]};"),
+     f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" \
+      if is_packed(b.src[0].dtype) and mem_type(b) != "register" else f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx")), allow_any_len=True),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
     # fix nan check: 'a != a -> is_nan()'
