@@ -844,8 +844,8 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(k.first_upcast-1, 4, AxisType.UPCAST)  # manual trigger float4 dim
-      k.shift_to(k.first_upcast-1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
+      k.shift_to(1, 4, AxisType.UPCAST)  # manual trigger float4 dim
+      k.shift_to(1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
       return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [13, 9, 17]
