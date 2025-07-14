@@ -75,10 +75,7 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  # Handle LOAD from registers (just return the register value)
-  (UPat(Ops.LOAD, src=(UPat(Ops.DEFINE_REG, arg=("register",)),), allow_any_len=True, name="x"),
-   lambda ctx,x: f"  {ctx[x]} = {ctx[x.src[0]]}  ; load from register"),
-  # Handle LOAD from memory
+  # Handle LOAD from memory (including registers)
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), allow_any_len=True, name="x"),
    lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
@@ -154,14 +151,7 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     local_args: list[str] = []
-    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      # prealloc all STORE to registers
-      if u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register":
-        vc += 1
-        r[u.src[1]] = f"%assign{vc}"
-        assert u.src[0] not in acc_to_assign, "can't store to register twice"
-        acc_to_assign[u.src[0]] = u.src[1]
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
@@ -191,10 +181,18 @@ class LLVMRenderer(Renderer):
               kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} " \
                             f"to [{u.dtype.size} x {ldt(u.dtype)}]*")
           elif u.arg[0] == "register":
-            # Register case - check if it was stored to in the first pass
-            r[u] = r[acc_to_assign.get(u, u.src[0] if len(u.src) > 0 else u)] if u in acc_to_assign else f"%reg_{id(u)}"
+            # Register case - allocate a stack slot for the register
+            r[u] = f"%reg_{u.arg[1]}"
+            kernel.append(f"  {r[u]} = alloca {ldt(u.dtype.base)}, align {u.dtype.base.itemsize}")
       elif u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register":
-        pass  # register stores are already handled by the first pass
+        # Handle register stores normally through STORE operation
+        if u not in r:
+          vc += 1
+          r[u] = f"%v{vc}"
+
+        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
+          raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        kernel.append(cast(str, l))
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -209,13 +207,8 @@ class LLVMRenderer(Renderer):
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
-        # generate the phi nodes for the assigns
-        if u.op is Ops.RANGE:
-          for x in acc_to_assign:
-            if u in x.src:  # if this range is relevant for this acc
-              vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
-              r[x] = f"%acc{vc}"
+        # Phi nodes for registers will be handled by LLVM's register allocation
+        # when using proper LOAD/STORE operations
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
