@@ -311,7 +311,7 @@ create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
 # ** add metadata of KERNEL outputs
 
 def append_metadata(root:UOp, k:UOp):
-  if PROFILE: root.src[0].buffer._metadata = str(k.arg.metadata)
+  if PROFILE and root.src[0].op is Ops.BUFFER: root.src[0].buffer._profile_args["metadata"] = str(k.arg.metadata)
   if not root.metadata or (new_metadata:=tuple(dedup(k.arg.metadata+root.metadata))) == k.arg.metadata: return None
   return root.replace(src=(root.src[0], k.replace(arg=Kernel(k.arg.ast, new_metadata)))+root.src[2:])
 

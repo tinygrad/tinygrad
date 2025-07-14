@@ -107,6 +107,7 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         self.copyin(memoryview(initial_value))
+      if PROFILE: self._profile_args = {"dtype":str(self.dtype), "sz":self.size, "nbytes":self.nbytes}
     else:
       assert base._base is None, "base can't have a base"
       assert device == base.device, "base must have the same device"
@@ -141,11 +142,7 @@ class Buffer:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
       if PROFILE:
         self._prof_num = num = len(Buffer.profile_events)
-        ts = decimal.Decimal(time.perf_counter_ns())/1000
-        try: metadata = self._metadata
-        except AttributeError: metadata = None
-        args = {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes,"metadata":metadata}
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, args))
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", decimal.Decimal(time.perf_counter_ns())/1000, num, self._profile_args))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
