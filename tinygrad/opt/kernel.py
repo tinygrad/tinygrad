@@ -6,6 +6,7 @@ from typing import Optional, cast, Final, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax, AxisType
+from tinygrad.uop.ops import ReduceArgs, parse_reduce_args
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
@@ -500,7 +501,8 @@ class Kernel:
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
-          grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
+          op_args = parse_reduce_args(op.arg)
+          grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), ReduceArgs(op_args.op, grouped_axes, op_args.keepdims, op_args.fuse))
           if op is self.reduceops[-1]: return grouped_reduce
           st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
           return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))

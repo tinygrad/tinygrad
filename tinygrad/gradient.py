@@ -9,7 +9,7 @@ def reduce_gradient(ctx:UOp, ret:UOp):
   if ret.arg[0] == Ops.ADD: return (to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MAX:
     max_is_1s = ret.src[0].ne(to_inp_shape(ret)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
-    div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1]))
+    div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1], keepdims=True))
     return ((max_is_1s/div) * to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
 
@@ -40,7 +40,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip(ret.arg),)),
   # TODO: this cast can be removed by putting the casts around the EXPAND
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
+    (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so),
+                                           keepdims=True).cast(ctx.dtype),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda ctx: (None,)),

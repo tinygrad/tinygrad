@@ -1686,7 +1686,8 @@ class Tensor(MathTrait):
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
-    ret = self._apply_uop(UOp.r, op=op, axis=axis)
+    # Use keepdims=True for backward compatibility with kernel optimization
+    ret = self._apply_uop(UOp.r, op=op, axis=axis, keepdims=True)
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
   def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Tensor:
