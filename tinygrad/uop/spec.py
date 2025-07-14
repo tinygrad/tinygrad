@@ -151,6 +151,8 @@ spec = PatternMatcher([
 
   # early STORE has a <bufview, val>
   (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEFINE_REG),)), UPat())), lambda: True),
+  # STORE to registers (replacement for ASSIGN)
+  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_REG), UPat()), name="x"), lambda x: x.src[0].arg[0] == "register"),
 
   # **** new style load/store ****
 

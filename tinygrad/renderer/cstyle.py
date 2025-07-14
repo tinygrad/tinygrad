@@ -9,7 +9,13 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
-  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: ctx[x.src[0]] if x.arg[0] == "register" else None),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:
+   f"{ctx.render_dtype(x.src[0].dtype)}(0)" if x.arg[0] == "register" and len(x.src) == 1 and x.src[0].op == Ops.CONST else
+   ctx[x.src[0]] if x.arg[0] == "register" and len(x.src) == 1 else
+   # For registers with multiple sources or non-CONST sources, initialize to 0
+   "0.0f" if x.arg[0] == "register" and x.dtype == dtypes.float else
+   "0" if x.arg[0] == "register" else
+   ctx[x] if x.arg[0] == "register" else None),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.ENDRANGE)), lambda ctx: "}"),
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
@@ -178,7 +184,8 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-      if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI} or \
+
+      if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI, Ops.LOAD} or \
         (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
@@ -186,6 +193,17 @@ class CStyleLanguage(Renderer):
           pass
         else:
           l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+        # Special handling for STORE operations that might reference undefined variables
+        if u.op == Ops.STORE and "alu" in l and "= alu" in l:
+          # Check if we're storing an undefined ALU operation
+          # This can happen with register reductions where the ADD is inlined
+          # Try to find a register that should be used instead
+          for reg_u, reg_name in r.items():
+            if reg_name.startswith("acc") and reg_u.op == Ops.DEFINE_REG and reg_u.arg and reg_u.arg[0] == "register":
+              # Replace the undefined alu reference with the register
+              l = l.replace("= alu0", f"= {reg_name}")
+              l = l.replace("= alu1", f"= {reg_name}")
+              break
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
