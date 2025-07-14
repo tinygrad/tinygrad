@@ -30,7 +30,7 @@ if __name__ == "__main__":
       allow_failed -= 1
 
       if allow_failed >= 0:
-        print(f"tokens missmatch at index: {idx}.\n")
+        print(f"tokens mismatch at index: {idx}.\n")
 
         print("simple:  ", color_tokens(simple_tokens))
         print("official:", color_tokens(base_tokens) + "\n")
