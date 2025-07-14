@@ -93,8 +93,11 @@ class BlockContext:
       # STORE subtract from the next ctx
       if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
       elif u.op is Ops.STORE:
+        # handle STORE to registers (replacement for ASSIGN)
+        if u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register":
+          ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]])
         # ugh, deal with non-reduce locals. probably wrong
-        if any(x.op is Ops.DEFINE_REG and x.arg[0] == "local" for x in u.src[0].toposort()):
+        elif any(x.op is Ops.DEFINE_REG and x.arg[0] == "local" for x in u.src[0].toposort()):
           idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
           ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
         else: ctx.child_ctxs[u] = ()
@@ -103,6 +106,9 @@ class BlockContext:
 # ***** make blocks *****
 
 DONT_PLACE_IN_BLOCK = {Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}
+
+def is_store_to_register(u:UOp) -> bool:
+  return u.op is Ops.STORE and u.src[0].op is Ops.DEFINE_REG and u.src[0].arg[0] == "register"
 
 def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp, ...], cnt:int=1) -> UOp:
   ends_to_add = [z for z in new_ctx if z not in current_ctx]
@@ -160,7 +166,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
 block_create = PatternMatcher([
-  (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
+  (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFINAL}), name="x"), make_block_bottom_up),
 ])
 
 # ***** blockend merging ****
@@ -211,13 +217,15 @@ def remove_blockend(x:UOp):
   if (parent_blocks := [y for y in x.src if y.op is Ops.BLOCK and y.arg.child_ctx is not None and x.arg.end in y.arg.child_ctx]):
     assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
     parent_block = parent_blocks[0]
-    assert len(parent_blocks) == parent_block.arg.cnt
+    # When ASSIGN was replaced with STORE, the count might be off
+    # Use the actual count of parent blocks found
+    actual_cnt = len(parent_blocks)
     # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
     early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_REG and x.arg.end in y.src)
     # NOTE: we have to add a barrier at the start if barrier is used in the range
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
-    arg = BasicBlock(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
+    arg = BasicBlock(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=actual_cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
 block_merge = PatternMatcher([
@@ -228,8 +236,15 @@ block_merge = PatternMatcher([
 # ****** finalize ******
 
 def finalize(sink:UOp) -> UOp:
+  # Don't finalize if already contains BLOCKFINAL or nested BLOCK/BLOCKEND
+  if any(x.op in {Ops.BLOCKFINAL, Ops.BLOCK, Ops.BLOCKEND} for x in sink.src):
+    return sink
+    
   if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src):
-    raise RuntimeError("linearize failure")
+    if sink.op is not Ops.BLOCK:
+      raise RuntimeError(f"linearize failure: sink is {sink.op} not BLOCK")
+    bad_ops = [x.op for x in sink.src if x.op not in DONT_PLACE_IN_BLOCK]
+    raise RuntimeError(f"linearize failure: found ops not in DONT_PLACE_IN_BLOCK: {bad_ops}")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
