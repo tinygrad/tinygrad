@@ -60,7 +60,9 @@ ptx_matcher = PatternMatcher([
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
 ])
 
-def mem_type(x: UOp): return 'shared' if any(_x.op is Ops.DEFINE_REG and _x.arg[0] == "local" for _x in x.src[0].toposort()) else 'global'
+def mem_type(x: UOp):
+  if any(_x.op is Ops.DEFINE_REG and _x.arg[0] == "register" for _x in x.src[0].toposort()): return 'register'
+  return 'shared' if any(_x.op is Ops.DEFINE_REG and _x.arg[0] == "local" for _x in x.src[0].toposort()) else 'global'
 
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
@@ -107,25 +109,22 @@ string_rewrite = PatternMatcher([
   ]) if alt.dtype.count > 1 else [
     f"@{ctx.r[gate]} ld.{mem_type(x)}.{ctx.mem_types[x.dtype.scalar()]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
     f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype.scalar()][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
-  # Handle LOAD from registers
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.DEFINE_REG, arg=("register",)),), allow_any_len=True),
-   lambda ctx, x: ctx.r[x.src[0]]),
-  # Handle LOAD from memory
+  # Handle LOAD from memory (including registers)
   (UPat(Ops.LOAD, name="x", src=(UPat.var('loc'),), allow_any_len=True),
-   lambda ctx, x, loc: f"ld.{mem_type(x)}.v{x.dtype.count}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
+   lambda ctx, x, loc: f"mov.pred {ctx.r[x]}, {ctx.r[loc]};" if mem_type(x) == 'register' and x.dtype == dtypes.bool else
+     f"mov.{ctx.types[x.dtype]} {ctx.r[x]}, {ctx.r[loc]};" if mem_type(x) == 'register' else
+     f"ld.{mem_type(x)}.v{x.dtype.count}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
      if x.dtype.count > 1 else f"ld.{mem_type(x)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   (UPat(Ops.DEFINE_REG, name="x", src=(UPat.cvar("pred", dtype=dtypes.bool),), allow_any_len=True), lambda ctx, x, pred: [
     f"setp.ne.s16 {ctx.r[pred]}, {render_val(pred.arg, pred.dtype)}, 0;", f"mov.pred {ctx.r[x]}, {ctx.r[pred]};"]),
   (UPat(Ops.DEFINE_REG, name="x", src=(UPat.cvar("pred"),), allow_any_len=True),
    lambda ctx, x, pred: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(pred.arg, x.dtype)};"),
   (UPat(Ops.RANGE, name="x"), lambda ctx, x: [f"mov.u32 {ctx.r[x]}, 0;", "LOOP_" + f"{ctx.r[x][1:]}:"]),
-  # Handle STORE to registers
-  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_REG, arg=("register",)), UPat.var("val")), name="x"),
-   lambda ctx, x, val: ([f"mov.pred {ctx.r[x.src[0]]}, {ctx.r[val]};"] if val.dtype == dtypes.bool else
-                        f"mov.b{ctx.types[val.dtype][1:]} {ctx.r[x.src[0]]}, {ctx.r[val]};")),
-  # Handle STORE to memory (global/local)
+  # Handle STORE to memory (including registers)
   (UPat(Ops.STORE, name="x", src=(UPat.var("loc"), UPat.var("val")), allow_any_len=True),
-   lambda ctx, x, loc, val: f"st.{mem_type(x)}.v{val.dtype.count}.{ctx.mem_types[val.dtype.scalar()]} [{ctx.r[loc]}+0], {{{', '.join(ctx.r[val])}}};"
+   lambda ctx, x, loc, val: f"mov.pred {ctx.r[loc]}, {ctx.r[val]};" if mem_type(x) == 'register' and val.dtype == dtypes.bool else
+     f"mov.{ctx.types[val.dtype]} {ctx.r[loc]}, {ctx.r[val]};" if mem_type(x) == 'register' else
+     f"st.{mem_type(x)}.v{val.dtype.count}.{ctx.mem_types[val.dtype.scalar()]} [{ctx.r[loc]}+0], {{{', '.join(ctx.r[val])}}};"
      if val.dtype.count > 1 else f"st.{mem_type(x)}.{ctx.mem_types[val.dtype]} [{ctx.r[loc]}+0], {ctx.r[val]};"),
   (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), lambda ctx, x, src0: [
     ctx.code_for_op[Ops.ADD](ctx.r[src0], ctx.r[src0], "1", dtypes.int, ctx.types[dtypes.int]),
