@@ -4,7 +4,7 @@ from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.opt.kernel import Opt, OptOps, Kernel, KernelOptError
-from tinygrad.engine.realize import CompiledRunner, ExecItem
+from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
 
@@ -17,7 +17,7 @@ class TestArange(unittest.TestCase):
     k = Kernel(sched[-1].ast)
     if opts is not None:
       for o in opts: k.apply_opt(o)
-    p = k.to_program()
+    p = get_program(k.get_optimized_ast(), k.opts)
     print(p.name)
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()

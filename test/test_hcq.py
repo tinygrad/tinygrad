@@ -1,10 +1,11 @@
-import unittest, ctypes, struct, os, random
+import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import getenv, CI, mv_address
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
-from tinygrad.engine.realize import get_runner, CompiledRunner
+from tinygrad.runtime.support.system import PCIIfaceBase
+from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
 from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad import Variable
 
@@ -163,7 +164,7 @@ class TestHCQ(unittest.TestCase):
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
     for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, arg=3))
 
-    runner = CompiledRunner(k.to_program())
+    runner = CompiledRunner(get_program(k.get_optimized_ast(), k.opts))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
@@ -534,6 +535,24 @@ class TestHCQ(unittest.TestCase):
     y = nv_dev.signal_t()
     assert type(x) is amd_dev.signal_t
     assert type(y) is nv_dev.signal_t
+
+  def test_multidevice_p2p(self):
+    try:
+      amd_dev = Device["AMD"]
+      if not issubclass(type(amd_dev.iface), PCIIfaceBase): self.skipTest("Not a pci dev")
+    except Exception: self.skipTest("no AMD device, test skipped")
+
+    try:
+      nv_dev = Device["NV"]
+      if not issubclass(type(nv_dev.iface), PCIIfaceBase): self.skipTest("Not a pci dev")
+    except Exception: self.skipTest("no NV device, test skipped")
+
+    def _check_copy(dev1, dev2):
+      buf1 = Tensor.randn(10, 10, device=dev1).realize()
+      buf2 = buf1.to(dev2).realize()
+      np.testing.assert_equal(buf1.numpy(), buf2.numpy(), "p2p failed")
+    _check_copy("AMD", "NV")
+    _check_copy("NV", "AMD")
 
 if __name__ == "__main__":
   unittest.main()

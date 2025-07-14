@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel
+from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
 from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
@@ -33,8 +33,8 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   realized_ast, bufs = helper_realized_ast(r)
   k = Kernel(realized_ast)
   k.apply_tensor_cores(use_tensor_cores, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
-  prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
-  if use_tensor_cores == 1: assert len([uop for uop in k.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  prg = CompiledRunner(replace(get_program(k.get_optimized_ast(), k.opts), device=Device.DEFAULT))
+  if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -100,8 +100,9 @@ class TestLinearizer(unittest.TestCase):
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
     b_t = Tensor.full(st.shape, 3).contiguous().realize()
     lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
 
-    stores = [u for u in lin.uops if u.op is Ops.STORE]
+    stores = [u for u in uops if u.op is Ops.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
@@ -148,76 +149,83 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)).sum()])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
+    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
     # RANGE -> LOAD -> RANGE -> ASSIGN
-    #assert any(x.op is Ops.LOAD for x in lin.uops[ranges[0]:ranges[1]])
+    #assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).expand(2, 2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[np.broadcast_to(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)), (2, 2, 3)).sum()])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
+    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
     # RANGE -> RANGE -> LOAD -> RANGE -> ASSIGN
     # NOTE: nothing should toposort between the first two ranges
     #assert ranges[0]+1 == ranges[1]
-    #assert any(x.op is Ops.LOAD for x in lin.uops[ranges[1]:ranges[2]])
+    #assert any(x.op is Ops.LOAD for x in uops[ranges[1]:ranges[2]])
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
     out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
+    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
-    assert any(x.op in GroupOp.ALU for x in lin.uops[ranges[0]:ranges[1]])
-    assert not any(x.op is Ops.LOAD for x in lin.uops[ranges[0]:ranges[1]])
-    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in lin.uops[ranges[1]:])
+    assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
+    assert not any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
+    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
 
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
     lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
+    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> ASSIGN
-    assert len([x for x in lin.uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
+    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])[0]
-    ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
+    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
     #if getenv("PTX"):
     # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> ASSIGN
-    #  assert lin.uops[ranges[0]-2].op is Ops.LOAD
+    #  assert uops[ranges[0]-2].op is Ops.LOAD
     #  assert ranges[1] == ranges[0]+6
-    #  assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
+    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
     # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> ASSIGN
     #else:
-    #  assert lin.uops[ranges[0]-2].op is Ops.LOAD
+    #  assert uops[ranges[0]-2].op is Ops.LOAD
     #  assert ranges[1] == ranges[0]+3
-    #  assert [x.op for x in lin.uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
+    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
 
   def test_range_outer_op_after_phi(self):
     a = Tensor.randn(4, 1).realize()
     out = a.sum() * a.sum()
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     # RANGE -> LOAD -> ASSIGN -> ALU
-    end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
+    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
     # the INDEX can be first
-    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
+    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
 
   def test_range_outer_op_after_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
+    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     # RANGE -> LOAD -> ASSIGN -> ALU
-    end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
+    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
     # the INDEX can be first
-    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
+    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -228,8 +236,8 @@ class TestLinearizer(unittest.TestCase):
 
     k = Kernel(r.schedule()[-1].ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.DEPRECATED_linearize()
-    num_loads = len([uop for uop in k.uops if uop.op is Ops.LOAD])
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
@@ -241,8 +249,8 @@ class TestLinearizer(unittest.TestCase):
 
     k = Kernel(r.schedule()[-1].ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.DEPRECATED_linearize()
-    num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -253,9 +261,9 @@ class TestLinearizer(unittest.TestCase):
     k = Kernel(r.schedule()[-1].ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    k.DEPRECATED_linearize()
-    accs = [u for u in k.uops if u.op is Ops.DEFINE_REG]
-    stores = [u for u in k.uops if u.op is Ops.STORE]
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    accs = [u for u in uops if u.op is Ops.DEFINE_REG]
+    stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
@@ -267,7 +275,7 @@ class TestLinearizer(unittest.TestCase):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
     k = Kernel(out.schedule()[-1].ast)
     k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
-    prg = k.to_program()
+    prg = get_program(k.get_optimized_ast(), k.opts)
     self.assertEqual(len(prg.src.split("for")), 5)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -297,8 +305,8 @@ class TestLinearizer(unittest.TestCase):
 
     k = Kernel(r.schedule()[-1].ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.DEPRECATED_linearize()
-    num_ops = len([uop for uop in k.uops if uop.op in GroupOp.ALU])
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
   def test_sum_acc_dtype(self):
@@ -356,7 +364,7 @@ class TestLinearizer(unittest.TestCase):
       realized_ast = sched[-1].ast
       kernel = Kernel(realized_ast)
       kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
-      prg = kernel.to_program()
+      prg = get_program(kernel.get_optimized_ast(), kernel.opts)
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and AMD_LLVM:
@@ -447,7 +455,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in k.uops:
+    for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.ASSIGN
 
@@ -458,7 +466,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in k.uops:
+    for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.ASSIGN
@@ -471,7 +479,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in k.uops:
+    for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.ASSIGN
@@ -482,13 +490,14 @@ class TestLinearizer(unittest.TestCase):
     r = (x@y).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
     # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x ASSIGN -> ENDRANGE
-    for u in k.uops:
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    for u in uops:
       if u.op is Ops.ASSIGN:
         assert u.src[1].op in GroupOp.ALU
       # children of ASSIGN are placed after ENDRANGE
       if any(x.op is Ops.ASSIGN for x in u.src):
-        end_range = [i for i, x in enumerate(k.uops) if x.op is Ops.ENDRANGE][0]
-        assert end_range < k.uops.index(u)
+        end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
+        assert end_range < uops.index(u)
 
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes, assert_same_length = True):
@@ -566,7 +575,8 @@ class TestLinearizer(unittest.TestCase):
     # shrink so that the dims do not collapse
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
     k = helper_linearizer_opt(t+1)[0]
-    idxs = dedup([uop for uop in k.uops if uop.op is Ops.SPECIAL])
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg[0])
     assert idxs[0].arg == ('gidx0', 6), idxs[0].arg
     assert idxs[1].arg == ('gidx1', 5), idxs[1].arg
@@ -605,7 +615,7 @@ class TestLinearizer(unittest.TestCase):
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       k = helper_linearizer_opt(t)[-1]
-      uops = list(k.DEPRECATED_linearize().uops)
+      uops = get_program(k.get_optimized_ast(), k.opts).uops
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
@@ -635,8 +645,9 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
     k = helper_linearizer_opt(out)[-1]
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
     # check that the float4 cast collapses
-    store_vals = [u.src[-1] for u in k.uops if u.op is Ops.STORE]
+    store_vals = [u.src[-1] for u in uops if u.op is Ops.STORE]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
 
@@ -659,7 +670,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
-    store_val = [u.src[-1] for u in k.uops if u.op is Ops.STORE][0]
+    store_val = [u.src[-1] for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.VECTORIZE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -672,16 +683,17 @@ class TestLinearizer(unittest.TestCase):
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     k = helper_linearizer_opt(out, opts=[opt])[-1]
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
-    local_stores = [u for u in k.uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
-    global_stores = [u for u in k.uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
-    barrier = [u for u in k.uops if u.op is Ops.BARRIER][0]
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
+    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
+    barrier = [u for u in uops if u.op is Ops.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
       assert store.src[-1].dtype.count > 1 # and store.src[2].op is not Ops.VECTORIZE
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
-    assert len([u for u in k.uops if u.op is Ops.IF and u.src[-1] == barrier]) == 1
+    assert len([u for u in uops if u.op is Ops.IF and u.src[-1] == barrier]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -690,7 +702,8 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
-    stores = [u for u in k.uops if u.op is Ops.STORE]
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    stores = [u for u in uops if u.op is Ops.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
     self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
@@ -715,7 +728,7 @@ class TestLinearizer(unittest.TestCase):
         Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)
     ]
     k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
-    out = [u for u in k.uops if u.op is Ops.STORE][0]
+    out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -733,7 +746,7 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
-    out = [u for u in k.uops if u.op is Ops.STORE][0]
+    out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
@@ -770,9 +783,9 @@ class TestFloat4(unittest.TestCase):
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) == (4, 2)
+    assert TestFloat4.count_float4(uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_amx(self):
@@ -784,19 +797,16 @@ class TestFloat4(unittest.TestCase):
       s = c.schedule()[0]
       k = Kernel(s.ast)
       k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
-      k.upcast()
-      k.upcast()
-      k.DEPRECATED_linearize()
-      return k
+      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=shift))
+      return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
-    excepted_upcast_size = [4, 8, 16]
+    expected_upcast_size = [4, 8, 16]
     expected_output = [(6,3), (2,1), (2,1)]
 
     for i in range(len(sizes)):
-      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), expected_upcast_size[i]) == expected_output[i]
 
   def test_float4_unaligned_load(self):
     a = Tensor.empty(9).realize().shrink(((1, 9),))
@@ -821,9 +831,9 @@ class TestFloat4(unittest.TestCase):
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=2))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) == (0, 2)
+    assert TestFloat4.count_float4(uops) == (0, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
   def test_float4_multidim_unaligned_load_amx(self):
@@ -834,20 +844,17 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
-      k.upcast()
-      k.shift_to(len(k.full_unupcasted_shape)-1, shift, insert_before=k.shape_len-1)
-      k.upcast()
-      k.DEPRECATED_linearize()
-      return k
+      k.shift_to(k.first_upcast-1, 4, AxisType.UPCAST)  # manual trigger float4 dim
+      k.shift_to(k.first_upcast-1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
+      return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
-    excepted_upcast_size = [4, 8, 16]
+    expected_upcast_size = [4, 8, 16]
     expected_output = [(0,3), (0,1), (0,1)]
 
     for i in range(len(sizes)):
-      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]).uops, excepted_upcast_size[i]) == expected_output[i]
+      assert TestFloat4.count_float4(kernel_for_shape(sizes[i], shifts[i]), expected_upcast_size[i]) == expected_output[i]
 
   def test_float4_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 8).realize()
@@ -859,9 +866,9 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) == (0, 0)
+    assert TestFloat4.count_float4(uops) == (0, 0)
 
   def test_float4_multidim_sometimes_unaligned(self):
     a = Tensor.empty(1, 1, 7).realize()
@@ -876,26 +883,9 @@ class TestFloat4(unittest.TestCase):
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) in {(0,1), (1,1)}
-
-  @unittest.skip("no longer supported")
-  def test_float4_noncontiguous(self):
-    a = Tensor.empty(4, 2).realize()
-    b = Tensor.empty(4, 2).realize()
-    c = a + b
-
-    # we will upcast the top axis of sz 4. they should not be coalesced into float4,
-    # since the top axis is not contiguous.
-
-    s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.shift_to(0, 4, top=True)  # top axes are float4 axes
-    k.upcast()
-    k.DEPRECATED_linearize()
-
-    assert TestFloat4.count_float4(k.uops) == (0, 0)
+    assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
 
   def test_float4_expand(self):
     a = Tensor.empty(9).realize().shrink(((1, 9),))
@@ -908,9 +898,9 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) == (0, 1)
+    assert TestFloat4.count_float4(uops) == (0, 1)
 
   def test_float4_heterogeneous(self):
     a = Tensor.empty(8).realize()
@@ -922,9 +912,9 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     k = Kernel(s.ast)
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    k.DEPRECATED_linearize()
+    uops = get_program(k.get_optimized_ast(), k.opts).uops
 
-    assert TestFloat4.count_float4(k.uops) == (1, 1)
+    assert TestFloat4.count_float4(uops) == (1, 1)
 
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
@@ -1109,7 +1099,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   outbufs = [real_bufs[x.src[0].base.arg] for x in realized_ast.src]
   device = real_bufs[0].device
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=device))
+  def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.get_optimized_ast(), k.opts), device=device))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()

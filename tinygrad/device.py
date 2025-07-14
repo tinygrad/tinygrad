@@ -168,6 +168,9 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+  def as_dmaref(self) -> DMARef:
+    assert hasattr(self.allocator, "_as_dmaref"), f"Device {self.device} doesn't support DMA"
+    return self.allocator._as_dmaref(self._buf)
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
@@ -198,6 +201,19 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
+
+@dataclass(frozen=True)
+class DMACPURef:
+  addr: int
+  size: int
+
+@dataclass(frozen=True)
+class DMAFdRef:
+  fd: int
+  offset: int
+  size: int
+
+DMARef = DMACPURef|DMAFdRef
 
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 
@@ -255,6 +271,7 @@ class _MallocAllocator(LRUAllocator['Compiled']):
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
     return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
+  def _as_dmaref(self, buf): return DMACPURef(ctypes.addressof(buf), ctypes.sizeof(buf))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
