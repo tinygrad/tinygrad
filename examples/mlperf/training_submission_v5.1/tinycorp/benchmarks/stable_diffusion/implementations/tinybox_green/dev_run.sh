@@ -8,8 +8,7 @@
 # dependencies
 # pip install tqdm
 
-#export PYTHONPATH="." NV=1
-export PYTHONPATH="." CPU=1
+export PYTHONPATH="." NV=1
 
 #export MODEL="bert"
 export MODEL="stable_diffusion"

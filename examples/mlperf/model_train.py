@@ -1356,9 +1356,12 @@ def train_llama3():
 
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
+  from extra.models.clip import FrozenOpenClipEmbedder
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   from examples.stable_diffusion import get_alphas_cumprod
+  from tinygrad.nn.state import load_state_dict
+  device = Device.DEFAULT = "NV"
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1382,37 +1385,60 @@ def train_stable_diffusion():
     "ctx_dim": 1024,
     "use_linear": True,
   }
-  model = UNetModel(**unet_params)
+  unet_model = UNetModel(**unet_params)
 
-  optimizer = AdamW(get_parameters(model))
+  # For loading weights from mlperf reference
+  # TODO: combine with UNetModel like in examples/stable_diffusion.py
+  class ClipContainer:
+    def __init__(self):
+      clip_config = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True}
+      self.cond_stage_model = FrozenOpenClipEmbedder(**clip_config)
+  clip_model = ClipContainer()
+  clip_weights = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/training_init_model.safetensors")
+  load_state_dict(clip_model, clip_weights)
+
+  optimizer = AdamW(get_parameters(unet_model))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
   scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
   # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   scheduler.step()
 
+  alphas_cumprod = get_alphas_cumprod().to(device)
+  sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
+  sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
+
   @TinyJit
   @Tensor.train()
-  def train_step(model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
+  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, noise:Tensor, x_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
     optimizer.zero_grad()
+
+    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * x_true
+    out = model(x_noised, t, c)
+    loss = ((out - v_true) ** 2).mean() / v_true.shape[0]
+    loss.backward()
 
     optimizer.step()
     scheduler.step()
-    #return loss
+    return loss
 
   dl = batch_load_train_stable_diffusion(BS)
   # training loop, one iteration = one epoch
-  for batch in dl:
+  for i, batch in enumerate(dl):
+    start = time.perf_counter()
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
+    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half).to(device), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
     latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
-    alphas_cumprod = get_alphas_cumprod()
-    sqrt_alphas_cumprod = alphas_cumprod.sqrt()
-    sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt()
-    t = Tensor.randint(0, alphas_cumprod.shape[0], (latent.shape[0],), dtype=dtypes.long)
+    t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
     noise = Tensor.randn_like(latent)
     latent_with_noise = sqrt_alphas_cumprod[t] * latent + sqrt_one_minus_alphas_cumprod[t] * noise
-    break
+
+    # encode prompt
+    prompt = batch['txt']
+    context = clip_model.cond_stage_model(prompt)
+
+    loss = train_step(latent_with_noise, t, context, noise, latent, unet_model, optimizer, scheduler)
+    print(f"epoch {i}: loss: {loss.item():.3f}, elapsed: {(time.perf_counter() - start):0.2f} sec")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
