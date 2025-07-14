@@ -482,7 +482,7 @@ class Kernel:
             else:
               reordered.extend(group)
 
-                    for upcast_group in upcast_groups:
+          for upcast_group in upcast_groups:
             reordered.extend(upcast_group)
 
           return reordered
