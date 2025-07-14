@@ -131,7 +131,7 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda x: (
     (x.arg[0] == "global" and isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local and len(x.src) == 0) or
     (x.arg[0] == "local" and isinstance(x.dtype, PtrDType) and x.dtype.local and len(x.src) == 0) or
-    (x.arg[0] == "register" and len(x.src) >= 1 and all(y.op is Ops.RANGE for y in x.src[1:]) and x.src[0].dtype == x.dtype)
+    (x.arg[0] == "register" and len(x.src) >= 1 and all(y.op in {Ops.RANGE, Ops.BLOCKFINAL, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCK} for y in x.src[1:]) and x.src[0].dtype == x.dtype)
   )),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 

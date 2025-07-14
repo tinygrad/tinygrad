@@ -250,80 +250,8 @@ def finalize(sink:UOp) -> UOp:
     bad_ops = [x.op for x in sink.src if x.op not in DONT_PLACE_IN_BLOCK]
     raise RuntimeError(f"linearize failure: found ops not in DONT_PLACE_IN_BLOCK: {bad_ops}")
 
-  # Fix DEFINE_REG operations that have BLOCK or BLOCKFINAL sources
-  # This can happen when RANGE operations are wrapped in BLOCKs during block creation
-  fixed_sources = []
-  additional_sources = []  # Sources that need to be added to the list
-
-  for src in sink.src:
-    if src.op == Ops.DEFINE_REG and src.arg[0] == "register":
-      # Check if any source is a BLOCK or BLOCKFINAL that contains a RANGE
-      new_src = []
-      for s in src.src:
-        if s.op == Ops.BLOCK and len(s.arg.lst) > 0 and s.arg.lst[0].op == Ops.RANGE:
-          # Replace BLOCK source with the RANGE inside it
-          new_src.append(s.arg.lst[0])
-        elif s.op == Ops.BLOCKFINAL and hasattr(s.arg, 'lst') and len(s.arg.lst) > 0:
-          # Check if this BLOCKFINAL contains just CONST and RANGE
-          if len(s.arg.lst) == 2 and s.arg.lst[0].op == Ops.CONST and s.arg.lst[1].op == Ops.RANGE:
-            # This is likely the RANGE we need, but we also need the CONST
-            new_src.append(s.arg.lst[1])
-            # Make sure the CONST is in our sources
-            if s.arg.lst[0] not in fixed_sources and s.arg.lst[0] not in sink.src:
-              additional_sources.append(s.arg.lst[0])
-          else:
-            new_src.append(s)
-        else:
-          new_src.append(s)
-      if new_src != list(src.src):
-        src = src.replace(src=tuple(new_src))
-    fixed_sources.append(src)
-
-  # Add any additional sources we found
-  fixed_sources.extend(additional_sources)
-
   # place the early things
-  # For DEFINE_REG with sources, ensure sources come before the DEFINE_REG
-  early_things = dedup(fixed_sources)
-
-  # Separate DEFINE_REGs with sources from other operations
-  define_regs_with_sources = []
-  other_ops = []
-  for op in early_things:
-    if op.op == Ops.DEFINE_REG and len(op.src) > 0:
-      define_regs_with_sources.append(op)
-    else:
-      other_ops.append(op)
-
-  # Sort other ops
-  sorted_others = sorted(other_ops, key=lambda x: x.tuplize)
-
-  # For each DEFINE_REG, ensure its sources are in the sorted list
-  final_early = []
-  added = set()
-  for op in sorted_others:
-    if op not in added:
-      final_early.append(op)
-      added.add(op)
-
-  # Collect all ops that will be in the main list to avoid duplicates
-  main_lst = list(sink.arg.lst)
-  main_ops_set = set(main_lst)
-
-  # Now add DEFINE_REGs, ensuring their sources are already added
-  for dr in sorted(define_regs_with_sources, key=lambda x: x.tuplize):
-    # Add any sources that aren't already added and aren't in main list
-    for src in dr.src:
-      if src not in added and src.op in {Ops.CONST, Ops.RANGE} and src not in main_ops_set:
-        final_early.append(src)
-        added.add(src)
-    # Add the DEFINE_REG itself
-    if dr not in added:
-      final_early.append(dr)
-      added.add(dr)
-
-  lst = final_early + main_lst
-
+  lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)
   return UOp(Ops.BLOCKFINAL, arg=BasicBlock(tuple(lst)))
 
 pm_finalize = PatternMatcher([(UPat(Ops.BLOCK, name="sink"), finalize)])
