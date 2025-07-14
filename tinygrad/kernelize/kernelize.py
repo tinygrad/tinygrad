@@ -288,6 +288,16 @@ replace_globals = PatternMatcher([
   (UPat(Ops.MSTACK, name="x"), lambda x: x.src[0]),
 ])
 
+def check_kernel_buffer_limit(ast:UOp, device:str) -> None:
+  """Check if kernel exceeds device buffer limits, counting only global/local DEFINE_REG instances."""
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return
+
+  # Count DEFINE_REG operations that are global or local (not register)
+  define_regs = [u for u in ast.toposort() if u.op is Ops.DEFINE_REG and u.arg[0] in {"global", "local"}]
+  # NOTE: -1 for the output buffer
+  if len(define_regs) > MAX_BUFS-1:
+    raise RuntimeError(f"Kernel exceeds device buffer limit: {len(define_regs)} > {MAX_BUFS-1} (device={device})")
+
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace global memory ops with the BUFFER they write to
@@ -304,6 +314,13 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
+
+  # Check buffer limits after DEFINE_REG operations are created
+  device = k.src[0].device if k.src else None
+  if device:
+    device_str = device if isinstance(device, str) else device[0].split(":")[0]
+    check_kernel_buffer_limit(ast, device_str)
+
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
@@ -396,12 +413,15 @@ def limit_bufs(root:UOp):
   device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
   # count number of unique buffers flowing into this op
+  # NOTE: This is a pre-check at tensor level. The actual buffer limit is enforced in fix_kernel_ast
+  # after DEFINE_REG operations are created, where we can properly filter by arg[0]
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     if (is_load:=(u.op in {Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer
+  # Use a more conservative check here since we don't know which will become registers yet
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
