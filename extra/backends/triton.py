@@ -91,7 +91,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == Ops.DEFINE_REG: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == Ops.CONST: r[u] = define_scalar([], dtype, args)
     elif uop == Ops.ASSIGN:
-      # TODO: ASSIGN should be replaced with STORE for registers 
+      # TODO: ASSIGN should be replaced with STORE for registers
       kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
       r[u] = r[vin[0]]
     elif uop == Ops.STORE:
