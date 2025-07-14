@@ -1358,6 +1358,7 @@ def train_stable_diffusion():
   from extra.models.unet import UNetModel
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  from examples.stable_diffusion import get_alphas_cumprod
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1405,6 +1406,12 @@ def train_stable_diffusion():
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
     latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
+    alphas_cumprod = get_alphas_cumprod()
+    sqrt_alphas_cumprod = alphas_cumprod.sqrt()
+    sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt()
+    t = Tensor.randint(0, alphas_cumprod.shape[0], (latent.shape[0],), dtype=dtypes.long)
+    noise = Tensor.randn_like(latent)
+    latent_with_noise = sqrt_alphas_cumprod[t] * latent + sqrt_one_minus_alphas_cumprod[t] * noise
     break
 
 if __name__ == "__main__":
