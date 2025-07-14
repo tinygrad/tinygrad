@@ -453,10 +453,10 @@ class Kernel:
         # NOTE: should group_for_reduces be added to the local_dims?
         kernel_name = ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override
         # Reorder axis_types to put UPCAST before REDUCE while preserving all other ordering
-        def reorder_axis_types(axis_types):
-          groups = []
-          current_group = []
-          current_type = None
+        def reorder_axis_types(axis_types: list[AxisType]) -> list[AxisType]:
+          groups: list[tuple[AxisType, list[AxisType]]] = []
+          current_group: list[AxisType] = []
+          current_type: AxisType | None = None
 
           for axis_type in axis_types:
             if axis_type != current_type:
@@ -468,8 +468,8 @@ class Kernel:
           if current_group:
             groups.append((current_type, current_group))
 
-          reordered = []
-          upcast_groups = []
+          reordered: list[AxisType] = []
+          upcast_groups: list[list[AxisType]] = []
 
           for axis_type, group in groups:
             if axis_type == AxisType.UPCAST:
