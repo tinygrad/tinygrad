@@ -452,7 +452,43 @@ class Kernel:
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
         kernel_name = ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override
-        return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
+        # Reorder axis_types to put UPCAST before REDUCE while preserving all other ordering
+        def reorder_axis_types(axis_types):
+          groups = []
+          current_group = []
+          current_type = None
+          
+          for axis_type in axis_types:
+            if axis_type != current_type:
+              if current_group:
+                groups.append((current_type, current_group))
+              current_group = []
+              current_type = axis_type
+            current_group.append(axis_type)
+          if current_group:
+            groups.append((current_type, current_group))
+          
+          reordered = []
+          upcast_groups = []
+          
+          for axis_type, group in groups:
+            if axis_type == AxisType.UPCAST:
+              upcast_groups.append(group)
+            elif axis_type == AxisType.REDUCE and upcast_groups:
+              for upcast_group in upcast_groups:
+                reordered.extend(upcast_group)
+              upcast_groups = []
+              reordered.extend(group)
+            else:
+              reordered.extend(group)
+        
+          for upcast_group in upcast_groups:
+            reordered.extend(upcast_group)
+          
+          return reordered
+        
+        reordered_axis_types = reorder_axis_types(self.axis_types)
+        return ret.replace(arg=KernelInfo(kernel_name, tuple(reordered_axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
         axes = tuple(i for i in range(0, self.shape_len) if self.axis_types[i] in {AxisType.REDUCE, AxisType.UNROLL} and
