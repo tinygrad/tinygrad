@@ -2,11 +2,12 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -253,14 +254,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
-  def r(self, op:Ops, axis:tuple[int, ...]):
+  def r(self, op:Ops, axis:tuple[int, ...], permute=True):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
-    if move_early:
-      permute = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
-      ret = self.permute(permute)
+    if move_early and permute:
+      permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
+      ret = self.permute(permaxis)
       new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
       assert len(axis) == len(new_axis)
     else:
@@ -272,7 +273,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
-  def gbarrier(self): return self.alu(Ops.GBARRIER)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
@@ -400,7 +400,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
     buffers[self] = ret
-    if PROFILE and isinstance(ret, Buffer): ret._uop_ref = self.src[0].arg
     return ret
   @property
   def realized(self) -> Optional[Buffer|MultiBuffer]:
@@ -508,8 +507,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    # TODO: incorrect for bool and unsigned because CAST is not monotone
-    if self.op is Ops.CAST: return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
+    # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
+    if self.op is Ops.CAST and self.dtype in (dtypes.floats+dtypes.sints):
+      return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -527,17 +527,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
-  global_dims: int = 0          # number of global dimensions (this is remapping RANGE to SPECIAL)
-  local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
+  axis_types: tuple[AxisType, ...] = tuple()
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+  @property
+  def global_dims(self): return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
+  @property
+  def local_dims(self): return sum([1 for x in self.axis_types if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)])
 
 # ******** ops in python ********
 
@@ -770,13 +775,6 @@ class TrackedGraphRewrite:
   depth:int                              # depth if it's a subrewrite
   bottom_up:bool
 
-@dataclass(frozen=True)
-class TracingKey:
-  display_name:str                       # display name of this trace event
-  keys:tuple[str, ...]=()                # optional keys to search for related traces
-  fmt:str|None=None                      # optional detailed formatting
-  cat:str|None=None                      # optional category to color this by
-
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
@@ -795,8 +793,6 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
       if TRACK_MATCH_STATS >= 2:
         tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
-      # late import!
-      from tinygrad.device import cpu_profile
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
@@ -825,7 +821,8 @@ def track_matches(func):
       depth = len(active_rewrites)
       tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    ret = func(*args, **kwargs)
+    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
+      ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret
   return _track_func

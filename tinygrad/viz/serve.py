@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal, codecs
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, TracingKey, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -14,7 +15,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
-               Ops.ALLREDUCE: "#ff40a0", Ops.GBARRIER: "#FFC14D", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0"}
+               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D"}
 
 # VIZ API
 
@@ -92,46 +93,21 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
     if not ctx.bottom_up: next_sink = new_sink
 
-# map Ops.UNIQUE to locations in viz
-kmap:dict[int, dict] = {}
-revmap:dict[UOp, int] = {}
-def build_kmap():
-  for i,c in enumerate(ctxs):
-    if not c["name"].startswith("Schedule"): continue
-    # *** 1. map all buffers to kernels in the large graph
-    for j,step in enumerate(c["steps"]):
-      if step["name"] == "create_ast":
-        kernel_graph = _reconstruct(contexts[1][i][j].sink)
-        for u in kernel_graph.toposort():
-          if u.op is Ops.ASSIGN:
-            kernel = u.src[1]
-            unique = u.src[0].src[0].arg
-            kmap[unique] = {"metadata":str(kernel.arg.metadata), "ref":[]}
-            revmap.setdefault(kernel.arg.ast, []).append(unique)
-    # *** 2. find asts (small graphs)
-    for j,step in enumerate(c["steps"]):
-      if step["name"] == "replace globals":
-        uop = _reconstruct(contexts[1][i][j].sink)
-        for buf in revmap.get(uop, []):
-          kmap[buf]["ref"].append((i, j+1))
-      # *** 3. find children (small asts)
-      if step["name"] == "replace buffer":
-        uop = _reconstruct(contexts[1][i][j].sink)
-        for u in uop.toposort():
-          if u.op is Ops.BUFFER: kmap.setdefault(buf, {"ref":[], "metadata":None})["ref"].append((i, j))
-def get_buffer_refs(unique:int) -> dict:
-  if not kmap: build_kmap()
-  return kmap.get(unique, {"re":[], "metadata":None})
-
 # Profiler API
 
+device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
+def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
+
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
-    if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
-    if isinstance(e, ProfileGraphEvent):
-      for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    elif isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
+    elif isinstance(e, ProfileGraphEvent):
+      cpu_ts = []
+      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
+      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
+      for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -159,9 +135,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      if (uop_ref:=e.arg.get("uop_ref")):
-        for k,v in get_buffer_refs(uop_ref).items(): e.arg[k] = v
-      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg, "st":int(e.st)}
+      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
       step += 1
       mem += e.arg["nbytes"]
@@ -170,7 +144,6 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
       timestamps.append(int(e.st))
       step += 1
       mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
-      removed["arg"]["alive_for"] = float(e.st-decimal.Decimal(removed["st"]))
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
@@ -184,17 +157,14 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
-  devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  for ev in profile:
+    if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   min_ts:int|None = None
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
-    time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
-    # ProfilePointEvent records perf_counter, offset other events by GPU time diff
-    st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
-    et = st if en is None else int(en+time_diff)
-    dev_events.setdefault(e.device,[]).append((st, et, 0. if en is None else float(en-ts), e))
+    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
