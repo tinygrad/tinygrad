@@ -28,4 +28,6 @@ export BASEDIR="/home/hooved/train-sd/training/stable_diffusion/datasets"
 #export WANDB=1 PARALLEL=0
 export PARALLEL=0
 
+export LIMIT_GPU_RAM=1
+
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
