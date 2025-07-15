@@ -99,7 +99,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         del UOpMetaClass.ucache[k]
     except AttributeError: pass
   def __reduce__(self):
-    args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
+    # Convert ReduceArgs back to tuple format for backward compatibility with process replay
+    arg = self.arg
+    if self.op is Ops.REDUCE_AXIS and isinstance(arg, ReduceArgs):
+      # Convert back to legacy tuple format for pickle compatibility
+      if arg.fuse:
+        arg = (arg.op, arg.axes, arg.fuse)
+      else:
+        arg = (arg.op, arg.axes)
+    args = [self.op, self.dtype, self.src, arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
