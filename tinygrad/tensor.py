@@ -1965,7 +1965,7 @@ class Tensor(MathTrait):
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def keccak(self, cfg:str|tuple[int, int] = "sha3_256"):
+  def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
     Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
 
@@ -2014,7 +2014,7 @@ class Tensor(MathTrait):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
-    return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
+    return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
