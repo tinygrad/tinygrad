@@ -24,10 +24,10 @@ class ReduceArgs(NamedTuple):
 def parse_reduce_args(arg):
   if isinstance(arg, ReduceArgs):
     return arg
-  # Legacy 2-tuple: (op, axes) - maintains old keepdims=True behavior
+  # Legacy 2-tuple: (op, axes) - internally uses keepdims=True for compatibility
   if len(arg) == 2:
     return ReduceArgs(arg[0], arg[1], keepdims=True, fuse=False)
-  # Legacy 3-tuple: (op, axes, fuse) - maintains old keepdims=True behavior
+  # Legacy 3-tuple: (op, axes, fuse) - internally uses keepdims=True for compatibility
   if len(arg) == 3:
     return ReduceArgs(arg[0], arg[1], keepdims=True, fuse=arg[2])
   raise ValueError(f"Invalid reduce args: {arg}")
@@ -178,10 +178,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.REDUCE_AXIS | Ops.WMMA:
         if self.op is Ops.REDUCE_AXIS:
           args = parse_reduce_args(self.arg)
-          if args.keepdims:
-            shape = src_sts[0].reduce(args.axes)  # Keep dims as 1
-          else:
-            shape = tuple(s for i, s in enumerate(src_sts[0].shape) if i not in args.axes)
+          # Always use keepdims=True behavior for shape tracking in kernel
+          shape = src_sts[0].reduce(args.axes)  # Keep dims as 1
         else:
           shape = src_sts[0].reduce(self.axis_arg)
       case _: shape = src_sts[0].shape
@@ -298,10 +296,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert len(axis) == len(new_axis)
     else:
       ret, new_axis = self, axis
-    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, keepdims=keepdims))
-    # Only reshape if keepdims=True (legacy behavior)
-    if keepdims:
-      return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    # Always create REDUCE_AXIS with keepdims=True internally for kernel compatibility
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, keepdims=True, fuse=False))
+    # Always reshape to add 1s in reduced dimensions
+    ret = ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    # If keepdims=False, squeeze out the singleton dimensions
+    if not keepdims:
+      ret = ret.reshape(tuple([x for i,x in enumerate(self.shape) if i not in axis]))
     return ret
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
