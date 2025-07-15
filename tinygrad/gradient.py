@@ -1,17 +1,18 @@
 from typing import cast
 import math, dataclasses
 from tinygrad.dtype import dtypes, sum_acc_dtype
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, parse_reduce_args
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   def to_inp_shape(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
-  if ret.arg[0] == Ops.ADD: return (to_inp_shape(ctx),)
-  if ret.arg[0] == Ops.MAX:
+  args = parse_reduce_args(ret.arg)
+  if args.op == Ops.ADD: return (to_inp_shape(ctx),)
+  if args.op == Ops.MAX:
     max_is_1s = ret.src[0].ne(to_inp_shape(ret)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
-    div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1], keepdims=True))
+    div = to_inp_shape(max_is_1s.r(Ops.ADD, args.axes, keepdims=True))
     return ((max_is_1s/div) * to_inp_shape(ctx),)
-  if ret.arg[0] == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
+  if args.op == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([

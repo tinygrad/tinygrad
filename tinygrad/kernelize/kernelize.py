@@ -390,7 +390,7 @@ def fuse_arange(root:UOp):
   if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
   for r in local_arange:
     # skip if already fused
-    if len(r.arg) > 2: continue
+    if parse_reduce_args(r.arg).fuse: continue
     q = list(local_children[r])
     while q:
       u = q.pop()
