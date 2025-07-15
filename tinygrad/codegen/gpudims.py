@@ -70,4 +70,6 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
+  # remove SPECIAL ENDRANGE
+  (UPat(Ops.ENDRANGE, src=(UPat(Ops.SPECIAL),), allow_any_len=True, name="x"), lambda x: UOp.sink(*x.src[1:]))
 ])
