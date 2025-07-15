@@ -1,5 +1,5 @@
 from tinygrad import Device, Context
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.helpers import getenv, colorize_float
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.opt.search import bufs_from_lin
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     dev.compiler = ClangJITCompiler(opt_args=['-O1', '-march=native'])
     lin = ast_str_to_lin(ast, opts=dev.renderer)
     lin.apply_opts(hand_coded_optimizations(lin))
-    clang_prg = CompiledRunner(lin.to_program())
+    clang_prg = CompiledRunner(get_program(lin.get_optimized_ast(), lin.opts))
 
     bufs = bufs_from_lin(lin)
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
       dev.compiler = ClangJITCompiler(lang_args=['assembler'] + (['-masm=intel']) if isinstance(asm, X86Renderer) else [])
       lin = ast_str_to_lin(ast, opts=asm)
       lin.apply_opts(hand_coded_optimizations(lin))
-      asm_prg = CompiledRunner(lin.to_program())
+      asm_prg = CompiledRunner(get_program(lin.get_optimized_ast(), lin.opts))
 
     tm_clang, tm_asm = [], []
     # warmup
