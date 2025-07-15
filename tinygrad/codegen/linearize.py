@@ -92,9 +92,9 @@ class BlockContext:
       # RANGE/IF add to the next ctx
       # STORE/ASSIGN subtract from the next ctx
       if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
-      elif u.op is Ops.STORE:
-        # STORE says what RANGEs it closes
-        ctx.child_ctxs[u] = tuple([x for x in ctx.block_ctxs[u] if x not in u.src[2:]])
+      elif u.op is Ops.ENDRANGE:
+        # ENDRANGE says what RANGEs it closes
+        ctx.child_ctxs[u] = tuple([x for x in ctx.block_ctxs[u] if x not in u.src])
     return ctx
 
 # ***** make blocks *****
@@ -106,8 +106,9 @@ def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
-    end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
-    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
+    base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock((), tuple(new_ctx), end=r, cnt=cnt))
+    #end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+    #base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
   return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):

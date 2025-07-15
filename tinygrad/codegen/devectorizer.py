@@ -307,6 +307,9 @@ pm_render = PatternMatcher([
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
+  # split all ENDRANGEs
+  (UPat(Ops.ENDRANGE, name="x", allow_any_len=True), lambda x: UOp(Ops.ENDRANGE, src=tuple([y for y in x.src if y.op is not Ops.RANGE])+(rngs[0],))
+    if len(rngs:=[y for y in x.src if y.op is Ops.RANGE]) > 1 else None)
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***
