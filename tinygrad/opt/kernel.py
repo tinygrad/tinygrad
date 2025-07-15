@@ -180,14 +180,14 @@ class Kernel:
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
-  # insert_before : place to insert the new stuff
-  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_before:int|None=None):
-    if insert_before is None: insert_before = self.shape_len
-    self.axis_types.insert(insert_before, new_type)
+  # insert_at : place to insert the new stuff
+  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
+    if insert_at is None: insert_at = self.shape_len
+    self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
-    if move_axis < insert_before: insert_before += 1
+    if move_axis < insert_at: insert_at += 1
     def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
-    new_axes = [i for i in range(insert_before) if i != move_axis]+[move_axis]+[i for i in range(insert_before, self.shape_len+1) if i != move_axis]
+    new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
     self.reshape(new_shape_fxn)
     self.permute(new_axes)
 
@@ -294,22 +294,22 @@ class Kernel:
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(axis < self.global_dims, "local is for globals")
-      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.axis_types[axis] is AxisType.REDUCE, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
-      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=min(self.axes_of(AxisType.REDUCE)))
+      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_at=min(self.axes_of(AxisType.REDUCE)))
     elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
-      self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
