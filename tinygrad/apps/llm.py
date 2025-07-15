@@ -121,7 +121,9 @@ class Transformer:
     return sample_with_temperature(logits, temperature)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos, temperature)
+    use_jit = getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp)
+    forward_fn = self.forward_jit if use_jit else self.forward
+    return forward_fn(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:

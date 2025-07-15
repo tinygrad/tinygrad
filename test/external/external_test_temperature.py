@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 from tinygrad import Tensor
 from tinygrad.apps.llm import sample_with_temperature, Transformer
 
@@ -24,11 +23,11 @@ class TestTemperature(unittest.TestCase):
 
   def test_temperature_distribution(self):
     logits = Tensor([1.0, 1.0, 4.0, 1.0])
-    
+
     def get_best_ratio(temperature, samples=50):
       results = [int(sample_with_temperature(logits, temperature).item()) for _ in range(samples)]
       return sum(1 for r in results if r == 2) / len(results)
-    
+
     low_temp_ratio = get_best_ratio(0.1)
     high_temp_ratio = get_best_ratio(2.0)
     self.assertGreater(low_temp_ratio, high_temp_ratio)
@@ -45,10 +44,10 @@ class TestTemperature(unittest.TestCase):
 
   def test_extreme_temperatures(self):
     logits = Tensor([1.0, 2.0, 3.0])
-    
+
     result_low = sample_with_temperature(logits, 1e-8)
     self.assertEqual(int(result_low.item()), 2)
-    
+
     result_high = sample_with_temperature(logits, 100.0)
     self.assertIn(int(result_high.item()), [0, 1, 2])
 
@@ -56,7 +55,7 @@ class TestTemperature(unittest.TestCase):
     import inspect
     forward_sig = inspect.signature(Transformer.forward)
     self.assertIn('temperature', forward_sig.parameters)
-    
+
     generate_sig = inspect.signature(Transformer.generate)
     self.assertIn('temperature', generate_sig.parameters)
     self.assertEqual(generate_sig.parameters['temperature'].default, 0.0)
@@ -77,14 +76,14 @@ class TestTemperatureStatistics(unittest.TestCase):
     logits = Tensor([1.0, 3.0, 2.0, 4.0])
     temperatures = [0.1, 0.5, 1.0, 2.0]
     ratios = []
-    
+
     for temp in temperatures:
       results = [int(sample_with_temperature(logits, temp).item()) for _ in range(30)]
       best_ratio = sum(1 for r in results if r == 3) / len(results)
       ratios.append(best_ratio)
-    
+
     for i in range(len(ratios) - 1):
       self.assertGreaterEqual(ratios[i], ratios[i + 1])
 
 if __name__ == '__main__':
-  unittest.main() 
+  unittest.main()
