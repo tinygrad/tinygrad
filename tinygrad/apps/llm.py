@@ -41,6 +41,12 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   y2 = x[..., 0] * sin + x[..., 1] * cos
   return Tensor.stack(y1, y2, dim=-1).reshape(B, H, T, Hd)
 
+def sample_with_temperature(logits: Tensor, temperature: float) -> Tensor:
+  """Simple temperature sampling. Use greedy (argmax) if temperature is very low."""
+  if temperature < 1e-6:
+    return logits.argmax(-1, keepdim=True)
+  return (logits / temperature).softmax(-1).multinomial()
+
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0):
     self.n_heads      = n_heads
@@ -108,14 +114,14 @@ class Transformer:
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:float=0.0) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    # TODO: add temperature
-    return self.output(self.output_norm(x))[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    logits = self.output(self.output_norm(x))[:, -1, :]  # (B, vocab_size)
+    return sample_with_temperature(logits, temperature)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
-    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0, temperature:float=0.0) -> Tensor:
+    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:
@@ -136,13 +142,13 @@ class Transformer:
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     return model, kv
 
-  def generate(self, tokens:list[int], start_pos=0):
+  def generate(self, tokens:list[int], start_pos=0, temperature:float=0.0):
     v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
     start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
     while len(tokens) < self.max_context:
-      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
+      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos, temperature)
       next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
@@ -159,6 +165,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature (0.0 = greedy, higher = more creative)")
   args = parser.parse_args()
 
   # load the model
