@@ -64,6 +64,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
+  capture_manager = None
   def __init__(self, device:str):
     self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
@@ -73,15 +74,15 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
-    if PROFILE:
-      self.capture_manager = msg("sharedCaptureManager", objc_instance)(libobjc.objc_getClass(b"MTLCaptureManager"))
+    if PROFILE and MetalDevice.capture_manager is None:
+      MetalDevice.capture_manager = msg("sharedCaptureManager", objc_instance)(libobjc.objc_getClass(b"MTLCaptureManager"))
       outfile = f"file://{temp(f'tiny_{int(time.time()*1000)}', append_user=True)}.gputrace"
       Compiled.profile_events += [ProfilePointEvent(device, "gputrace", decimal.Decimal(-1), id(self), {"path":outfile})]
       descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCaptureDescriptor"))
       msg("setDestination:")(descriptor, 2)
       msg("setOutputURL:")(descriptor, msg("URLWithString:", objc_instance)(libobjc.objc_getClass(b"NSURL"), to_ns_str(outfile)))
       msg("setCaptureObject:")(descriptor, self.sysdevice)
-      msg("startCaptureWithDescriptor:error:")(self.capture_manager, descriptor, ctypes.byref(err_capture:=objc_instance()))
+      msg("startCaptureWithDescriptor:error:")(MetalDevice.capture_manager, descriptor, ctypes.byref(err_capture:=objc_instance()))
       error_check(err_capture)
 
     from tinygrad.runtime.graph.metal import MetalGraph
@@ -90,7 +91,8 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
 
-  def _at_profile_finalize(self): msg("stopCapture")(self.capture_manager)
+  def _at_profile_finalize(self):
+    msg("stopCapture")(MetalDevice.capture_manager)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
