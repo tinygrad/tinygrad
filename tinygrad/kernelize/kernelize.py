@@ -8,7 +8,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.kernelize.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
-from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
+from tiny  grad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
 import sys
