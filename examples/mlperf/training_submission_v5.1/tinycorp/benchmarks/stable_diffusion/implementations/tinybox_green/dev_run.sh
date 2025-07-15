@@ -23,11 +23,9 @@ export BS=1 EVAL_BS=1
 
 #export BASEDIR="/raid/datasets/wiki"
 # TODO: this will change when training on a tinybox
-export BASEDIR="/home/hooved/train-sd/training/stable_diffusion/datasets"
+export BASEDIR="/home/hooved/train-sd/training/stable_diffusion"
 
 #export WANDB=1 PARALLEL=0
 export PARALLEL=0
-
-export LIMIT_GPU_RAM=1
 
 RUNMLPERF=1 python3 examples/mlperf/model_train.py

@@ -1361,6 +1361,7 @@ def train_stable_diffusion():
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   from examples.stable_diffusion import get_alphas_cumprod
   from tinygrad.nn.state import load_state_dict
+  from collections import namedtuple
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1369,7 +1370,7 @@ def train_stable_diffusion():
   SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
   LIMIT_GPU_RAM      = config["LIMIT_GPU_RAM"]          = getenv("LIMIT_GPU_RAM", 0)
 
-  BASEDIR = getenv("BASEDIR", "")
+  BASEDIR = Path(getenv("BASEDIR", "./"))
   assert BASEDIR, "set BASEDIR to path of datasets"
 
   unet_params = {
@@ -1386,36 +1387,52 @@ def train_stable_diffusion():
     "use_linear": True,
   }
   Device.DEFAULT="CPU"
-  unet_model = UNetModel(**unet_params)
-  #for p in get_parameters(unet_model): p.realize()
 
-  # For loading weights from mlperf reference
-  # TODO: combine with UNetModel like in examples/stable_diffusion.py
-  class ClipContainer:
+  # for weights loading code to work
+  class StableDiffusion:
     def __init__(self):
-      clip_config = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True}
-      self.cond_stage_model = FrozenOpenClipEmbedder(**clip_config)
-  #clip_model = ClipContainer()
-  #weights = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/training_init_model.safetensors")
-  #load_state_dict(clip_model, weights)
-  #load_state_dict(unet_model, weights)
+      self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+  model = StableDiffusion()
 
-  optimizer = AdamW(get_parameters(unet_model))
+  weights = safe_load(BASEDIR / "checkpoints" / "training_init_model.safetensors")
+  load_state_dict(model, weights)
+
+  # NOTE: Here the goal is to compare output against the mlperf reference implementation, using the same inputs for both
+  # NOTE: Therefore we load the same input samples (including randn samples) that were used in the mlperf reference run
+  with open(BASEDIR / "checkpoints" / "eleven_training_prompts.txt") as f:
+    prompts = f.read().split("\n")
+
+  data = safe_load(BASEDIR / "checkpoints" / "eleven_training_steps.safetensors")
+  for p in data.values(): p.to_("CPU").realize()
+
+  for p in get_parameters(model.cond_stage_model): p.to_("NV")
+  Device.DEFAULT="NV"
+  contexts = model.cond_stage_model(prompts).to_("CPU").realize()
+  Device.DEFAULT="CPU"
+  #for p in get_parameters(model.cond_stage_model): p.to_("CPU").realize()
+  del model.cond_stage_model
+
+  #model_after_eleven_steps = safe_load(BASEDIR / "checkpoints" / "model_after_eleven_training_steps.safetensors")
+  #for p in model_after_eleven_steps.values(): p.to_("CPU").realize()
+
+  unet = model.model.diffusion_model
+  optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
   scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
   # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   scheduler.step()
 
-  #Device.DEFAULT="NV"
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
 
-  #@TinyJit
   @Tensor.train()
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
     optimizer.zero_grad()
 
+    # NOTE: moving parameters to/from GPU won't be necessary on a tinybox; everything can live in GPU memory
+    # This is only needed for training on a single NVIDIA RTX 3080 with 10GB VRAM
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("NV")
 
@@ -1428,7 +1445,7 @@ def train_stable_diffusion():
       p.to_("CPU")
 
     optimizer.step()
-    #Device.DEFAULT = "CPU" # for scheduler calculated LR to be on same device as optimizer, for assign
+    #Device.DEFAULT = "CPU" # for scheduler's calculated LR to be on same device as optimizer, for assign
     scheduler.step()
     return loss
   
@@ -1437,28 +1454,44 @@ def train_stable_diffusion():
 
   dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   # training loop, one iteration = one epoch
+  losses = []
   for i, batch in enumerate(dl):
-    start = time.perf_counter()
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-    #Device.DEFAULT="NV"
-    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
+
+    ##### batch['npy']
+    #mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
+    mean, logvar = Tensor.chunk(data['batch_npy'][i].contiguous().realize().cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
-    t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
-    noise = Tensor.randn_like(latent)
+
+    ##### latent randn
+    #latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
+    latent = (mean + std * data['latent_randn'][i].contiguous().realize()).cast(dtypes.half) * SCALE_FACTOR
+
+    ##### t
+    #t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
+    t = data['t'][i].contiguous().realize()
+
+    ##### noise
+    #noise = Tensor.randn_like(latent)
+    noise = data['noise'][i].contiguous().realize()
     latent_with_noise = sqrt_alphas_cumprod[t] * latent + sqrt_one_minus_alphas_cumprod[t] * noise
 
     # encode prompt
-    prompt = batch['txt']
-    #context = clip_model.cond_stage_model(prompt)
-    context = Tensor.randn(1,77,1024)
 
-    #for p in get_parameters(clip_model): p.to_("CPU").realize()
+    ##### prompt
+    #prompt = batch['txt']
+    #context = model.cond_stage_model(prompt)
+    #context = Tensor.randn(1,77,1024)
+    context = contexts[i:i+1].contiguous().realize()
 
     v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
-    #loss = train_step(latent_with_noise, t, context, v_true, unet_model, optimizer, scheduler)
-    loss = jit_step(latent_with_noise, t, context, v_true, unet_model, optimizer, scheduler)
-    print(f"epoch {i}: loss: {loss.item():.3f}, elapsed: {(time.perf_counter() - start):0.2f} sec")
+    loss = jit_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
+    losses.append(loss)
+    ref_loss = data['loss'][i].item()
+    print(f"epoch {i}: loss: {loss.item():.9f}, ref_loss: {ref_loss:.9f}, loss_diff: {(ref_loss - loss.item()):.9f}")
+    if i == 10:
+      safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / "tiny_after_eleven_training_steps.safetensors")
+      safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / "tiny_losses.safetensors")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
