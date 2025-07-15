@@ -1,7 +1,8 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, time
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, temp
+if PROFILE: os.environ["MTL_CAPTURE_ENABLED"] = "1"
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, ProfilePointEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
@@ -72,12 +73,24 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
+    if PROFILE:
+      self.capture_manager = msg("sharedCaptureManager", objc_instance)(libobjc.objc_getClass(b"MTLCaptureManager"))
+      outfile = f"file://{temp(f'tiny_{int(time.time()*1000)}', append_user=True)}.gputrace"
+      Compiled.profile_events += [ProfilePointEvent(device, "gputrace", -1, id(self), {"path":outfile})]
+      descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCaptureDescriptor"))
+      msg("setDestination:")(descriptor, 2)
+      msg("setOutputURL:")(descriptor, msg("URLWithString:", objc_instance)(libobjc.objc_getClass(b"NSURL"), to_ns_str(outfile)))
+      msg("setCaptureObject:")(descriptor, self.sysdevice)
+      msg("startCaptureWithDescriptor:error:")(self.capture_manager, descriptor, ctypes.byref(err_capture:=objc_instance()))
+      error_check(err_capture)
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
+
+  def _at_profile_finalize(self): msg("stopCapture")(self.capture_manager)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
