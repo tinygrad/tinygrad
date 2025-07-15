@@ -115,9 +115,7 @@ class Kernel:
     return ret
 
   @property
-  def first_reduce(self) -> int: return next(iter(self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)), self.first_upcast)
-  @property
-  def first_upcast(self) -> int: return self.shape_len-self.upcasted
+  def first_reduce(self) -> int: return self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)[0]
 
   @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
