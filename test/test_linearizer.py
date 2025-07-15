@@ -844,8 +844,8 @@ class TestFloat4(unittest.TestCase):
 
       s = c.schedule()[0]
       k = Kernel(s.ast)
-      k.shift_to(k.first_upcast-1, 4, AxisType.UPCAST)  # manual trigger float4 dim
-      k.shift_to(k.first_upcast-1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
+      k.shift_to(1, 4, AxisType.UPCAST)  # manual trigger float4 dim
+      k.shift_to(1, shift, AxisType.UPCAST, insert_before=k.shape_len-1)
       return get_program(k.get_optimized_ast(), k.opts).uops
 
     sizes = [13, 9, 17]
@@ -1461,7 +1461,7 @@ class TestKernelOpts(unittest.TestCase):
     opts_shapes = [
       ([Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("red",32)]),
       ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
-      # check to ensure local_dims are stable for full UNROLL of first_reduce
+      # check to ensure local_dims are stable for full UNROLL of the first reduce
       ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
       ([Opt(OptOps.UNROLL, 0, 0),Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
       # check behavior for full UNROLL on an existing GROUP

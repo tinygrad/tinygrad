@@ -66,9 +66,9 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
-      if axis not in upcasted_axis and k.full_shape[axis]%upcast_amount == 0 and \
-        any(st.views[-1].strides[axis] == 0 and not any(x == 0 for x in st.real_strides()[k.first_upcast:]) \
-        for st in k.sts):
+      if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
+      if any(st.views[-1].strides[axis] == 0 and \
+             all(x != 0 for t,x in zip(k.axis_types, st.real_strides()) if t in (AxisType.UPCAST, AxisType.UNROLL)) for st in k.sts):
         xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts),
                            sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if xb_choices:
@@ -79,8 +79,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else: break
 
   # if last reduce dim is small(ish), loop unroll the reduce
-  if k.unrollable_dims and \
-      (prod(k.full_shape[k.first_upcast:]) <= 4 or (AxisType.UNROLL not in k.axis_types)) and (prod(k.full_shape[k.first_upcast:]) < 64):
+  upcast_size = prod(s for s,t in zip(k.full_shape, k.axis_types) if t in (AxisType.UPCAST, AxisType.UNROLL))
+  if k.unrollable_dims and (upcast_size <= 4 or (AxisType.UNROLL not in k.axis_types)) and (upcast_size < 64):
     if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
       k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims[-1]-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too

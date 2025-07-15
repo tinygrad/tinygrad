@@ -207,10 +207,11 @@ class Kernel:
     return False
 
   def simplify_merge_adjacent(self):
+    assert not hasattr(self, 'axis_types'), "don't called this after init"
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
     # NOTE: we can't use self.first_reduce yet
-    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape+(0,), self.full_shape+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
@@ -285,8 +286,8 @@ class Kernel:
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
                                       (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
-      upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
-      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
+      upcast_sz = prod([s for s,t in zip(self.full_shape, self.axis_types) if t is AxisType.UPCAST])
+      local_sz = prod([s for s,t in zip(self.full_shape, self.axis_types) if t is AxisType.LOCAL])
       smem_sz = amt*acc_sz*upcast_sz*local_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
@@ -298,16 +299,16 @@ class Kernel:
       self.shift_to(axis, amt, AxisType.LOCAL, insert_before=self.first_reduce)
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
-      check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
+      check(self.axis_types[axis] is AxisType.REDUCE, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
     elif opt.op is OptOps.UNROLL:                     # purple
-      check(axis < self.first_upcast, "can't upcasted already upcasted")
+      check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
-      check(axis < self.first_reduce, "upcast is for non-reduce")
+      check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
@@ -322,9 +323,10 @@ class Kernel:
       self.permute(tuple(permute))
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
-      check(axis < self.first_upcast, "cannot pad upcasted")
+      check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
+      if (r:=self.reduceop) is not None and self.axis_types[axis] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
+        check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
