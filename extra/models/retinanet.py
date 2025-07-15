@@ -1,5 +1,5 @@
 import math
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import flatten, get_child
 from examples.mlperf.helpers import generate_anchors, BoxCoder, generate_anchors2
 from examples.mlperf.losses import sigmoid_focal_loss, l1_loss
@@ -147,6 +147,7 @@ class RetinaNet:
         # remove low scoring boxes
         scores_level = scores_level.flatten()
         topk_idxs = _masked_indices(scores_level > score_thresh)
+        scores_level = scores_level.masked_select(scores_level > score_thresh)
         scores_level = scores_level[topk_idxs]
 
         # keep topk
