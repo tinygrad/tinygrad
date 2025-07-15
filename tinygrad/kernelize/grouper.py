@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternMatcher, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternMatcher, graph_rewrite, parse_reduce_args
 from tinygrad.helpers import all_int, prod, unwrap, dedup, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, FUSE_CONV_BW
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -70,9 +70,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   for r in toposort:
     if r.op is not Ops.REDUCE_AXIS: continue
     # Skip fused reduces (don't create separate kernels for them)
-    from tinygrad.uop.ops import parse_reduce_args
-    args = parse_reduce_args(r.arg)
-    if args.fuse: continue
+    if parse_reduce_args(r.arg).fuse: continue
     if FUSE_CONV_BW and r.src[0].base.op is Ops.REDUCE_AXIS and r.src[0] is not r.src[0].base: double_reduces.append(r)
     if r in realizes: continue
     group: dict[UOp, None] = {}

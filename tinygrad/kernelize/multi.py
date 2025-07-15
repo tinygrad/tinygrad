@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve, parse_reduce_args
 
 # *** allreduce implementation ***
 
@@ -127,7 +127,6 @@ def alu_multi(root:UOp):
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
-  from tinygrad.uop.ops import parse_reduce_args
   args = parse_reduce_args(root.arg)
   op, axis = args.op, args.axes
   if multi.axis is not None and multi.axis in axis:

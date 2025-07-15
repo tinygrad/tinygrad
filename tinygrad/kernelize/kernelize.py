@@ -262,9 +262,8 @@ view_right = merge_views+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK, Ops.REDUCE_AXIS}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
-   lambda r1,r2: (lambda r1_args, r2_args:
-     r1.replace(arg=ReduceArgs(r1_args.op, r2_args.axes+r1_args.axes, r1_args.keepdims, r1_args.fuse))
-     if r1_args.op is r2_args.op else None)(parse_reduce_args(r1.arg), parse_reduce_args(r2.arg))),
+   lambda r1,r2: r1.replace(arg=ReduceArgs(r1.arg.op, r2.arg.axes+r1.arg.axes, r1.arg.keepdims, r1.arg.fuse))
+                 if parse_reduce_args(r1.arg).op is parse_reduce_args(r2.arg).op else None),
 ])
 
 # **** fix kernel AST
@@ -347,8 +346,8 @@ pm_fuse = PatternMatcher([
 
   # FUSE on reduce (without view) adds fuse marker to grouper
   (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
-   lambda r: (lambda parsed_args: r.replace(src=(r.src[0].fuse(),), arg=parsed_args._replace(fuse=True))
-             if not parsed_args.fuse else None)(parse_reduce_args(r.arg))),
+   lambda r: r.replace(src=(r.src[0].fuse(),), arg=parse_reduce_args(r.arg)._replace(fuse=True))
+             if not parse_reduce_args(r.arg).fuse else None),
 
   # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),

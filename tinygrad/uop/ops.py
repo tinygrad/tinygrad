@@ -184,12 +184,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
       case Ops.REDUCE_AXIS | Ops.WMMA:
-        if self.op is Ops.REDUCE_AXIS:
-          args = parse_reduce_args(self.arg)
-          # Always use keepdims=True behavior for shape tracking in kernel
-          shape = src_sts[0].reduce(args.axes)  # Keep dims as 1
-        else:
-          shape = src_sts[0].reduce(self.axis_arg)
+        shape = src_sts[0].reduce(self.axis_arg)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -236,14 +231,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    if self.op is Ops.REDUCE_AXIS:
-      # Handle both old tuple format and new ReduceArgs format
-      if isinstance(self.arg, ReduceArgs):
-        ret = self.arg.axes
-      else:
-        ret = self.arg[1]  # Legacy tuple format
-    else:
-      ret = self.arg[7]  # WMMA
+    ret = parse_reduce_args(self.arg).axes if self.op is Ops.REDUCE_AXIS else self.arg[7]
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
@@ -314,7 +302,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret, new_axis = self, axis
       inv_permaxis = None
     # Always create REDUCE_AXIS with keepdims=True internally for kernel compatibility
-    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, keepdims=True, fuse=False))
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, True))
     # If permutation was applied, unpermute the result back to original axis order
     if inv_permaxis is not None:
       ret = ret.permute(inv_permaxis)
