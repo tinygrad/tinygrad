@@ -79,8 +79,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else: break
 
   # if last reduce dim is small(ish), loop unroll the reduce
-  upcast_size = prod(s for s,t in zip(k.full_shape, k.axis_types) if t in (AxisType.UPCAST, AxisType.UNROLL))
-  if k.unrollable_dims and (upcast_size <= 4 or (AxisType.UNROLL not in k.axis_types)) and (upcast_size < 64):
+  upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
+  if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
     if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
       k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims[-1]-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too
@@ -105,8 +105,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local
-      local_axis_ranking = [(any(st.views[-1].strides[axis] == 0 for st in k.sts), axis) \
-                            for axis,t in enumerate(k.axis_types) if t in (AxisType.GLOBAL, AxisType.LOOP)]
+      local_axis_ranking = [(any(st.views[-1].strides[axis] == 0 for st in k.sts), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
