@@ -87,7 +87,7 @@ class NV_FLCN(NV_IP):
     self.prep_booter()
 
   def prep_ucode(self):
-    expansion_rom_off, bit_addr = 0x14e00, 0x1b0
+    expansion_rom_off, bit_addr = {"GA": 0x16600, "AD": 0x14e00}[self.nvdev.chip_name[:2]], 0x1b0
     vbios_bytes = bytes(array.array('I', self.nvdev.mmio[0x00300000//4:(0x00300000+0x98e00)//4]))
 
     bit_header = nv.BIT_HEADER_V1_00.from_buffer_copy(vbios_bytes[bit_addr:bit_addr + ctypes.sizeof(nv.BIT_HEADER_V1_00)])
@@ -132,7 +132,7 @@ class NV_FLCN(NV_IP):
       dmem.init_cmd = cmd_id
       patched_image[dmem_mapper_offset : dmem_mapper_offset+len(bytes(dmem))] = bytes(dmem)
       patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
-      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[0x180:]
+      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[-0x180:]
 
       return System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
 
@@ -158,6 +158,7 @@ class NV_FLCN(NV_IP):
       imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
       dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
       pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
+    assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
 
     self.reset(self.falcon, riscv=True)
 
@@ -313,9 +314,11 @@ class NV_GSP(NV_IP):
     self.rpc_set_gsp_system_info()
     self.rpc_set_registry_table()
 
-    self.gpfifo_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_CHANNEL_GPFIFO_A
-    self.compute_class = nv_gpu.BLACKWELL_COMPUTE_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.ADA_COMPUTE_A
-    self.dma_class = nv_gpu.BLACKWELL_DMA_COPY_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.AMPERE_DMA_COPY_B
+    match self.nvdev.chip_name[:2]:
+      case "AD": self.compute_class = nv_gpu.ADA_COMPUTE_A
+      case "GB":
+        self.gpfifo_class,self.compute_class,self.dma_class=nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A,nv_gpu.BLACKWELL_COMPUTE_B,nv_gpu.BLACKWELL_DMA_COPY_B
 
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
