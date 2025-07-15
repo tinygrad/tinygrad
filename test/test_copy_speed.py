@@ -1,6 +1,5 @@
-import unittest
-from tinygrad import Tensor
-from tinygrad import Device
+import unittest, numpy as np
+from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import Timing, CI, OSX
 import multiprocessing.shared_memory as shared_memory
 
@@ -42,12 +41,30 @@ class TestCopySpeed(unittest.TestCase):
         Device[Device.DEFAULT].synchronize()
       del t
 
-  def testCopyDefaulttoCPU(self):
-    t = Tensor.ones(N, N).contiguous().realize()
+  def testCopyDefaulttoCPU2(self):
+    @TinyJit
+    def _do_copy(t): return t.to('CPU').realize()
+
+    t = Tensor.randn(N, N, 32).contiguous().realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
-    for _ in range(3):
+
+    for _ in range(5):
+      t = Tensor.randn(N, N, 2).contiguous().realize()
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
-        t.to('CPU').realize()
+        x = _do_copy(t)
+        Device[Device.DEFAULT].synchronize()
+      np.testing.assert_equal(t.numpy(), x.numpy())
+
+  # def testCopytoCPUtoDefault2(self):
+  #   @TinyJit
+  #   def _do_copy(t): return t.to(Device.DEFAULT).realize()
+
+  #   for _ in range(5):
+  #     t = Tensor.randn(N, N, 2, device="CPU").contiguous().realize()
+  #     with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+  #       x = _do_copy(t)
+  #       Device[Device.DEFAULT].synchronize()
+  #     np.testing.assert_equal(t.numpy(), x.numpy())
 
   @unittest.skipIf(CI, "CI doesn't have 6 GPUs")
   @unittest.skipIf(Device.DEFAULT != "GPU", "only test this on GPU")

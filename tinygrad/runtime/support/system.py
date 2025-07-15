@@ -12,6 +12,16 @@ class _System:
 
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
 
+  def lock_memory(self, addr:int, size:int):
+    if not (libc.mlock(loc:=ctypes.c_void_p(addr), size) == 0): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+
+  def unlock_memory(self, addr:int, size:int):
+    if not (libc.munlock(loc:=ctypes.c_void_p(addr), size) == 0): raise RuntimeError(f"Failed to unlock memory at {addr:#x} with size {size:#x}")
+
+  def sysmem_pages(self, vaddr:int, size:int) -> list[int]:
+    self.pagemap().seek(vaddr // mmap.PAGESIZE * 8)
+    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
@@ -159,3 +169,11 @@ class PCIIfaceBase:
 
     paddrs = [(paddr if b.meta.mapping.system else (paddr+b.meta.owner.iface.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
     self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
+
+  def map_cpu(self, va, size):
+    System.lock_memory(va, size)
+    vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+    paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.sysmem_pages(va, size)]
+    mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+    return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
+        view=MMIOInterface(mapping.va_addr, size, fmt='B'))

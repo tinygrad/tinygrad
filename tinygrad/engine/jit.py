@@ -50,6 +50,10 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
         ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
         # All *Multi*GraphRunner support graphing BufferXfers
         can_be_graphed = ji_graph_dev.graph is not None and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
+      case BufferCopy():
+        # TODO: CLEANUP: select any not cpu dev
+        ji_graph_dev = Device[unwrap(ji.bufs[1]).device] if unwrap(ji.bufs[0]).device in {"CPU"} else Device[unwrap(ji.bufs[0]).device]
+        can_be_graphed = ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_cpu_transfers
       case ViewOp(): continue # ViewOps are just ignored
       case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
 
@@ -72,6 +76,9 @@ def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) 
   return input_replace
 
 class GraphRunner(Runner):
+  supports_multi_device = False # this is a marker for your graph supporting multiple devices of the same type
+  supports_cpu_transfers = False # this is a marker for your graph supporting copy transfers
+
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
