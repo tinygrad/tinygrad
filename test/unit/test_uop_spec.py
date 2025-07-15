@@ -71,7 +71,9 @@ class TestUOpSpec(unittest.TestCase):
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
-    with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
+    # With keepdims=False default, this operation should now be valid
+    # r has shape (1,), a has shape (32,1), r+a = (32,1) via broadcasting
+    helper_test_verify_ast(st)
 
   def test_buffer_uops_st(self):
     a = Tensor.randn(4, 4)+2

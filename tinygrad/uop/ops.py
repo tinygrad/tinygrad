@@ -24,12 +24,12 @@ class ReduceArgs(NamedTuple):
 def parse_reduce_args(arg):
   if isinstance(arg, ReduceArgs):
     return arg
-  # Legacy 2-tuple: (op, axes) - internally uses keepdims=True for compatibility
+  # Legacy 2-tuple: (op, axes) - now defaults to keepdims=False per bounty requirement
   if len(arg) == 2:
-    return ReduceArgs(arg[0], arg[1], keepdims=True, fuse=False)
-  # Legacy 3-tuple: (op, axes, fuse) - internally uses keepdims=True for compatibility
+    return ReduceArgs(arg[0], arg[1], keepdims=False, fuse=False)
+  # Legacy 3-tuple: (op, axes, fuse) - now defaults to keepdims=False per bounty requirement  
   if len(arg) == 3:
-    return ReduceArgs(arg[0], arg[1], keepdims=True, fuse=arg[2])
+    return ReduceArgs(arg[0], arg[1], keepdims=False, fuse=arg[2])
   raise ValueError(f"Invalid reduce args: {arg}")
 
 def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
