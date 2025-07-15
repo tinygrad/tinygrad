@@ -30,6 +30,9 @@ def parse_reduce_args(arg):
   # Legacy 3-tuple: (op, axes, fuse) - now defaults to keepdims=False per bounty requirement
   if len(arg) == 3:
     return ReduceArgs(arg[0], arg[1], keepdims=False, fuse=arg[2])
+  # Legacy 4-tuple: (op, axes, keepdims, fuse) - explicit keepdims setting
+  if len(arg) == 4:
+    return ReduceArgs(arg[0], arg[1], keepdims=arg[2], fuse=arg[3])
   raise ValueError(f"Invalid reduce args: {arg}")
 
 def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
