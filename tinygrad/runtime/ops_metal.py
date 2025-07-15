@@ -76,7 +76,7 @@ class MetalDevice(Compiled):
     if PROFILE:
       self.capture_manager = msg("sharedCaptureManager", objc_instance)(libobjc.objc_getClass(b"MTLCaptureManager"))
       outfile = f"file://{temp(f'tiny_{int(time.time()*1000)}', append_user=True)}.gputrace"
-      Compiled.profile_events += [ProfilePointEvent(device, "gputrace", -1, id(self), {"path":outfile})]
+      Compiled.profile_events += [ProfilePointEvent(device, "gputrace", decimal.Decimal(-1), id(self), {"path":outfile})]
       descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCaptureDescriptor"))
       msg("setDestination:")(descriptor, 2)
       msg("setOutputURL:")(descriptor, msg("URLWithString:", objc_instance)(libobjc.objc_getClass(b"NSURL"), to_ns_str(outfile)))
