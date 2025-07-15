@@ -1486,12 +1486,14 @@ def train_stable_diffusion():
 
     v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
     loss = jit_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
-    losses.append(loss)
+    losses.append(loss.clone().realize())
     ref_loss = data['loss'][i].item()
     print(f"epoch {i}: loss: {loss.item():.9f}, ref_loss: {ref_loss:.9f}, loss_diff: {(ref_loss - loss.item()):.9f}")
     if i == 10:
       safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / "tiny_after_eleven_training_steps.safetensors")
       safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / "tiny_losses.safetensors")
+      import sys
+      sys.exit()
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
