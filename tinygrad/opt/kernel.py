@@ -133,13 +133,13 @@ class Kernel:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def global_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GLOBAL]) if hasattr(self, 'axis_types') else 0
+  def global_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
   @property
-  def local_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.LOCAL]) if hasattr(self, 'axis_types') else 0
+  def local_dims(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.LOCAL])
   @property
-  def upcasted(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.UPCAST, AxisType.UNROLL}]) if hasattr(self, 'axis_types') else 0
+  def upcasted(self) -> int: return sum([1 for x in self.axis_types if x in {AxisType.UPCAST, AxisType.UNROLL}])
   @property
-  def group_for_reduces(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GROUP_REDUCE]) if hasattr(self, 'axis_types') else 0
+  def group_for_reduces(self) -> int: return sum([1 for x in self.axis_types if x == AxisType.GROUP_REDUCE])
 
   # heuristic helpers
   @property
@@ -207,7 +207,7 @@ class Kernel:
     return False
 
   def simplify_merge_adjacent(self):
-    assert not hasattr(self, 'axis_types'), "don't called this after init"
+    assert not hasattr(self, 'axis_types'), "don't call this after init"
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
     # NOTE: we can't use self.first_reduce yet
