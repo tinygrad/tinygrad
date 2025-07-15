@@ -285,8 +285,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...], keepdims=False, permute=True):
+    original_axis = axis  # Keep track of originally requested axes
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
+    if len(axis) == 0:
+      # If no axes need reduction but keepdims=False and original_axis was not empty,
+      # we still need to squeeze out the originally requested dimensions
+      if not keepdims and len(original_axis) > 0:
+        return self.reshape(tuple([s for i, s in enumerate(self.shape) if i not in original_axis]))
+      return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
     if move_early and permute:
@@ -294,15 +300,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret = self.permute(permaxis)
       new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
       assert len(axis) == len(new_axis)
+      # Track the inverse permutation for later
+      inv_permaxis = tuple(permaxis.index(i) for i in range(len(permaxis)))
     else:
       ret, new_axis = self, axis
+      inv_permaxis = None
     # Always create REDUCE_AXIS with keepdims=True internally for kernel compatibility
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, keepdims=True, fuse=False))
-    # Always reshape to add 1s in reduced dimensions
-    ret = ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
-    # If keepdims=False, squeeze out the singleton dimensions
+    # If permutation was applied, unpermute the result back to original axis order
+    if inv_permaxis is not None:
+      ret = ret.permute(inv_permaxis)
+    # If keepdims=False, squeeze out only the reduced dimensions
     if not keepdims:
-      ret = ret.reshape(tuple([x for i,x in enumerate(self.shape) if i not in axis]))
+      # Only remove dimensions that were originally requested for reduction
+      ret = ret.reshape(tuple([s for i, s in enumerate(ret.shape) if i not in original_axis]))
     return ret
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
