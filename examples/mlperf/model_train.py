@@ -1387,7 +1387,7 @@ def train_stable_diffusion():
   }
   Device.DEFAULT="CPU"
   unet_model = UNetModel(**unet_params)
-  for p in get_parameters(unet_model): p.realize()
+  #for p in get_parameters(unet_model): p.realize()
 
   # For loading weights from mlperf reference
   # TODO: combine with UNetModel like in examples/stable_diffusion.py
@@ -1396,8 +1396,9 @@ def train_stable_diffusion():
       clip_config = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True}
       self.cond_stage_model = FrozenOpenClipEmbedder(**clip_config)
   #clip_model = ClipContainer()
-  #clip_weights = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/training_init_model.safetensors")
-  #load_state_dict(clip_model, clip_weights)
+  #weights = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/training_init_model.safetensors")
+  #load_state_dict(clip_model, weights)
+  #load_state_dict(unet_model, weights)
 
   optimizer = AdamW(get_parameters(unet_model))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
@@ -1405,66 +1406,41 @@ def train_stable_diffusion():
   # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   scheduler.step()
 
-  Device.DEFAULT="NV"
+  #Device.DEFAULT="NV"
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
 
   #@TinyJit
   @Tensor.train()
-  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, noise:Tensor, x_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
+  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
     optimizer.zero_grad()
 
-    print(f"num_params: {len(get_parameters(model))}")
-    for p in get_parameters(model):
-      p.to_("NV").realize()
+    for p in get_parameters(model) + [x_noised, t, c, v_true]:
+      p.to_("NV")
 
-    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * x_true
     out = model(x_noised, t, c)
     loss = ((out - v_true) ** 2).mean() / v_true.shape[0]
 
-    loss.backward()
-    print("loss.backward()")
-    loss.realize()
-    print("loss.realize()")
+    loss.backward().to_("CPU")
 
-    if LIMIT_GPU_RAM:
-    #if False:
-      #grad_bufs = []
-      print(f"num_params: {len(get_parameters(model))}")
-      for p in get_parameters(model):
-        #buf = p.uop.base.realized
-        #if p.grad is not None:
-          #grad_bufs.append(p.grad.kernelize().uop.base.buffer)
-
-        p.to_("CPU").realize()
-        #buf.deallocate()
-        #buf.ref(1)
-      print("done moving parameters")
-
-      for p in get_parameters(model):
-        if p.grad is not None:
-          #assert p.grad.device == "CPU"
-          p.grad.to_("CPU").realize()
-          #p.grad.realize()
-      print("done moving gradients")
+    for p in get_parameters(model) + [x_noised, t, c, v_true]:
+      p.to_("CPU")
 
     optimizer.step()
-    print(f"optimizer.step()")
-    Device.DEFAULT = "CPU" # for scheduler calculated LR to be on same device as optimizer, for assign
+    #Device.DEFAULT = "CPU" # for scheduler calculated LR to be on same device as optimizer, for assign
     scheduler.step()
-    print(f"scheduler.step()")
     return loss
   
-  #jit_step = TinyJit(train_step)
-  #jit_step.cnt = 1 # capture right away
+  jit_step = TinyJit(train_step, optimize=True)
+  jit_step.cnt = 1 # capture right away
 
-  dl = batch_load_train_stable_diffusion(BS)
+  dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   # training loop, one iteration = one epoch
   for i, batch in enumerate(dl):
     start = time.perf_counter()
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-    Device.DEFAULT="NV"
+    #Device.DEFAULT="NV"
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
     latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
@@ -1479,8 +1455,9 @@ def train_stable_diffusion():
 
     #for p in get_parameters(clip_model): p.to_("CPU").realize()
 
-    loss = train_step(latent_with_noise, t, context, noise, latent, unet_model, optimizer, scheduler)
-    #loss = jit_step(latent_with_noise, t, context, noise, latent, unet_model, optimizer, scheduler)
+    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
+    #loss = train_step(latent_with_noise, t, context, v_true, unet_model, optimizer, scheduler)
+    loss = jit_step(latent_with_noise, t, context, v_true, unet_model, optimizer, scheduler)
     print(f"epoch {i}: loss: {loss.item():.3f}, elapsed: {(time.perf_counter() - start):0.2f} sec")
 
 if __name__ == "__main__":
