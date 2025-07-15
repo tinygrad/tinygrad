@@ -307,10 +307,6 @@ pm_render = PatternMatcher([
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
     lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
-  # split all ENDRANGEs
-  (UPat(Ops.ENDRANGE, name="x", allow_any_len=True), lambda x:
-   UOp(Ops.ENDRANGE, src=(UOp(Ops.ENDRANGE, src=tuple([y for y in x.src if y.op is not Ops.RANGE])+(rngs[0],)),)+tuple(rngs[1:]))
-    if len(rngs:=[y for y in x.src if y.op is Ops.RANGE]) > 1 else None)
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***
@@ -335,15 +331,15 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   if len(reduce_range) != 0:
     acc = UOp(Ops.DEFINE_REG, red.dtype.scalar().ptr(red.dtype.count), arg=(ctx.acc_num,))
     #acc = UOp(Ops.DEFINE_REG, red.dtype, (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-    mask = functools.reduce(lambda x,y: x&y, [x.eq(0) for x in reduce_range]).logical_not()
+    mask = functools.reduce(lambda x,y: x&y, [x.eq(0) for x in reduce_range])
     #acc_inp = mask.where(red.const_like(identity_element(red.arg, red.dtype.scalar())), acc.load(dtype=red.dtype))
-    acc_inp = acc.index(UOp.const(dtypes.int, 0), mask).load(dtype=red.dtype)
+    acc_inp = mask.where(red.const_like(identity_element(red.arg, red.dtype.scalar())), acc.index(UOp.const(dtypes.int, 0)).load(*reduce_range, dtype=red.dtype))
     lst = [acc_inp] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
   acci = acc.index(UOp.const(dtypes.int, 0))
-  return acci.load(UOp(Ops.ENDRANGE, src=(acci.store(ret), *reduce_range)))
+  return acci.load(acci.store(ret).endrange(*reduce_range[::-1]))
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:

@@ -254,6 +254,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
+  def endrange(self, *rngs): return functools.reduce(lambda base,r: UOp(Ops.ENDRANGE, src=(r, base)), rngs, self)
   def r(self, op:Ops, axis:tuple[int, ...], permute=True):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
