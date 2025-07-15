@@ -177,6 +177,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
+    # For operations that support broadcasting, we don't require all shapes to be the same
+    # Instead, we'll use the broadcasted shape
+    if self.op in GroupOp.Binary and len(src_sts) > 1:
+      from tinygrad.tensor import _broadcast_shape
+      try:
+        shape = _broadcast_shape(*[x.shape for x in src_sts])
+        return ShapeTracker.from_shape(shape)
+      except Exception:
+        # If broadcast fails, fall through to the assertion
+        pass
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
@@ -289,15 +299,27 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...], keepdims=False, permute=True):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
+    # With keepdims=False, we need to reduce even axes of size 1 to remove them from the shape
+    # Only filter out size-1 axes if keepdims=True (they don't affect the result but don't need to be removed)
+    if keepdims:
+      axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
+      if len(axis) == 0: return self
+    else:
+      axis = tuple(sorted(axis))
+      if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
     if move_early and permute:
       permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
       ret = self.permute(permaxis)
-      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
-      assert len(axis) == len(new_axis)
+      # When keepdims=False, we need to keep all reduce axes (even size 1) in new_axis
+      if keepdims:
+        new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+      else:
+        # Map original axis indices to their new positions after permutation
+        axis_map = {old: new for new, old in enumerate(permaxis)}
+        new_axis = tuple(sorted(axis_map[ax] for ax in axis))
+      assert len(axis) == len(new_axis), f"axis mismatch: {len(axis)} != {len(new_axis)}, axis={axis}, new_axis={new_axis}"
     else:
       ret, new_axis = self, axis
     # Create REDUCE_AXIS with explicit keepdims parameter

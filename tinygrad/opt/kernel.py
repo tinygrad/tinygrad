@@ -72,13 +72,13 @@ class Kernel:
     for x in self.reduceops:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
-    
+
     # With keepdims=False, ShapeTrackers may have different dimensions
     # Pad all to the same dimension count to maintain kernel optimization compatibility
     if self.sts:
       max_dims = max(len(st.shape) for st in self.sts)
       self.sts = [st.reshape(st.shape + (1,) * (max_dims - len(st.shape))) if len(st.shape) < max_dims else st for st in self.sts]
-      
+
       # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
       self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*max_dims))
 
@@ -206,18 +206,18 @@ class Kernel:
     # Only consider dimensions that exist in all shapes
     min_dims = min(len(st.shape) for st in self.sts) if self.sts else 0
     if min_dims == 0: return False
-    
+
     # Check for ones only in dimensions that all shapes have
     all_ones = [all(st.shape[i] == 1 for st in self.sts if i < len(st.shape)) for i in range(min_dims)]
-    
+
     if any(all_ones):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if i >= min_dims or not all_ones[i]]
-      
+
       # Apply reshape only to dimensions that exist
       def new_shape_fxn(shape):
         return [x for i,x in enumerate(shape[:min_dims]) if not all_ones[i]] + list(shape[min_dims:])
-      
+
       self.reshape(new_shape_fxn)
       return True
     return False
@@ -248,15 +248,15 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    
+
     # With keepdims=False, shapes might have different dimensions
     # Find the maximum number of dimensions
     max_dims = max(len(s) for s in shapes) if shapes else 0
     if max_dims == 0: return
-    
+
     # Initialize rets based on first dimension for each shape
     rets = [[(s[0] if len(s) > 0 else 1, st[0] if len(st) > 0 else 0)] for s,st in zip(shapes, strides)]
-    
+
     # Process remaining dimensions
     for i in range(1, max_dims):
       can_merge = []
@@ -268,7 +268,7 @@ class Kernel:
         else:
           # Shape doesn't have this dimension (due to reduce with keepdims=False)
           can_merge.append(False)
-      
+
       # more can merge than this
       mergeable = all(can_merge) and i != first_reduce
       for j,(s,st) in enumerate(zip(shapes, strides)):

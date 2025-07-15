@@ -222,8 +222,10 @@ ast_spec = PatternMatcher([
   # VIEW can only exist in the edges
   (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
   (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
-  # all parent UOps must have the same shape
-  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
+  # all parent UOps must have the same shape, except for operations that support broadcasting
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root:
+   # For binary operations that support broadcasting, shapes don't need to be the same
+   True if root.op in GroupOp.Binary else all_same([x.shape for x in root.src if x.st is not None])),
 ])
 
 # ***** uop helpers *****

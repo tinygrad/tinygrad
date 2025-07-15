@@ -26,9 +26,16 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   prshape = prod(x.shape[i] for i in reduce_args.axes)
   ret = x.shrink(tuple((0,s) if i not in reduce_args.axes else (0,1) for i,s in enumerate(x.shape)))
   match reduce_args.op:
-    case Ops.ADD: return ret*prshape
-    case Ops.MUL: return ret.pow(prshape)
-    case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
+    case Ops.ADD: result = ret*prshape
+    case Ops.MUL: result = ret.pow(prshape)
+    case Ops.MAX: result = ret # NOTE: Ops.MAX is passthrough
+    case _: result = None
+  # If keepdims=False, we need to squeeze out the reduced dimensions
+  if result is not None and not reduce_args.keepdims:
+    # Remove dimensions that were reduced
+    new_shape = tuple(s for i, s in enumerate(result.shape) if i not in reduce_args.axes)
+    result = result.reshape(new_shape)
+  return result
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -186,6 +193,9 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
     new_shape: list[sint] = []
     new_reduce_axis = []
     old_args = parse_reduce_args(r.arg)
+    # This function is designed for keepdims=True case where we're adding ones back
+    # For keepdims=False, the dimension mapping is different and more complex
+    if not old_args.keepdims: return None
     if (contraction:=get_contraction_with_reduce(view.shape, r.shape, old_args.axes)) is None: return None
     for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
