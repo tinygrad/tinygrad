@@ -84,7 +84,7 @@ class Kernel:
     self.finalized: bool = False
 
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+    self.axis_types = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * len(self.full_shape)
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
@@ -203,7 +203,7 @@ class Kernel:
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-    first_reduce = self.first_reduce
+    first_reduce, axis_types = self.first_reduce, self.axis_types
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
     membufs = dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
@@ -224,17 +224,18 @@ class Kernel:
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
     rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
-    for i in range(1, len(shapes[0])):
+    for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
+        if axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape): continue
         si, sti, last_st = s[i], st[i], ret[-1][1]
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
       if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
       for j,(s,st) in enumerate(zip(shapes, strides)):
-        if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
-        else: rets[j].append((s[i], st[i]))
+        if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])#if reduce axis and shape is reduced there, then skip?
+        elif not (axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape)): rets[j].append((s[i], st[i]))
 
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
