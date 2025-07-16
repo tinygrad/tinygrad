@@ -1360,7 +1360,7 @@ def train_stable_diffusion():
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   from examples.stable_diffusion import get_alphas_cumprod
-  from tinygrad.nn.state import load_state_dict
+  from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
   config = {}
   # ** hyperparameters **
@@ -1368,54 +1368,24 @@ def train_stable_diffusion():
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
   SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
-  LIMIT_GPU_RAM      = config["LIMIT_GPU_RAM"]          = getenv("LIMIT_GPU_RAM", 0)
 
   BASEDIR = Path(getenv("BASEDIR", "./"))
   assert BASEDIR, "set BASEDIR to path of datasets"
 
-  unet_params = {
-    "adm_in_ch": None,
-    "in_ch": 4,
-    "out_ch": 4,
-    "model_ch": 320,
-    "attention_resolutions": [4, 2, 1],
-    "num_res_blocks": 2,
-    "channel_mult": [1, 2, 4, 4],
-    "d_head": 64,
-    "transformer_depth": [1, 1, 1, 1],
-    "ctx_dim": 1024,
-    "use_linear": True,
-  }
+  unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+    "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True}
+
   Device.DEFAULT="CPU"
 
-  # for weights loading code to work
   class StableDiffusion:
     def __init__(self):
       self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
   model = StableDiffusion()
 
-  weights = safe_load(BASEDIR / "checkpoints" / "training_init_model.safetensors")
-  load_state_dict(model, weights)
-
-  # NOTE: Here the goal is to compare output against the mlperf reference implementation, using the same inputs for both
-  # NOTE: Therefore we load the same input samples (including randn samples) that were used in the mlperf reference run
-  with open(BASEDIR / "checkpoints" / "3_training_prompts.txt") as f:
-    prompts = f.read().split("\n")
-  print(prompts[0])
-
-  data = safe_load(BASEDIR / "checkpoints" / "3_training_steps.safetensors")
-  for p in data.values(): p.to_("CPU").realize()
-
-  for p in get_parameters(model.cond_stage_model): p.to_("NV")
-  Device.DEFAULT="NV"
-  contexts = model.cond_stage_model(prompts).to_("CPU").realize()
-  Device.DEFAULT="CPU"
-  #for p in get_parameters(model.cond_stage_model): p.to_("CPU").realize()
-  del model.cond_stage_model
-
-  #model_after_eleven_steps = safe_load(BASEDIR / "checkpoints" / "model_after_eleven_training_steps.safetensors")
-  #for p in model_after_eleven_steps.values(): p.to_("CPU").realize()
+  clip_weights = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
+  clip_weights["attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+  load_state_dict(model.cond_stage_model.model, clip_weights)
 
   unet = model.model.diffusion_model
   optimizer = AdamW(get_parameters(unet))
@@ -1433,7 +1403,7 @@ def train_stable_diffusion():
     optimizer.zero_grad()
 
     # NOTE: moving parameters to/from GPU won't be necessary on a tinybox; everything can live in GPU memory
-    # This is only needed for training on a single NVIDIA RTX 3080 with 10GB VRAM
+    # This is only needed for training on a single NVIDIA RTX 3080 with 10GB VRAM with BS=1
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("NV")
 
@@ -1442,91 +1412,36 @@ def train_stable_diffusion():
 
     loss.backward().to_("CPU")
 
-    """
-    loss.backward()
-    print("saving grads")
-    grads = {}
-    for k,v in get_state_dict(unet).items():
-      if k == "out.2.bias":
-        if v.grad is not None:
-          print(f"saving {k}")
-          x = v.grad.realize().to("CPU").realize()
-          grads[f"{k}.grad"] = x
-    safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_1_steps.safetensors")
-    print("saved grads")
-    import sys
-    sys.exit()
-    """
-
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("CPU")
 
     optimizer.step()
-    #Device.DEFAULT = "CPU" # for scheduler's calculated LR to be on same device as optimizer, for assign
     scheduler.step()
     return loss
   
-  jit_step = TinyJit(train_step, optimize=True)
-  #jit_step.cnt = 1 # capture right away
+  jit_train_step = TinyJit(train_step, optimize=True)
+  jit_context_step = TinyJit(model.cond_stage_model)
 
   dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
-  # training loop, one iteration = one epoch
-  losses = []
+  # training loop
   for i, batch in enumerate(dl):
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-
-    ##### batch['npy']
-    #mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
-    mean, logvar = Tensor.chunk(data['batch_npy'][i].contiguous().realize().cast(dtypes.half), 2, dim=1)
+    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+    latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
 
-    ##### latent randn
-    #latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
-    latent = (mean + std * data['latent_randn'][i].contiguous().realize()).cast(dtypes.half) * SCALE_FACTOR
-
-    ##### t
-    #t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
-    t = data['t'][i].contiguous().realize()
-
-    ##### noise
-    #noise = Tensor.randn_like(latent)
-    noise = data['noise'][i].contiguous().realize()
+    t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
+    noise = Tensor.randn_like(latent)
     latent_with_noise = sqrt_alphas_cumprod[t] * latent + sqrt_one_minus_alphas_cumprod[t] * noise
+    # the UNet predicts velocity (v); v_true is the ground-truth value
+    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
 
     # encode prompt
+    prompt = batch['txt']
+    context = jit_context_step(prompt)
 
-    ##### prompt
-    #prompt = batch['txt']
-    #context = model.cond_stage_model(prompt)
-    #context = Tensor.randn(1,77,1024)
-    context = contexts[i:i+1].contiguous().realize()
-
-    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
-    loss = jit_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
-    #loss = train_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
-    losses.append(loss.clone().realize())
-    ref_loss = data['loss'][i].item()
-    print(f"epoch {i}: loss: {loss.item():.9f}, ref_loss: {ref_loss:.9f}, loss_diff: {(ref_loss - loss.item()):.9f}")
-    #if i == 10:
-    if i == 2:
-      #safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / f"tiny_after_{i+1}_training_steps.safetensors")
-      #print("saved model")
-      #safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / f"tiny_losses_after_{i+1}_steps.safetensors")
-      #print("saved losses")
-      #grads = {}
-      out = {}
-      for k,v in get_state_dict(unet).items():
-        if k == "out.2.bias":
-          #if v.grad is not None:
-            #x = v.grad.to("NV").contiguous().to("CPU").realize()
-            #grads[f"{k}.grad"] = x
-            #grads[f"{k}.grad"] = v.grad.contiguous().realize()
-          out[k] = v
-      #safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_{i+1}_steps.safetensors")
-      safe_save(out, BASEDIR / "checkpoints" / f"tiny_out.2.bias_after_{i+1}_steps.safetensors")
-      print("saved")
-      import sys
-      sys.exit()
+    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
+    print(f"step {i}: loss: {loss.item():.9f}")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
