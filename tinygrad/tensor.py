@@ -18,7 +18,7 @@ from tinygrad.kernelize.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
-all_tensors: set[weakref.ref[Tensor]] = set()
+all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
   return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
 
@@ -173,8 +173,8 @@ class Tensor(MathTrait):
       self.uop = data
 
     # add to all_tensors after construction succeeds
-    all_tensors.add(weakref.ref(self))
-  def __del__(self): all_tensors.discard(weakref.ref(self))
+    all_tensors[weakref.ref(self)] = None
+  def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
