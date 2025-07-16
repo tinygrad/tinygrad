@@ -1699,7 +1699,9 @@ class Tensor(MathTrait):
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
+    which the sum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     You can pass in `dtype` keyword argument to control the data type of the accumulation.
     If not specified, the accumulation data type is chosen based on the input tensor's data type.
@@ -1753,6 +1755,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 0, 2], [5, 4, 3]])
@@ -1778,6 +1782,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the minimum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 0, 2], [5, 4, 3]])
@@ -1865,6 +1871,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the mean is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)

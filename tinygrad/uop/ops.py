@@ -180,6 +180,19 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
+    
+    # REDUCE_AXIS has special shape logic based on keepdims
+    if self.op is Ops.REDUCE_AXIS:
+      src_shape = src_sts[0].shape
+      args = parse_reduce_args(self.arg)
+      if args.keepdims:
+        # With keepdims=True, set reduced dimensions to 1
+        shape = tuple(1 if i in args.axes else s for i, s in enumerate(src_shape))
+      else:
+        # With keepdims=False, remove reduced dimensions
+        shape = tuple(s for i, s in enumerate(src_shape) if i not in args.axes)
+      return ShapeTracker.from_shape(shape)
+    
     # For operations that support broadcasting, we don't require all shapes to be the same
     # Instead, we'll use the broadcasted shape
     if self.op in GroupOp.Binary and len(src_sts) > 1:
@@ -200,6 +213,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         # Check keepdims parameter in ReduceArgs
         reduce_args = parse_reduce_args(self.arg)
         if reduce_args.keepdims:
+          # reduce() returns a tuple with 1s in reduced dimensions
           shape = src_sts[0].reduce(self.axis_arg)
         else:
           # Remove reduced dimensions

@@ -27,7 +27,7 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   match args.op:
     case Ops.ADD: ret = ret*prshape
     case Ops.MUL: ret = ret.pow(prshape)
-    case Ops.MAX: ret = ret # NOTE: Ops.MAX is passthrough
+    case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
   # Handle keepdims
   if not args.keepdims and ret is not None:
     ret = ret.reshape(tuple(s for i,s in enumerate(ret.shape) if i not in args.axes))
@@ -213,6 +213,8 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
   args = parse_reduce_args(r.arg)
+  # When keepdims=False, the shapes may differ but fusion can still work
+  # The shape compatibility will be checked later in the function
   if unwrap(view.st).contiguous and view.size == r.size and \
       (not args.fuse or # fuse marker check
        tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
@@ -230,13 +232,16 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   new_axis = tuple(range(len(view.shape), len(view.shape) + len(r.axis_arg)))
   if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input.fuse(),), ReduceArgs(args.op, new_axis, args.keepdims, True))
   else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input,), ReduceArgs(args.op, new_axis, args.keepdims, args.fuse))
+  # The reshape will handle shape compatibility
   return red.reshape(view.shape)
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
   args = parse_reduce_args(r.arg)
   new_axis = [i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u]
-  return src.r(args.op, tuple(new_axis), keepdims=args.keepdims).reshape(r.shape)
+  result = src.r(args.op, tuple(new_axis), keepdims=args.keepdims)
+  # The reshape will handle shape compatibility automatically
+  return result.reshape(r.shape)
 
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
@@ -245,7 +250,9 @@ def elementwise_view_right(root:UOp):
   new_st = ShapeTracker.from_shape(swizzles[0].base.shape)
   new_src = [x.base if x.base.shape==new_st.shape else apply_swizzle(x.view(new_st)) for x in root.src]
   # reshape to match downstream shapes
-  return root.replace(src=tuple(new_src)).reshape(root.shape)
+  new_root = root.replace(src=tuple(new_src))
+  # The reshape will handle shape compatibility automatically
+  return new_root.reshape(root.shape)
 
 # push VIEW to children
 view_right = merge_views+PatternMatcher([

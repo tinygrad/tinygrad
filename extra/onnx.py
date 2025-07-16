@@ -733,9 +733,16 @@ def get_onnx_ops():
     for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
       i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
       u = u.squeeze(0)
-      if reduction == "none": x[i] = u
-      elif reduction == "add": x[i] += u
-      elif reduction == "mul": x[i] *= u
+      if reduction == "none": 
+        # Convert index tensors to python ints to avoid contiguous issues
+        i_ints = tuple(int(idx.numpy()) for idx in i)
+        x[i_ints] = u
+      elif reduction == "add": 
+        i_ints = tuple(int(idx.numpy()) for idx in i)
+        x[i_ints] += u
+      elif reduction == "mul": 
+        i_ints = tuple(int(idx.numpy()) for idx in i)
+        x[i_ints] *= u
       else: raise NotImplementedError("reduction doesn't support max or min")
     return x
 

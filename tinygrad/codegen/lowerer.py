@@ -38,7 +38,9 @@ def get_index(ast:UOp) -> IndexContext:
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  # Filter out indices that don't exist (can happen with keepdims=False)
+  valid_indices = [i for i in x.axis_arg if i < len(ctx.ridxs)]
+  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in valid_indices], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
