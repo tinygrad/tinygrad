@@ -83,13 +83,11 @@ class Kernel:
     self.dont_use_locals = False
     self.finalized: bool = False
 
+    global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
+    self.axis_types = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
-
-    # axis types
-    global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
 
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
@@ -115,7 +113,7 @@ class Kernel:
     return ret
 
   @property
-  def first_reduce(self) -> int: return self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)[0]
+  def first_reduce(self) -> int: return next(iter(self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)), self.shape_len)
 
   @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
@@ -203,12 +201,9 @@ class Kernel:
     return False
 
   def simplify_merge_adjacent(self):
-    assert not hasattr(self, 'axis_types'), "don't call this after init"
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-    # NOTE: we can't use self.first_reduce yet
-    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape+(0,), self.full_shape+(1,))].index(True)
-
+    first_reduce = self.first_reduce
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
     membufs = dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
@@ -236,7 +231,7 @@ class Kernel:
         si, sti, last_st = s[i], st[i], ret[-1][1]
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
-      mergeable = all(can_merge) and i != first_reduce
+      if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
       for j,(s,st) in enumerate(zip(shapes, strides)):
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
         else: rets[j].append((s[i], st[i]))
