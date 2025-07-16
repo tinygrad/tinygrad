@@ -102,6 +102,7 @@ class OnnxNode:
   inputs: tuple[str, ...]
   outputs: tuple[str, ...]
   opts: dict[str, Any]
+  domain: str
 
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
@@ -147,7 +148,7 @@ class OnnxRunner:
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = tuple(x.name for x in model.graph.output)
-    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute})
+    self.graph_nodes = tuple(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}, n.domain)
                        for num,n in enumerate(model.graph.node))
     self.opset_version = model.opset_import[0].version
     self.variable_dims: dict[str, int] = {}
@@ -171,13 +172,20 @@ class OnnxRunner:
       if user_dim_input != onnx_dim: raise RuntimeError(f"input {name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
-  def _dispatch_op(self, op, inps, opts):
+  # TODO hacked in domain support
+  def _dispatch_op(self, op, inps, opts, domain:str|None=None):
     if op in self.onnx_ops:
       fxn = self.onnx_ops[op]
       if isinstance(fxn, dict):
         for k in sorted(fxn.keys()):
-          if k <= self.opset_version:
+          if isinstance(k, int) and k <= self.opset_version:
             real_fxn = fxn[k]
+          elif isinstance(k, str):
+            if domain is None: domain = ""
+            real_fxn = fxn[domain]
+          else:
+            raise NotImplementedError(f"{op=} with {k=} not supported")
+
       else: real_fxn = fxn
       return real_fxn(*inps, **opts)
     raise NotImplementedError(f"{op=} not supported")
@@ -206,7 +214,7 @@ class OnnxRunner:
 
       if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = self._dispatch_op(node.op, inps, opts)
+      ret = self._dispatch_op(node.op, inps, opts, node.domain)
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
@@ -663,10 +671,10 @@ def get_onnx_ops():
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None, attention_bias:Tensor|None=None,
-                past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0, num_heads:int|None=None,
-                past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None, rotary_embedding_dim:int|None=None,
-                scale:float|None=None, unidirectional:int=0):
+  def contrib_Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None,
+                attention_bias:Tensor|None=None, past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0,
+                num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
+                rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
     assert not do_rotary and not attention_bias, "TODO"
     if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
     qkv = x.linear(weights, bias)
@@ -707,10 +715,9 @@ def get_onnx_ops():
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
     return output, present
 
-  def Attention(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
+  def ai_onnx_Attention(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
                 is_causal:int=0, kv_num_heads:int|None=None, q_num_heads:int|None=None, qk_matmul_output_mode:int=0,
                 scale:float|None=None, softcap:float=0.0, softmax_precision:int|None=None):
-    # Reshape inputs from 3D to 4D if needed
     input_shape_len = Q.ndim
     if input_shape_len == 3:
       assert q_num_heads is not None and kv_num_heads is not None
@@ -718,7 +725,6 @@ def get_onnx_ops():
       K = K.reshape(K.shape[0], kv_num_heads, K.shape[1], -1)
       V = V.reshape(V.shape[0], kv_num_heads, V.shape[1], -1)
 
-    # Handle KV Cache and Grouped-Query Attention (GQA)
     if past_key is not None: K = past_key.cat(K, dim=2)
     if past_value is not None: V = past_value.cat(V, dim=2)
     present_key, present_value = K, V
@@ -728,12 +734,10 @@ def get_onnx_ops():
       K = K.repeat((1, _q_heads // _kv_heads, 1, 1))
       V = V.repeat((1, _q_heads // _kv_heads, 1, 1))
 
-    # Calculate QK matmul with scaling
     effective_scale = scale if scale is not None else 1.0 / (Q.shape[-1] ** 0.5)
     scores = (Q @ K.transpose(-2, -1)) * effective_scale
     qk_matmul_return_val = scores
 
-    # Apply attention mask/bias
     if is_causal:
       causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, requires_grad=False).tril(0)
       scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
@@ -744,22 +748,20 @@ def get_onnx_ops():
 
     if qk_matmul_output_mode == 1: qk_matmul_return_val = scores
 
-    # Apply Softcap
     if softcap > 0.0:
       scores = (scores / softcap).tanh() * softcap
       if qk_matmul_output_mode == 2: qk_matmul_return_val = scores
 
-    # Apply Softmax with optional precision change
     if softmax_precision: scores = scores.cast({1: dtypes.float32, 10: dtypes.float16, 16: dtypes.bfloat16}[softmax_precision])
 
     qk_softmax = scores.softmax(-1).cast(Q.dtype)
     if qk_matmul_output_mode == 3: qk_matmul_return_val = qk_softmax
 
-    # Compute final output and reshape if necessary
     output = (qk_softmax @ V).cast(Q.dtype)
     if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
 
     return output, present_key, present_value, qk_matmul_return_val
+  Attention = {"com.microsoft": contrib_Attention, "": ai_onnx_Attention}
 
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5):
     norm = X.square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
@@ -768,7 +770,6 @@ def get_onnx_ops():
   def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
                       rotary_embedding_dim:int=0):
     original_input_shape = X.shape
-    # First ensure input to be processed has shape [batch_size, seq_len, num_heads, head_size]
     if len(X.shape) == 4:
       X = X.permute(0, 2, 1, 3)
     batch_size = X.shape[0]
@@ -782,9 +783,7 @@ def get_onnx_ops():
     assert len(X.shape) == 4
     head_size = X.shape[3]
 
-    # Fully or partially perform rotation on input based on rotary_embedding_dim attribute
     if rotary_embedding_dim is None or rotary_embedding_dim == 0:
-      # If rotary_embedding_dim not provided, perform full rotation by using head_size
       rotary_embedding_dim = head_size
     x_rotate = X[:, :, :, :rotary_embedding_dim]
     x_not_rotate = X[:, :, :, rotary_embedding_dim:]
