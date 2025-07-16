@@ -1513,15 +1513,18 @@ def train_stable_diffusion():
       #print("saved model")
       #safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / f"tiny_losses_after_{i+1}_steps.safetensors")
       #print("saved losses")
-      grads = {}
+      #grads = {}
+      out = {}
       for k,v in get_state_dict(unet).items():
         if k == "out.2.bias":
-          if v.grad is not None:
+          #if v.grad is not None:
             #x = v.grad.to("NV").contiguous().to("CPU").realize()
             #grads[f"{k}.grad"] = x
-            grads[f"{k}.grad"] = v.grad.contiguous().realize()
-      safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_{i+1}_steps.safetensors")
-      print("saved grads")
+            #grads[f"{k}.grad"] = v.grad.contiguous().realize()
+          out[k] = v
+      #safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_{i+1}_steps.safetensors")
+      safe_save(out, BASEDIR / "checkpoints" / f"tiny_out.2.bias_after_{i+1}_steps.safetensors")
+      print("saved")
       import sys
       sys.exit()
 
