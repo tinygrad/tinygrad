@@ -504,15 +504,15 @@ class Kernel:
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
-          local_shape = tuple([s if self.axis_types[i] not in (AxisType.GLOBAL, AxisType.REDUCE, AxisType.UNROLL) and \
-                               (self.axis_types[i] is not AxisType.GROUP_REDUCE or i in grouped_axes) else 1 for i,s in enumerate(self.full_shape)])
+          local_shape = tuple([1 if self.axis_types[i] is AxisType.GLOBAL else s for i,s in enumerate(self.full_shape) \
+                            if self.axis_types[i] not in {AxisType.REDUCE, AxisType.UNROLL}])
           st = ShapeTracker.from_shape(local_shape).expand(self.full_shape[:self.global_dims]+local_shape[self.global_dims:])
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
-          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
+          st = ShapeTracker.from_shape(tuple([a for i,a in enumerate(local_shape) if i not in grouped_axes]))
           return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret
