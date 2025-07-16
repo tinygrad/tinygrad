@@ -1,8 +1,7 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, time
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, temp
-if PROFILE: os.environ["MTL_CAPTURE_ENABLED"] = "1"
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, ProfilePointEvent
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
@@ -64,7 +63,6 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
-  capture_manager = None
   def __init__(self, device:str):
     self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
@@ -74,25 +72,20 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
-    if PROFILE and MetalDevice.capture_manager is None:
-      MetalDevice.capture_manager = msg("sharedCaptureManager", objc_instance)(libobjc.objc_getClass(b"MTLCaptureManager"))
-      outfile = f"file://{temp(f'tiny_{int(time.time()*1000)}', append_user=True)}.gputrace"
-      Compiled.profile_events += [ProfilePointEvent(device, "gputrace", decimal.Decimal(-1), id(self), {"path":outfile})]
-      descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCaptureDescriptor"))
-      msg("setDestination:")(descriptor, 2)
-      msg("setOutputURL:")(descriptor, msg("URLWithString:", objc_instance)(libobjc.objc_getClass(b"NSURL"), to_ns_str(outfile)))
-      msg("setCaptureObject:")(descriptor, self.sysdevice)
-      msg("startCaptureWithDescriptor:error:")(MetalDevice.capture_manager, descriptor, ctypes.byref(err_capture:=objc_instance()))
-      error_check(err_capture)
+    if PROFILE:
+      import subprocess
+      pid = os.getpid()
+      # NOTE: GPU Counters is a custom template, somehow need to install this on the user's device
+      self.xctrace_recorder = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--attach", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+      # TODO: do this properly
+      from time import sleep
+      sleep(1)
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
-
-  def _at_profile_finalize(self):
-    msg("stopCapture")(MetalDevice.capture_manager)
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -102,6 +95,11 @@ class MetalDevice(Compiled):
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
+
+  def _at_profile_finalize(self):
+    self.xctrace_recorder.send_signal(signal.SIGINT)
+    self.xctrace_recorder.wait()
+    print("stopped xctrace.")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
@@ -123,7 +121,7 @@ class MetalCompiler(Compiler):
 
   def __init__(self):
     self.cgs = ctypes.c_void_p(MetalCompiler.support.MTLCodeGenServiceCreate(b"tinygrad"))
-    super().__init__("compile_metal_direct_profile" if PROFILE else "compile_metal_direct")
+    super().__init__("compile_metal_direct")
   def __reduce__(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
   def compile(self, src:str) -> bytes:
     ret: Union[Exception, bytes] = CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
@@ -144,7 +142,6 @@ class MetalCompiler(Compiler):
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
     params = f'-fno-fast-math -std={metal_version} --driver-mode=metal -x metal -fmodules-cache-path="{cache_dir}" -fno-caret-diagnostics'
-    if PROFILE: params += ' -frecord-sources'
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
     request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded

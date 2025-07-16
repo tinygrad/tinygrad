@@ -134,7 +134,6 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   timestamps:list[int] = []
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
-    if e.name == "gputrace": print(f"Profile for {e.device} in {e.arg['path']}")
     if e.name == "alloc":
       shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
       timestamps.append(int(e.st))
@@ -166,7 +165,6 @@ def get_profile(profile:list[ProfileEvent]):
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if int(ts) == -1: continue # remove this, some traces don't need a timestamp
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
