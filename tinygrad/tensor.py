@@ -1200,11 +1200,17 @@ class Tensor(MathTrait):
       # inject 1's for the extra dims added in create masks
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
       # sum reduce the extra dims introduced in create masks
-      x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
+      # Use keepdim=True for indexing operations to maintain backward compatibility
+      x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), keepdim=True, dtype=x.dtype)
 
       # special permute case
       if dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1)):
         x = x.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), x.ndim))
+
+      # for getitem, remove the dimensions that were kept with keepdim=True
+      if v is None:
+        for axis in sorted(sum_axis, reverse=True):
+          x = x.squeeze(axis)
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
@@ -1686,15 +1692,16 @@ class Tensor(MathTrait):
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
-    ret = self._apply_uop(UOp.r, op=op, axis=axis)
-    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
+    return self._apply_uop(UOp.r, op=op, axis=axis, keepdims=keepdim)
 
   def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Tensor:
     """
     Returns the sum of the elements of the tensor along the specified axis or axes.
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
+    which the sum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     You can pass in `dtype` keyword argument to control the data type of the accumulation.
     If not specified, the accumulation data type is chosen based on the input tensor's data type.
@@ -1748,6 +1755,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the maximum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 0, 2], [5, 4, 3]])
@@ -1773,6 +1782,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the minimum is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 0, 2], [5, 4, 3]])
@@ -1860,6 +1871,8 @@ class Tensor(MathTrait):
 
     You can pass in `axis` and `keepdim` keyword arguments to control the axis along
     which the mean is computed and whether the reduced dimensions are retained.
+    By default, `keepdim=False`, which removes the reduced dimensions from the output.
+    Set `keepdim=True` to retain reduced dimensions with size 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)

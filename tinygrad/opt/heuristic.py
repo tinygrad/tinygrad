@@ -2,7 +2,7 @@ import itertools
 from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
-from tinygrad.uop.ops import Ops, resolve
+from tinygrad.uop.ops import Ops, resolve, parse_reduce_args
 
 def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # make a copy so it does not mutate the input
@@ -11,7 +11,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
+    k.reduceop is not None and parse_reduce_args(k.reduceop.arg).op is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
     st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
     strides0, strides1 = st0.real_strides(), st1.real_strides()

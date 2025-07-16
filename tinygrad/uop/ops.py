@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
+from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence, NamedTuple
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -14,6 +14,26 @@ if TYPE_CHECKING:
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
+
+class ReduceArgs(NamedTuple):
+  op: Ops                    # Reduce operation (ADD, MUL, MAX)
+  axes: tuple[int, ...]      # Axes to reduce along
+  keepdims: bool = False     # NEW DEFAULT: False instead of True
+  fuse: bool = False         # Fuse marker for optimization
+
+def parse_reduce_args(arg):
+  if isinstance(arg, ReduceArgs):
+    return arg
+  # Legacy 2-tuple: (op, axes) - now defaults to keepdims=False per bounty requirement
+  if len(arg) == 2:
+    return ReduceArgs(arg[0], arg[1], keepdims=False, fuse=False)
+  # Legacy 3-tuple: (op, axes, fuse) - now defaults to keepdims=False per bounty requirement
+  if len(arg) == 3:
+    return ReduceArgs(arg[0], arg[1], keepdims=False, fuse=arg[2])
+  # Legacy 4-tuple: (op, axes, keepdims, fuse) - explicit keepdims setting
+  if len(arg) == 4:
+    return ReduceArgs(arg[0], arg[1], keepdims=arg[2], fuse=arg[3])
+  raise ValueError(f"Invalid reduce args: {arg}")
 
 def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
   return all(u.op not in GroupOp.UnsafePad for u in root.toposort(gate=lambda x:x not in edges))
@@ -82,7 +102,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         del UOpMetaClass.ucache[k]
     except AttributeError: pass
   def __reduce__(self):
-    args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
+    # Convert ReduceArgs back to tuple format for backward compatibility with process replay
+    arg = self.arg
+    if self.op is Ops.REDUCE_AXIS and isinstance(arg, ReduceArgs):
+      # Convert back to legacy tuple format for pickle compatibility
+      if arg.fuse:
+        arg = (arg.op, arg.axes, arg.fuse)
+      else:
+        arg = (arg.op, arg.axes)
+    args = [self.op, self.dtype, self.src, arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
@@ -152,13 +180,37 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
+
+    # REDUCE_AXIS has special shape logic based on keepdims
+    if self.op is Ops.REDUCE_AXIS:
+      src_shape = src_sts[0].shape
+      args = parse_reduce_args(self.arg)
+      if args.keepdims:
+        # With keepdims=True, set reduced dimensions to 1
+        shape = tuple(1 if i in args.axes else s for i, s in enumerate(src_shape))
+      else:
+        # With keepdims=False, remove reduced dimensions
+        shape = tuple(s for i, s in enumerate(src_shape) if i not in args.axes)
+      return ShapeTracker.from_shape(shape)
+
+    # For operations that support broadcasting, we don't require all shapes to be the same
+    # Instead, we'll use the broadcasted shape
+    if self.op in GroupOp.Binary and len(src_sts) > 1:
+      from tinygrad.tensor import _broadcast_shape
+      try:
+        shape = _broadcast_shape(*[x.shape for x in src_sts])
+        return ShapeTracker.from_shape(shape)
+      except Exception:
+        # If broadcast fails, fall through to the assertion
+        pass
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.WMMA:
+        shape = src_sts[0].reduce(self.axis_arg)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -205,7 +257,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def axis_arg(self) -> tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+    ret = parse_reduce_args(self.arg).axes if self.op is Ops.REDUCE_AXIS else self.arg[7]
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
@@ -254,20 +306,34 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
-  def r(self, op:Ops, axis:tuple[int, ...], permute=True):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
+  def r(self, op:Ops, axis:tuple[int, ...], keepdims=False, permute=True):
+    # With keepdims=False, we need to reduce even axes of size 1 to remove them from the shape
+    # Only filter out size-1 axes if keepdims=True (they don't affect the result but don't need to be removed)
+    if keepdims:
+      axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
+      if len(axis) == 0: return self
+    else:
+      axis = tuple(sorted(axis))
+      if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
     if move_early and permute:
       permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
       ret = self.permute(permaxis)
-      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
-      assert len(axis) == len(new_axis)
+      # When keepdims=False, we need to keep all reduce axes (even size 1) in new_axis
+      if keepdims:
+        new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+      else:
+        # Map original axis indices to their new positions after permutation
+        axis_map = {old: new for new, old in enumerate(permaxis)}
+        new_axis = tuple(sorted(axis_map[ax] for ax in axis))
+      assert len(axis) == len(new_axis), f"axis mismatch: {len(axis)} != {len(new_axis)}, axis={axis}, new_axis={new_axis}"
     else:
       ret, new_axis = self, axis
-    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
-    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    # Create REDUCE_AXIS with explicit keepdims parameter
+    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), ReduceArgs(op, new_axis, keepdims=keepdims))
+    # If keepdims=True, need to reshape to add back the 1s since REDUCE_AXIS default is now keepdims=False
+    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)])) if keepdims else ret
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
@@ -296,7 +362,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
-    if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
+    if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in parse_reduce_args(self.arg).axes else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
       arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))

@@ -117,5 +117,5 @@ if __name__ == "__main__":
   logging.info(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap(replayers)
   except Exception as e:
-    logging.info("process replay err", e)
+    logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))
