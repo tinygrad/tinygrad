@@ -1400,11 +1400,11 @@ def train_stable_diffusion():
 
   # NOTE: Here the goal is to compare output against the mlperf reference implementation, using the same inputs for both
   # NOTE: Therefore we load the same input samples (including randn samples) that were used in the mlperf reference run
-  with open(BASEDIR / "checkpoints" / "1_training_prompts.txt") as f:
+  with open(BASEDIR / "checkpoints" / "3_training_prompts.txt") as f:
     prompts = f.read().split("\n")
   print(prompts[0])
 
-  data = safe_load(BASEDIR / "checkpoints" / "1_training_steps.safetensors")
+  data = safe_load(BASEDIR / "checkpoints" / "3_training_steps.safetensors")
   for p in data.values(): p.to_("CPU").realize()
 
   for p in get_parameters(model.cond_stage_model): p.to_("NV")
@@ -1467,7 +1467,7 @@ def train_stable_diffusion():
     return loss
   
   jit_step = TinyJit(train_step, optimize=True)
-  jit_step.cnt = 1 # capture right away
+  #jit_step.cnt = 1 # capture right away
 
   dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   # training loop, one iteration = one epoch
@@ -1508,7 +1508,7 @@ def train_stable_diffusion():
     ref_loss = data['loss'][i].item()
     print(f"epoch {i}: loss: {loss.item():.9f}, ref_loss: {ref_loss:.9f}, loss_diff: {(ref_loss - loss.item()):.9f}")
     #if i == 10:
-    if i == 0:
+    if i == 2:
       #safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / f"tiny_after_{i+1}_training_steps.safetensors")
       #print("saved model")
       #safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / f"tiny_losses_after_{i+1}_steps.safetensors")
