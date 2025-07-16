@@ -174,8 +174,8 @@ class Kernel:
   # apply reshape and permute to all shapetrackers
   def reshape(self, new_shape_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
     self.sts = [st.reshape(tuple(new_shape_fxn(st.shape))) for st in self.sts]
-  def permute(self, new_axes:Sequence[int]): self.sts = [st.permute(tuple(new_axes)) for st in self.sts]
-
+  def permute(self, new_perm_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
+    self.sts = [st.permute(tuple(new_perm_fxn(list(range(len(st.shape)))))) for st in self.sts]
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
@@ -185,10 +185,14 @@ class Kernel:
     self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
-    def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
-    new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
+    def new_shape_fxn(x):
+      return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if axis < len(x) else ()) + x[axis+1:]
+    def new_perm_fxn(x):
+      return [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, len(x)) if i != move_axis] \
+      if move_axis < len(x) else list(range(len(x)))
+
     self.reshape(new_shape_fxn)
-    self.permute(new_axes)
+    self.permute(new_perm_fxn)
 
   # ******************** complex simplifiers ********************
 
@@ -197,8 +201,7 @@ class Kernel:
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      # self.reshape(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]])
-      self.reshape(lambda shape: [x for x in shape if x is not 1])
+      self.reshape(lambda shape: [x for x in shape if x != 1])
       return True
     return False
 
@@ -320,9 +323,10 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
       check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
-      permute = list(range(self.shape_len))
-      permute[axis], permute[amt] = permute[amt], permute[axis]
-      self.permute(tuple(permute))
+      def swap_permute(x):
+        x[axis], x[amt] = x[amt], x[axis]
+        return x
+      self.permute(swap_permute)
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "cannot pad upcasted")
