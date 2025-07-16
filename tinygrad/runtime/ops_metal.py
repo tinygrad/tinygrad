@@ -1,6 +1,6 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, temp
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -74,12 +74,12 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE:
       import subprocess
-      pid = os.getpid()
-      # NOTE: GPU Counters is a custom template, somehow need to install this on the user's device
-      self.xctrace_recorder = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--attach", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+      os.makedirs(path:=temp("gpu_counters", append_user=True), exist_ok=True)
+      # TODO: "GPU Counters" is a custom template, somehow need to install this on the user's device
+      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--output", path, "--attach", str(os.getpid())],
+                                           stdout=subprocess.PIPE)
       # TODO: do this properly
-      from time import sleep
-      sleep(1)
+      self.xctrace_proc.stdout.readline()
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -97,9 +97,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
-    self.xctrace_recorder.send_signal(signal.SIGINT)
-    self.xctrace_recorder.wait()
-    print("stopped xctrace.")
+    self.xctrace_proc.send_signal(signal.SIGINT)
+    self.xctrace_proc.wait()
+    print(f"saved profile data in {temp('gpu_counters', append_user=True)}")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
