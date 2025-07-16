@@ -83,10 +83,12 @@ class Kernel:
     self.dont_use_locals = False
     self.finalized: bool = False
 
-    global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * len(self.full_shape)
     # group simplifies
     self.simplify_ones()
+
+    global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
+    self.axis_types = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * (len(self.full_shape) - len(self.output_shape))
+
     self.simplify_merge_adjacent()
 
     # confirm all reduce axes are at the end
@@ -123,8 +125,7 @@ class Kernel:
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
   @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
-
+  def shape_len(self) -> int: return len(self.sts[-1].shape)
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
   @property
   def global_dims(self) -> int: return len(self.axes_of(AxisType.GLOBAL))
@@ -196,14 +197,19 @@ class Kernel:
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      self.reshape(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]])
+      # self.reshape(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]])
+      self.reshape(lambda shape: [x for x in shape if x is not 1])
       return True
     return False
 
   def simplify_merge_adjacent(self):
-    if self.shape_len == 0: return
+    if self.shape_len == 0 or self.axis_types == [] or self.output_shape == (): return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-    first_reduce, axis_types = self.first_reduce, self.axis_types
+    first_reduce = self.first_reduce
+    axis_types = self.axis_types.copy()
+    # print(axis_types)
+    # print(shapes)
+
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
     membufs = dedup([x.src[0].base for x in self.bufs if x.op in {Ops.LOAD, Ops.STORE}])
@@ -234,8 +240,9 @@ class Kernel:
       # more can merge than this
       if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
       for j,(s,st) in enumerate(zip(shapes, strides)):
+        if (axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape)): continue
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])#if reduce axis and shape is reduced there, then skip?
-        elif not (axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape)): rets[j].append((s[i], st[i]))
+        else: rets[j].append((s[i], st[i]))
 
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
@@ -306,7 +313,7 @@ class Kernel:
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       # self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
@@ -460,10 +467,13 @@ class Kernel:
         return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
-        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if
-                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if
-                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        runoff = len(self.sts[reduce_idx+1].shape) -len(self.sts[reduce_idx].shape)
+        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL))
+        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE))
+        # axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if
+        #                      resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        # grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if
+        #                      resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])

@@ -14,11 +14,11 @@ class IndexContext:
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
-
-  # indexes
+  # if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
+  p = [x for x in ast.toposort() if x.op is Ops.VIEW]#Big hack. needs changing
+  full_shape = max([x.arg.shape for x in p], key=len)
   idxs = []
-  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
+  for i, (s, at) in enumerate(zip(full_shape, axis_types)):
     if at in (AxisType.UPCAST, AxisType.UNROLL):
       assert isinstance(s, int), "needs to be int to upcast/unroll"
       idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)))
@@ -28,10 +28,9 @@ def get_index(ast:UOp) -> IndexContext:
 
   # late indexes (group for reduce)
   ridxs = idxs[:]
-  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
+  for i, (s, at) in enumerate(zip(full_shape, axis_types)):
     if at == AxisType.GROUP_REDUCE:
       ridxs[i] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), 1000+i)
-
   return IndexContext(idxs, ridxs)
 
 # ***** lowering (given index) *****
