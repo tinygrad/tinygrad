@@ -304,7 +304,8 @@ class Kernel:
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
+      # self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
