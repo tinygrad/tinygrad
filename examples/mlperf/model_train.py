@@ -1400,10 +1400,11 @@ def train_stable_diffusion():
 
   # NOTE: Here the goal is to compare output against the mlperf reference implementation, using the same inputs for both
   # NOTE: Therefore we load the same input samples (including randn samples) that were used in the mlperf reference run
-  with open(BASEDIR / "checkpoints" / "eleven_training_prompts.txt") as f:
+  with open(BASEDIR / "checkpoints" / "1_training_prompts.txt") as f:
     prompts = f.read().split("\n")
+  print(prompts[0])
 
-  data = safe_load(BASEDIR / "checkpoints" / "eleven_training_steps.safetensors")
+  data = safe_load(BASEDIR / "checkpoints" / "1_training_steps.safetensors")
   for p in data.values(): p.to_("CPU").realize()
 
   for p in get_parameters(model.cond_stage_model): p.to_("NV")
@@ -1440,6 +1441,22 @@ def train_stable_diffusion():
     loss = ((out - v_true) ** 2).mean() / v_true.shape[0]
 
     loss.backward().to_("CPU")
+
+    """
+    loss.backward()
+    print("saving grads")
+    grads = {}
+    for k,v in get_state_dict(unet).items():
+      if k == "out.2.bias":
+        if v.grad is not None:
+          print(f"saving {k}")
+          x = v.grad.realize().to("CPU").realize()
+          grads[f"{k}.grad"] = x
+    safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_1_steps.safetensors")
+    print("saved grads")
+    import sys
+    sys.exit()
+    """
 
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("CPU")
@@ -1486,12 +1503,25 @@ def train_stable_diffusion():
 
     v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
     loss = jit_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
+    #loss = train_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
     losses.append(loss.clone().realize())
     ref_loss = data['loss'][i].item()
     print(f"epoch {i}: loss: {loss.item():.9f}, ref_loss: {ref_loss:.9f}, loss_diff: {(ref_loss - loss.item()):.9f}")
-    if i == 10:
-      safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / "tiny_after_eleven_training_steps.safetensors")
-      safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / "tiny_losses.safetensors")
+    #if i == 10:
+    if i == 0:
+      #safe_save(get_state_dict(unet), BASEDIR / "checkpoints" / f"tiny_after_{i+1}_training_steps.safetensors")
+      #print("saved model")
+      #safe_save(get_state_dict(losses), BASEDIR / "checkpoints" / f"tiny_losses_after_{i+1}_steps.safetensors")
+      #print("saved losses")
+      grads = {}
+      for k,v in get_state_dict(unet).items():
+        if k == "out.2.bias":
+          if v.grad is not None:
+            #x = v.grad.to("NV").contiguous().to("CPU").realize()
+            #grads[f"{k}.grad"] = x
+            grads[f"{k}.grad"] = v.grad.contiguous().realize()
+      safe_save(grads, BASEDIR / "checkpoints" / f"tiny_grads_after_{i+1}_steps.safetensors")
+      print("saved grads")
       import sys
       sys.exit()
 
