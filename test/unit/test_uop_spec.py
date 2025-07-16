@@ -48,9 +48,6 @@ class TestUOpSpec(unittest.TestCase):
   def test_no_implicit_broadcasting(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((4, 32))),))
-    # With keepdims=False, reduction (4,32) -> (4,) on axis=1, then (4,32) + (4,) broadcasts to (4,32)
-    # This is now valid, so we need to create a truly invalid case
-    # Let's try reducing axis=0 to get shape (32,), then (4,32) + (32,) should fail
     b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.MAX, (0,)))
     st = UOp(Ops.STORE, dtypes.void, (bufs[0].view(ShapeTracker.from_shape((4, 32))), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
@@ -74,9 +71,6 @@ class TestUOpSpec(unittest.TestCase):
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
-    # With keepdims=False default, r has shape (1,), a has shape (32,1), r+a = (32,1) via broadcasting
-    # This should be valid, but there's a compilation issue where reduce axes get lost during processing
-    # The RuntimeError comes from get_program, not from AST verification
     with self.assertRaises((InvalidASTException, RuntimeError)): helper_test_verify_ast(st)
 
   def test_buffer_uops_st(self):
@@ -90,7 +84,6 @@ class TestUOpSpec(unittest.TestCase):
   def test_assert_swizzle(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
-    # With keepdims=False, r has shape (1,), so we need to use keepdims=True to get (32, 1) for expansion
     from tinygrad.uop.ops import ReduceArgs
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), ReduceArgs(Ops.ADD, (0,), keepdims=True))
     st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)

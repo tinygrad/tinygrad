@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
-from tinygrad.uop.ops import ReduceArgs, parse_reduce_args
-from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.ops import track_rewrites, _substitute, parse_reduce_args, ReduceArgs
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
@@ -21,21 +20,18 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   # must be unmasked (NOTE: can be relaxed if not masked on stride 0 axis)
   if any(v.mask is not None for v in unwrap(x.st).views): return None
   # must have all stride 0 in the relevant axis (NOTE: can do partial)
-  reduce_args = parse_reduce_args(reduce.arg)
-  if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce_args.axes) or not all_int(x.shape): return None
-  prshape = prod(x.shape[i] for i in reduce_args.axes)
-  ret = x.shrink(tuple((0,s) if i not in reduce_args.axes else (0,1) for i,s in enumerate(x.shape)))
-  match reduce_args.op:
-    case Ops.ADD: result = ret*prshape
-    case Ops.MUL: result = ret.pow(prshape)
-    case Ops.MAX: result = ret # NOTE: Ops.MAX is passthrough
-    case _: result = None
-  # If keepdims=False, we need to squeeze out the reduced dimensions
-  if result is not None and not reduce_args.keepdims:
-    # Remove dimensions that were reduced
-    new_shape = tuple(s for i, s in enumerate(result.shape) if i not in reduce_args.axes)
-    result = result.reshape(new_shape)
-  return result
+  args = parse_reduce_args(reduce.arg)
+  if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in args.axes) or not all_int(x.shape): return None
+  prshape = prod(x.shape[i] for i in args.axes)
+  ret = x.shrink(tuple((0,s) if i not in args.axes else (0,1) for i,s in enumerate(x.shape)))
+  match args.op:
+    case Ops.ADD: ret = ret*prshape
+    case Ops.MUL: ret = ret.pow(prshape)
+    case Ops.MAX: ret = ret # NOTE: Ops.MAX is passthrough
+  # Handle keepdims
+  if not args.keepdims and ret is not None:
+    ret = ret.reshape(tuple(s for i,s in enumerate(ret.shape) if i not in args.axes))
+  return ret
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -44,27 +40,18 @@ def split_reduceop(reduce:UOp, x:UOp):
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
+  args = parse_reduce_args(reduce.arg)
   real_strides = unwrap(x.st).real_strides(ignore_valid=True)
-  reduce_args = parse_reduce_args(reduce.arg)
-  if not (split_candidates:=[(i,d) for i in reduce_args.axes for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+  if not (split_candidates:=[(i,d) for i in args.axes for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and real_strides[i]!=0]): return None
   dim_to_split, divisor = split_candidates[0]
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  old_args = parse_reduce_args(reduce.arg)
-  first_reduce = splitted.r(old_args.op, old_args.axes, keepdims=old_args.keepdims)
-  # The axis for the second reduce should be based on the shape after the first reduce
-  # If keepdims=True, use len(reduce.shape) as before
-  # If keepdims=False, need to account for reduced dimensions
-  if old_args.keepdims:
-    second_axis = (len(reduce.shape),)
-  else:
-    # When keepdims=False, the split dimension ends up at position (first_reduce.ndim - 1)
-    second_axis = (len(first_reduce.shape) - 1,)
-  second_reduce = first_reduce.r(old_args.op, second_axis, keepdims=old_args.keepdims)
-  return second_reduce.reshape(reduce.shape)
+  first = splitted.r(args.op, args.axes, keepdims=args.keepdims)
+  second_axis = (len(first.shape)-1,) if not args.keepdims else (len(reduce.shape),)
+  return first.r(args.op, second_axis, keepdims=args.keepdims).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
@@ -188,18 +175,17 @@ merge_views = PatternMatcher([
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
+  args = parse_reduce_args(r.arg)
+  # This function only works with keepdims=True (when we're adding ones back)
+  if not args.keepdims: return None
   if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and \
       tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    old_args = parse_reduce_args(r.arg)
-    # This function is designed for keepdims=True case where we're adding ones back
-    # For keepdims=False, the dimension mapping is different and more complex
-    if not old_args.keepdims: return None
-    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, old_args.axes)) is None: return None
+    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, args.axes)) is None: return None
     for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
-      if i in old_args.axes:
+      if i in args.axes:
         # if this is a reduce axis, we need a 1 in the view here to put it
         assert len(new_shape_chunk) > 0
         new_shape += [1]*(len(pairs)-1) + [src.shape[i]]
@@ -207,7 +193,7 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
-    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=ReduceArgs(old_args.op, tuple(new_reduce_axis), old_args.keepdims, old_args.fuse))
+    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=ReduceArgs(args.op, tuple(new_reduce_axis), args.keepdims, args.fuse))
     assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
   return None
@@ -226,9 +212,9 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  old_args = parse_reduce_args(r.arg)
+  args = parse_reduce_args(r.arg)
   if unwrap(view.st).contiguous and view.size == r.size and \
-      (not old_args.fuse or # fuse marker check
+      (not args.fuse or # fuse marker check
        tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
     return None
   # swizzle the input
@@ -242,16 +228,15 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   swizzled_input = apply_swizzle(src.view(new_view))
   # create a new reduceop
   new_axis = tuple(range(len(view.shape), len(view.shape) + len(r.axis_arg)))
-  old_args = parse_reduce_args(r.arg)
-  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input.fuse(),), ReduceArgs(old_args.op, new_axis, old_args.keepdims, True))
-  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input,), ReduceArgs(old_args.op, new_axis, old_args.keepdims, False))
+  if fuse: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input.fuse(),), ReduceArgs(args.op, new_axis, args.keepdims, True))
+  else: red = UOp(Ops.REDUCE_AXIS, r.dtype, (swizzled_input,), ReduceArgs(args.op, new_axis, args.keepdims, args.fuse))
   return red.reshape(view.shape)
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
-  old_args = parse_reduce_args(r.arg)
+  args = parse_reduce_args(r.arg)
   new_axis = [i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u]
-  return src.r(old_args.op, tuple(new_axis), keepdims=old_args.keepdims).reshape(r.shape)
+  return src.r(args.op, tuple(new_axis), keepdims=args.keepdims).reshape(r.shape)
 
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
@@ -272,8 +257,8 @@ view_right = merge_views+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK, Ops.REDUCE_AXIS}, name="root"), elementwise_view_right),
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
-   lambda r1,r2: r1.replace(arg=ReduceArgs(r1.arg.op, r2.arg.axes+r1.arg.axes, r1.arg.keepdims, r1.arg.fuse))
-                 if parse_reduce_args(r1.arg).op is parse_reduce_args(r2.arg).op else None),
+   lambda r1,r2: r1.replace(arg=ReduceArgs(a1.op, a2.axes+a1.axes, a1.keepdims, a1.fuse))
+   if (a1:=parse_reduce_args(r1.arg)).op == (a2:=parse_reduce_args(r2.arg)).op and a1.keepdims == a2.keepdims else None),
 ])
 
 # **** fix kernel AST
@@ -356,8 +341,8 @@ pm_fuse = PatternMatcher([
 
   # FUSE on reduce (without view) adds fuse marker to grouper
   (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
-   lambda r: r.replace(src=(r.src[0].fuse(),), arg=parse_reduce_args(r.arg)._replace(fuse=True))
-             if not parse_reduce_args(r.arg).fuse else None),
+   lambda r: (lambda a: r.replace(src=(r.src[0].fuse(),), arg=ReduceArgs(a.op, a.axes, a.keepdims, True))
+             if not a.fuse else None)(parse_reduce_args(r.arg))),
 
   # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
   (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),
@@ -399,7 +384,7 @@ def fuse_arange(root:UOp):
   if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
   for r in local_arange:
     # skip if already fused
-    if parse_reduce_args(r.arg).fuse: continue
+    if len(r.arg) > 2: continue
     q = list(local_children[r])
     while q:
       u = q.pop()

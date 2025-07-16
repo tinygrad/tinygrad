@@ -5,8 +5,17 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, parse
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
-  def to_inp_shape(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   args = parse_reduce_args(ret.arg)
+  # For gradient, we always need to expand back to input shape
+  # If keepdims=False, we need to add dimensions back first
+  def to_inp_shape(x):
+    if not args.keepdims and len(x.shape) < len(ret.src[0].shape):
+      # Insert 1s at the reduced axes positions to match input rank
+      new_shape = list(x.shape)
+      for axis in sorted(args.axes):
+        new_shape.insert(axis, 1)
+      x = x.reshape(tuple(new_shape))
+    return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   if args.op == Ops.ADD: return (to_inp_shape(ctx),)
   if args.op == Ops.MAX:
     max_is_1s = ret.src[0].ne(to_inp_shape(ret)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
