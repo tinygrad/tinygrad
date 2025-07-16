@@ -1257,27 +1257,31 @@ class Tensor(MathTrait):
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
-        if isinstance(self.device, str) and self.device.startswith("DISK"):
-          self.realize()._getitem(indices).assign(v)
-          return
-        # NOTE: check that setitem target is valid first
-        if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
-        if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
-        if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
-        if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
+    if isinstance(self.device, str) and self.device.startswith("DISK"):
+      self.realize()._getitem(indices).assign(v)
+      return
+    # NOTE: check that setitem target is valid first
+    if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
+    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-        # This is for the simple integer index case.
-        idx = indices if isinstance(indices, int) else indices[0]
+    # This provides a lazy path for 1D integer assignments to enable kernel fusion in loops.
+    is_simple_1d_assignment = self.ndim == 1 and isinstance(indices, int)
 
-        # Create the lazy boolean mask.
-        mask = Tensor.arange(self.shape[-1], device=self.device, requires_grad=False) == idx
+    if is_simple_1d_assignment:
+        # Create a lazy mask and use `where` to implement the assignment.
+        mask = Tensor.arange(self.shape[-1], device=self.device, requires_grad=False) == indices
+        self.uop = mask.where(v, self).uop
+        return
 
-        # Use the mask to create the new lazy tensor.
-        new_self = mask.where(v, self)
-
-        # Update self's computation graph.
-        self.uop = new_self.uop
-        return self
+    # Fallback to the original eager implementation for all other complex cases.
+    res = self.realize()._getitem(indices, v)
+    if res.shape == self.shape and res.uop is not self.uop:
+      self.assign(res).realize()
+    else: # no copy, basic setitem
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+      res.assign(v).realize()
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
