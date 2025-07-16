@@ -178,14 +178,8 @@ class OnnxRunner:
       fxn = self.onnx_ops[op]
       if isinstance(fxn, dict):
         for k in sorted(fxn.keys()):
-          if isinstance(k, int) and k <= self.opset_version:
-            real_fxn = fxn[k]
-          elif isinstance(k, str):
-            if domain is None: domain = ""
-            real_fxn = fxn[domain]
-          else:
-            raise NotImplementedError(f"{op=} with {k=} not supported")
-
+          if isinstance(k, int) and k <= self.opset_version: real_fxn = fxn[k]
+          if isinstance(k, str): real_fxn = fxn["" if domain is None else domain]
       else: real_fxn = fxn
       return real_fxn(*inps, **opts)
     raise NotImplementedError(f"{op=} not supported")
@@ -671,7 +665,7 @@ def get_onnx_ops():
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def contrib_Attention(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None,
+  def Attention_contrib(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None,
                 attention_bias:Tensor|None=None, past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0,
                 num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
                 rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
@@ -715,7 +709,7 @@ def get_onnx_ops():
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
     return output, present
 
-  def ai_onnx_Attention(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
+  def Attention_ai_onnx(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
                 is_causal:int=0, kv_num_heads:int|None=None, q_num_heads:int|None=None, qk_matmul_output_mode:int=0,
                 scale:float|None=None, softcap:float=0.0, softmax_precision:int|None=None):
     input_shape_len = Q.ndim
@@ -761,7 +755,7 @@ def get_onnx_ops():
     if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
 
     return output, present_key, present_value, qk_matmul_return_val
-  Attention = {"com.microsoft": contrib_Attention, "": ai_onnx_Attention}
+  Attention = {"com.microsoft": Attention_contrib, "": Attention_ai_onnx}
 
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5):
     norm = X.square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
@@ -770,62 +764,34 @@ def get_onnx_ops():
   def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
                       rotary_embedding_dim:int=0):
     original_input_shape = X.shape
-    if len(X.shape) == 4:
-      X = X.permute(0, 2, 1, 3)
-    batch_size = X.shape[0]
-    sequence_length = X.shape[1]
-    if len(X.shape) == 3:
-      hidden_size = X.shape[2]
-      assert num_heads != 0
-      head_size = int(hidden_size / num_heads)
-      new_shape = [batch_size, sequence_length, num_heads, head_size]
-      X = X.reshape(new_shape)
-    assert len(X.shape) == 4
-    head_size = X.shape[3]
 
-    if rotary_embedding_dim is None or rotary_embedding_dim == 0:
-      rotary_embedding_dim = head_size
-    x_rotate = X[:, :, :, :rotary_embedding_dim]
-    x_not_rotate = X[:, :, :, rotary_embedding_dim:]
-    rotary_embedding_dim_half = int(rotary_embedding_dim / 2)
+    if X.ndim == 4: X = X.permute(0, 2, 1, 3)
+    elif X.ndim == 3:
+      assert num_heads is not None, "num_heads must be provided for 3D input"
+      X = X.reshape(*X.shape[:-1], num_heads, X.shape[-1] // num_heads)
 
-    # Retrieve sin and cos caches using position ids
-    if position_ids is not None:
-      cos = cos_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
-      sin = sin_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
-    else:
-      cos = cos_cache
-      sin = sin_cache
-    cos = cos[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    sin = sin[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    cos = cos.unsqueeze(2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
-    sin = sin.unsqueeze(2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
+    head_size = X.shape[-1]
+    rot_dim = rotary_embedding_dim or head_size
+    x_rotate, x_pass = X[..., :rot_dim], X[..., rot_dim:]
 
-    # Either divide the input in halves or interleave (based on interleaved attribute)
+    cos = cos_cache[position_ids] if position_ids is not None else cos_cache[:X.shape[1]]
+    sin = sin_cache[position_ids] if position_ids is not None else sin_cache[:X.shape[1]]
+    cos = cos[..., :rot_dim//2].unsqueeze(2)
+    sin = sin[..., :rot_dim//2].unsqueeze(2)
+
     if interleaved:
-      x1 = x_rotate[:, :, :, 0::2]
-      x2 = x_rotate[:, :, :, 1::2]
+      x1, x2 = x_rotate[..., ::2], x_rotate[..., 1::2]
+      real = x1 * cos - x2 * sin
+      imag = x1 * sin + x2 * cos
+      x_rotated = Tensor.stack(real, imag, dim=-1).flatten(start_dim=-2)
     else:
       x1, x2 = x_rotate.chunk(2, dim=-1)
+      real = x1 * cos - x2 * sin
+      imag = x1 * sin + x2 * cos
+      x_rotated = real.cat(imag, dim=-1)
 
-    # Calculate real and imaginary values
-    real = (cos * x1) - (sin * x2)
-    imag = (sin * x1) + (cos * x2)
-
-    # Inserted rotated embeddings back to the original input
-    if interleaved:
-      real = real.unsqueeze(-1)
-      imag = imag.unsqueeze(-1)
-      x_rotate_concat = real.cat(imag, dim=-1)
-      x_rotate = x_rotate_concat.reshape(x_rotate.shape)
-    else:
-      x_rotate = real.cat(imag, dim=-1)
-    output = x_rotate.cat(x_not_rotate, dim=-1)
-    if len(original_input_shape) == 3:
-      output = output.reshape(original_input_shape)
-    else:
-      output = output.permute(0, 2, 1, 3)
-    return output
+    output = x_rotated.cat(x_pass, dim=-1)
+    return output.flatten(start_dim=2) if len(original_input_shape) == 3 else output.permute(0, 2, 1, 3)
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
