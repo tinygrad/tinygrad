@@ -1626,7 +1626,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  def test_conv2d_fused(self): 
+  def test_conv2d_fused(self):
     # Kernel count increased from 5 to 6 due to keepdims=False affecting fusion in conv2d backward pass
     _test_conv2d(6, FUSE_CONV_BW=1)
 
