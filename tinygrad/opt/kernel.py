@@ -251,6 +251,7 @@ class Kernel:
       if opt.axis is None: return -1
       if opt.op is OptOps.UNROLL: return self.unrollable_dims[opt.axis]
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[opt.axis]
+      check(opt.axis < self.shape_len, "invalid axis")
       return opt.axis
     except IndexError as e: raise KernelOptError from e
 
@@ -271,7 +272,6 @@ class Kernel:
       return
 
     axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
 
     if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
     elif opt.arg is not None:
