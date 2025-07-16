@@ -129,8 +129,6 @@ class Kernel:
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
   @property
-  def local_dims(self) -> int: return len(self.axes_of(AxisType.LOCAL))
-  @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
@@ -311,7 +309,7 @@ class Kernel:
       self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
-      check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
+      check(AxisType.LOCAL not in self.axis_types and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
       check(axis < amt, f"swap is only for axis < amt, getting {amt=}, {axis=}")
