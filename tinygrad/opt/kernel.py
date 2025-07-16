@@ -335,7 +335,8 @@ class Kernel:
         check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
-        if (s:=st.shape[axis]) == 1: continue  # reduced
+        if self.axis_types[axis] in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} and len(st.shape) < len(self.full_shape): continue  # reduced
+        s = st.shape[axis]
         check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
         if (ru := round_up(cast(int, s), amt) - s):
           # pad right seems to be faster
