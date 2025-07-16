@@ -206,12 +206,10 @@ class Kernel:
     return False
 
   def simplify_merge_adjacent(self):
-    if self.shape_len == 0 or self.axis_types == [] or self.output_shape == (): return
+    if self.axis_types == []: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
     first_reduce = self.first_reduce
     axis_types = self.axis_types.copy()
-    # print(axis_types)
-    # print(shapes)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
@@ -232,7 +230,7 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
+    rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]#handle all zero shapes
     for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
@@ -248,7 +246,8 @@ class Kernel:
         else: rets[j].append((s[i], st[i]))
 
     # do the reshapes
-    for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets[:len(self.sts)]): 
+      if shapes[i] != (): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** apply optimizations ********************
 
