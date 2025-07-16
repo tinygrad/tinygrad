@@ -739,21 +739,17 @@ def get_onnx_ops():
     if attn_mask is not None:
       mask_to_add = attn_mask.where(0, -float("inf")) if attn_mask.dtype == dtypes.bool else attn_mask
       scores = scores + mask_to_add
-
     if qk_matmul_output_mode == 1: qk_matmul_return_val = scores
 
-    if softcap > 0.0:
-      scores = (scores / softcap).tanh() * softcap
-      if qk_matmul_output_mode == 2: qk_matmul_return_val = scores
+    if softcap > 0.0: scores = (scores / softcap).tanh() * softcap
+    if qk_matmul_output_mode == 2: qk_matmul_return_val = scores
 
     if softmax_precision: scores = scores.cast({1: dtypes.float32, 10: dtypes.float16, 16: dtypes.bfloat16}[softmax_precision])
-
     qk_softmax = scores.softmax(-1).cast(Q.dtype)
     if qk_matmul_output_mode == 3: qk_matmul_return_val = qk_softmax
 
     output = (qk_softmax @ V).cast(Q.dtype)
     if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
-
     return output, present_key, present_value, qk_matmul_return_val
   Attention = {"com.microsoft": Attention_contrib, "": Attention_ai_onnx}
 
