@@ -1141,9 +1141,11 @@ class Tensor(MathTrait):
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          size = len(index)
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
+          size = 1
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
           start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
@@ -1170,6 +1172,13 @@ class Tensor(MathTrait):
       # flip negative strides
       shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
       x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
+      # Align the number of dimensions with x, then shrink v to match how many elements are being used to make advanced setitem easier later,
+      # in some cases it can be longer than the total elements that will be assigned
+      if v is not None:
+        v_shrinks = tuple((0, mop['size']) if mop['stride'] > 0 else (v.shape[i] - mop['size'], v.shape[i]) for i, mop in enumerate(mops) if len(mops) - i - 1 < v.ndim)
+        if v_shrinks:
+          v = v.shrink(v_shrinks)
+        v = v.reshape(_align_left(v.shape, x.shape)[0])
       # handle stride != 1 or -1
       if any(abs(st) != 1 for st in strides):
         strides = tuple(abs(s) for s in strides)
@@ -1180,7 +1189,7 @@ class Tensor(MathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], (int, UOp))))
+    x = x.reshape(tuple(self.shape[i] if isinstance(index['index'], Tensor) else index['size'] for i,index in enumerate(indices_parsed) if not isinstance(index['index'], (int, UOp))))
 
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
@@ -1213,6 +1222,46 @@ class Tensor(MathTrait):
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
         x = _masked_setitem(self, vb, mask, tuple(range(dims[0], dims[0] + len(big_shape))))
+
+      return x
+
+    # -------------------------------------------------------------------------
+    # Generic setitem for non-tensor indexing (ints and simple slices).
+    # If `v` is provided and we did not hit the tensor-advanced indexing path
+    # above (i.e., `tops` is empty), return the full tensor with the indexed
+    # elements replaced, matching NumPy/PyTorch semantics.
+    # -------------------------------------------------------------------------
+    # TODO: Unify with tensors or at least make sure they work together
+    if v is not None:
+      tops = [(d,i) for d,i in enumerate((index for index in indices_parsed if index['index'] is not None and not isinstance(index['index'], Tensor)))]
+      dims, indices, strides, masks = [d for d,_ in tops], [i['index'] for _,i in tops], [i['stride'] for _,i in tops], []
+      big_shape = tuple(i['boundary'][1] - i['boundary'][0] for d,i in tops)
+
+      premask = Tensor.ones(v.shape, device=v.device, dtype=dtypes.bool)
+
+      # Pad v and mask based on stride
+      abs_strides = tuple(abs(s) for s in strides)
+      v = v.pad(tuple((0, st - 1) for st in abs_strides))
+      premask = premask.pad(tuple((0, st - 1) for st in abs_strides))
+      # Repeat to fill up big_shape
+      v = v.repeat(*tuple(max(s // st + 1, 1) for s, st in zip(big_shape, abs_strides)))
+      premask = premask.repeat(*tuple(max(s // st + 1, 1) for s, st in zip(big_shape, abs_strides)))
+      # Get rid of extras due to big_shape not being divisible by stride length 
+      v = v.shrink(tuple((0, s) for s in big_shape))
+      premask = premask.shrink(tuple((0, s) for s in big_shape))
+
+      padding = tuple((tops[i][1]['boundary'][0] or 0, (s - (tops[i][1]['boundary'][1] or 0))) for i,s in enumerate(self.shape))
+
+      # Flip for negative strides
+      v = v.flip(tuple(i for i,st in enumerate(strides) if st < 0))
+      premask = premask.flip(tuple(i for i,st in enumerate(strides) if st < 0))
+
+      premask = premask.pad(padding)
+
+      mask = premask
+      vb = v.pad(padding)
+
+      x = mask.where(vb, self)
 
     return x
 
@@ -1266,13 +1315,8 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+    res = self._getitem(indices, v)
+    self.replace(res)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """

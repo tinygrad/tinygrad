@@ -32,7 +32,7 @@ class TestSetitem(unittest.TestCase):
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
   def test_setitem_inplace_mul(self):
-    t = Tensor.arange(10).realize()
+    t = Tensor.arange(10).contiguous()
     t[:3] *= 10
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
@@ -110,6 +110,7 @@ class TestSetitem(unittest.TestCase):
     t[[0,0]] = Tensor([[1],[2]])
     np.testing.assert_allclose(t.numpy(), [[2],[2],[3]])
 
+  # TODO: Failing
   def test_fancy_setitem(self):
     t = Tensor.zeros(6,6).contiguous()
     t[[1,2], [3,2]] = 3
@@ -117,17 +118,22 @@ class TestSetitem(unittest.TestCase):
     n[[1,2], [3,2]] = 3
     np.testing.assert_allclose(t.numpy(), n)
 
+  # We could expect the JIT to fail or we can call realize within the JIT function
+  #@unittest.expectedFailure
   def test_simple_jit_setitem(self):
+    # TODO: At the moment, the JIT causes a failure when it kicks in on the 3rd call
     @TinyJit
     def f(t:Tensor, a:Tensor):
       t[2:4, 3:5] = a
+      # Nothing to JIT if we don't realize the tensor
+      t.realize()
 
     for i in range(1, 6):
-      t = Tensor.zeros(6, 6).contiguous().realize()
+      t = Tensor.randn(6, 6).contiguous()
+      n = t.numpy()
       a = Tensor.full((2, 2), fill_value=i, dtype=dtypes.float).contiguous()
       f(t, a)
 
-      n = np.zeros((6, 6))
       n[2:4, 3:5] = np.full((2, 2), i)
       np.testing.assert_allclose(t.numpy(), n)
 
@@ -179,7 +185,15 @@ class TestWithGrad(unittest.TestCase):
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
-    cmp = Tensor.empty(N)
+    cmp = Tensor.zeros(N, dtype=dtypes.int).contiguous()
+    tensor_to_assign = Tensor.arange(N, dtype=dtypes.int)
+    for i in range(N): cmp[i] = tensor_to_assign[i]
+    self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+
+  # Previously the kernel would be split up by each creation of a constant
+  def test_arange_constant_assignment(self):
+    N = 10
+    cmp = Tensor.zeros(N, dtype=dtypes.int).contiguous()
     for i in range(N): cmp[i] = i
     self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
 
