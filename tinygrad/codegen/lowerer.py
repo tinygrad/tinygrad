@@ -16,7 +16,7 @@ def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
   # if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
   p = [x for x in ast.toposort() if x.op is Ops.VIEW]#Big hack. needs changing
-  full_shape = max([x.arg.shape for x in p], key=len)
+  full_shape = max([x.arg.shape for x in p], key=lambda shape: (len(shape), shape))
   idxs = []
   for i, (s, at) in enumerate(zip(full_shape, axis_types)):
     if at in (AxisType.UPCAST, AxisType.UNROLL):
