@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, subprocess, sys, ctypes, functools
+import platform, subprocess, sys, ctypes, functools, time
 from typing import ClassVar
 from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address
 from tinygrad.device import Compiled, Compiler, MallocAllocator, CPUProgram, BufferSpec
