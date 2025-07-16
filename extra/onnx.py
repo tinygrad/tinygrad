@@ -293,7 +293,11 @@ def get_onnx_ops():
     if value_string is not None or value_strings is not None and sparse_value is not None:
       raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
-  def Range(start:float|int, limit:float|int, delta:float|int): return Tensor.arange(start=start, stop=limit, step=delta)
+  def Range(start:float|int, limit:float|int, delta:float|int):
+    start = start[0] if isinstance(start, (list, tuple)) else start
+    limit = limit[0] if isinstance(limit, (list, tuple)) else limit
+    delta = delta[0] if isinstance(delta, (list, tuple)) else delta
+    return Tensor.arange(start=start, stop=limit, step=delta)
 
   def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
     try: import PIL.Image
@@ -488,7 +492,9 @@ def get_onnx_ops():
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
-  def Trilu(x:Tensor, k:int=0, upper:int=1): return x.triu(k) if upper else x.tril(k)
+  def Trilu(x:Tensor, k:int=0, upper:int=1):
+    k = k[0] if isinstance(k, list) else k
+    return x.triu(k) if upper else x.tril(k)
 
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
             axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
@@ -700,6 +706,127 @@ def get_onnx_ops():
     output = attn_scores.softmax(-1) @ v
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
     return output, present
+
+  def Attention(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
+                is_causal:int=0, kv_num_heads:int|None=None, q_num_heads:int|None=None, qk_matmul_output_mode:int=0,
+                scale:float|None=None, softcap:float=0.0, softmax_precision:int|None=None):
+    # Reshape inputs from 3D to 4D if needed
+    input_shape_len = Q.ndim
+    if input_shape_len == 3:
+      assert q_num_heads is not None and kv_num_heads is not None
+      Q = Q.reshape(Q.shape[0], q_num_heads, Q.shape[1], -1)
+      K = K.reshape(K.shape[0], kv_num_heads, K.shape[1], -1)
+      V = V.reshape(V.shape[0], kv_num_heads, V.shape[1], -1)
+
+    # Handle KV Cache and Grouped-Query Attention (GQA)
+    if past_key is not None: K = past_key.cat(K, dim=2)
+    if past_value is not None: V = past_value.cat(V, dim=2)
+    present_key, present_value = K, V
+
+    _q_heads, _kv_heads = q_num_heads or Q.shape[1], kv_num_heads or K.shape[1]
+    if _q_heads != _kv_heads:
+      K = K.repeat((1, _q_heads // _kv_heads, 1, 1))
+      V = V.repeat((1, _q_heads // _kv_heads, 1, 1))
+
+    # Calculate QK matmul with scaling
+    effective_scale = scale if scale is not None else 1.0 / (Q.shape[-1] ** 0.5)
+    scores = (Q @ K.transpose(-2, -1)) * effective_scale
+    qk_matmul_return_val = scores
+
+    # Apply attention mask/bias
+    if is_causal:
+      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, requires_grad=False).tril(0)
+      scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
+
+    if attn_mask is not None:
+      mask_to_add = attn_mask.where(0, -float("inf")) if attn_mask.dtype == dtypes.bool else attn_mask
+      scores = scores + mask_to_add
+
+    if qk_matmul_output_mode == 1: qk_matmul_return_val = scores
+
+    # Apply Softcap
+    if softcap > 0.0:
+      scores = (scores / softcap).tanh() * softcap
+      if qk_matmul_output_mode == 2: qk_matmul_return_val = scores
+
+    # Apply Softmax with optional precision change
+    if softmax_precision: scores = scores.cast({1: dtypes.float32, 10: dtypes.float16, 16: dtypes.bfloat16}[softmax_precision])
+
+    qk_softmax = scores.softmax(-1).cast(Q.dtype)
+    if qk_matmul_output_mode == 3: qk_matmul_return_val = qk_softmax
+
+    # Compute final output and reshape if necessary
+    output = (qk_softmax @ V).cast(Q.dtype)
+    if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
+
+    return output, present_key, present_value, qk_matmul_return_val
+
+  def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5):
+    norm = X.square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
+    return X * norm * scale
+
+  def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
+                      rotary_embedding_dim:int=0):
+    original_input_shape = X.shape
+    # First ensure input to be processed has shape [batch_size, seq_len, num_heads, head_size]
+    if len(X.shape) == 4:
+      X = X.permute(0, 2, 1, 3)
+    batch_size = X.shape[0]
+    sequence_length = X.shape[1]
+    if len(X.shape) == 3:
+      hidden_size = X.shape[2]
+      assert num_heads != 0
+      head_size = int(hidden_size / num_heads)
+      new_shape = [batch_size, sequence_length, num_heads, head_size]
+      X = X.reshape(new_shape)
+    assert len(X.shape) == 4
+    head_size = X.shape[3]
+
+    # Fully or partially perform rotation on input based on rotary_embedding_dim attribute
+    if rotary_embedding_dim is None or rotary_embedding_dim == 0:
+      # If rotary_embedding_dim not provided, perform full rotation by using head_size
+      rotary_embedding_dim = head_size
+    x_rotate = X[:, :, :, :rotary_embedding_dim]
+    x_not_rotate = X[:, :, :, rotary_embedding_dim:]
+    rotary_embedding_dim_half = int(rotary_embedding_dim / 2)
+
+    # Retrieve sin and cos caches using position ids
+    if position_ids is not None:
+      cos = cos_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
+      sin = sin_cache[position_ids]  # Shape: [batch_size, sequence_length, head_size/2]
+    else:
+      cos = cos_cache
+      sin = sin_cache
+    cos = cos[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+    sin = sin[:, :, :rotary_embedding_dim_half]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+    cos = cos.unsqueeze(2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
+    sin = sin.unsqueeze(2)  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
+
+    # Either divide the input in halves or interleave (based on interleaved attribute)
+    if interleaved:
+      x1 = x_rotate[:, :, :, 0::2]
+      x2 = x_rotate[:, :, :, 1::2]
+    else:
+      x1, x2 = x_rotate.chunk(2, dim=-1)
+
+    # Calculate real and imaginary values
+    real = (cos * x1) - (sin * x2)
+    imag = (sin * x1) + (cos * x2)
+
+    # Inserted rotated embeddings back to the original input
+    if interleaved:
+      real = real.unsqueeze(-1)
+      imag = imag.unsqueeze(-1)
+      x_rotate_concat = real.cat(imag, dim=-1)
+      x_rotate = x_rotate_concat.reshape(x_rotate.shape)
+    else:
+      x_rotate = real.cat(imag, dim=-1)
+    output = x_rotate.cat(x_not_rotate, dim=-1)
+    if len(original_input_shape) == 3:
+      output = output.reshape(original_input_shape)
+    else:
+      output = output.permute(0, 2, 1, 3)
+    return output
 
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]

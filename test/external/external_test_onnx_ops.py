@@ -18,7 +18,7 @@ class TestOnnxOps(unittest.TestCase):
     onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
-    model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}", ir_version=10)
     return model
 
   def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
