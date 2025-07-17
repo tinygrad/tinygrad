@@ -262,7 +262,8 @@
                 // var v = new Int32Array(51864);
                 // v.fill(0);
                 // v[0] = TOK_NO_TIMESTAMPS;
-                for(let i = offset; i < (MAX_TOKENS_TO_DECODE*2); ++i) {
+                let max_range = offset + MAX_TOKENS_TO_DECODE;
+                for(let i = offset; i < max_range; ++i) {
                     let [nextToken] = await net_decoder(context, audio_features, [i]);
                     nextToken = nextToken.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
                     // for (const tok of nextToken) {
