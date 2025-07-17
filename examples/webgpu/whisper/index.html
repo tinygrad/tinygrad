@@ -300,7 +300,11 @@
                     } else {
                         pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     }
-                    if (decoder_output[0] == TOK_EOS) break;
+                    if (decoder_output[0] == TOK_EOS) {
+                        break;
+                    } else if (i + 1 >= max_range) {
+                        context[context.length-1] = TOK_EOS;
+                    }
                 }
                 previous_context = context.slice();
 
