@@ -239,7 +239,7 @@ class OnnxRunner:
 ####################
 def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionType]]:
   # ***** helper functions *****
-  def _enforce_single_element(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
+  def _resolve_const(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
 
   def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 
@@ -312,7 +312,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
   def Range(start:float|int|list[float|int], limit:float|int|list[float|int], delta:float|int|list[float|int]):
-    return Tensor.arange(start=_enforce_single_element(start), stop=_enforce_single_element(limit), step=_enforce_single_element(delta))
+    return Tensor.arange(start=_resolve_const(start), stop=_resolve_const(limit), step=_resolve_const(delta))
 
   def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
     try: import PIL.Image
@@ -501,14 +501,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Einsum(*Inputs:list[Tensor], equation:str): return Tensor.einsum(equation, *Inputs)
 
   def CumSum(X:Tensor, axis:int|list[int], exclusive:int=0, reverse:int=0):
-    axis = X._resolve_dim(_enforce_single_element(axis))
+    axis = X._resolve_dim(_resolve_const(axis))
     if reverse: X = X.flip(axis)
     if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
   def Trilu(x:Tensor, k:int|list[int]=0, upper:int=1):
-    k_ = _enforce_single_element(k)
+    k_ = _resolve_const(k)
     return x.triu(k_) if upper else x.tril(k_)
 
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
@@ -571,7 +571,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
-    val, idx = X.topk(_enforce_single_element(K), axis, largest, sorted)
+    val, idx = X.topk(_resolve_const(K), axis, largest, sorted)
     return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
@@ -635,7 +635,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def OneHot(indices:Tensor, depth:float|int|list[int|float], values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
-    depth = int(_enforce_single_element(depth))
+    depth = int(_resolve_const(depth))
     indices = indices.int()
     indices = (indices < 0).where(indices+depth, indices)
     return indices.unsqueeze(axis)._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
