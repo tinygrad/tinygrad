@@ -343,9 +343,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def IsInf(x:Tensor, detect_negative:int=1, detect_positive:int=1): return x.isinf(bool(detect_positive), bool(detect_negative))
 
   # ***** Unary Ops (activation) *****
-  def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
-  def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
-  Softmax = {OpSetId(Domain.ONNX, 1):Softmax_1, OpSetId(Domain.ONNX, 13):Softmax_13}
+  def softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
+  def softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
+  Softmax = {OpSetId(Domain.ONNX, 1):softmax_1, OpSetId(Domain.ONNX, 13):softmax_13}
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
   def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
@@ -646,7 +646,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return X.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=blocksize, w1=blocksize)
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
-  def Dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
+  def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
     if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
@@ -655,8 +655,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     mask = rand >= ratio
     return data * mask / (1.0 - ratio), mask
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
-  def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
-  Dropout = {OpSetId(Domain.ONNX, 6):Dropout_6, OpSetId(Domain.ONNX, 7):Dropout_7}
+  def dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return dropout_7(data, ratio, training_mode=not is_test)
+  Dropout = {OpSetId(Domain.ONNX, 6):dropout_6, OpSetId(Domain.ONNX, 7):dropout_7}
 
   def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
     pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
@@ -678,10 +678,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  def Attention_contrib(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None,
-                attention_bias:Tensor|None=None, past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0,
-                num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
-                rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
+  def attention_contrib(x:Tensor, weights:Tensor, bias:Tensor|None=None, mask_index:Tensor|None=None, past:Tensor|None=None,
+                        attention_bias:Tensor|None=None, past_sequence_length:Tensor|None=None,  do_rotary:int=0, mask_filter_value:float=-10000.0,
+                        num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
+                        rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
     assert not do_rotary and not attention_bias, "TODO"
     if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
     qkv = x.linear(weights, bias)
@@ -722,9 +722,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
     return output, present
 
-  def Attention_ai_onnx(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
-                is_causal:int=0, kv_num_heads:int|None=None, q_num_heads:int|None=None, qk_matmul_output_mode:int=0,
-                scale:float|None=None, softcap:float=0.0, softmax_precision:int|None=None):
+  def attention_onnx(Q:Tensor, K:Tensor, V:Tensor, attn_mask:Tensor|None=None, past_key:Tensor|None=None, past_value:Tensor|None=None,
+                     is_causal:int=0, kv_num_heads:int|None=None, q_num_heads:int|None=None, qk_matmul_output_mode:int=0, scale:float|None=None,
+                     softcap:float=0.0, softmax_precision:int|None=None):
     input_shape_len = Q.ndim
     if input_shape_len == 3:
       assert q_num_heads is not None and kv_num_heads is not None
@@ -742,7 +742,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       V = V.repeat((1, _q_heads // _kv_heads, 1, 1))
 
     effective_scale = scale if scale is not None else 1.0 / (Q.shape[-1] ** 0.5)
-    scores = (Q @ K.transpose(-2, -1)) * effective_scale
+    scores = (Q @ K.transpose(-1, -2)) * effective_scale
     qk_matmul_return_val = scores
 
     if is_causal:
@@ -764,7 +764,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     output = (qk_softmax @ V).cast(Q.dtype)
     if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
     return output, present_key, present_value, qk_matmul_return_val
-  Attention = {OpSetId(Domain.MICROSOFT_CONTRIB_OPS, 1): Attention_contrib, OpSetId(Domain.ONNX, 1): Attention_ai_onnx}
+  Attention = {OpSetId(Domain.ONNX, 1): attention_onnx, OpSetId(Domain.MICROSOFT_CONTRIB_OPS, 1): attention_contrib}
 
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5):
     norm = X.square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
