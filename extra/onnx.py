@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable, get_args
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum
+import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum, collections
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
@@ -9,11 +9,14 @@ from extra.onnx_parser import onnx_load
 
 # ***** constants ******
 class Domain(enum.StrEnum):
-  ONNX = "" # "ai.onnx"
+  ONNX = ""  # "ai.onnx"
   MICROSOFT_CONTRIB_OPS = "com.microsoft"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  def __repr__(self): return self.value if self.value != "" else "ai.onnx"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None else cls(domain)
+  def __repr__(self): return "ai.onnx" if self is Domain.ONNX else self.value
+
 
 # https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
 data_types: dict[int, DType] = {
@@ -103,11 +106,7 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
-@dataclasses.dataclass(frozen=True)
-class OnnxOpVersion:
-  domain: str
-  version: int
-
+OpSetId = collections.namedtuple("OpSetId", ["domain", "version"])
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
   num: int
@@ -115,7 +114,7 @@ class OnnxNode:
   inputs: tuple[str, ...]
   outputs: tuple[str, ...]
   opts: dict[str, Any]
-  version: OnnxOpVersion
+  opset_id: OpSetId
 
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
@@ -161,15 +160,13 @@ class OnnxRunner:
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = tuple(x.name for x in model.graph.output)
-    opset_imports = {Domain(getattr(x, "domain", "")):x.version for x in model.opset_import}
-    self.graph_nodes = tuple(OnnxNode(
-      num, n.op_type,
-      tuple(n.input),
-      tuple(n.output),
-      {x.name:attribute_parse(x) for x in n.attribute},
-      OnnxOpVersion(Domain("" if n.domain is None else n.domain), opset_imports[Domain("" if n.domain is None else n.domain)]))
-      for num,n in enumerate(model.graph.node)
-    )
+    opset_imports = {Domain.from_onnx(getattr(x, "domain", None)):x.version for x in model.opset_import}
+    self.graph_nodes = []
+    for num, n in enumerate(model.graph.node):
+      domain = Domain.from_onnx(n.domain)
+      opset_id = OpSetId(domain, opset_imports.get(domain, 1))
+      self.graph_nodes.append(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}, opset_id))
+    self.graph_nodes = tuple(self.graph_nodes)
     self.variable_dims: dict[str, int] = {}
 
     self.onnx_ops = onnx_ops
@@ -191,15 +188,15 @@ class OnnxRunner:
       if user_dim_input != onnx_dim: raise RuntimeError(f"input {name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
-  def _dispatch_op(self, op, version, inps, opts):
+  def _select_op(self, op:str, opset_id:OpSetId) -> Callable:
     if op not in self.onnx_ops: raise NotImplementedError(f"{op=} not supported")
     # return default implementation if no version is specified
-    if isinstance(impl := self.onnx_ops[op], Callable): return impl(*inps, **opts)
-    assert isinstance(impl, dict)
+    if isinstance(impl := self.onnx_ops[op], types.FunctionType): return impl
+    assert isinstance(impl, dict) and all(isinstance(k, OpSetId) for k in impl.keys())
     # match domain and select implementation with highest supported version
-    eligible_ops = {k.version:fxn for k,fxn in impl.items() if k.domain == version.domain and k.version <= version.version}
-    if not eligible_ops: raise NotImplementedError(f"{op=} not supported for domain {version.domain} and version {version.version}")
-    return eligible_ops[max(eligible_ops.keys())](*inps, **opts)
+    domain_eligible_ops = {k.version:fxn for k,fxn in impl.items() if k.domain == opset_id.domain and k.version <= opset_id.version}
+    if not domain_eligible_ops: raise NotImplementedError(f"{op=} not supported for domain {opset_id.domain} and version {opset_id.version}")
+    return domain_eligible_ops[max(domain_eligible_ops.keys())]
 
   def get_empty_input_data(self, device:str|None=None, dtype:DType|None=None) -> dict[str, Tensor]:
     return {name:Tensor.empty(*spec.shape, device=device, dtype=dtype or spec.dtype) for name, spec in self.graph_inputs.items()}
@@ -225,7 +222,7 @@ class OnnxRunner:
 
       if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
-      ret = self._dispatch_op(node.op, node.version, inps, opts)
+      ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{x} - {o!r}" for x,o in zip(node.outputs, ret)))
 
@@ -348,7 +345,7 @@ def get_onnx_ops():
   # ***** Unary Ops (activation) *****
   def Softmax_1(x:Tensor, axis:int=1): return x.softmax(axis)
   def Softmax_13(x:Tensor, axis:int=-1): return x.softmax(axis)
-  Softmax = {OnnxOpVersion(Domain.ONNX, 1):Softmax_1, OnnxOpVersion(Domain.ONNX, 13):Softmax_13}
+  Softmax = {OpSetId(Domain.ONNX, 1):Softmax_1, OpSetId(Domain.ONNX, 13):Softmax_13}
   def HardSigmoid(x:Tensor, alpha:float=0.2, beta:float=0.5): return (alpha*x + beta).clip(0, 1)
   def Gelu(x:Tensor, approximate:str|None=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
   def BiasGelu(x: Tensor, bias: Tensor, approximate: str | None = None) -> Tensor: return Gelu(x + bias, approximate)
@@ -659,7 +656,7 @@ def get_onnx_ops():
     return data * mask / (1.0 - ratio), mask
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
   def Dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return Dropout_7(data, ratio, training_mode=not is_test)
-  Dropout = {OnnxOpVersion(Domain.ONNX, 6):Dropout_6, OnnxOpVersion(Domain.ONNX, 7):Dropout_7}
+  Dropout = {OpSetId(Domain.ONNX, 6):Dropout_6, OpSetId(Domain.ONNX, 7):Dropout_7}
 
   def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
     pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
@@ -767,7 +764,7 @@ def get_onnx_ops():
     output = (qk_softmax @ V).cast(Q.dtype)
     if input_shape_len == 3: output = output.permute(0, 2, 1, 3).reshape(Q.shape[0], Q.shape[2], -1)
     return output, present_key, present_value, qk_matmul_return_val
-  Attention = {OnnxOpVersion(Domain.MICROSOFT_CONTRIB_OPS, 1): Attention_contrib, OnnxOpVersion(Domain.ONNX, 1): Attention_ai_onnx}
+  Attention = {OpSetId(Domain.MICROSOFT_CONTRIB_OPS, 1): Attention_contrib, OpSetId(Domain.ONNX, 1): Attention_ai_onnx}
 
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5):
     norm = X.square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
