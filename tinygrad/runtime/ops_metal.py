@@ -75,10 +75,9 @@ class MetalDevice(Compiled):
     if PROFILE:
       import subprocess
       #os.system("killall Instruments")
-      if os.path.exists(path:="/tmp/metal.trace"):
-        os.system(f"rm -rd {path}")
+      if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, somehow need to install this on the user's device
-      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--output", path, "--attach", str(os.getpid())])
+      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounters2", "--output", path, "--attach", str(os.getpid())])
       # TODO: do this properly
       from time import sleep
       sleep(2)
@@ -102,7 +101,7 @@ class MetalDevice(Compiled):
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
     #os.system("open /tmp/metal.trace/")
-    print(f"saved profile data in {temp('gpu_counters', append_user=True)}")
+    print(f"saved profile data in /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))

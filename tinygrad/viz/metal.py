@@ -1,16 +1,21 @@
 import sys, subprocess, os
 from typing import Generator
 import xml.etree.ElementTree as ET
-from tinygrad.helpers import diskcache
+from tinygrad.helpers import temp
 
 COLS = {"gpu-counter-info":["timestamp", "counter_id", "name", "max_value", "accelerator_id", "description", "group_index", "type",
                             "ring_buffer_count", "require_weighted_accumulation", "sample_interval"],
         "gpu-counter-value":["timestamp", "counter_id", "value", "accelerator_id", "sample_index", "ring_buffer_index"]}
 TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time": int, "gpu-counter-name":str, "string":str, "fixed-decimal":float}
 
-@diskcache # SLOW!
-def xctrace_export(fp:str, query:str) -> str: return subprocess.check_output(["xctrace", "export", "--input", fp, "--xpath", \
-    f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], text=True)
+def xctrace_export(fp:str, query:str) -> str:
+  try:
+    with open(out_path:=f"{temp(query)}.xml") as f: return f.read()
+  except FileNotFoundError:
+    print(f"exporting to {out_path}")
+    subprocess.check_output(["xctrace", "export", "--input", fp, "--output", out_path, "--xpath",
+                             f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], text=True)
+    return xctrace_export(fp, query)
 
 def parse_xml(fp:str, query:str) -> Generator[dict, None, None]:
   id_cache:dict[str, str] = {}
