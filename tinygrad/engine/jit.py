@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
@@ -198,7 +198,7 @@ class CapturedJit(Generic[ReturnType]):
           if b is not None: b.ensure_allocated()
       # create graph if needed
       if JIT < 2:
-        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=JIT_BATCH_SIZE.value)
         self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._first_run = False
 

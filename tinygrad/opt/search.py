@@ -9,7 +9,7 @@ from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
@@ -64,7 +64,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
-    p = x[1].copy().to_program(name_override="test")
+    p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].opts)
     assert p.uops is not None, "uop list wasn't generated?"
     if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
@@ -121,7 +121,9 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
-      if ((ax:=lin.real_axis(a)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
+      try: ax = lin.real_axis(a.op, a.axis)
+      except KernelOptError: continue
+      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)

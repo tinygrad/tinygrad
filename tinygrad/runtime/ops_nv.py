@@ -286,7 +286,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
       self.dev.iface.free(opaque)
     except AttributeError: pass
 
-  def map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
 class GPFifo:
@@ -439,21 +439,19 @@ class NVKIface:
 
     # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
-      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
-      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping),
-      view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None)
+      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
+      has_cpu_mapping=has_cpu_mapping), view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
-  def map(self, mem:HCQBuffer):
-    if self.gpu_uuid in mem.meta.mapped_gpu_ids: return
-    mem.meta.mapped_gpu_ids.append(self.gpu_uuid)
-    self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
+  def map(self, mem:HCQBuffer): self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
 class PCIIface(PCIIfaceBase):
+  gpus:ClassVar[list[str]] = []
+
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     System.reserve_hugepages(64)
 
@@ -578,13 +576,13 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
-                    .signal(self.timeline_signal, self.timeline_value).submit(self)
+                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value)) \
-                                   .setup(copy_class=self.iface.dma_class) \
-                                   .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
+    NVCopyQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                 .setup(copy_class=self.iface.dma_class) \
+                 .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    self.timeline_value += 2
+    self.synchronize()
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return

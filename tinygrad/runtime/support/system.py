@@ -1,8 +1,8 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, fcntl
-from typing import cast
+from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
@@ -117,21 +117,21 @@ class PCIDevImplBase:
   mm: MemoryManager
 
 @dataclasses.dataclass
-class PCIAllocationMeta: owner:HCQCompiled; mapped_devs:list; mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
+class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
   dev_impl:PCIDevImplBase
-  gpus:list[str] = []
+  gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
-    if len(PCIIfaceBase.gpus) == 0:
-      PCIIfaceBase.gpus = System.pci_scan_bus(vendor, devices)
+    if len((cls:=type(self)).gpus) == 0:
+      cls.gpus = System.pci_scan_bus(vendor, devices)
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', '')).split(',') if x.strip()]
-      PCIIfaceBase.gpus = [PCIIfaceBase.gpus[x] for x in visible_devices] if visible_devices else PCIIfaceBase.gpus
+      cls.gpus = [cls.gpus[x] for x in visible_devices] if visible_devices else cls.gpus
 
       # Acquire va range to avoid collisions.
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)
-    self.pci_dev, self.dev, self.vram_bar = PCIDevice(PCIIfaceBase.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
+    self.pci_dev, self.dev, self.vram_bar = PCIDevice(cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
@@ -139,23 +139,20 @@ class PCIIfaceBase:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)[1]]
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
-        view=MMIOInterface(mapping.va_addr, size, fmt='B'))
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
+        view=MMIOInterface(mapping.va_addr, size, fmt='B'), owner=self.dev)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
     if cpu_access: self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size)
     return HCQBuffer(mapping.va_addr, size, view=MMIOInterface(mapping.va_addr, size, fmt='B') if cpu_access else None,
-      meta=PCIAllocationMeta(self.dev, [self.dev], mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]))
+      meta=PCIAllocationMeta(mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 
   def free(self, b:HCQBuffer):
-    for dev in b.meta.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if not b.meta.mapping.system: self.dev_impl.mm.vfree(b.meta.mapping)
-    if b.meta.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
+    if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    # Check if the memory is already mapped on this device
-    if self.dev in b.meta.mapped_devs: return
-    b.meta.mapped_devs.append(self.dev)
-
-    paddrs = [(paddr if b.meta.mapping.system else (paddr+b.meta.owner.iface.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
+    if (ifa:=getattr(b.owner, "iface", None)) is None or not isinstance(ifa, PCIIfaceBase): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+    paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
     self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
