@@ -23,8 +23,8 @@ def parse_xml(fp:str, query:str) -> Generator[dict, None, None]:
 
 def parse_metal_trace(fp:str) -> list[dict]:
   ret:dict[int, dict] = {}
-  for v in parse_xml(fp, "gpu-counter-info"): ret[v.pop("counter_id")] = {**v, "values":[]}
-  for v in parse_xml(fp, "gpu-counter-value"): ret[v.pop("counter_id")]["values"].append({"x":v["timestamp"], "y":v["value"]})
+  for v in parse_xml(fp, "gpu-counter-info"): ret[v.pop("counter_id")] = {**v, "data":[]}
+  for v in parse_xml(fp, "gpu-counter-value"): ret[v.pop("counter_id")]["data"].append({"x":v["timestamp"], "y":v["value"]})
   return list(ret.values())
 
 if __name__ == "__main__":

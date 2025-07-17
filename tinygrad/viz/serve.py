@@ -125,7 +125,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
-  return {"shapes":shapes, "maxDepth":len(levels)}
+  return {"name":"Timeline", "max_value":len(levels), "data":shapes}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   step, peak, mem = 0, 0, 0
@@ -153,12 +153,12 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  return {"name":"Memory", "max_value":peak, "data":{"shapes":list(shps.values()), "timestamps":timestamps}}
 
 from tinygrad.viz.metal import parse_metal_trace
-parsers = {"METAL":parse_metal_trace}
-def lines_layout(k:str) -> list:
-  try: return parsers[k](f"/tmp/{k}.trace")
+ext_parsers = {"METAL":parse_metal_trace}
+def device_metrics(k:str) -> list:
+  try: return ext_parsers[k](f"/tmp/{k}.trace")
   except (FileNotFoundError, KeyError): return []
 
 def get_profile(profile:list[ProfileEvent]):
@@ -175,7 +175,7 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v), "lines":lines_layout(k)} for k,v in dev_events.items()}
+  dev_layout = {k:[timeline_layout(v), mem_layout(v)]+device_metrics(k) for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server

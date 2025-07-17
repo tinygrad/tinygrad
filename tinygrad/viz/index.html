@@ -121,6 +121,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
+    position: relative;
   }
   .ctx-list-parent {
     width: 15%;
@@ -213,15 +214,18 @@
     display: none;
     font-size: 10px;
   }
-  #device-list > div {
-    min-height: 32px;
+  #device-list {
+    overflow-x: auto;
     max-width: 100px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
+    min-width: 100px;
   }
-  #device-list > div:hover {
-    background-color: rgba(20, 23, 35, 0.3);
+  #device-list > div {
+    margin-left: 4px;
+    padding: 4px 0;
+    white-space: nowrap;
+  }
+  #device-list > div > p {
+    margin-left: 4px;
   }
   </style>
 </head>
