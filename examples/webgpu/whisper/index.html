@@ -262,6 +262,22 @@
                 // var v = new Int32Array(51864);
                 // v.fill(0);
                 // v[0] = TOK_NO_TIMESTAMPS;
+
+                function handle_timestamp_tokens(nextTokens, context, last_token_index, one_before_last_token_index) {
+                    if (!NO_TIMESTAMPS) {
+                        if (token_count === 0) {
+                            nextTokens = nextTokens.filter((t)=> t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
+                        } else if (context[last_token_index] >= TOK_TS_FIRST) {
+                            if (context[one_before_last_token_index] >= TOK_TS_FIRST) {
+                                nextTokens = nextTokens.filter((t)=> t < TOK_TS_FIRST);
+                            } else {
+                                nextTokens = nextTokens.filter((t)=> t >= TOK_EOS);
+                            }
+                        }
+                    }
+
+                    return nextTokens;
+                }
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
                 for(let i = offset; i < max_range; ++i) {
                     let token_count = context.length - offset;
