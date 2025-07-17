@@ -136,10 +136,45 @@ async function renderProfiler() {
     mainTrack.innerText = k;
     for (const t of tracks) {
       if (!(t.max_value)) continue;
+      // find a track to append this to
       let td = mainTrack;
       if (t.name !== "Timeline") {
         td = deviceList.appendChild(document.createElement("div"));
         td.appendChild(document.createElement("p")).innerText = t.name;
+      }
+      let trackHeight = rect(td).height;
+      // add shapes spec
+      if (t.name === "Timeline") {
+        let colorKey, ref;
+        // map range events to a fixed height rect
+        const height = 32;
+        for (const e of t.data) {
+          if (e.depth === 0) colorKey = e.cat ?? e.name;
+          if (!colorMap.has(colorKey)) {
+            const colors = devColors[k] ?? devColors.DEFAULT;
+            colorMap.set(colorKey, colors[colorMap.size%colors.length]);
+          }
+          const fillColor = lighten(colorMap.get(colorKey), e.depth);
+          const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+          if (e.ref != null) ref = {ctx:e.ref, step:0};
+          else if (ref != null) {
+            const start = ref.step>0 ? ref.step+1 : 0;
+            const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+            if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+          }
+          // offset y by depth
+          data.shapes.push({x:e.st-st, y:height*e.depth, width:e.dur, height, ref, label, fillColor });
+        }
+      }
+      if (t.name === "Memory") {
+        const height = 32;
+        const yscale = d3.scaleLinear().domain([0, t.maxValue]).range([height, :]);
+        for (const [i,e] of t.data.shapes.entries()) {
+          const x = e.x.map((i,_) => (t.data.timestamps[i] ?? et)-st);
+          const y0 = e.y.map(yscale);
+          const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+          data.shapes.push({ x, y0, y1, arg:e.arg, color:bufColors[i%bufColors.length] });
+        }
       }
     }
   }
@@ -162,11 +197,11 @@ async function renderProfiler() {
     }
     // draw shapes
     for (const e of data.shapes) {
-      const [start, end] = e.x.width == null ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.width];
+      const [start, end] = e.width == null ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.width];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
       ctx.fillStyle = e.fillColor;
       // non contiguous generic polygon
-      if (e.x.width == null) {
+      if (e.width == null) {
         const x = e.x.map(xscale);
         ctx.beginPath();
         ctx.moveTo(x[0], e.y0[0]);
