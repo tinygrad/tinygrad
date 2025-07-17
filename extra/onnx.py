@@ -1,8 +1,8 @@
 from types import SimpleNamespace
-from typing import Any, Sequence, cast, Literal, Callable
+from typing import Any, Sequence, cast, Literal, Callable, get_args
 import dataclasses, functools, io, math, types, warnings, pathlib, sys
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 from extra.onnx_parser import onnx_load
@@ -225,6 +225,8 @@ class OnnxRunner:
 ####################
 def get_onnx_ops():
   # ***** helper functions *****
+  def _enforce_single_element(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
+
   def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 
   # (padding_top, padding_left, ..., padding_bottom, padding_right, ...) -> (padding_left, padding_right, padding_top, padding_bottom, ...)
@@ -295,11 +297,8 @@ def get_onnx_ops():
     if value_string is not None or value_strings is not None and sparse_value is not None:
       raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
-  def Range(start:float|int, limit:float|int, delta:float|int):
-    start = start[0] if isinstance(start, (list, tuple)) else start
-    limit = limit[0] if isinstance(limit, (list, tuple)) else limit
-    delta = delta[0] if isinstance(delta, (list, tuple)) else delta
-    return Tensor.arange(start=start, stop=limit, step=delta)
+  def Range(start:float|int|list[float|int], limit:float|int|list[float|int], delta:float|int|list[float|int]):
+    return Tensor.arange(start=_enforce_single_element(start), stop=_enforce_single_element(limit), step=_enforce_single_element(delta))
 
   def ImageDecoder(encoded_stream:bytes, pixel_format="RGB"):
     try: import PIL.Image
@@ -487,16 +486,16 @@ def get_onnx_ops():
 
   def Einsum(*Inputs:list[Tensor], equation:str): return Tensor.einsum(equation, *Inputs)
 
-  def CumSum(X:Tensor, axis:int|list, exclusive:int=0, reverse:int=0):
-    axis = X._resolve_dim(axis[0] if isinstance(axis, list) else axis)
+  def CumSum(X:Tensor, axis:int|list[int], exclusive:int=0, reverse:int=0):
+    axis = X._resolve_dim(_enforce_single_element(axis))
     if reverse: X = X.flip(axis)
     if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
     return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
-  def Trilu(x:Tensor, k:int=0, upper:int=1):
-    k = k[0] if isinstance(k, list) else k
-    return x.triu(k) if upper else x.tril(k)
+  def Trilu(x:Tensor, k:int|list[int]=0, upper:int=1):
+    k_ = _enforce_single_element(k)
+    return x.triu(k_) if upper else x.tril(k_)
 
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
             axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
@@ -558,7 +557,7 @@ def get_onnx_ops():
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
-    val, idx = X.topk(K if isinstance(K, int) else K[0], axis, largest, sorted)
+    val, idx = X.topk(_enforce_single_element(K), axis, largest, sorted)
     return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
@@ -620,9 +619,9 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
-  def OneHot(indices:Tensor, depth:float|int|list, values:Tensor, axis:int=-1):
+  def OneHot(indices:Tensor, depth:float|int|list[int], values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
-    depth = int(depth[0] if isinstance(depth, list) else depth)
+    depth = int(_enforce_single_element(depth))
     indices = indices.int()
     indices = (indices < 0).where(indices+depth, indices)
     return indices.unsqueeze(axis)._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
