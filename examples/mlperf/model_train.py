@@ -1357,25 +1357,27 @@ def train_llama3():
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
   from extra.models.clip import FrozenOpenClipEmbedder
+  from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
-  from examples.stable_diffusion import get_alphas_cumprod
+  from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
+  import csv
 
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
+  assert 30_000 % EVAL_BS == 0, "Eval (which generates 30,000 images) is currently implemented without padding"
 
 # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
-# Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS.
-  EVAL_STEP_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
-  assert EVAL_STEP_INTERVAL % BS == 0, "Need cumulative images used in training to line up with checkpoint intervals"
+# "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
+  CKPT_IMAGE_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
+  assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
 
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
   SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
-
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
 
@@ -1384,10 +1386,12 @@ def train_stable_diffusion():
 
   Device.DEFAULT="CPU"
 
+  # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
     def __init__(self):
       self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+      self.first_stage_model = AutoencoderKL()
 
     def __call__(self):
       pass
@@ -1414,7 +1418,8 @@ def train_stable_diffusion():
     optimizer.zero_grad()
 
     # Run forward/backward on GPU, optimizer/scheduler steps on CPU
-    # NOTE: This is only needed for training on a single GPU with 10GB VRAM with BS=1
+    # NOTE: This prevents OOM when training on a single GPU with 10GB VRAM with BS=1
+    # NOTE: This will change when running on a tinybox, as will number of GPUs, parallelism, etc.
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("NV")
 
@@ -1430,13 +1435,64 @@ def train_stable_diffusion():
     scheduler.step()
     return loss
 
-  def validation_step(unet:UNetModel) -> tuple[float, float]:
-    clip_score = 1.
-    fid_score = 2.
-    return clip_score, fid_score
-  
   jit_train_step = TinyJit(train_step, optimize=True)
   jit_context_step = TinyJit(model.cond_stage_model)
+
+  # load prompts for generating images for validation; 2 MB of data total
+  with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
+  assert len(eval_inputs) == 30_000
+  unconditional_context = jit_context_step("")
+  eval_timesteps = list(reversed(range(1, 1000, 20)))
+  # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
+  #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
+  eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]])
+
+  @TinyJit
+  def denoise_step(x:Tensor, t:Tensor, uc:Tensor, c:Tensor, alpha_prev:Tensor) -> Tensor:
+    out_uncond, out = unet(x.cat(x), t.cat(t), uc.cat(c)).chunk(2)
+    # unconditional guidance scale = 8.0
+    v_t = out_uncond + 8.0 * (out - out_uncond)
+    e_t = sqrt_alphas_cumprod[t] * v_t + sqrt_one_minus_alphas_cumprod * x
+    pred_x0 = sqrt_alphas_cumprod[t] * x - sqrt_one_minus_alphas_cumprod * v_t
+    dir_xt = (1. - alpha_prev).sqrt() * e_t
+    x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
+    return x_prev
+
+  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+
+  def eval_unet(unet:UNetModel) -> tuple[float, float]:
+    clip_scores = []
+    inception_activations = []
+
+    for batch_idx in range(0, len(eval_inputs), EVAL_BS):
+      batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
+      c = jit_context_step([row["caption"] for row in batch])
+      uc = unconditional_context.expand(context.shape)
+      x = Tensor.randn(EVAL_BS,4,64,64)
+
+      for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
+        reversed_idx = Tensor([50 - step_idx - 1])
+        t = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.long)
+        alpha_prev = eval_alphas_prev[reversed_idx]
+        x = denoise_step(x, t, uc, c, alpha_prev)
+      
+      x = 1./0.18215 * x
+      x = model.first_stage_model.decoder(x)
+      x = ((x + 1.0) / 2.0).clip(0.0, 1.0) # 1,3,512,512
+
+      inception_activation = inception(x) # 1,2048,1,1
+      inception_activations.append(inception_activation)
+
+      # TODO: preprocess x with transforms
+      # clip
+
+    clip_score = Tensor.cat(*clip_scores).mean()
+    fid_score = inception.compute_score(Tensor.stack(*inception_activations))
+    return clip_score, fid_score
+
+  #eval_unet(unet)
 
   # training loop
   num_seen_images = 0
@@ -1445,7 +1501,7 @@ def train_stable_diffusion():
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * SCALE_FACTOR
+    latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * 0.18215
 
     t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
     noise = Tensor.randn_like(latent)
@@ -1461,14 +1517,14 @@ def train_stable_diffusion():
     print(f"step {i}: loss: {loss.item():.9f}")
 
     num_seen_images += BS
-    if EVAL_STEP_INTERVAL % num_seen_images == 0:
+    if CKPT_IMAGE_INTERVAL % num_seen_images == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
       safe_save(get_state_dict(unet), UNET_CKPTDIR)
 
-      # Only checkpoint collection is required here; eval can be done offline if desired
-      # TODO: move validation_step call to not block training loop
-      clip_score, fid_score = validation_step(unet)
+      # Only checkpoint collection is required here; eval can be done offline
+      # TODO: move eval call to not block training loop
+      clip_score, fid_score = eval_unet(unet)
       print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
 
 if __name__ == "__main__":
