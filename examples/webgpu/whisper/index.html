@@ -234,6 +234,8 @@
                 const TOK_TRANSCRIBE = 50358;
                 const TOK_NOSPEECH = 50361;
                 const MAX_TOKENS_TO_DECODE = 224;
+                const TOK_TS_FIRST = 50363;
+                const TOK_TS_LAST = 51863;
                 let context = [];
                 if (previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
                     context.push(TOK_STARTOFPREV);
