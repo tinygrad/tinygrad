@@ -21,12 +21,11 @@ export PYTHONPATH="." NV=1
 
 export MODEL="stable_diffusion"
 
-# https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#benchmark_specific_rules
-# Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS.
-export BS=1 EVAL_BS=512000
+export BS=1 EVAL_BS=1
 
 # TODO: this will change when training on a tinybox
 export BASEDIR="/home/hooved/train-sd/training/stable_diffusion"
+export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"
 
 #export WANDB=1 PARALLEL=0
 export PARALLEL=0

@@ -1367,11 +1367,17 @@ def train_stable_diffusion():
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
+
+# https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+# Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS.
+  EVAL_STEP_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
+  assert EVAL_STEP_INTERVAL % BS == 0, "Need cumulative images used in training to line up with checkpoint intervals"
+
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
   SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
 
-  BASEDIR = Path(getenv("BASEDIR", "./"))
-  assert BASEDIR, "set BASEDIR to path of datasets"
+  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
+  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
 
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
     "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True}
@@ -1382,6 +1388,10 @@ def train_stable_diffusion():
     def __init__(self):
       self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+
+    def __call__(self):
+      pass
+
   model = StableDiffusion()
 
   clip_weights = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
@@ -1400,11 +1410,11 @@ def train_stable_diffusion():
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
 
   @Tensor.train()
-  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR):
+  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
-    # NOTE: moving parameters to/from GPU won't be necessary on a tinybox; everything can live in GPU memory
-    # This is only needed for training on a single NVIDIA RTX 3080 with 10GB VRAM with BS=1
+    # Run forward/backward on GPU, optimizer/scheduler steps on CPU
+    # NOTE: This is only needed for training on a single GPU with 10GB VRAM with BS=1
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
       p.to_("NV")
 
@@ -1419,12 +1429,18 @@ def train_stable_diffusion():
     optimizer.step()
     scheduler.step()
     return loss
+
+  def validation_step(unet:UNetModel) -> tuple[float, float]:
+    clip_score = 1.
+    fid_score = 2.
+    return clip_score, fid_score
   
   jit_train_step = TinyJit(train_step, optimize=True)
   jit_context_step = TinyJit(model.cond_stage_model)
 
-  dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   # training loop
+  num_seen_images = 0
+  dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   for i, batch in enumerate(dl):
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
@@ -1443,6 +1459,17 @@ def train_stable_diffusion():
 
     loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")
+
+    num_seen_images += BS
+    if EVAL_STEP_INTERVAL % num_seen_images == 0:
+      # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+      # "evaluation is done offline, the time is not counted towards the submission time."
+      safe_save(get_state_dict(unet), UNET_CKPTDIR)
+
+      # Only checkpoint collection is required here; eval can be done offline if desired
+      # TODO: move validation_step call to not block training loop
+      clip_score, fid_score = validation_step(unet)
+      print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
