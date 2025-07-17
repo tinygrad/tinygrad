@@ -186,11 +186,22 @@ async function renderProfiler() {
       data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
     mainTrack.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
+    let trackOffset = startY+area+padding;
     const trackHeight = 32;
-    for (const track of tracks) {
+    for (const [i,track] of tracks.entries()) {
+      trackOffset += trackHeight*i;
       const td = div.appendChild(document.createElement("div"));
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
+      // TODO: align these properly
+      // https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time
+      const stLocal = track.data[0].x;
+      const trackYScale = d3.scaleLinear().domain([0, track.max_value]).range([0, trackHeight]);
+      for (const t of track.data) {
+        const x = (t.x-stLocal)/1000;
+        const height = trackYScale(t.y);
+        data.shapes.push({x, y:trackOffset, width:2, height, fillColor:"#C04CFD" });
+      }
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${rect(mainTrack).height+trackHeight*tracks.length+padding}px`;
@@ -236,6 +247,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
