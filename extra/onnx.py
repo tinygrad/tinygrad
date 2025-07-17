@@ -160,7 +160,7 @@ class OnnxRunner:
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = tuple(x.name for x in model.graph.output)
-    opset_imports = {Domain.from_onnx(getattr(x, "domain")):x.version for x in model.opset_import}
+    opset_imports = {Domain.from_onnx(getattr(x, "domain", "")):x.version for x in model.opset_import}
     self.graph_nodes = []
     for num, n in enumerate(model.graph.node):
       domain = Domain.from_onnx(n.domain)
