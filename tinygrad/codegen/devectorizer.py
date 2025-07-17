@@ -282,7 +282,7 @@ def no_vectorized_alu(alu:UOp):
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
+  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(Ops.VECTORIZE, acc.dtype, alus)
 
