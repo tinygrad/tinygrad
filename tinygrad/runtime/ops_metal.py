@@ -74,12 +74,14 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE:
       import subprocess
-      os.makedirs(path:=temp("gpu_counters", append_user=True), exist_ok=True)
+      os.system("killall Instruments")
+      if os.path.exists(path:="/tmp/metal.trace"):
+        os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, somehow need to install this on the user's device
-      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--output", path, "--attach", str(os.getpid())],
-                                           stdout=subprocess.PIPE)
+      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPU Counters", "--output", path, "--attach", str(os.getpid())])
       # TODO: do this properly
-      self.xctrace_proc.stdout.readline()
+      from time import sleep
+      sleep(2)
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -99,6 +101,7 @@ class MetalDevice(Compiled):
   def _at_profile_finalize(self):
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
+    os.system("open /tmp/metal.trace/")
     print(f"saved profile data in {temp('gpu_counters', append_user=True)}")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
