@@ -96,12 +96,13 @@ class OnnxValue:
   is_sequence: bool
 
 class Domain(enum.StrEnum):
-  ONNX = "" # "ai.onnx"
+  ONNX = "ai.onnx"
   ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_TRAINING = "ai.onnx.training"
   AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
   MICROSOFT_CONTRIB_OPS = "com.microsoft"
   @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None else cls(domain)
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
 class OpSetId(NamedTuple):
   domain: Domain
@@ -154,7 +155,7 @@ class OnnxRunner:
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = onnx_load(model_path)
-    self.is_training = any(n.domain == Domain.AI_ONNX_PREVIEW_TRAINING for n in model.graph.node)
+    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in model.graph.node)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
@@ -195,7 +196,7 @@ class OnnxRunner:
     # match domain and select implementation with latest compatible version
     eligible_ops = {impl_opset.version:impl_fxn for impl_opset,impl_fxn in impl.items()
                     if impl_opset.domain == required_opset.domain and impl_opset.version <= required_opset.version}
-    if not eligible_ops: raise NotImplementedError(f"{op=} is not supported for {required_opset=}")
+    if not eligible_ops: raise NotImplementedError(f"{op=} is not supported for domain {required_opset.domain} and version {required_opset.version}")
     return eligible_ops[max(eligible_ops.keys())]
 
   def get_empty_input_data(self, device:str|None=None, dtype:DType|None=None) -> dict[str, Tensor]:
