@@ -257,7 +257,7 @@
         const getDevice = async () => {
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
-            return adapter?.requestDevice({ requiredFeatures: ["shader-f16"], powerPreference: "high-performance" });
+            return adapter?.requestDevice({ powerPreference: "high-performance" });
         };
 
         // async function dropHandler(ev) {
