@@ -188,7 +188,8 @@ class Kernel:
     def new_shape_fxn(x):
       return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if axis < len(x) else ()) + x[axis+1:]
     def new_perm_fxn(x):
-      return [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, len(x)) if i != move_axis] \
+      max_insert = min(insert_at,len(x))
+      return [i for i in range(max_insert) if i != move_axis]+[move_axis]+[i for i in range(max_insert, len(x)) if i != move_axis] \
       if move_axis < len(x) else list(range(len(x)))
 
     self.reshape(new_shape_fxn)
