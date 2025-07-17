@@ -231,7 +231,7 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]#handle all zero shapes
+    rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]
     for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
@@ -242,7 +242,7 @@ class Kernel:
       # more can merge than this
       if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
       for j,(s,st) in enumerate(zip(shapes, strides)):
-        if (axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape)): continue
+        if (axis_types[i] is AxisType.REDUCE and len(s) < i+1): continue
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])#if reduce axis and shape is reduced there, then skip?
         else: rets[j].append((s[i], st[i]))
 
@@ -472,13 +472,10 @@ class Kernel:
         return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
-        runoff = len(self.sts[reduce_idx+1].shape) -len(self.sts[reduce_idx].shape)
-        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL))
-        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE))
-        # axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if
-        #                      resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        # grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if
-        #                      resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        axes = tuple(x for x in range(len(self.sts[reduce_idx].shape),len(self.sts[reduce_idx+1].shape)) if \
+        x in self.axes_of(AxisType.REDUCE, AxisType.UNROLL))
+        grouped_axes = tuple(x for x in range(len(self.sts[reduce_idx].shape),len(self.sts[reduce_idx+1].shape)) if \
+        x in self.axes_of( AxisType.GROUP_REDUCE))
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
