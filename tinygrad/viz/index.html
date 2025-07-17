@@ -10,7 +10,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="http://127.0.0.1:35729/livereload.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -121,7 +120,6 @@
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    position: relative;
   }
   .ctx-list-parent {
     width: 15%;
@@ -214,18 +212,17 @@
     display: none;
     font-size: 10px;
   }
-  #device-list {
-    overflow-x: auto;
-    max-width: 100px;
-    min-width: 100px;
-  }
   #device-list > div {
-    margin-left: 4px;
-    padding: 4px 0;
+    min-height: 32px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    cursor: pointer;
   }
-  #device-list > div > p {
-    margin-left: 4px;
+  #device-list > div:hover {
+    background-color: rgba(20, 23, 35, 0.3);
   }
   </style>
 </head>

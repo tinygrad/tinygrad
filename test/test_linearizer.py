@@ -1069,7 +1069,7 @@ class TestHandCodedOpts(unittest.TestCase):
     k = helper_linearizer_opt(c)[-1]
 
     assert k.group_for_reduces == 1
-    assert k.local_dims == 1
+    assert k.axis_types.count(AxisType.LOCAL) == 1
     assert k.upcasted == 1
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
