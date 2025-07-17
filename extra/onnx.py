@@ -1,21 +1,11 @@
 from types import SimpleNamespace
-from typing import Any, Sequence, cast, Literal, Callable, get_args
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum, collections
+from typing import Any, Sequence, cast, Literal, Callable, get_args, NamedTuple
+import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 from extra.onnx_parser import onnx_load
-
-# ***** constants ******
-class Domain(enum.StrEnum):
-  ONNX = "" # "ai.onnx"
-  ONNX_ML = "ai.onnx.ml"
-  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
-  @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None else cls(domain)
-  def __repr__(self): return "ai.onnx" if self is Domain.ONNX else self.value
 
 # https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
 data_types: dict[int, DType] = {
@@ -105,7 +95,18 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
-OpSetId = collections.namedtuple("OpSetId", ["domain", "version"])
+class Domain(enum.StrEnum):
+  ONNX = "" # "ai.onnx"
+  ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None else cls(domain)
+
+class OpSetId(NamedTuple):
+  domain: Domain
+  version: int
+
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
   num: int
@@ -187,14 +188,15 @@ class OnnxRunner:
       if user_dim_input != onnx_dim: raise RuntimeError(f"input {name} has mismatch on {dim=}. Expected {onnx_dim}, received {user_dim_input}.")
     return tensor
 
-  def _select_op(self, op:str, opset_id:OpSetId) -> Callable:
-    if op not in self.onnx_ops: raise NotImplementedError(f"{op=} not supported")
+  def _select_op(self, op:str, required_opset:OpSetId) -> types.FunctionType:
+    if op not in self.onnx_ops: raise NotImplementedError(f"{op=} is not supported")
     # return default implementation if no opset_id is specified
     if isinstance(impl := self.onnx_ops[op], types.FunctionType): return impl
-    # match domain and select implementation with highest supported version
-    domain_eligible_ops = {k.version:fxn for k,fxn in impl.items() if k.domain == opset_id.domain and k.version <= opset_id.version}
-    if not domain_eligible_ops: raise NotImplementedError(f"{op=} not supported for domain {opset_id.domain} and version {opset_id.version}")
-    return domain_eligible_ops[max(domain_eligible_ops.keys())]
+    # match domain and select implementation with latest compatible version
+    eligible_ops = {impl_opset.version:impl_fxn for impl_opset,impl_fxn in impl.items()
+                    if impl_opset.domain == required_opset.domain and impl_opset.version <= required_opset.version}
+    if not eligible_ops: raise NotImplementedError(f"{op=} is not supported for {required_opset=}")
+    return eligible_ops[max(eligible_ops.keys())]
 
   def get_empty_input_data(self, device:str|None=None, dtype:DType|None=None) -> dict[str, Tensor]:
     return {name:Tensor.empty(*spec.shape, device=device, dtype=dtype or spec.dtype) for name, spec in self.graph_inputs.items()}
