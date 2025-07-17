@@ -264,6 +264,9 @@
                 // v[0] = TOK_NO_TIMESTAMPS;
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
                 for(let i = offset; i < max_range; ++i) {
+                    let token_count = context.length - offset;
+                    let last_token_index = i;
+                    let one_before_last_token_index = i - 1;
                     let [nextToken] = await net_decoder(context, audio_features, [i]);
                     nextToken = nextToken.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
                     // for (const tok of nextToken) {
