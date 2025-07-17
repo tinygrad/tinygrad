@@ -4352,7 +4352,6 @@ class Tensor(MathTrait):
 
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
-    if dtype is None and (ret_dtype := least_upper_dtype(self.dtype, weight.dtype)) in (dtypes.float16, dtypes.bfloat16): ret = ret.cast(ret_dtype)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
 P = ParamSpec("P")
