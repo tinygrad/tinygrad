@@ -9,7 +9,7 @@ from extra.onnx_parser import onnx_load
 
 # ***** constants ******
 class Domain(enum.StrEnum):
-  ONNX = ""  # "ai.onnx"
+  ONNX = "" # "ai.onnx"
   MICROSOFT_CONTRIB_OPS = "com.microsoft"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
@@ -160,7 +160,7 @@ class OnnxRunner:
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
     self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
     self.graph_outputs = tuple(x.name for x in model.graph.output)
-    opset_imports = {Domain.from_onnx(getattr(x, "domain", None)):x.version for x in model.opset_import}
+    opset_imports = {Domain.from_onnx(getattr(x, "domain")):x.version for x in model.opset_import}
     self.graph_nodes = []
     for num, n in enumerate(model.graph.node):
       domain = Domain.from_onnx(n.domain)
@@ -190,9 +190,8 @@ class OnnxRunner:
 
   def _select_op(self, op:str, opset_id:OpSetId) -> Callable:
     if op not in self.onnx_ops: raise NotImplementedError(f"{op=} not supported")
-    # return default implementation if no version is specified
+    # return default implementation if no opset_id is specified
     if isinstance(impl := self.onnx_ops[op], types.FunctionType): return impl
-    assert isinstance(impl, dict) and all(isinstance(k, OpSetId) for k in impl.keys())
     # match domain and select implementation with highest supported version
     domain_eligible_ops = {k.version:fxn for k,fxn in impl.items() if k.domain == opset_id.domain and k.version <= opset_id.version}
     if not domain_eligible_ops: raise NotImplementedError(f"{op=} not supported for domain {opset_id.domain} and version {opset_id.version}")
@@ -237,7 +236,7 @@ class OnnxRunner:
 ####################
 ##### ONNX OPS #####
 ####################
-def get_onnx_ops():
+def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionType]]:
   # ***** helper functions *****
   def _enforce_single_element(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
 
@@ -633,7 +632,7 @@ def get_onnx_ops():
   def MeanVarianceNormalization(x:Tensor, axis:list[int]=[0,2,3]):
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
-  def OneHot(indices:Tensor, depth:float|int|list[int], values:Tensor, axis:int=-1):
+  def OneHot(indices:Tensor, depth:float|int|list[int|float], values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
     depth = int(_enforce_single_element(depth))
     indices = indices.int()
