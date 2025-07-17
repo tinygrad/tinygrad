@@ -10,21 +10,27 @@ import numpy as np
 from extra.onnx_helpers import validate
 from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN
 MICROSOFT_CONTRIB_OPS_DOMAIN = "com.microsoft"
+# TODO: remove this once ORT supports 1.18.0
 from onnx.helper import VERSION_TABLE
 VERSION_MAP = {row[0]: row[1:] for row in VERSION_TABLE}
-IR_VERSION, ai_onnx, ai_onnx_ml, ai_onnx_training = VERSION_MAP["1.17.0"] # bump this up when ort supports new IR
+IR_VERSION, ai_onnx, ai_onnx_ml, ai_onnx_training = VERSION_MAP["1.17.0"]
 
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
-  OPSETID = -1
   def helper_build_model(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     onnx_inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
     onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
+    #model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    # TODO: remove this once ORT supports 1.18.0
+    opset_id = None
+    if type(self).__name__ == "TestMainOnnxOps": opset_id = ai_onnx
+    if type(self).__name__ == "TestTrainingOnnxOps": opset_id = ai_onnx_training
+    if type(self).__name__ == "TestContribOnnxOps": opset_id = 1
     model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}", ir_version=IR_VERSION,
-                                   opset_imports=[onnx.helper.make_opsetid(ONNX_DOMAIN, self.OPSETID)])
+                                    opset_imports=[onnx.helper.make_opsetid(self.DOMAIN, opset_id)])
     return model
 
   def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
@@ -35,7 +41,6 @@ class TestOnnxOps(unittest.TestCase):
 
 class TestMainOnnxOps(TestOnnxOps):
   DOMAIN = ONNX_DOMAIN
-  OPSETID = ai_onnx
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
@@ -208,7 +213,6 @@ class TestMainOnnxOps(TestOnnxOps):
 class TestTrainingOnnxOps(TestOnnxOps):
   # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
   DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
-  OPSETID = ai_onnx_training
   def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
     model = self.helper_build_model(op, inps, opts, outs)
     if op == "Momentum": del opts['mode']
@@ -264,7 +268,6 @@ class TestTrainingOnnxOps(TestOnnxOps):
 
 class TestContribOnnxOps(TestOnnxOps):
   DOMAIN = MICROSOFT_CONTRIB_OPS_DOMAIN
-  OPSETID = 1
   def test_attention(self):
     batch_size, seq_len, input_hidden_size = 2, 8, 256
     num_heads, head_size = 4, 64

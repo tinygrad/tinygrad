@@ -10,13 +10,12 @@ from extra.onnx_parser import onnx_load
 # ***** constants ******
 class Domain(enum.StrEnum):
   ONNX = "" # "ai.onnx"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
   @classmethod
   def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None else cls(domain)
   def __repr__(self): return "ai.onnx" if self is Domain.ONNX else self.value
-
 
 # https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
 data_types: dict[int, DType] = {
