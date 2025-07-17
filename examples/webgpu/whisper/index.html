@@ -180,7 +180,8 @@
                     padded.set(chunk);
                     chunk = padded;
                 }
-                log_specs.push((await net_mel(chunk))[0]);
+                let [mel_spec] = await net_mel(chunk);
+                log_specs.push(mel_spec);
             }
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
