@@ -111,10 +111,10 @@ class OpSetId(NamedTuple):
 class OnnxNode:
   num: int
   op: str
+  opset_id: OpSetId
   inputs: tuple[str, ...]
   outputs: tuple[str, ...]
   opts: dict[str, Any]
-  opset_id: OpSetId
 
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
@@ -165,7 +165,7 @@ class OnnxRunner:
     for num, n in enumerate(model.graph.node):
       domain = Domain.from_onnx(n.domain)
       opset_id = OpSetId(domain, opset_imports.get(domain, 1))
-      self.graph_nodes.append(OnnxNode(num, n.op_type, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}, opset_id))
+      self.graph_nodes.append(OnnxNode(num, n.op_type, opset_id, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}))
     self.graph_nodes = tuple(self.graph_nodes)
     self.variable_dims: dict[str, int] = {}
 
@@ -203,7 +203,7 @@ class OnnxRunner:
 
   def to(self, device:str|None):
     self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
-    self.graph_nodes = tuple(OnnxNode(n.num, n.op, tuple(n.inputs), tuple(n.outputs),
+    self.graph_nodes = tuple(OnnxNode(n.num, n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
                                       {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
     return self
 
