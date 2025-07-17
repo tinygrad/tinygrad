@@ -269,16 +269,6 @@
                     let one_before_last_token_index = i - 1;
                     let [nextToken] = await net_decoder(context, audio_features, [i]);
                     nextToken = nextToken.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-                    // for (const tok of nextToken) {
-                    //     // if (suppress.includes(tok)) {
-                    //     //     console.log(`${tok} wasn't filtered by suppress mask`);
-                    //     // }
-                    //     // if (!suppress.includes(tok) && tok != TOK_NO_TIMESTAMPS) {
-                    //     if (tok != TOK_NO_TIMESTAMPS) {
-                    //         nextToken = [tok];
-                    //         break;
-                    //     }
-                    // }
                     context.push(nextToken[0]);
                     pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     if (nextToken[0] == TOK_EOS) break;
