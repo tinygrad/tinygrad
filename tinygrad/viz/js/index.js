@@ -134,12 +134,13 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
-  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+  for (const [k, { timeline, mem, tracks }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.innerText = k;
     div.style.padding = `${padding}px`;
-    div.onclick = () => { // TODO: make this feature more visible
+    const mainTrack = div.appendChild(document.createElement("div"));
+    mainTrack.innerText = k;
+    mainTrack.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
       const prevScroll = profiler.node().scrollTop;
       renderProfiler();
@@ -184,8 +185,15 @@ async function renderProfiler() {
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
       data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
+    mainTrack.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
+    const trackHeight = 32;
+    for (const track of tracks) {
+      const td = div.appendChild(document.createElement("div"));
+      td.style.height = trackHeight+"px";
+      td.innerText = track.name;
+    }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
+    div.style.height = `${rect(mainTrack).height+trackHeight*tracks.length+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -461,7 +469,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
