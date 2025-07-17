@@ -172,7 +172,7 @@
 
             // const { samples } = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             const { samples } = await audioFetcher();
-            let log_specs = [];
+            let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
             for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
                 let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
                 if (chunk.length < SAMPLES_PER_SEGMENT) {
@@ -181,7 +181,7 @@
                     chunk = padded;
                 }
                 let [mel_spec] = await net_mel(chunk);
-                log_specs.push(mel_spec);
+                log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
             }
 
             const mapping = await fetch('./vocab.json').then(res => res.json());
@@ -230,7 +230,9 @@
             const DECODER_OUTPUTS_TOKENS = true;
             const NO_TIMESTAMPS = false;
             let previous_context = [];
-            for (const log_spec of log_specs) {
+            for (let seek = 0; seek < log_specs_full.length;) {
+                console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
+                let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 const [audio_features] = await net_encoder(log_spec);
                 const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
                 const TOK_STARTOFPREV = 50360;
@@ -318,6 +320,8 @@
                 transcriptionLog.appendChild(newChunk);
                 pendingText = '';
                 currentTranscription.innerText = '';
+
+                seek += MEL_SPEC_CHUNK_LENGTH;
             }
             inferenceDone = true;
             currentTranscription.style.display = 'none';
