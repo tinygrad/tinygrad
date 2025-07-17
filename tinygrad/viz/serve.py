@@ -155,6 +155,12 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     v["y"].append(v["y"][-1])
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
+from tinygrad.viz.metal import parse_metal_trace
+parsers = {"METAL":parse_metal_trace}
+def lines_layout(k:str):
+  try: return parsers[k](f"/tmp/{k}.trace")
+  except (FileNotFoundError, KeyError): return {}
+
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   for ev in profile:
@@ -169,7 +175,7 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
+  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v), "lines":lines_layout(k)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 # ** HTTP server

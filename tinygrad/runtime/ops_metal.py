@@ -74,7 +74,7 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE:
       import subprocess
-      os.system("killall Instruments")
+      #os.system("killall Instruments")
       if os.path.exists(path:="/tmp/metal.trace"):
         os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, somehow need to install this on the user's device
@@ -101,7 +101,7 @@ class MetalDevice(Compiled):
   def _at_profile_finalize(self):
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
-    os.system("open /tmp/metal.trace/")
+    #os.system("open /tmp/metal.trace/")
     print(f"saved profile data in {temp('gpu_counters', append_user=True)}")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
