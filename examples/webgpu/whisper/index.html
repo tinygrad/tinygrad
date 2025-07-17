@@ -233,6 +233,11 @@
             for (let seek = 0; seek < log_specs_full.length;) {
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
+                if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
+                    let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
+                    padded.set(log_specs_full.slice(seek));
+                    log_spec = padded;
+                }
                 const [audio_features] = await net_encoder(log_spec);
                 const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
                 const TOK_STARTOFPREV = 50360;
