@@ -162,28 +162,26 @@ async function renderProfiler() {
     }
     // draw shapes
     for (const e of data.shapes) {
-      // polygon
-      const [start, end] = Array.isArray(e.x) ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.dur];
+      const [start, end] = e.x.width == null ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.width];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-      if (Array.isArray(e.x)) {
+      ctx.fillStyle = e.fillColor;
+      // non contiguous generic polygon
+      if (e.x.width == null) {
         const x = e.x.map(xscale);
         ctx.beginPath();
         ctx.moveTo(x[0], e.y0[0]);
         for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y0[i]);
         for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y1[i]);
         ctx.closePath();
-        ctx.fillStyle = e.color;
         ctx.fill();
         const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
         // NOTE: y coordinates are in reverse order
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], tooltipText });
         continue;
       }
-      // rect
-      // zoom only changes x and width
+      // contiguous rect
       const x = xscale(start);
       const width = xscale(end)-x;
-      ctx.fillStyle = e.fillColor;
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.ref, tooltipText:formatTime(e.dur) });
       // add label
