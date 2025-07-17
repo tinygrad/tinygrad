@@ -226,6 +226,7 @@
                 return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
             }
 
+            const NO_TIMESTAMPS = false;
             let previous_context = [];
             for (const log_spec of log_specs) {
                 const [audio_features] = await net_encoder(log_spec);
@@ -238,17 +239,21 @@
                 const TOK_TS_LAST = 51863;
                 let context = [];
                 if (previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
-                    context.push(TOK_STARTOFPREV);
-                    // NOTE(irwin): adding timestamp tokens to context seems to stabilize gen. Why?
-                    context.push(...(previous_context.filter((tok) => tok < TOK_EOS || (tok >= 50363 && tok <= 51863)).slice(-MAX_TOKENS_TO_DECODE+3+1)));
-                    context.push(TOK_TRANSCRIBE, TOK_BEGIN_TRANSCRIPTION);
+                    let prefix = [TOK_STARTOFPREV];
+                    let suffix = [TOK_BEGIN_TRANSCRIPTION];
+                    if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
+                    let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
+                    context.push(...prefix);
+                    context.push(...previous_context.filter((tok) => tok < TOK_EOS /*|| (tok >= 50363 && tok <= 51863)*/).slice(-max_context_to_take));
+                    context.push(...suffix);
                 } else {
-                    context = [TOK_TRANSCRIBE, TOK_BEGIN_TRANSCRIPTION];
+                    context = [TOK_BEGIN_TRANSCRIPTION];
+                    if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
                 }
                 console.log(context);
 
                 const offset = context.length;
-                if (offset >= MAX_TOKENS_TO_DECODE) {
+                if (offset > MAX_TOKENS_TO_DECODE) {
                     console.error("Context length exceeds 224");
                     return;
                 }
