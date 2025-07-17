@@ -283,11 +283,12 @@
                     let token_count = context.length - offset;
                     let last_token_index = i;
                     let one_before_last_token_index = i - 1;
-                    let [nextToken] = await net_decoder(context, audio_features, [i]);
-                    nextToken = nextToken.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-                    context.push(nextToken[0]);
+
+                    let [decoder_output] = await net_decoder(context, audio_features, [i]);
+                    decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
+                    context.push(decoder_output[0]);
                     pendingText = context.slice(offset).map(j => mapping[j]).join('');
-                    if (nextToken[0] == TOK_EOS) break;
+                    if (decoder_output[0] == TOK_EOS) break;
                 }
                 previous_context = context.slice();
 
