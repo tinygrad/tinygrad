@@ -21,11 +21,11 @@ def parse_xml(fp:str, query:str) -> Generator[dict, None, None]:
       if (eid:=v.attrib.get("id")): id_cache[eid] = value
     yield rec
 
-def parse_metal_trace(fp:str) -> dict[str, dict]:
-  ret:dict[str, dict] = {}
+def parse_metal_trace(fp:str) -> list[dict]:
+  ret:dict[int, dict] = {}
   for v in parse_xml(fp, "gpu-counter-info"): ret[v.pop("counter_id")] = {**v, "values":[]}
   for v in parse_xml(fp, "gpu-counter-value"): ret[v.pop("counter_id")]["values"].append({"x":v["timestamp"], "y":v["value"]})
-  return ret
+  return list(ret.values())
 
 if __name__ == "__main__":
   ret = parse_metal_trace(sys.argv[1])

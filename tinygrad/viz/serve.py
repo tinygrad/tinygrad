@@ -157,9 +157,9 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
 
 from tinygrad.viz.metal import parse_metal_trace
 parsers = {"METAL":parse_metal_trace}
-def lines_layout(k:str):
+def lines_layout(k:str) -> list:
   try: return parsers[k](f"/tmp/{k}.trace")
-  except (FileNotFoundError, KeyError): return {}
+  except (FileNotFoundError, KeyError): return []
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs

@@ -134,7 +134,7 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
-  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+  for (const [k, { timeline, mem, lines }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
@@ -165,6 +165,10 @@ async function renderProfiler() {
       }
       // offset y by depth
       data.shapes.push({x:e.st-st, dur:e.dur, height:levelHeight, y:offsetY+levelHeight*e.depth, ref, label, fillColor });
+    }
+    for (const e of lines) {
+      const counter = div.appendChild(document.createElement("div"));
+      counter.innerText = e.name;
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -204,6 +208,7 @@ async function renderProfiler() {
     }
     // draw shapes
     for (const e of data.shapes) {
+      // polygon
       const [start, end] = Array.isArray(e.x) ? [e.x[0], e.x[e.x.length-1]] : [e.x, e.x+e.dur];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
       if (Array.isArray(e.x)) {
@@ -220,6 +225,7 @@ async function renderProfiler() {
         for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], tooltipText });
         continue;
       }
+      // rect
       // zoom only changes x and width
       const x = xscale(start);
       const width = xscale(end)-x;
@@ -460,7 +466,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
