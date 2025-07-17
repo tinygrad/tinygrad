@@ -196,7 +196,7 @@ class OnnxRunner:
     # return default implementation if no version is specified
     if isinstance(impl := self.onnx_ops[op], Callable): return impl(*inps, **opts)
     assert isinstance(impl, dict)
-    # match domain and select highest supported version
+    # match domain and select implementation with highest supported version
     eligible_ops = {k.version:fxn for k,fxn in impl.items() if k.domain == version.domain and k.version <= version.version}
     if not eligible_ops: raise NotImplementedError(f"{op=} not supported for domain {version.domain} and version {version.version}")
     return eligible_ops[max(eligible_ops.keys())](*inps, **opts)
