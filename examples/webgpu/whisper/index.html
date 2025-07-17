@@ -11,6 +11,7 @@
         import mel from "./mel.js"; window.mel = mel;
         import encoder from "./encoder.js"; window.encoder = encoder;
         import decoder from "./decoder.js"; window.decoder = decoder;
+        import silero from "./vad.js"; window.silero = silero;
         window._resolveModule();
     </script>
     <style>
@@ -164,6 +165,7 @@
                     loadingContainer.style.display = "none";
                     return;
                 }
+                net_silero = await silero.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/vad.safetensors`, progressCallback)));
                 net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/mel.safetensors`, progressCallback)));
                 net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/encoder.safetensors`, progressCallback)));
                 net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/decoder.safetensors`, progressCallback)));
@@ -172,6 +174,97 @@
 
             // const { samples } = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             const { samples } = await audioFetcher();
+
+            async function vad_go_brrr(samples_array) {
+                var hn = new Float32Array(128);
+                var cn = new Float32Array(128);
+
+                const prefix = 64;
+                const VAD_BS = 32;
+                const stride = VAD_BS*512;
+                // var vad_probs = [];
+                let vad_probs = new Float32Array(Math.ceil(samples_array.length / stride) * VAD_BS)
+                var batch_n = 0;
+                for(var i = -prefix; i < samples_array.length; i+=stride)
+                {
+                    let vad_chunk = null;
+                    if (i < 0) {
+                        vad_chunk = new Float32Array(stride+prefix);
+                        vad_chunk.set(samples_array.slice(0, stride), prefix);
+                    } else if (i+prefix+stride <= samples_array.length) {
+                        vad_chunk = samples_array.slice(i, i+prefix+stride);
+                    } else {
+                        vad_chunk = new Float32Array(stride+prefix);
+                        vad_chunk.set(samples_array.slice(i));
+                    }
+                    const vad_output = await net_silero(vad_chunk, hn, cn);
+                    hn = vad_output[1];
+                    cn = vad_output[2];
+                    vad_probs.set(vad_output[0], batch_n * VAD_BS);
+                    console.log(vad_output[0]);
+                    ++batch_n;
+                }
+                return vad_probs;
+            }
+
+            function segment_speech(vad_probabilities, threshold=0.5, neg_threshold=0.15, min_silence=1000, min_speech=250, speech_pad=50) {
+                const SPEECH = 1;
+                const SILENCE = 2;
+
+                let segments = [];
+                let state = SILENCE;
+                let start = 0;
+                let counter_exit = 0;
+                for (var i = 0; i < vad_probabilities.length; ++i) {
+                    let prob = vad_probabilities[i];
+                    switch (state) {
+                        case SPEECH:
+                            if (prob < threshold-neg_threshold) {
+                                ++counter_exit;
+                            } else {
+                                counter_exit = 0;
+                            }
+                            if (counter_exit > min_silence / 32) {
+                                segments.push(start, i-counter_exit);
+                                start = i-counter_exit;
+                                counter_exit = 0;
+                                state = SILENCE;
+                            }
+                            break;
+
+                        case SILENCE:
+                            if (prob > threshold) {
+                                ++counter_exit;
+                            } else {
+                                counter_exit = 0;
+                            }
+                            if (counter_exit > min_speech / 32) {
+                                start = i-counter_exit;
+                                // segments.push(start, i-counter_exit);
+                                counter_exit = 0;
+                                state = SPEECH;
+                            }
+                            break;
+
+                        default:
+                            console.error("invalid state");
+                            break;
+                    }
+                }
+                if (state === SPEECH && vad_probabilities.length - start > min_speech / 32) {
+                    segments.push(start, vad_probabilities.length-1);
+                }
+                segments = segments.map((x,i) => x*512/16000.0 +(speech_pad/1000.0 * (i % 2 ? -1 : 1)));
+                if (segments[0] < 0 && segments.length) segments[0] = 0;
+                if (segments.length && segments[segments.length-1] > vad_probabilities.length * 0.032) segments[segments.length-1] = vad_probabilities.length * 0.032;
+                return segments;
+            }
+
+            const vad_probabilities = await vad_go_brrr(samples);
+
+            let speech_segments = segment_speech(vad_probabilities);
+            console.log(speech_segments);
+
             let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
             for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
                 let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
@@ -231,6 +324,11 @@
             const NO_TIMESTAMPS = false;
             let previous_context = [];
             for (let seek = 0; seek < log_specs_full.length;) {
+                let next_speech_seek = next_speech(speech_segments, seek);
+                if (next_speech_seek > seek + 80) {
+                    seek = next_speech_seek;
+                    // continue;
+                }
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
