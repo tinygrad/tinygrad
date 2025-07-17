@@ -2,7 +2,7 @@ import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys,
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQCompiled, HCQBuffer
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
