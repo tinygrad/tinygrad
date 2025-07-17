@@ -227,6 +227,7 @@
                 return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
             }
 
+            const DECODER_OUTPUTS_TOKENS = true;
             const NO_TIMESTAMPS = false;
             let previous_context = [];
             for (const log_spec of log_specs) {
@@ -278,6 +279,8 @@
 
                     return nextTokens;
                 }
+
+                let segment_cumlogprob = 0;
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
                 for(let i = offset; i < max_range; ++i) {
                     let token_count = context.length - offset;
@@ -285,18 +288,29 @@
                     let one_before_last_token_index = i - 1;
 
                     let [decoder_output] = await net_decoder(context, audio_features, [i]);
+                    let nextLogits = decoder_output;
+                    if (!DECODER_OUTPUTS_TOKENS) decoder_output = argsort(decoder_output);
                     decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
                     decoder_output = handle_timestamp_tokens(decoder_output, context, last_token_index, one_before_last_token_index);
 
                     context.push(decoder_output[0]);
-                    pendingText = context.slice(offset).map(j => mapping[j]).join('');
+                    if (!DECODER_OUTPUTS_TOKENS) {
+                        segment_cumlogprob += nextLogits[decoder_output[0]];
+                        pendingText = (segment_cumlogprob / (i-offset+1)).toFixed(2) + context.slice(offset).map(j => mapping[j]).join('');
+                    } else {
+                        pendingText = context.slice(offset).map(j => mapping[j]).join('');
+                    }
                     if (decoder_output[0] == TOK_EOS) break;
                 }
                 previous_context = context.slice();
 
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
-                newChunk.innerText = pendingText;
+                if (!DECODER_OUTPUTS_TOKENS) {
+                    newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
+                } else {
+                    newChunk.innerText = pendingText;
+                }
                 transcriptionLog.appendChild(newChunk);
                 pendingText = '';
                 currentTranscription.innerText = '';
