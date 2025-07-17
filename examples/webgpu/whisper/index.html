@@ -214,6 +214,18 @@
                 return vad_probabilities[Math.trunc(seek_milliseconds / vad_chunk_length_milliseconds)] > threshold;
             }
 
+            function next_speech(speech_segments, log_spec_seek) {
+                let seek_seconds = log_spec_seek / MEL_SPEC_CHUNK_LENGTH * 30.0;
+                if (speech_segments.length && seek_seconds < speech_segments[0]) return speech_segments[0] / 30.0 * MEL_SPEC_CHUNK_LENGTH;
+                for (let i = 1; i < speech_segments.length; i+=2) {
+                    let [end, start] = [speech_segments[i], speech_segments[i+1]];
+                    if (seek_seconds >= end && seek_seconds < start) {
+                        return start / 30.0 * MEL_SPEC_CHUNK_LENGTH;
+                    }
+                }
+                return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
+            }
+
             let previous_context = [];
             for (const log_spec of log_specs) {
                 const [audio_features] = await net_encoder(log_spec);
