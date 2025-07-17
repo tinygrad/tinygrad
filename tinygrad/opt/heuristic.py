@@ -80,7 +80,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
 
   # if last reduce dim is small(ish), loop unroll the reduce
   upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
-  if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
+  if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):#TODO: this fails on some masked axis
     if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
       k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims[-1]-k.first_reduce, 0))
       # if it's small, upcast a second reduce dimension too
@@ -91,7 +91,6 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
           k.apply_opt(Opt(OptOps.UNROLL, axis-k.first_reduce, splits))
           break
-
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
     # TODO: somehow this never hits a reduce
