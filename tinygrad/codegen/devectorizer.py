@@ -113,7 +113,9 @@ def cat_after_store(cat:UOp, data:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
     offset += s.dtype.count
-  return UOp.sink(ret[0], *ret[1:])
+  # assert all dtypes same
+  return UOp(Ops.PTRCAT, dtype=ret[0].dtype.vec(len(ret)), src=tuple(ret))
+  #return UOp.sink(ret[0], *ret[1:])
 
 def gep_on_store(gep:UOp, st:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -284,7 +286,7 @@ def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
   alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
-  return UOp(Ops.VECTORIZE, acc.dtype, alus)
+  return UOp(Ops.PTRCAT, acc.dtype, alus)
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
