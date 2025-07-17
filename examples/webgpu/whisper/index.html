@@ -286,6 +286,8 @@
 
                     let [decoder_output] = await net_decoder(context, audio_features, [i]);
                     decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
+                    decoder_output = handle_timestamp_tokens(decoder_output, context, last_token_index, one_before_last_token_index);
+
                     context.push(decoder_output[0]);
                     pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     if (decoder_output[0] == TOK_EOS) break;
