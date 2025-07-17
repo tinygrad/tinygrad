@@ -196,6 +196,14 @@
             requestAnimationFrame(updateLoop);
             currentTranscription.style.display = 'block';
 
+            function argsort(array) {
+                // arange
+                const indices = new Uint32Array(array.length);
+                for (let i = 0; i < indices.length; i++) indices[i] = i;
+                indices.sort((a, b) => array[b] - array[a]);
+                return indices;
+            }
+
             let previous_context = [];
             for (const log_spec of log_specs) {
                 const [audio_features] = await net_encoder(log_spec);
