@@ -1362,6 +1362,7 @@ def train_stable_diffusion():
   from examples.stable_diffusion import get_alphas_cumprod
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
+
   config = {}
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
@@ -1408,7 +1409,7 @@ def train_stable_diffusion():
       p.to_("NV")
 
     out = model(x_noised, t, c)
-    loss = ((out - v_true) ** 2).mean() / v_true.shape[0]
+    loss = ((out - v_true) ** 2).mean()
 
     loss.backward().to_("CPU")
 
