@@ -480,7 +480,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       self.dev.iface.free(opaque)
     except AttributeError: pass
 
-  def map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass(frozen=True)
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
@@ -588,13 +588,14 @@ class KFDIface:
       buf = self.drm_fd.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, mem.mmap_offset)
       assert addr == buf == mem.va_addr
 
-    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem, view=MMIOInterface(mem.va_addr, mem.size, fmt='B') if cpu_access or host else None))
+    view = MMIOInterface(mem.va_addr, mem.size, fmt='B') if cpu_access or host else None
+    self.map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem, view=view, owner=self.dev))
     return hcqbuf
 
   def free(self, mem):
-    if len(gpus:=getattr(mem.meta, "mapped_gpu_ids", [])):
-      c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
-      stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
+    if len(mem.mapped_devs) > 0:
+      gpus = (ctypes.c_int32 * len(mem.mapped_devs))(*[x.gpu_id for x in mem.mapped_devs])
+      stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
     kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
@@ -606,12 +607,9 @@ class KFDIface:
     return dmaref
 
   def map(self, mem):
-    if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return
-    mem.meta.__setattr__("mapped_gpu_ids", getattr(mem.meta, "mapped_gpu_ids", []) + [self.gpu_id])
-    c_gpus = (ctypes.c_int32 * len(mem.meta.mapped_gpu_ids))(*mem.meta.mapped_gpu_ids)
-    stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus),
-                                           n_devices=len(mem.meta.mapped_gpu_ids))
-    assert stm.n_success == len(mem.meta.mapped_gpu_ids)
+    c_gpus = (ctypes.c_int32 * 1)(self.gpu_id)
+    stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
+    assert stm.n_success == 1
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
@@ -706,7 +704,7 @@ class USBIface(PCIIface):
   def _dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def _dma_region(self, ctrl_addr, sys_addr, size):
     region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], system=True, uncached=True)
-    return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(self.dev, [self.dev], region, has_cpu_mapping=False), view=self._dma_view(ctrl_addr, size))
+    return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self._dma_view(ctrl_addr, size), owner=self.dev)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     if (host or (uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
@@ -714,8 +712,8 @@ class USBIface(PCIIface):
       return self.sys_buf.offset(self.sys_next_off - size, size)
 
     am_mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    return HCQBuffer(am_mapping.va_addr, size, meta=PCIAllocationMeta(self.dev, [self.dev], am_mapping, has_cpu_mapping=False),
-      view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None)
+    return HCQBuffer(am_mapping.va_addr, size, meta=PCIAllocationMeta(am_mapping, has_cpu_mapping=False),
+      view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None, owner=self.dev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
