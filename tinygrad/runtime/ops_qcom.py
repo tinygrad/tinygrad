@@ -37,7 +37,7 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, *args **kwargs): super().__init__(*args, **kwargs, timestamp_divider=19.2)
+  def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs, timestamp_divider=19.2)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Sleep only for only timeline signals. Do it immediately to free cpu.

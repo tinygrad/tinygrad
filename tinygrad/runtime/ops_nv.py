@@ -72,7 +72,7 @@ class QMD:
     else: self.write(**{f'constant_buffer_addr_upper_shifted6_{i}':hi32(addr >> 6), f'constant_buffer_addr_lower_shifted6_{i}':lo32(addr >> 6)})
 
 class NVSignal(HCQSignal):
-  def __init__(self, *args **kwargs): super().__init__(*args, **kwargs, timestamp_divider=1000)
+  def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs, timestamp_divider=1000)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
