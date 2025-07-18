@@ -121,7 +121,9 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
-      if ((ax:=lin.real_axis(a)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
+      try: ax = lin.real_axis(a.op, a.axis)
+      except KernelOptError: continue
+      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)

@@ -280,7 +280,7 @@ class QCOMAllocator(HCQAllocatorBase):
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
       size = pitch * imgh
 
-    buf = HCQBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
+    buf = HCQBuffer(options.external_ptr, size, owner=self.dev) if options.external_ptr else self.dev._gpu_alloc(size)
 
     if options.image is not None:
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
@@ -358,7 +358,7 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'))
+    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'), owner=self)
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)

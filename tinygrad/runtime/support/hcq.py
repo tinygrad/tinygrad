@@ -443,16 +443,21 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 class HCQBuffer:
-  def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None):
+  def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None,
+               owner:HCQCompiled|None=None):
     self.va_addr, self.size, self.texture_info, self.meta, self._base, self.view = va_addr, size, texture_info, meta, _base, view
+    self.devs, self.owner = ([owner] if owner is not None else []), owner
 
   def offset(self, offset:int=0, size:int|None=None) -> HCQBuffer:
-    return HCQBuffer(self.va_addr+offset, size or (self.size - offset), texture_info=self.texture_info, meta=self.meta, _base=self._base or self,
-      view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
+    return HCQBuffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, texture_info=self.texture_info, meta=self.meta,
+      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
   def cpu_view(self) -> MMIOInterface:
     assert self.view is not None, "buffer has no cpu_view"
     return self.view
+
+  @property
+  def mapped_devs(self): return self.devs if self._base is None else self._base.devs
 
 class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   """
@@ -466,7 +471,13 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
 
-  def map(self, buf:HCQBuffer): pass
+  def map(self, buf:HCQBuffer):
+    if self.dev in buf.mapped_devs: return
+    if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
+    if not hasattr(self, '_map'): raise NotImplementedError("map failed: no method implemented")
+    self._map(buf)
+    buf.mapped_devs.append(self.dev)
+
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
 
 class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):

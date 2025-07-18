@@ -53,15 +53,15 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   ki: KernelInfo = s.arg
-  if ki.global_dims == 0 and ki.local_dims == 0: return None
+  if not ki.global_dims and not ki.local_dims: return None
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
-  ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg < (ki.global_dims+ki.local_dims)], key=lambda x: x.arg)
+  ranges = sorted([x for x in s_topo if x.op is Ops.RANGE and x.arg in (ki.global_dims+ki.local_dims)], key=lambda x: x.arg)
   if not len(ranges): return None
-  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg < ki.global_dims])
-  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg >= ki.global_dims])
+  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg in ki.global_dims])
+  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg in ki.local_dims])
   if ki.dont_use_locals:
-    assert ki.local_dims == 0, "can't use locals if there's no local dims"
+    assert not ki.local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
     # define indexes for GPU-like execution
