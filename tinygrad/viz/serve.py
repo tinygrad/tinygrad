@@ -101,8 +101,7 @@ def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(dev
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent):
-      yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
     elif isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
