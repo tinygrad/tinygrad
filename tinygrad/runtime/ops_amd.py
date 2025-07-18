@@ -26,7 +26,7 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 class AMDSignal(HCQSignal):
-  def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs, timestamp_divider=100)
+  def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
