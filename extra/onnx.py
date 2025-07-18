@@ -1,14 +1,13 @@
-from typing import Any, Sequence, cast, Literal, NamedTuple, get_args
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct
+from typing import Any, Sequence, cast, Literal, NamedTuple
+import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
-from enum import IntEnum, StrEnum
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 from tinygrad.nn.state import TensorIO
 
-class Domain(StrEnum):
+class Domain(enum.Enum):
   ONNX = "ai.onnx"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_TRAINING = "ai.onnx.training"
@@ -17,14 +16,14 @@ class Domain(StrEnum):
   @classmethod
   def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
-class WireType(IntEnum):
+class WireType(enum.IntEnum):
   """
   Protocol Buffer wire types for decoding fields.
   Reference: https://github.com/protocolbuffers/protobuf/blob/main/python/google/protobuf/internal/wire_format.py#L24-L29
   """
   VARINT = 0; FIXED64 = 1; LENGTH_DELIMITED = 2; START_GROUP = 3; END_GROUP = 4; FIXED32 = 5 # noqa: E702
 
-class AttributeType(IntEnum):
+class AttributeType(enum.IntEnum):
   """
   ONNX attribute type identifiers.
   Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
@@ -33,7 +32,7 @@ class AttributeType(IntEnum):
 
   def to_field_name(self) -> str: return {1: "f", 2: "i", 3: "s", 4: "t", 6: "floats", 7: "ints", 8: "strings"}[self.value]
 
-class OnnxDataType(IntEnum):
+class OnnxDataType(enum.IntEnum):
   """
   ONNX tensor data type identifiers.
   Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
@@ -444,7 +443,7 @@ class OnnxRunner:
 
   def to(self, device:str|None):
     self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
-    self.graph_nodes = tuple(OnnxNode(n.num, n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
+    self.graph_nodes = tuple(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
                                       {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
     return self
 
@@ -480,7 +479,7 @@ class OnnxRunner:
 ####################
 def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionType]]:
   # ***** helper functions *****
-  def _resolve_const(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
+  def _resolve_const(x: Sequence[ConstType]|ConstType): return get_single_element(x) if isinstance(x, Sequence) else x
 
   def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 
@@ -817,7 +816,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
-    val, idx = X.topk(_resolve_const(K), axis, largest, sorted)
+    val, idx = X.topk(_resolve_const(K), axis, bool(largest), bool(sorted))
     return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
@@ -990,7 +989,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       K = K.repeat((1, _q_heads // _kv_heads, 1, 1))
       V = V.repeat((1, _q_heads // _kv_heads, 1, 1))
 
-    effective_scale = scale if scale is not None else 1.0 / (Q.shape[-1] ** 0.5)
+    effective_scale = scale if scale is not None else 1.0 / (cast(int, Q.shape[-1]) ** 0.5)
     scores = (Q @ K.transpose(-1, -2)) * effective_scale
     qk_matmul_return_val = scores
 
@@ -1029,11 +1028,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       X = X.reshape(*X.shape[:-1], num_heads, X.shape[-1] // num_heads)
 
     head_size = X.shape[-1]
-    rot_dim = rotary_embedding_dim or head_size
+    rot_dim = rotary_embedding_dim or cast(int, head_size)
     x_rotate, x_pass = X[..., :rot_dim], X[..., rot_dim:]
 
-    cos = cos_cache[position_ids] if position_ids is not None else cos_cache[:X.shape[1]]
-    sin = sin_cache[position_ids] if position_ids is not None else sin_cache[:X.shape[1]]
+    cos = cos_cache[position_ids] if position_ids is not None else cos_cache[:cast(int, X.shape[1])]
+    sin = sin_cache[position_ids] if position_ids is not None else sin_cache[:cast(int, X.shape[1])]
     cos = cos[..., :rot_dim//2].unsqueeze(2)
     sin = sin[..., :rot_dim//2].unsqueeze(2)
 
