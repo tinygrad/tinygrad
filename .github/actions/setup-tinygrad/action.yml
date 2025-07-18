@@ -176,7 +176,7 @@ runs:
           pkgs+=" libllvm20 clang-20 lld-20"
         fi
         
-        echo "PKGS=$pkgs" >> "$GITHUB_ENV"
+        echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt
@@ -184,7 +184,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ inputs.opencl }}-${{ inputs.amd }}-${{ inputs.cuda }}-${{ inputs.webgpu }}-${{ inputs.llvm }}-${{ steps.apt-pkgs.outputs.hash }}
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}
 
     - name: Run apt Update + Install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -193,8 +193,8 @@ runs:
         sudo apt -qq update || true
         
         # ******** do install ********
-        if [[ -n "$PKGS" ]]; then
-          sudo apt-get -y --allow-unauthenticated --no-install-recommends install $PKGS
+        if [[ -n "${{ steps.apt-pkgs.outputs.pkgs }}" ]]; then
+          sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}
         fi
 
         sudo chown -R $USER:$USER /var/cache/apt/archives/
