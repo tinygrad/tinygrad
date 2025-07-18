@@ -179,11 +179,11 @@ class Kernel:
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
     def new_shape_fxn(x):
-      return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount))) + x[axis+1:] if axis < len(x) else x
+      return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if axis < len(x) else ()) + x[axis+1:]
     def new_perm_fxn(x):
       max_insert = min(insert_at,len(x))
       return [i for i in range(max_insert) if i != move_axis]+[move_axis]+[i for i in range(max_insert, len(x)) if i != move_axis] \
-      if move_axis < len(x) else list(range(len(x)))#something here is off
+      if move_axis < len(x) else list(range(len(x)))
 
     self.reshape(new_shape_fxn)
     self.permute(new_perm_fxn)
@@ -225,8 +225,8 @@ class Kernel:
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
     rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]
-    for i in range(1, len(self.full_shape)):#these are essentially just memory mappings, right?
-      can_merge = [not any(abs(len(s) - i) == 1 for s in shapes)]#if any shape lens differ by one, then we shouldnt merge along those axis
+    for i in range(1, len(self.full_shape)):
+      can_merge = [not any(abs(len(s) - i) == 1 for s in shapes)]#if any shape lens differ by one, then we shouldnt merge along that axis
       for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
         if axis_types[i] is AxisType.REDUCE and len(s) < len(self.full_shape): continue
