@@ -32,7 +32,9 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
     graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init])
 
   # Create and save the model
-  model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  #model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  # TODO remove this once ORT supports 1.18.0
+  model_def = helper.make_model(graph_def, producer_name="single_gemm_example", ir_version=10, opset_imports=[helper.make_opsetid("", 22)])
   onnx.save_model(model_def, model_path)
   return model_path
 
