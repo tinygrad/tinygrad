@@ -167,7 +167,7 @@ async function renderProfiler() {
       const arg = { tooltipText:formatTime(e.dur), ...ref };
       // offset y by depth
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
-      console.log(e.name, e.st);
+      console.log(e.st-st, e.name);
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -191,16 +191,17 @@ async function renderProfiler() {
     const trackHeight = 32;
     let i = 0;
     for (const track of tracks) {
-      if (track.name !== "Kernel Occupancy") continue;
+      if (track["max_value"] === 0) continue;
       trackOffset += trackHeight*i;
       i += 1;
       const td = div.appendChild(document.createElement("div"));
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
-      const trackYScale = d3.scaleLinear().domain([0, track.max_value]).range([0, trackHeight]);
+      const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight]);
       for (const t of track.data) {
         const height = trackYScale(t.y);
-        data.shapes.push({x:t.x, y:trackOffset, width:2, height, fillColor:"#C04CFD" });
+        arg = { tooltipText: `${t.y}`};
+        data.shapes.push({x:t.x-st, y:trackOffset, width:10, height, arg, fillColor:"#C04CFD" });
       }
     }
     // lastly, adjust device rect by number of levels

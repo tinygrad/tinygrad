@@ -101,7 +101,8 @@ def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(dev
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent):
+      yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
     elif isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
@@ -153,8 +154,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  #return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
-  return {"shapes":[], "peak":0, "timestamps":timestamps}
+  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 from tinygrad.viz.metal import parse_metal_trace
 ext_parsers = {"METAL":parse_metal_trace}

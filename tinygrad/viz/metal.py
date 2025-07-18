@@ -14,8 +14,9 @@ def xctrace_export(fp:str, query:str) -> str:
   subprocess.run(["xctrace","export","--input",fp,"--output",out,"--xpath",f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], check=True)
   return out
 
-TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time":int, "sample-time":Decimal, "mach-absolute-time":int, "string":str,
-        "mach-continuous-time":int, "mach-timebase-info":str, "time-since-epoch":Decimal, "gpu-counter-name":str, "fixed-decimal":float}
+# TODO: parse mach-timebase-info
+TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time":int, "sample-time":Decimal, "mach-absolute-time":Decimal, "string":str,
+        "mach-continuous-time":Decimal, "mach-timebase-info":lambda _:125/3, "time-since-epoch":Decimal, "gpu-counter-name":str, "fixed-decimal":float}
 
 def parse_xml(xml:str) -> Generator[dict, None, None]:
   id_cache:dict[str, str] = {}
@@ -30,16 +31,20 @@ def parse_xml(xml:str) -> Generator[dict, None, None]:
       if (eid:=v.attrib.get("id")): id_cache[eid] = value
     yield rec
 
-def to_cpu_time(ts:Decimal, trace_start:Decimal) -> float:
-  ts_us = ts/Decimal("1_000")
-  return float(trace_start*Decimal("1_000_000")+ts_us)
+# sample_time: Time relative to start in ns
+# trace_start: Wallclock time
+# mach hw time (diff is in behavior if device sleeps, does it matter here?)
+def to_cpu_time(sample_time:Decimal, time_info:dict) -> float:
+  perf_ns_ref = time_info["mabs-epoch"]*Decimal(time_info["timebase-info"])
+  perf_ns = perf_ns_ref+sample_time
+  return float(perf_ns/Decimal("1_000"))
 
 def parse_metal_trace(fp:str) -> list[dict]:
   ret:dict[int, dict] = {}
-  trace_start = next(parse_xml(xctrace_export(fp, "time-info")))["trace-start-time"]
+  time_info = next(parse_xml(xctrace_export(fp, "time-info")))
   for v in parse_xml(xctrace_export(fp, "gpu-counter-info")): ret[v.pop("counter-id")] = {**v, "data":[]}
   for v in parse_xml(xctrace_export(fp, "gpu-counter-value")):
-    ret[v.pop("counter-id")]["data"].append({"x":to_cpu_time(v["timestamp"], trace_start), "y":v["value"]})
+    ret[v.pop("counter-id")]["data"].append({"x":to_cpu_time(v["timestamp"], time_info), "y":v["value"]})
   return list(ret.values())
 
 if __name__ == "__main__":
