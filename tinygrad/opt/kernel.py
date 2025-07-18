@@ -202,7 +202,7 @@ class Kernel:
   def simplify_merge_adjacent(self):
     if self.axis_types == []: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-    first_reduce = self.first_reduce
+    first_reduce = self.shape_len if not len(self.axes_of(AxisType.REDUCE)) else self.axes_of(AxisType.REDUCE)[0]
     axis_types = self.axis_types.copy()
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
@@ -315,10 +315,12 @@ class Kernel:
       check(AxisType.LOCAL not in self.axis_types and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
-      check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
-      permute = list(range(self.shape_len))
-      permute[axis], permute[amt] = permute[amt], permute[axis]
-      self.permute(tuple(permute))
+      check(axis < amt, f"swap is only for axis < amt, getting {amt=}, {axis=}")
+      check(self.axis_types[axis]==self.axis_types[amt]==AxisType.GLOBAL, f"swap is for globals {self.axis_types[axis]=}, {self.axis_types[amt]=}")
+      def perm_swap(x):
+        x[axis], x[amt] = x[amt], x[axis]
+        return x
+      self.permute(perm_swap)
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "cannot pad upcasted")
