@@ -1396,7 +1396,7 @@ def train_stable_diffusion():
   #Device.DEFAULT="CPU"
 
   model = StableDiffusion()
-  load_state_dict(model, torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"])
+  #load_state_dict(model, torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"])
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
   #load_state_dict(model.model.diffusion_model, safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors"))
 
@@ -1462,8 +1462,9 @@ def train_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
 
+  @Tensor.train(mode=False)
   def eval_unet(unet:UNetModel) -> tuple[float, float]:
     clip_scores = []
     inception_activations = []
@@ -1482,24 +1483,25 @@ def train_stable_diffusion():
         alpha_prev = eval_alphas_prev[reversed_idx]
         x = denoise_step(x, t, uc, c, alpha_prev)
       
-      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
-      x = data["samples"].to("NV")
+      if False:
+        x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
+        x = model.first_stage_model.decoder(x)
+        x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
 
-      x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
-      x = model.first_stage_model.decoder(x)
-      x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
+      x = data["x_samples"].to("NV")
+
+      inception_activation = inception(x) # 1,2048,1,1
+      inception_activations.append(inception_activation.squeeze(3).squeeze(2))
+
       def md(a, b):
         diff = (a - b).abs()
         max_diff = diff.max()
         mean_diff = diff.mean()
         ratio = mean_diff / a.abs().mean()
         return mean_diff.item(), ratio.item(), max_diff.item()
-      print(md(data["x_samples"].to("NV"), x))
-      # (6.629376798628073e-07, 1.4325587471830659e-06, 5.5730342864990234e-06)
-      pause = 1
-
-      inception_activation = inception(x) # 1,2048,1,1
-      inception_activations.append(inception_activation)
+      print(md(data["pred"].to("NV"), inception_activations[0]))
+      # (3.6280880522099324e-07, 1.8309206097910646e-06, 4.5299530029296875e-06)
 
       # TODO: preprocess x with transforms
       # clip
