@@ -179,9 +179,11 @@ class TestWithGrad(unittest.TestCase):
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
-    cmp = Tensor.empty(N)
+    cmp = Tensor.zeros(N)
+    cmp = cmp.contiguous()
     for i in range(N): cmp[i] = i
-    self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+    cmp.realize()
+    self.assertListEqual(Tensor.arange(N).realize().tolist(), cmp.tolist())
 
 if __name__ == '__main__':
   unittest.main()

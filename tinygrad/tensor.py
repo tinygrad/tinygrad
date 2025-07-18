@@ -15,6 +15,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.kernelize.kernelize import get_kernelize_map
+from typing import Union
+ConstType = Union[int, float, bool]
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -1266,13 +1268,19 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
+    view = self._getitem(indices)
+    if getattr(view, 'lazydata', None) is not None and getattr(v, 'lazydata', None) is not None:
+        view.lazydata.op = LazyOp(LoadOps.STORE, (view.lazydata, v.lazydata), None)
+        view.realize()  #  key line to force STORE op to execute
+        return
+
     res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+      self.assign(res)
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      res.assign(v)
+      res.realize()
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
