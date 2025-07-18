@@ -188,8 +188,11 @@ async function renderProfiler() {
     mainTrack.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
     let trackOffset = startY+area+padding;
     const trackHeight = 32;
-    for (const [i,track] of tracks.entries()) {
+    let i = 0;
+    for (const track of tracks) {
+      if (track.name !== "Kernel Occupancy") continue;
       trackOffset += trackHeight*i;
+      i += 1;
       const td = div.appendChild(document.createElement("div"));
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
@@ -197,6 +200,7 @@ async function renderProfiler() {
       // https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time
       const stLocal = track.data[0].x;
       const trackYScale = d3.scaleLinear().domain([0, track.max_value]).range([0, trackHeight]);
+      console.log(track); // x = 1103061584, instruments = "00:01.103.061"
       for (const t of track.data) {
         const x = (t.x-stLocal)/1000;
         const height = trackYScale(t.y);

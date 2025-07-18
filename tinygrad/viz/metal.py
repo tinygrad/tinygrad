@@ -1,37 +1,40 @@
-import sys, subprocess, os
+import sys, subprocess, os, decimal
 from typing import Generator
 import xml.etree.ElementTree as ET
-from tinygrad.helpers import temp, tqdm
-
-COLS = {"gpu-counter-info":["timestamp", "counter_id", "name", "max_value", "accelerator_id", "description", "group_index", "type",
-                            "ring_buffer_count", "require_weighted_accumulation", "sample_interval"],
-        "gpu-counter-value":["timestamp", "counter_id", "value", "accelerator_id", "sample_index", "ring_buffer_index"]}
-TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time": int, "gpu-counter-name":str, "string":str, "fixed-decimal":float}
+from tinygrad.helpers import temp, tqdm, getenv
 
 def xctrace_export(fp:str, query:str) -> str:
   #out_path = f"{temp(query)}.xml"
   out = f"/tmp/{query}.xml"
   if os.path.exists(out):
     return out
-    os.system(f"rm -rd {out}")
+    os.system(f"rm {out}")
   print(f"exporting to {out}")
   subprocess.run(["xctrace","export","--input",fp,"--output",out,"--xpath",f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], check=True)
   return out
 
-def parse_xml(fp:str, query:str) -> Generator[dict, None, None]:
+TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time":int, "sample-time":float, "mach-absolute-time":int, "string":str,
+        "mach-continuous-time":int, "mach-timebase-info":str, "time-since-epoch":float, "gpu-counter-name":str, "fixed-decimal":float}
+
+def parse_xml(xml:str) -> Generator[dict, None, None]:
   id_cache:dict[str, str] = {}
-  for _,e in ET.iterparse(xctrace_export(fp, query), events=("end",)):
+  columns:list[str] = []
+  for _,e in ET.iterparse(xml, events=("end",)):
+    if getenv("XML_DEBUG"): print(ET.tostring(e, encoding="unicode"))
+    if e.tag == "col": columns.append(e.find("mnemonic").text)
     if e.tag != "row": continue
     rec:dict[str, bool|int|str] = {}
-    for col,v in zip(COLS[query], e):
+    for col,v in zip(columns, e):
       rec[col] = value = TAGS[v.tag](id_cache[ref] if (ref:=v.attrib.get("ref")) else (v.text or ""))
       if (eid:=v.attrib.get("id")): id_cache[eid] = value
     yield rec
 
 def parse_metal_trace(fp:str) -> list[dict]:
   ret:dict[int, dict] = {}
-  for v in parse_xml(fp, "gpu-counter-info"): ret[v.pop("counter_id")] = {**v, "data":[]}
-  for v in parse_xml(fp, "gpu-counter-value"): ret[v.pop("counter_id")]["data"].append({"x":v["timestamp"], "y":v["value"]})
+  trace_start = next(parse_xml(xctrace_export(fp, "time-info")))["trace-start-time"]
+  for v in parse_xml(xctrace_export(fp, "gpu-counter-info")): ret[v.pop("counter-id")] = {**v, "data":[]}
+  for v in parse_xml(xctrace_export(fp, "gpu-counter-value")):
+    ret[v.pop("counter-id")]["data"].append({"x":trace_start+v["timestamp"]/1e9, "y":v["value"]})
   return list(ret.values())
 
 if __name__ == "__main__":
