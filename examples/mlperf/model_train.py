@@ -1370,21 +1370,18 @@ def train_stable_diffusion():
   BS                 = config["BS"]                     = getenv("BS", 1)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
   assert 30_000 % EVAL_BS == 0, "Eval (which generates 30,000 images) is currently implemented without padding"
+  lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
 
-# https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
-# "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
+  # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+  # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   CKPT_IMAGE_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
   assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
 
-  lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
-  SCALE_FACTOR       = config["SCALE_FACTOR"]           = getenv("SCALE_FACTOR", 0.18215)
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
 
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
     "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True}
-
-  Device.DEFAULT="CPU"
 
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
@@ -1396,18 +1393,21 @@ def train_stable_diffusion():
     def __call__(self):
       pass
 
+  #Device.DEFAULT="CPU"
+
   model = StableDiffusion()
+  load_state_dict(model.model.diffusion_model, safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors"))
 
   clip_weights = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
   clip_weights["attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  load_state_dict(model.cond_stage_model.model, clip_weights)
+  #load_state_dict(model.cond_stage_model.model, clip_weights)
 
   unet = model.model.diffusion_model
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
   scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
   # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
-  scheduler.step()
+  #scheduler.step()
 
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
@@ -1443,7 +1443,7 @@ def train_stable_diffusion():
     reader = csv.DictReader(f, delimiter="\t")
     eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
   assert len(eval_inputs) == 30_000
-  unconditional_context = jit_context_step("")
+  #unconditional_context = jit_context_step("")
   eval_timesteps = list(reversed(range(1, 1000, 20)))
   # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
   #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
@@ -1454,13 +1454,13 @@ def train_stable_diffusion():
     out_uncond, out = unet(x.cat(x), t.cat(t), uc.cat(c)).chunk(2)
     # unconditional guidance scale = 8.0
     v_t = out_uncond + 8.0 * (out - out_uncond)
-    e_t = sqrt_alphas_cumprod[t] * v_t + sqrt_one_minus_alphas_cumprod * x
-    pred_x0 = sqrt_alphas_cumprod[t] * x - sqrt_one_minus_alphas_cumprod * v_t
+    e_t = sqrt_alphas_cumprod[t] * v_t + sqrt_one_minus_alphas_cumprod[t] * x
+    pred_x0 = sqrt_alphas_cumprod[t] * x - sqrt_one_minus_alphas_cumprod[t] * v_t
     dir_xt = (1. - alpha_prev).sqrt() * e_t
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
 
   def eval_unet(unet:UNetModel) -> tuple[float, float]:
     clip_scores = []
@@ -1468,15 +1468,29 @@ def train_stable_diffusion():
 
     for batch_idx in range(0, len(eval_inputs), EVAL_BS):
       batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
-      c = jit_context_step([row["caption"] for row in batch])
-      uc = unconditional_context.expand(context.shape)
+      #c = jit_context_step([row["caption"] for row in batch])
+      #uc = unconditional_context.expand(c.shape)
       x = Tensor.randn(EVAL_BS,4,64,64)
+      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
+      x = data["x"][0:1].to("NV")
+      t = data["timesteps"][0:1].to("NV")
+      uc, c = data["context"].to("NV").chunk(2)
+      uc = uc.contiguous().realize()
+      c = c.contiguous().realize()
 
       for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
         reversed_idx = Tensor([50 - step_idx - 1])
         t = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.long)
         alpha_prev = eval_alphas_prev[reversed_idx]
         x = denoise_step(x, t, uc, c, alpha_prev)
+        def md(a, b):
+          diff = (a - b).abs()
+          max_diff = diff.max()
+          mean_diff = diff.mean()
+          ratio = mean_diff / a.abs().mean()
+          return mean_diff.item(), ratio.item(), max_diff.item()
+        print(md(data["x_prev"].to("NV"), x))
+        # (3.122703873259525e-08, 3.871293685620003e-08, 4.76837158203125e-07)
       
       x = 1./0.18215 * x
       x = model.first_stage_model.decoder(x)
@@ -1492,7 +1506,7 @@ def train_stable_diffusion():
     fid_score = inception.compute_score(Tensor.stack(*inception_activations))
     return clip_score, fid_score
 
-  #eval_unet(unet)
+  eval_unet(unet)
 
   # training loop
   num_seen_images = 0
