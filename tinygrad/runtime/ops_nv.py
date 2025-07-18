@@ -365,7 +365,7 @@ class NVKIface:
     uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
     uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace)
 
-    for dev in cast(list[NVDevice], self.dev.devices):
+    for dev in cast(list[NVDevice], [x for x in pg for pg in HCQCompiled.peer_groups.values() if isinstance(x, NVDevice) and not x.is_nvd()]):
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.iface.gpu_uuid)
       except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
 
@@ -481,10 +481,6 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class NVDevice(HCQCompiled[NVSignal]):
-  devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[HCQBuffer]] = []
-  signal_pool: ClassVar[list[HCQBuffer]] = []
-
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):

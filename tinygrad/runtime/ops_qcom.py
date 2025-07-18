@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Any, cast, ClassVar
+from typing import Any, cast
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
@@ -315,10 +315,6 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
-  devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[HCQBuffer]] = []
-  signal_pool: ClassVar[list[HCQBuffer]] = []
-
   gpu_id: int = 0
   dummy_addr: int = 0
 
