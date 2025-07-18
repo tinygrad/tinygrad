@@ -504,7 +504,7 @@ class Kernel:
           permute_axes = tuple([local_axes.index(i) for i in slocal+sgroup+supcast])
           local_shape = tuple([s if i in local_axes else 1 for i,s in enumerate(self.full_shape)])
           local_src_shape = tuple([self.full_shape[i] if i in self.axes_of(AxisType.GLOBAL) else s for i,s in enumerate(local_shape)])
-          st = ShapeTracker.from_shape(base_shape).permute(permute_axes).reshape(local_shape).expand(local_src_shape)
+          st = ShapeTracker.from_shape(base_shape).permute(permute_axes).reshape(local_shape).expand(local_src_shape).reshape(local_src_shape[:-1])
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
