@@ -540,9 +540,9 @@ class KernelInfo:
   @property
   def function_name(self): return to_function_name(self.name)
   @property
-  def global_dims(self): return sum([1 for x in self.axis_types if x == AxisType.GLOBAL])
+  def global_dims(self) -> list[int]: return [i for i,x in enumerate(self.axis_types) if x is AxisType.GLOBAL]
   @property
-  def local_dims(self): return sum([1 for x in self.axis_types if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+  def local_dims(self) -> list[int]: return [i for i,x in enumerate(self.axis_types) if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)]
 
 # ******** ops in python ********
 
