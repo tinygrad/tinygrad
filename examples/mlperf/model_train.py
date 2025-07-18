@@ -1386,8 +1386,8 @@ def train_stable_diffusion():
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
     def __init__(self):
-      self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+      #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+      #self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
       self.first_stage_model = AutoencoderKL()
 
     def __call__(self):
@@ -1396,7 +1396,9 @@ def train_stable_diffusion():
   #Device.DEFAULT="CPU"
 
   model = StableDiffusion()
-  load_state_dict(model.model.diffusion_model, safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors"))
+  load_state_dict(model, torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"])
+  model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+  #load_state_dict(model.model.diffusion_model, safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors"))
 
   clip_weights = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
   clip_weights["attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
@@ -1436,7 +1438,7 @@ def train_stable_diffusion():
     return loss
 
   jit_train_step = TinyJit(train_step, optimize=True)
-  jit_context_step = TinyJit(model.cond_stage_model)
+  #jit_context_step = TinyJit(model.cond_stage_model)
 
   # load prompts for generating images for validation; 2 MB of data total
   with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
@@ -1467,34 +1469,34 @@ def train_stable_diffusion():
     inception_activations = []
 
     for batch_idx in range(0, len(eval_inputs), EVAL_BS):
-      batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
-      #c = jit_context_step([row["caption"] for row in batch])
-      #uc = unconditional_context.expand(c.shape)
-      x = Tensor.randn(EVAL_BS,4,64,64)
-      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
-      x = data["x"][0:1].to("NV")
-      t = data["timesteps"][0:1].to("NV")
-      uc, c = data["context"].to("NV").chunk(2)
-      uc = uc.contiguous().realize()
-      c = c.contiguous().realize()
+      if False:
+        batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
+        c = jit_context_step([row["caption"] for row in batch])
+        uc = unconditional_context.expand(c.shape)
+        x = Tensor.randn(EVAL_BS,4,64,64)
 
       for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
+        continue
         reversed_idx = Tensor([50 - step_idx - 1])
         t = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.long)
         alpha_prev = eval_alphas_prev[reversed_idx]
         x = denoise_step(x, t, uc, c, alpha_prev)
-        def md(a, b):
-          diff = (a - b).abs()
-          max_diff = diff.max()
-          mean_diff = diff.mean()
-          ratio = mean_diff / a.abs().mean()
-          return mean_diff.item(), ratio.item(), max_diff.item()
-        print(md(data["x_prev"].to("NV"), x))
-        # (3.122703873259525e-08, 3.871293685620003e-08, 4.76837158203125e-07)
       
-      x = 1./0.18215 * x
+      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
+      x = data["samples"].to("NV")
+
+      x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
       x = model.first_stage_model.decoder(x)
-      x = ((x + 1.0) / 2.0).clip(0.0, 1.0) # 1,3,512,512
+      x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+      def md(a, b):
+        diff = (a - b).abs()
+        max_diff = diff.max()
+        mean_diff = diff.mean()
+        ratio = mean_diff / a.abs().mean()
+        return mean_diff.item(), ratio.item(), max_diff.item()
+      print(md(data["x_samples"].to("NV"), x))
+      # (6.629376798628073e-07, 1.4325587471830659e-06, 5.5730342864990234e-06)
+      pause = 1
 
       inception_activation = inception(x) # 1,2048,1,1
       inception_activations.append(inception_activation)
