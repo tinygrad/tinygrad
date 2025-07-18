@@ -12,7 +12,7 @@ def xctrace_export(fp:str, query:str) -> str:
   #out_path = f"{temp(query)}.xml"
   out = f"/tmp/{query}.xml"
   if os.path.exists(out):
-    #return out
+    return out
     os.system(f"rm -rd {out}")
   print(f"exporting to {out}")
   subprocess.run(["xctrace","export","--input",fp,"--output",out,"--xpath",f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], check=True)

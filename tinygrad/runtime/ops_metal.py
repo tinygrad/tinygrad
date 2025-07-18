@@ -98,6 +98,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
+    from time import sleep
+    # TODO: do this right...
+    sleep(2)
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
     #os.system("open /tmp/metal.trace/")

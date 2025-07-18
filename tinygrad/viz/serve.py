@@ -153,7 +153,8 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  #return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  return {"shapes":[], "peak":0, "timestamps":timestamps}
 
 from tinygrad.viz.metal import parse_metal_trace
 ext_parsers = {"METAL":parse_metal_trace}
