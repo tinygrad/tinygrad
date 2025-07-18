@@ -286,7 +286,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
       self.dev.iface.free(opaque)
     except AttributeError: pass
 
-  def map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
 class GPFifo:
@@ -439,14 +439,10 @@ class NVKIface:
 
     # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
-      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
-      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping),
-      view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None)
+      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
+      has_cpu_mapping=has_cpu_mapping), view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
-  def map(self, mem:HCQBuffer):
-    if self.gpu_uuid in mem.meta.mapped_gpu_ids: return
-    mem.meta.mapped_gpu_ids.append(self.gpu_uuid)
-    self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
+  def map(self, mem:HCQBuffer): self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)

@@ -16,11 +16,12 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
     strides0, strides1 = st0.real_strides(), st1.real_strides()
     def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
-    if strides0[k.first_reduce] == 1 and not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
-      for global_idx in range(k.global_dims):
-        if k.full_shape[k.first_reduce]%MV_THREADS_PER_ROW == 0 and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
+    if strides0[first_reduce:=(k.axes_of(AxisType.REDUCE)[0])] == 1 and \
+      not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
+      for global_idx in k.axes_of(AxisType.GLOBAL):
+        if k.full_shape[first_reduce]%MV_THREADS_PER_ROW == 0 and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
           if DEBUG >= 3:
-            print(f"MATVEC: {k.full_shape=} {k.first_reduce=} {strides0=} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
+            print(f"MATVEC: {k.full_shape=} {first_reduce=} {strides0=} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
           if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
@@ -41,7 +42,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
         elif axis in k.unrollable_dims:
-          k.apply_opt(Opt(OptOps.UNROLL, axis-k.first_reduce, 4))
+          k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k.applied_opts
@@ -63,7 +64,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   upcasted_axis: set[int] = set()
   while resolve(prod(k.sts[0].shape[i] for i in k.upcastable_dims) >= 1024):
     xb_choices = []
-    # consider all the non reduce axes, and a 3 or 4 reduce. (128 on the DSP)
+    # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
@@ -73,7 +74,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
                            sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)
-      if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
+      if DEBUG >= 4: print(f"more upcast axis : {xb_choices}")
       k.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
       upcasted_axis.add(xb_choices[0][2])
     else: break
@@ -82,14 +83,14 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
     if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
-      k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims[-1]-k.first_reduce, 0))
+      k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       # if it's small, upcast a second reduce dimension too
       if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
-        k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims[-1]-k.first_reduce, 0))
+        k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
     else:
       for splits in [4]:
         if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
-          k.apply_opt(Opt(OptOps.UNROLL, axis-k.first_reduce, splits))
+          k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
           break
 
   # if nothing at all is upcasted and it's easy to, do an upcast

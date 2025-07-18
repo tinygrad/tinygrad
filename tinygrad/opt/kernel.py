@@ -115,11 +115,6 @@ class Kernel:
     return ret
 
   @property
-  def first_reduce(self) -> int: return next(iter(self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)), self.first_upcast)
-  @property
-  def first_upcast(self) -> int: return self.shape_len-self.upcasted
-
-  @property
   def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
   @property
   def full_shape(self) -> tuple[sint, ...]: return self.sts[-1].shape
@@ -130,10 +125,6 @@ class Kernel:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
-  @property
-  def global_dims(self) -> int: return len(self.axes_of(AxisType.GLOBAL))
-  @property
-  def local_dims(self) -> int: return len(self.axes_of(AxisType.LOCAL))
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
@@ -182,14 +173,14 @@ class Kernel:
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
-  # insert_before : place to insert the new stuff
-  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_before:int|None=None):
-    if insert_before is None: insert_before = self.shape_len
-    self.axis_types.insert(insert_before, new_type)
+  # insert_at : place to insert the new stuff
+  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
+    if insert_at is None: insert_at = self.shape_len
+    self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
-    if move_axis < insert_before: insert_before += 1
+    if move_axis < insert_at: insert_at += 1
     def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
-    new_axes = [i for i in range(insert_before) if i != move_axis]+[move_axis]+[i for i in range(insert_before, self.shape_len+1) if i != move_axis]
+    new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
     self.reshape(new_shape_fxn)
     self.permute(new_axes)
 
@@ -248,11 +239,14 @@ class Kernel:
 
   # ******************** apply optimizations ********************
 
-  def real_axis(self, opt:Opt):
-    if opt.axis is None: return -1
-    if opt.op is OptOps.UNROLL: return self.first_reduce+opt.axis
-    if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.first_reduce+self.group_for_reduces+opt.axis
-    return opt.axis
+  def real_axis(self, op:OptOps, axis:int|None):
+    try:
+      if axis is None: return -1
+      if op is OptOps.UNROLL: return self.unrollable_dims[axis]
+      if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
+      check(axis < self.shape_len, "invalid axis")
+      return axis
+    except IndexError as e: raise KernelOptError from e
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if self.finalized: raise RuntimeError("can't optimize Kernel after it's finalized")
@@ -270,10 +264,9 @@ class Kernel:
       self.applied_opts.append(opt)
       return
 
-    axis = self.real_axis(opt)
-    check(axis < len(self.full_shape), "invalid axis")
+    axis = self.real_axis(opt.op, opt.axis)
 
-    if opt.op is OptOps.SWAP: amt = cast(int, opt.arg)  # arg is an axis in the SWAPs
+    if opt.op is OptOps.SWAP: amt = self.real_axis(opt.op, cast(int, opt.arg))  # arg is an axis in the SWAPs
     elif opt.arg is not None:
       check(isinstance(opt.arg, int), "arg should be int")
       amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
@@ -293,29 +286,31 @@ class Kernel:
       # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
-      check(axis < self.global_dims, "local is for globals")
-      self.shift_to(axis, amt, AxisType.LOCAL, insert_before=self.first_reduce)
+      check(self.axis_types[axis] is AxisType.GLOBAL, "local is for globals")
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.axis_types[axis] is AxisType.REDUCE, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
-      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
+      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_at=min(self.axes_of(AxisType.REDUCE)))
     elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
-      self.shift_to(axis, amt, AxisType.UNROLL, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
-      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
+      # NOTE: assume the first get_local_axes() LOCAL are for TC
+      check(not (self.tensor_core and axis in self.axes_of(AxisType.LOCAL)[:len(self.tensor_core.get_local_axes())]), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_before=None)
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=None)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
-      check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
+      check(AxisType.LOCAL not in self.axis_types and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
-      check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
+      check(axis < amt, f"swap is only for axis < amt, getting {amt=}, {axis=}")
+      check(self.axis_types[axis]==self.axis_types[amt]==AxisType.GLOBAL, f"swap is for globals {self.axis_types[axis]=}, {self.axis_types[amt]=}")
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
       self.permute(tuple(permute))
@@ -362,11 +357,11 @@ class Kernel:
     if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: return None
 
     buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
-    axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0]
-    axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0]
-    if not (axis_buf0 and axis_buf1 and ((self.shape_len-self.first_reduce) == 1 or (opt_level >= 1))): return None
+    axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i in self.upcastable_dims if buf0_strides[i] == 0]
+    axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i in self.upcastable_dims if buf1_strides[i] == 0]
+    if not (axis_buf0 and axis_buf1 and (len(self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (opt_level >= 1))): return None
 
-    axis_choices = list(itertools.product(axis_buf0, axis_buf1, range(self.first_reduce, self.shape_len)))
+    axis_choices = list(itertools.product(axis_buf0, axis_buf1, self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)))
     if not (axis < len(axis_choices)): return None
 
     s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
@@ -493,15 +488,16 @@ class Kernel:
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
-          local_shape = tuple([s if self.axis_types[i] not in (AxisType.GLOBAL, AxisType.REDUCE, AxisType.UNROLL) and \
-                               (self.axis_types[i] is not AxisType.GROUP_REDUCE or i in grouped_axes) else 1 for i,s in enumerate(self.full_shape)])
-          st = ShapeTracker.from_shape(local_shape).expand(self.full_shape[:self.global_dims]+local_shape[self.global_dims:])
+          local_axes = tuple([i for i,t in enumerate(self.axis_types) if t in (AxisType.LOCAL, AxisType.UPCAST) or i in grouped_axes])
+          local_shape = tuple([s if i in local_axes else 1 for i,s in enumerate(self.full_shape)])
+          local_src_shape = tuple([self.full_shape[i] if i in self.axes_of(AxisType.GLOBAL) else s for i,s in enumerate(local_shape)])
+          st = ShapeTracker.from_shape(local_shape).expand(local_src_shape)
           local_size = st.real_size()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
-          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)]))
+          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else s for i,s in enumerate(local_shape)]))
           return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret
