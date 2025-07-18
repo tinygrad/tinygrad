@@ -1069,7 +1069,7 @@ class TestHandCodedOpts(unittest.TestCase):
     k = helper_linearizer_opt(c)[-1]
 
     assert k.group_for_reduces == 1
-    assert k.local_dims == 1
+    assert k.axis_types.count(AxisType.LOCAL) == 1
     assert k.upcasted == 1
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
@@ -1356,9 +1356,9 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 2, 8)],
     ])
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 0, 0), Opt(OptOps.PADTO, 1, 8)]])
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 1, 0), Opt(OptOps.PADTO, 2, 8)]])
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 1, 0), Opt(OptOps.PADTO, 1, 8)]])
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.UNROLL, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
 
