@@ -920,7 +920,7 @@ class TestFloat4(unittest.TestCase):
     # from llama 7B shard 4 gpus
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
+        UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000), strides=(0, 32000, 1), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(96000), arg=0, src=()),)),
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
           UOp(Ops.CAST, dtypes.float, arg=None, src=(
