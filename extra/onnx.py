@@ -7,15 +7,6 @@ from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 from tinygrad.nn.state import TensorIO
 
-class Domain(enum.Enum):
-  ONNX = "ai.onnx"
-  ONNX_ML = "ai.onnx.ml"
-  AI_ONNX_TRAINING = "ai.onnx.training"
-  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
-  @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
-
 class WireType(enum.IntEnum):
   """
   Protocol Buffer wire types for decoding fields.
@@ -26,7 +17,7 @@ class WireType(enum.IntEnum):
 class AttributeType(enum.IntEnum):
   """
   ONNX attribute type identifiers.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/onnx.proto3#L128-L145
   """
   FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
 
@@ -35,7 +26,7 @@ class AttributeType(enum.IntEnum):
 class OnnxDataType(enum.IntEnum):
   """
   ONNX tensor data type identifiers.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/onnx.proto3#L500-L544
   """
   FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12 # noqa: E702
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
@@ -48,6 +39,19 @@ def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
   warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
   assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
   return default_dtype
+
+class Domain(enum.Enum):
+  """
+  ONNX operator domains.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
+  """
+  ONNX = "ai.onnx"
+  ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_TRAINING = "ai.onnx.training"
+  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
 # ***** protobuf parsing ******
 class PBBufferedReader(BufferedReader):
