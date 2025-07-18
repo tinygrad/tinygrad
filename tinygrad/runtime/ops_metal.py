@@ -74,9 +74,10 @@ class MetalDevice(Compiled):
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE:
       import subprocess
-      #os.system("killall Instruments")
+      from tinygrad.helpers import fetch
       if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
-      # TODO: "GPU Counters" is a custom template, somehow need to install this on the user's device
+      # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
+      fetch("https://0x0.st/8dLm.gz", name="/Users/qazal/Library/Application Support/Instruments/Templates/GPUCounters2.tracetemplate", gunzip=True)
       self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounters2", "--output", path, "--attach", str(os.getpid())])
       # TODO: do this properly
       from time import sleep
@@ -103,8 +104,7 @@ class MetalDevice(Compiled):
     sleep(2)
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
-    #os.system("open /tmp/metal.trace/")
-    print(f"saved profile data in /tmp/metal.trace")
+    print(f"saved profile data to /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
