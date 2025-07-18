@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback
+from typing import cast, Callable, Type, TypeVar, Generic, Any
+import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback, collections
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
@@ -217,19 +217,17 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:HCQDeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[HCQDeviceType]):
-  def __init__(self, base_buf:HCQBuffer|None=None, value:int=0, dev_t:Type[HCQDeviceType]|None=None, timeline_for_device:HCQDeviceType|None=None,
-               timestamp_divider=1, value_off=0, timestamp_off=8):
-    self.base_buf = cast(HCQBuffer, dev_t._alloc_signal() if dev_t is not None and base_buf is None else base_buf)
-    self.value_addr, self.timestamp_addr, self.dev_t = self.base_buf.va_addr+value_off, self.base_buf.va_addr+timestamp_off, dev_t
+  def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1):
+    self.base_buf, self.value_addr, self.timestamp_addr, self.owner = base_buf, base_buf.va_addr+0, base_buf.va_addr+8, owner
+    self.is_timeline = is_timeline
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
-    self.timeline_for_device:HCQDeviceType|None = timeline_for_device
 
     if isinstance(self.base_buf.va_addr, int):
-      self.value_mv, self.timestamp_mv = self.base_buf.cpu_view().view(value_off, 8, 'Q'), self.base_buf.cpu_view().view(timestamp_off, 8, 'Q')
+      self.value_mv, self.timestamp_mv = self.base_buf.cpu_view().view(0, 8, 'Q'), self.base_buf.cpu_view().view(8, 8, 'Q')
       self.value_mv[0] = value
 
   def __del__(self):
-    if isinstance(self.base_buf.va_addr, int) and self.dev_t is not None: self.dev_t.signal_pool.append(self.base_buf)
+    if isinstance(self.base_buf.va_addr, int) and self.owner is not None: HCQCompiled.signal_pool[self.owner.peer_group].append(self.base_buf)
 
   @property
   def value(self) -> int: return self.value_mv[0]
@@ -270,7 +268,7 @@ class HCQSignal(Generic[HCQDeviceType]):
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None):
-  st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
+  st, en = (dev.new_signal(), dev.new_signal()) if enabled else (None, None)
 
   if enabled and queue is not None: queue.timestamp(st)
   elif enabled:
@@ -355,9 +353,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
-  devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[HCQBuffer]] = []
-  signal_pool: ClassVar[list[HCQBuffer]] = []
+  peer_groups: dict[str, list[HCQCompiled]] = collections.defaultdict(list)
+  signal_pages: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
+  signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
@@ -366,15 +364,17 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
+    # TODO: peer logic is determined based on device name.
+    self.peer_group = device.split(":")[0]
+    HCQCompiled.peer_groups[self.peer_group].append(self)
+
     # Map signals if any
-    for sig_page in self.signal_pages: cast(HCQAllocator, self.allocator).map(sig_page)
-    self.devices.append(self)
+    for sig_page in HCQCompiled.signal_pages[self.peer_group]: cast(HCQAllocator, self.allocator).map(sig_page)
 
     self.sigalloc_size = sigalloc_size
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
-    self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
 
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
@@ -395,13 +395,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_value += 1
     return self.timeline_value - 1
 
-  @classmethod
-  def _alloc_signal(cls) -> HCQBuffer:
-    if not cls.signal_pool:
-      cls.signal_pages.append(alc:=cls.devices[0].allocator.alloc(cls.devices[0].sigalloc_size, BufferSpec(host=True,uncached=True,cpu_access=True)))
-      cls.signal_pool += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
-      for dev in cls.devices: cast(HCQAllocator, dev.allocator).map(alc)
-    return cls.signal_pool.pop()
+  def new_signal(self, **kwargs) -> SignalType:
+    if not HCQCompiled.signal_pool[pg:=self.peer_group]:
+      HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True)))
+      HCQCompiled.signal_pool[pg] += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
+      for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator).map(alc)
+    return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
   def _at_profile_finalize(self):
     def _sync(d:HCQCompiled, q_t:Callable[[], HWQueue]):
