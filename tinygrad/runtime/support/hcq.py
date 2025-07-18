@@ -400,7 +400,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True)))
       HCQCompiled.signal_pool[pg] += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
       for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator).map(alc)
-    return self.signal_t(base_buf=self.signal_pool[pg].pop(), owner=self, **kwargs)
+    return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
   def _at_profile_finalize(self):
     def _sync(d:HCQCompiled, q_t:Callable[[], HWQueue]):
