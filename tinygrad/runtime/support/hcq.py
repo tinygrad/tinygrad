@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Callable, Type, TypeVar, Generic, Any, ClassVar
+from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback, collections
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
