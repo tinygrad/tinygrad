@@ -167,6 +167,7 @@ async function renderProfiler() {
       const arg = { tooltipText:formatTime(e.dur), ...ref };
       // offset y by depth
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+      console.log(e.name, e.st);
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -196,15 +197,10 @@ async function renderProfiler() {
       const td = div.appendChild(document.createElement("div"));
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
-      // TODO: align these properly
-      // https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time
-      const stLocal = track.data[0].x;
       const trackYScale = d3.scaleLinear().domain([0, track.max_value]).range([0, trackHeight]);
-      console.log(track); // x = 1103061584, instruments = "00:01.103.061"
       for (const t of track.data) {
-        const x = (t.x-stLocal)/1000;
         const height = trackYScale(t.y);
-        data.shapes.push({x, y:trackOffset, width:2, height, fillColor:"#C04CFD" });
+        data.shapes.push({x:t.x, y:trackOffset, width:2, height, fillColor:"#C04CFD" });
       }
     }
     // lastly, adjust device rect by number of levels
