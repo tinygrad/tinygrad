@@ -353,12 +353,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
-  # devices: ClassVar[list[HCQCompiled]] = []
-  # signal_pages: ClassVar[list[HCQBuffer]] = []
-  # signal_pool: ClassVar[list[HCQBuffer]] = []
   peer_groups: dict[str, list[HCQCompiled]] = collections.defaultdict(list)
-  signal_pages: dict[str, list[HCQBuffer]] = collections.defaultdict(list)
-  signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list)
+  signal_pages: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
+  signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20), sigalloc_size=0x1000):

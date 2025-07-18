@@ -681,7 +681,7 @@ class PCIIface(PCIIfaceBase):
       self.dev_impl.ih.interrupt_handler()
 
   def on_device_hang(self):
-    devs:list[AMDDevice] = [x for x in pg for pg in self.peer_groups.values() if isinstance(x, AMDDevice) and x.is_am()]
+    devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg  if isinstance(d, AMDDevice) and d.is_am()]
     for d in devs: d.iface.dev_impl.gmc.on_interrupt()
     raise RuntimeError("Device hang detected")
 
