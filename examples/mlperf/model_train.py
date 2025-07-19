@@ -1496,6 +1496,15 @@ def train_stable_diffusion():
       data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
       x = data["x_samples"].to("NV")
 
+      # clip preprocessing
+      y = (x[0].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
+      # Tensor.interpolate does not yet support bicubic
+      r = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
+      r = Tensor(r).permute(2,0,1).cast(dtypes.float) / 255
+      # clip normalization parameters
+      means = (0.48145466, 0.4578275, 0.40821073)
+      stds = (0.26862954, 0.26130258, 0.27577711)
+      normalized = Tensor.cat((r[0:1]-means[0])/stds[0], (r[1:2]-means[1])/stds[1], (r[2:3]-means[2])/stds[2])
       def md(a, b):
         diff = (a - b).abs()
         max_diff = diff.max()
@@ -1503,14 +1512,10 @@ def train_stable_diffusion():
         ratio = mean_diff / a.abs().mean()
         return mean_diff.item(), ratio.item(), max_diff.item()
 
-      y = (x[0].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
-      resized = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
-      resized = Tensor(resized).permute(2,0,1).cast(dtypes.float) / 255
-      print(md(data["resized"].to("NV"), resized))
-      # (1.4747552512517359e-08, 2.9580197846712508e-08, 4.6566128730773926e-08)
+      print(md(data["normalize"].to("NV"), normalized))
+      # (6.14930115716561e-08, 1.7403689867023786e-07, 3.5762786865234375e-07)
+      pause = 1
 
-      # TODO: preprocess x with transforms
-      # clip
 
     clip_score = Tensor.cat(*clip_scores).mean()
     fid_score = inception.compute_score(Tensor.stack(*inception_activations))
