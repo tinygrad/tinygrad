@@ -1,10 +1,11 @@
 # ruff: noqa: E501
+import os
+os.environ["VIZ"] = "1"
+os.environ["DEBUG"] = "2"
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.realize import get_runner, ExecItem
-from tinygrad.helpers import Context
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, dtypes, Context
 
 DEVICE = Device.DEFAULT
 

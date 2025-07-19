@@ -1,14 +1,16 @@
-import sys, subprocess, os
+import sys, subprocess, os, xml.etree.ElementTree as ET
 from typing import Generator, Callable
 from decimal import Decimal
-import xml.etree.ElementTree as ET
+from tinygrad.helpers import Timing
 
 def xctrace_export(fp:str, query:str) -> str:
   #out_path = f"{temp(query)}.xml"
   out = f"/tmp/{query}.xml"
   if os.path.exists(out): os.system(f"rm {out}")
-  print(f"exporting to {out}")
-  subprocess.run(["xctrace","export","--input",fp,"--output",out,"--xpath",f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], check=True)
+  print(f"Exporting {query}...")
+  with Timing("xctrace export "):
+    subprocess.run(["xctrace", "export", "--input", fp, "--output",out, "--xpath", f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]',
+                    "--quiet"], check=True)
   return out
 
 # TODO: parse mach-timebase-info
