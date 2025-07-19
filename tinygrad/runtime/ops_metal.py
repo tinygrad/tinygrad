@@ -1,4 +1,4 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal
 from typing import Any, Union, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
@@ -63,6 +63,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
+  xctrace_proc = None
   def __init__(self, device:str):
     self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
@@ -72,6 +73,15 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
+    if PROFILE and MetalDevice.xctrace_proc is None:
+      import subprocess
+      from tinygrad.helpers import fetch
+      if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
+      # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
+      fetch("https://0x0.st/8dLm.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
+      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
+                                            "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
+      subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -87,6 +97,12 @@ class MetalDevice(Compiled):
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
+
+  def _at_profile_finalize(self):
+    if (proc:=MetalDevice.xctrace_proc) is not None:
+      proc.send_signal(signal.SIGINT)
+      proc.wait()
+      print("saved profile data to /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))

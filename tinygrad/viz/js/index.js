@@ -134,12 +134,13 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
-  for (const [k, { timeline, mem }] of Object.entries(layout)) {
+  for (const [k, { timeline, mem, tracks }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
-    div.innerText = k;
     div.style.padding = `${padding}px`;
-    div.onclick = () => { // TODO: make this feature more visible
+    const mainTrack = div.appendChild(document.createElement("div"));
+    mainTrack.innerText = k;
+    mainTrack.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
       const prevScroll = profiler.node().scrollTop;
       renderProfiler();
@@ -170,7 +171,8 @@ async function renderProfiler() {
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
-    if (area === 0) div.style.pointerEvents = "none";
+    if (area === 0) mainTrack.style.pointerEvents = "none";
+    else mainTrack.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
@@ -184,8 +186,25 @@ async function renderProfiler() {
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
       data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
+    mainTrack.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
+    let trackOffset = startY+area+padding;
+    const trackHeight = 32;
+    const padY = 2;
+    for (const track of tracks) {
+      const td = div.appendChild(document.createElement("div"));
+      td.style.height = trackHeight+"px";
+      td.innerText = track.name;
+      td.onmouseenter = (e) => d3.select(".metadata").html("").text(track.description);
+      const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight]);
+      for (const t of track.data) {
+        const height = trackYScale(t.y)-padY;
+        arg = { tooltipText: `${t.y}`};
+        data.shapes.push({x:t.x-st, y:trackOffset-height, width:10, height, arg, fillColor:"#C04CFD" });
+      }
+      trackOffset += trackHeight;
+    }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
+    div.style.height = `${rect(mainTrack).height+trackHeight*tracks.length+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -228,6 +247,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
@@ -461,7 +481,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
