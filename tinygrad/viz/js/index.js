@@ -194,11 +194,7 @@ async function renderProfiler() {
       const td = div.appendChild(document.createElement("div"));
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
-      td.onmouseenter = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        d3.select(".metadata").html("").text(track.description);
-      }
+      td.onmouseenter = (e) => d3.select(".metadata").html("").text(track.description);
       const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight]);
       for (const t of track.data) {
         const height = trackYScale(t.y)-padY;

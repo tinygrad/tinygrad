@@ -63,6 +63,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
+  xctrace_proc = None
   def __init__(self, device:str):
     self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
@@ -72,13 +73,13 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
-    if PROFILE:
+    if PROFILE and MetalDevice.xctrace_proc is None:
       import subprocess
       from tinygrad.helpers import fetch
       if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
       fetch("https://0x0.st/8dLm.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
-      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
+      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
                                             "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
       subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
@@ -98,9 +99,10 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
-    self.xctrace_proc.send_signal(signal.SIGINT)
-    self.xctrace_proc.wait()
-    print("saved profile data to /tmp/metal.trace")
+    if (proc:=MetalDevice.xctrace_proc) is not None:
+      proc.send_signal(signal.SIGINT)
+      proc.wait()
+      print("saved profile data to /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
