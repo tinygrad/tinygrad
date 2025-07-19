@@ -302,7 +302,7 @@ class Kernel:
     elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
-      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)[-1]+1)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       # NOTE: assume the first get_local_axes() LOCAL are for TC
@@ -478,8 +478,10 @@ class Kernel:
 
           # permute the srcs
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+          unroll_offset = self.shape_len - len(self.axes_of(AxisType.UNROLL))
           for i, (src, permaxis) in enumerate(zip(srcs, tc.permutes_for_shape_str(self.shape_str()))):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
+            permaxis = [ (list(range(unroll_offset)) + list(reversed(range(unroll_offset, self.shape_len))))[i] for i in permaxis]
             srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(permaxis)))
 
           # construct the op
