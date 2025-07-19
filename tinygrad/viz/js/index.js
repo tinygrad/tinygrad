@@ -133,7 +133,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=40]);
   for (const [k, { timeline, mem, tracks }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -199,7 +199,7 @@ async function renderProfiler() {
       for (const t of track.data) {
         const height = trackYScale(t.y)-padY;
         arg = { tooltipText: `${t.y}`};
-        data.shapes.push({x:t.x-st, y:trackOffset-height, width:10, height, arg, fillColor:"#C04CFD" });
+        data.shapes.push({x:t.x-st, y:trackOffset-height, width:10, height, arg, fillColor:"#2667ff" });
       }
       trackOffset += trackHeight;
     }
