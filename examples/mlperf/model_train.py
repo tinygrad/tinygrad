@@ -1363,7 +1363,8 @@ def train_stable_diffusion():
   from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
-  import csv
+  import csv, PIL
+  import numpy as np
 
   config = {}
   # ** hyperparameters **
@@ -1462,7 +1463,7 @@ def train_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
 
   @Tensor.train(mode=False)
   def eval_unet(unet:UNetModel) -> tuple[float, float]:
@@ -1488,11 +1489,12 @@ def train_stable_diffusion():
         x = model.first_stage_model.decoder(x)
         x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
 
+      if False:
+        inception_activation = inception(x) # 1,2048,1,1
+        inception_activations.append(inception_activation.squeeze(3).squeeze(2))
+
       data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
       x = data["x_samples"].to("NV")
-
-      inception_activation = inception(x) # 1,2048,1,1
-      inception_activations.append(inception_activation.squeeze(3).squeeze(2))
 
       def md(a, b):
         diff = (a - b).abs()
@@ -1500,8 +1502,12 @@ def train_stable_diffusion():
         mean_diff = diff.mean()
         ratio = mean_diff / a.abs().mean()
         return mean_diff.item(), ratio.item(), max_diff.item()
-      print(md(data["pred"].to("NV"), inception_activations[0]))
-      # (3.6280880522099324e-07, 1.8309206097910646e-06, 4.5299530029296875e-06)
+
+      y = (x[0].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
+      resized = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
+      resized = Tensor(resized).permute(2,0,1).cast(dtypes.float) / 255
+      print(md(data["resized"].to("NV"), resized))
+      # (1.4747552512517359e-08, 2.9580197846712508e-08, 4.6566128730773926e-08)
 
       # TODO: preprocess x with transforms
       # clip
