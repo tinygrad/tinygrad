@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -18,7 +18,7 @@ from tinygrad.kernelize.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
-all_tensors: set[weakref.ref[Tensor]] = set()
+all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
   return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
 
@@ -47,7 +47,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # **** Tensor helper functions ****
 
 # this tracks the tensor.py METADATA
-_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
+_METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -173,8 +173,8 @@ class Tensor(MathTrait):
       self.uop = data
 
     # add to all_tensors after construction succeeds
-    all_tensors.add(weakref.ref(self))
-  def __del__(self): all_tensors.discard(weakref.ref(self))
+    all_tensors[weakref.ref(self)] = None
+  def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
@@ -1965,7 +1965,7 @@ class Tensor(MathTrait):
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def keccak(self, cfg:str|tuple[int, int] = "sha3_256"):
+  def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
     Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
 
@@ -2014,7 +2014,7 @@ class Tensor(MathTrait):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
-    return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
+    return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()

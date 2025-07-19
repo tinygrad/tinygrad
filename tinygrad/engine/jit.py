@@ -1,7 +1,7 @@
-from typing import TypeVar, Generic, Callable, Union, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
@@ -21,7 +21,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: list[ExecItem] = []
   current_batch: list[ExecItem] = []
-  current_device: Optional[Compiled] = None
+  current_device: Compiled|None = None
 
   def flush_batch():
     nonlocal current_batch, current_device, max_batch_size
@@ -31,7 +31,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Optional[Buffer]], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Buffer|None], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -76,7 +76,7 @@ class GraphRunner(Runner):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
-    self.launch_dims_replace:dict[int, tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
     self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
@@ -149,7 +149,7 @@ class CapturedJit(Generic[ReturnType]):
   jit_cache: list[ExecItem]
   input_replace: dict[tuple[int, int], int]
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
-  expected_names: list[Union[int, str]]
+  expected_names: list[int|str]
   expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
@@ -198,7 +198,7 @@ class CapturedJit(Generic[ReturnType]):
           if b is not None: b.ensure_allocated()
       # create graph if needed
       if JIT < 2:
-        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+        self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=JIT_BATCH_SIZE.value)
         self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._first_run = False
 
@@ -222,10 +222,10 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False, optimize=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, optimize=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
-    self.captured: Optional[CapturedJit] = captured
+    self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
     self.optimize = optimize

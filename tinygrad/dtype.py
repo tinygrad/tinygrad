@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Union, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
 
-ConstType = Union[float, int, bool]
+ConstType = float|int|bool
 
 FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
 
@@ -21,11 +21,11 @@ class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  fmt: Optional[FmtStr]
+  fmt: FmtStr|None
   count: int
-  _scalar: Optional[DType]
+  _scalar: DType|None
   @staticmethod
-  def new(priority:int, itemsize:int, name:str, fmt:Optional[FmtStr]): return DType(priority, itemsize, name, fmt, 1, None)
+  def new(priority:int, itemsize:int, name:str, fmt:FmtStr|None): return DType(priority, itemsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
@@ -167,7 +167,7 @@ if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
   assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
 
-DTypeLike = Union[str, DType]
+DTypeLike = str|DType
 def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType) else getattr(dtypes, dtype.lower())
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
@@ -279,7 +279,7 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 # numpy and torch dtype interop
 
-def _to_np_dtype(dtype:DType) -> Optional[type]:
+def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
@@ -287,7 +287,7 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
   return dtypes.fields()[np.dtype(npdtype).name]
 
 @functools.cache
-def _to_torch_dtype(dtype:DType) -> Optional['torch.dtype']:  # type: ignore [name-defined] # noqa: F821
+def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
   # NOTE: torch doesn't expose this mapping with a stable API
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype

@@ -1,5 +1,5 @@
 import os, sys, mmap, io, ctypes, ctypes.util, contextlib
-from typing import Optional, Generator, Callable
+from typing import Generator, Callable
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 with contextlib.suppress(ImportError):
@@ -12,8 +12,8 @@ class DiskDevice(Compiled):
   def __init__(self, device:str):
     if not DiskDevice._tried_io_uring_init: self._iouring_setup()
 
-    self.size: Optional[int] = None
-    self.fd: Optional[int] = None
+    self.size: int|None = None
+    self.fd: int|None = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
   def _might_open(self, size:int):

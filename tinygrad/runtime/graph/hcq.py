@@ -48,13 +48,13 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: dict[HCQCompiled, HWQueue] = {} # lazy allocation
 
-    self.signals: dict[Any, HCQSignal] = {**{dev: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
+    self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices}, **{"KICK": self.devices[0].new_signal(value=0)}}
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
     # When profiling allocate 2 signals for each jit item to measure speed. The jth jit item have signals at 2*j and 2*j+1.
     # TODO: This logic might allocate a few extra signals...
-    self.prof_signals: list[HCQSignal] = [self.devices[0].signal_t() for i in range(len(jit_cache) * 2)] if PROFILE else []
+    self.prof_signals: list[HCQSignal] = [self.devices[0].new_signal() for i in range(len(jit_cache) * 2)] if PROFILE else []
     self.prog_graph_deps: list[list[int]] = []
     self.prof_graph_entries: list[ProfileGraphEntry] = []
 
@@ -78,7 +78,7 @@ class HCQGraph(MultiGraphRunner):
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
         enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
 
-      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
+      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.new_signal(value=0))
 
       # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
@@ -131,11 +131,11 @@ class HCQGraph(MultiGraphRunner):
     # Create variable timeline signals for each device.
     timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{dev.device_id}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
     self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
-    self.virt_timeline_signals = {dev: dev.signal_t(base_buf=HCQBuffer(timeline_sigaddrs[dev], 16), timeline_for_device=dev) for dev in self.devices}
+    self.virt_timeline_signals = {dev: dev.signal_t(HCQBuffer(timeline_sigaddrs[dev], 16), owner=dev, is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
-                           .wait(self.signals['CPU'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
+                           .wait(self.signals['KICK'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
     for j,ji in enumerate(jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
@@ -175,7 +175,7 @@ class HCQGraph(MultiGraphRunner):
     self.kickoff_value += 1
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
     for sig in self.queue_signals_to_reset: sig.value = 0
-    self.signals['CPU'].value = self.kickoff_value
+    self.signals['KICK'].value = self.kickoff_value
 
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
