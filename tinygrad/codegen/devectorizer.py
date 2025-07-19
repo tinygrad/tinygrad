@@ -113,7 +113,9 @@ def cat_after_store(cat:UOp, data:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
     offset += s.dtype.count
-  return UOp.sink(ret[0], *ret[1:])
+  # assert all dtypes same
+  return UOp(Ops.PTRCAT, dtype=ret[0].dtype.vec(len(ret)), src=tuple(ret))
+  #return UOp.sink(ret[0], *ret[1:])
 
 def gep_on_store(gep:UOp, st:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -282,9 +284,9 @@ def no_vectorized_alu(alu:UOp):
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
+  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
-  return UOp(Ops.VECTORIZE, acc.dtype, alus)
+  return UOp(Ops.PTRCAT, acc.dtype, alus)
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
@@ -329,11 +331,11 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    acc = UOp(Ops.DEFINE_REG, red.dtype, (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-    lst = [acc] + lst  # put acc as the first element
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1), (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+    lst = [acc.load()] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.assign(ret) if len(reduce_range) != 0 else ret
+  return acc.store(ret).load() if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
