@@ -322,7 +322,8 @@ class CPUProgram:
     # https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms
     # This hack is required because clang/llvm bug doesn't allow us to just use {host's triple}+'-elf' (relocation failures)
     # The bug was fixed in https://github.com/llvm/llvm-project/commit/454cc36630296262cdb6360b60f90a64a97f7f1a but was only backported to xcode 16+
-    if platform.machine() == "arm64" and OSX: args = args[:8] + [ctypes.c_int64(a) if isinstance(a, int) else a for a in args[8:]]
+    # if platform.machine() == "arm64" and OSX:
+    args = [ctypes.c_int64(a) if isinstance(a, int) else ctypes.c_int64(a.va_addr) for a in args]
     return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
 
   def __del__(self):
