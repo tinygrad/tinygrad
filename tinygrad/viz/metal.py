@@ -1,28 +1,26 @@
 import sys, subprocess, os
-from typing import Generator
+from typing import Generator, Callable
 from decimal import Decimal
 import xml.etree.ElementTree as ET
-from tinygrad.helpers import temp, tqdm, getenv
 
 def xctrace_export(fp:str, query:str) -> str:
   #out_path = f"{temp(query)}.xml"
   out = f"/tmp/{query}.xml"
-  if os.path.exists(out):
-    os.system(f"rm {out}")
+  if os.path.exists(out): os.system(f"rm {out}")
   print(f"exporting to {out}")
   subprocess.run(["xctrace","export","--input",fp,"--output",out,"--xpath",f'/trace-toc/run[@number="1"]/data/table[@schema="{query}"]'], check=True)
   return out
 
 # TODO: parse mach-timebase-info
-TAGS = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time":int, "sample-time":Decimal, "mach-absolute-time":Decimal, "string":str,
-        "mach-continuous-time":Decimal, "mach-timebase-info":lambda _:125/3, "time-since-epoch":Decimal, "gpu-counter-name":str, "fixed-decimal":float}
+TAGS:dict[str, Callable] = {"boolean":lambda x:x!="0", "uint32":int, "uint64":int, "event-time":int, "sample-time":Decimal, "string":str,
+                             "mach-absolute-time":Decimal, "mach-continuous-time":Decimal, "mach-timebase-info":lambda _:125/3, "fixed-decimal":float,
+                             "time-since-epoch":Decimal, "gpu-counter-name":str}
 
 def parse_xml(xml:str) -> Generator[dict, None, None]:
   id_cache:dict[str, str] = {}
   columns:list[str] = []
   for _,e in ET.iterparse(xml, events=("end",)):
-    if getenv("XML_DEBUG"): print(ET.tostring(e, encoding="unicode"))
-    if e.tag == "col": columns.append(e.find("mnemonic").text)
+    if e.tag == "col" and (mnemonic:=e.find("mnemonic")) is not None: columns.append(str(mnemonic.text))
     if e.tag != "row": continue
     rec:dict[str, bool|int|str] = {}
     for col,v in zip(columns, e):

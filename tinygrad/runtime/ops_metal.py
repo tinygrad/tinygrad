@@ -1,6 +1,6 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal
 from typing import Any, Union, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, temp
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -77,11 +77,10 @@ class MetalDevice(Compiled):
       from tinygrad.helpers import fetch
       if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
-      fetch("https://0x0.st/8dLm.gz", name=f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounters2.tracetemplate", gunzip=True)
-      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounters2", "--output", path, "--attach", str(os.getpid())])
-      # TODO: do this properly
-      from time import sleep
-      sleep(2)
+      fetch("https://0x0.st/8dLm.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
+      self.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
+                                            "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
+      subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -99,12 +98,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
-    from time import sleep
-    # TODO: do this right...
-    sleep(2)
     self.xctrace_proc.send_signal(signal.SIGINT)
     self.xctrace_proc.wait()
-    print(f"saved profile data to /tmp/metal.trace")
+    print("saved profile data to /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))

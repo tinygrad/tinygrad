@@ -1,11 +1,12 @@
-# DEBUG=2 VIZ=1
+# ruff: noqa: E501
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.realize import get_runner, ExecItem
-from tinygrad.device import Device
 from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
+
+DEVICE = Device.DEFAULT
 
 ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
   UOp(Ops.STORE, dtypes.void, arg=None, src=(
@@ -25,8 +26,8 @@ ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(32), arg=3, src=()),)),)),)),)),))
 
 with Context(NOOPT=1):
-  p1 = get_runner("METAL", ast)
-p2 = get_runner("METAL", ast)
+  p1 = get_runner(DEVICE, ast)
+p2 = get_runner(DEVICE, ast)
 
 bufs = []
 for b in ast.toposort():
