@@ -1,10 +1,11 @@
-import unittest, ctypes, struct, os, random
+import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import getenv, CI, mv_address
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
-from tinygrad.engine.realize import get_runner, CompiledRunner
+from tinygrad.runtime.support.system import PCIIfaceBase
+from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
 from tinygrad.opt.kernel import Kernel, Opt, OptOps
 from tinygrad import Variable
 
@@ -67,7 +68,7 @@ class TestHCQ(unittest.TestCase):
       if queue_type is None: continue
 
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0.signal_t()
+        fake_signal = TestHCQ.d0.new_signal()
         fake_signal.value = 1
         queue_type().wait(fake_signal, 1) \
                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -80,7 +81,7 @@ class TestHCQ(unittest.TestCase):
       if queue_type is None: continue
 
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0.signal_t()
+        fake_signal = TestHCQ.d0.new_signal()
         queue_type().wait(fake_signal, 1) \
                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -100,7 +101,7 @@ class TestHCQ(unittest.TestCase):
         virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
         virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
-        fake_signal = TestHCQ.d0.signal_t()
+        fake_signal = TestHCQ.d0.new_signal()
         q = queue_type().wait(virt_signal, virt_val).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
         fake_signal.value = 0x30
@@ -163,7 +164,7 @@ class TestHCQ(unittest.TestCase):
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
     for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, arg=3))
 
-    runner = CompiledRunner(k.to_program())
+    runner = CompiledRunner(get_program(k.get_optimized_ast(), k.opts))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
@@ -292,7 +293,7 @@ class TestHCQ(unittest.TestCase):
       virt_signal = TestHCQ.d0.signal_t(base_buf=HCQBuffer(Variable("sig_addr", 0, 0xffffffffffffffff, dtypes.uint64), 16))
 
       with self.subTest(name=str(queue_type)):
-        fake_signal = TestHCQ.d0.signal_t()
+        fake_signal = TestHCQ.d0.new_signal()
         q = queue_type().wait(virt_signal, virt_val).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
         q.bind(TestHCQ.d0)
 
@@ -309,7 +310,7 @@ class TestHCQ(unittest.TestCase):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception: self.skipTest("no multidevice, test skipped")
 
-    TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0.signal_t(value=0), value=0xfff) \
+    TestHCQ.d0.hw_copy_queue_t().signal(sig:=TestHCQ.d0.new_signal(value=0), value=0xfff) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     d1.hw_copy_queue_t().wait(sig, value=0xfff) \
@@ -323,7 +324,7 @@ class TestHCQ(unittest.TestCase):
 
   # Test profile api
   def test_speed_exec_time(self):
-    sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
+    sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     TestHCQ.d0.hw_compute_queue_t().timestamp(sig_st) \
                                    .exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .timestamp(sig_en) \
@@ -345,7 +346,7 @@ class TestHCQ(unittest.TestCase):
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
     b = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
 
-    sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
+    sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
                                 .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
                                 .timestamp(sig_en) \
@@ -372,7 +373,7 @@ class TestHCQ(unittest.TestCase):
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
     TestHCQ.d0.allocator.map(b._buf)
 
-    sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
+    sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
                                 .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
                                 .timestamp(sig_en) \
@@ -530,10 +531,28 @@ class TestHCQ(unittest.TestCase):
     try: nv_dev = Device["NV"]
     except Exception: self.skipTest("no NV device, test skipped")
 
-    x = amd_dev.signal_t()
-    y = nv_dev.signal_t()
+    x = amd_dev.new_signal()
+    y = nv_dev.new_signal()
     assert type(x) is amd_dev.signal_t
     assert type(y) is nv_dev.signal_t
+
+  def test_multidevice_p2p(self):
+    try:
+      amd_dev = Device["AMD"]
+      if not issubclass(type(amd_dev.iface), PCIIfaceBase): self.skipTest("Not a pci dev")
+    except Exception: self.skipTest("no AMD device, test skipped")
+
+    try:
+      nv_dev = Device["NV"]
+      if not issubclass(type(nv_dev.iface), PCIIfaceBase): self.skipTest("Not a pci dev")
+    except Exception: self.skipTest("no NV device, test skipped")
+
+    def _check_copy(dev1, dev2):
+      buf1 = Tensor.randn(10, 10, device=dev1).realize()
+      buf2 = buf1.to(dev2).realize()
+      np.testing.assert_equal(buf1.numpy(), buf2.numpy(), "p2p failed")
+    _check_copy("AMD", "NV")
+    _check_copy("NV", "AMD")
 
 if __name__ == "__main__":
   unittest.main()

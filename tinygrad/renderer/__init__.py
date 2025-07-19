@@ -1,46 +1,12 @@
 from __future__ import annotations
-from typing import Optional, Callable, cast
-import functools, math, itertools
-from enum import Enum, auto
+from typing import Optional, Callable, cast, TYPE_CHECKING
+import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
-from tinygrad.dtype import DType
-
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: Optional[int] = None
-  arg: Optional[int | tuple] = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
-
-@dataclass(frozen=True)
-class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: tuple[int,int,int] # N, M, K
-  threads: int # number of threads that construct the warp
-  elements_per_thread: tuple[int, int, int] # elements per-thread to load/store from A/B/C
-  dtype_in: DType # dtype for A and B
-  dtype_out: DType # dtype for C and D
-  opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
-  swizzle: tuple[Optional[tuple[tuple[int, ...], tuple[int, ...]]], Optional[tuple[tuple[int, ...], tuple[int, ...]]]] = (None, None)
-  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
-  def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
-  def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
-  def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
-  def __post_init__(self):
-    local_axes, upcast_axes, reduce_axes = len(self.get_local_axes()), len(self.get_upcast_axes()), len(self.get_reduce_axes())
-    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), (
-      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})")
-    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"
-    assert 2**upcast_axes == self.elements_per_thread[2], (
-      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}")
-    assert all(len(perm[0]) == local_axes and len(perm[1]) == reduce_axes + upcast_axes for perm in self.swizzle if perm), (
-      f"swizzle perm should be of len (({local_axes})({reduce_axes + upcast_axes}))")
+if TYPE_CHECKING:
+  from tinygrad.opt.tc import TensorCore
+  from tinygrad.opt.kernel import Opt
 
 @dataclass(frozen=True)
 class Estimates:

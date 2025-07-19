@@ -14,7 +14,6 @@ from tinygrad.shape.view import View
 def _test_overflow(ast, opts):
   lin = Kernel(ast)
   lin.apply_opts(opts)
-  lin.linearize()
   bufs = bufs_from_lin(lin)
   print(bufs)
   time_linearizer(lin, bufs)

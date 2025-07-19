@@ -1,4 +1,4 @@
-import tempfile, unittest
+import unittest
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
@@ -6,11 +6,10 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
+from tinygrad.frontend.onnx import OnnxRunner
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
-
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):
@@ -30,11 +29,8 @@ class TinygradBackend(Backend):
     input_initializer = [x.name for x in model.graph.initializer]
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
-    with tempfile.NamedTemporaryFile(suffix='.onnx') as f:
-      onnx.save(model, f.name)
-      f.flush()
-      new_model = onnx_load(f.name)
-    run_onnx = OnnxRunner(new_model)
+    model = Tensor(model.SerializeToString(), device="PYTHON")
+    run_onnx = OnnxRunner(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
@@ -43,9 +39,6 @@ class TinygradBackend(Backend):
     return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
-
-# BUG: segfaults
-backend_test.exclude('test_MaxPool1d_stride_padding_dilation_cpu')
 
 # BUG: buggy onnx tests
 backend_test.exclude('test_adam_multiple_cpu')
@@ -94,6 +87,7 @@ backend_test.exclude('FLOAT8')
 backend_test.exclude('INT4')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
+backend_test.exclude('FLOAT4E2M1')
 
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
@@ -105,10 +99,12 @@ backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
 backend_test.exclude('test_quantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_quantizelinear_e5m2_cpu')
+backend_test.exclude('test_quantizelinear_float4e2m1_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_zero_point_cpu')
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_dequantizelinear_e5m2_cpu')
+backend_test.exclude('test_dequantizelinear_float4e2m1_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')

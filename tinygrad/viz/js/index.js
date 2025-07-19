@@ -1,8 +1,14 @@
-// **** graph renderers
+// ** graph helpers
 
 const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
+
+const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+
+const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 // ** UOp graph
 
@@ -15,8 +21,6 @@ function intersectRect(r1, r2) {
   const scale = Math.min(scaleX, scaleY);
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
-
-const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
@@ -95,10 +99,6 @@ async function renderDag(graph, additions, recenter=false) {
 
 }
 
-const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
-const parseColors = (name, defaultColor="#ffffff") => [...name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g)]
-  .map(([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
-
 // ** profiler graph
 
 function formatTime(ts, dur=ts) {
@@ -108,8 +108,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colors = ["#1D1F2A", "#2A2D3D", "#373B4F", "#444862", "#12131A", "#2F3244", "#3B3F54", "#4A4E65", "#181A23", "#232532", "#313548", "#404459"];
+const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
+                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
+
+const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -118,18 +121,19 @@ async function renderProfiler() {
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
-  const kernelMap = new Map();
-  for (const [i, c] of ctxs.entries()) kernelMap.set(c.function_name, { name:c.name, i });
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
-  const { top:canvasTop, height:canvasHeight } = rect(canvas);
-  // color by name
-  const nameMap = new Map();
+  const canvasTop = rect(canvas).top;
+  // color by key (name/category/device)
+  const colorMap = new Map();
   const data = {shapes:[], axes:{}};
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -137,34 +141,48 @@ async function renderProfiler() {
     div.style.padding = `${padding}px`;
     div.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
+      const prevScroll = profiler.node().scrollTop;
       renderProfiler();
+      if (prevScroll) profiler.node().scrollTop = prevScroll;
     }
     const { y:baseY, height:baseHeight } = rect(div);
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
-    for (const [i,e] of timeline.shapes.entries()) {
-     const kernel = kernelMap.get(e.name);
-     if (!nameMap.has(e.name)) {
-       const label = parseColors(kernel?.name ?? e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-       nameMap.set(e.name, { fillColor:colors[i%colors.length], label });
-     }
-     // offset y by depth
-     data.shapes.push({ x:e.st-st, dur:e.dur, name:e.name, height:levelHeight, y:offsetY+levelHeight*e.depth, kernel, ...nameMap.get(e.name) });
+    let colorKey, ref;
+    for (const e of timeline.shapes) {
+      if (e.depth === 0) colorKey = e.cat ?? e.name;
+      if (!colorMap.has(colorKey)) {
+        const colors = devColors[k] ?? devColors.DEFAULT;
+        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
+      }
+      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      if (e.ref != null) ref = {ctx:e.ref, step:0};
+      else if (ref != null) {
+        const start = ref.step>0 ? ref.step+1 : 0;
+        const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+      }
+      const arg = { tooltipText:formatTime(e.dur), ...ref };
+      // offset y by depth
+      data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-    let area = 40;
+    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
-      area = canvasHeight-baseY;
+      area = maxArea*4;
       data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
     }
     const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
     for (const [i,e] of mem.shapes.entries()) {
       const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y1 = e.y.map(yscale);
-      const y2 = e.y.map(y => yscale(y+e.arg.nbytes));
-      data.shapes.push({ x, y1, y2, arg:e.arg, color:bufColors[i%bufColors.length] });
+      const y0 = e.y.map(yscale);
+      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+      const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+      data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -173,39 +191,42 @@ async function renderProfiler() {
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
-  function render(transform=null) {
-    if (transform != null) zoomLevel = transform;
+  function render(transform) {
+    zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
+    const zoomDomain = transform != null ? xscale.domain() : null;
     let yscale = null;
     if (data.axes.y != null) {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
     // draw shapes
     for (const e of data.shapes) {
-      if (Array.isArray(e.x)) {
+      const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
+      if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
+      ctx.fillStyle = e.fillColor;
+      // generic polygon
+      if (e.width == null) {
         const x = e.x.map(xscale);
         ctx.beginPath();
-        ctx.moveTo(x[0], e.y1[0]);
-        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y1[i]);
-        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y2[i]);
+        ctx.moveTo(x[0], e.y0[0]);
+        for (let i=1; i<x.length; i++) ctx.lineTo(x[i], e.y0[i]);
+        for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], e.y1[i]);
         ctx.closePath();
-        ctx.fillStyle = e.color;
         ctx.fill();
-        const tooltipText = `${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")} `;
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y2[i], y1:e.y1[i], tooltipText });
+        // NOTE: y coordinates are in reverse order
+        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], arg:e.arg });
         continue;
       }
-      // zoom only changes x and width
-      const x = xscale(e.x);
-      const width = xscale(e.x+e.dur)-x;
-      ctx.fillStyle = e.fillColor;
+      // contiguous rect
+      const x = xscale(start);
+      const width = xscale(end)-x;
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, ref:e.kernel?.i, tooltipText:formatTime(e.dur) });
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -238,7 +259,6 @@ async function renderProfiler() {
       ctx.lineTo(x, tickSize);
       ctx.stroke();
       // tick label
-      ctx.fontSize = "10px";
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
       const padding = i === ticks.length-1 ? -1 : 1;
@@ -264,50 +284,52 @@ async function renderProfiler() {
   }
 
   function resize() {
-    let { width, height } = rect(".profiler");
+    const profiler = document.querySelector(".profiler");
+    // NOTE: use clientWidth to account for the scrollbar
+    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
     width -= rect("#device-list").width+padding;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    render();
+    d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
+
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  d3.select(canvas).call(canvasZoom);
+  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   resize();
   window.addEventListener("resize", resize);
-  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
-    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
-  d3.select(canvas).call(canvasZoom).call(canvasZoom.transform, zoomLevel);
-  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   function findRectAtPosition(x, y) {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
     for (const r of rectLst) {
-      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r;
+      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
 
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.ref != null) return setCtxWithHistory(foundRect.ref);
+    if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
   });
 
-  const tooltip = document.body.appendChild(document.createElement("div"));
-  tooltip.id = "tooltip";
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.tooltipText != null) {
+      const tooltip = document.getElementById("tooltip");
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
       tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
-  canvas.addEventListener("mouseleave", () => tooltip.style.display = "none");
+  canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
 // ** zoom and recentering
@@ -402,12 +424,12 @@ function setState(ns) {
 }
 
 // set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx) {
+function setCtxWithHistory(newCtx, step=0) {
   if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx, currentStep:0, currentRewrite:0 });
+  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
@@ -478,7 +500,7 @@ async function main() {
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.kernel_code != null ? [ctx.kernel_code, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {

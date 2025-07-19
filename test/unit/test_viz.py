@@ -1,10 +1,11 @@
 import unittest, decimal, json
+from dataclasses import dataclass
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -14,11 +15,13 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 pickles these tracked values
-from tinygrad.viz.serve import get_metadata
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, active_rewrites, _name_cnt
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
+from tinygrad.viz import serve
+serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
+from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
-class TestViz(unittest.TestCase):
+class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
@@ -31,6 +34,7 @@ class TestViz(unittest.TestCase):
     TRACK_MATCH_STATS.value = self.tms
     PROFILE.value = self.profile
 
+class TestViz(BaseTestViz):
   def test_simple(self):
     a = UOp.variable("a", 0, 10)
     exec_rewrite((a+0)*1, [sym])
@@ -91,21 +95,48 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "name_default n1")
 
-  # name can also be the first arg
-  def test_self_name(self):
-    @track_rewrites()
-    def name_is_self(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_is_self(arg:=UOp.variable("a", 1, 10))
-    lst = get_viz_list()
-    self.assertEqual(lst[0]["name"], str(arg))
-
-  # name can also come from a function
+  # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
     @track_rewrites(name=lambda a,ret: a.render())
     def name_from_fxn(s:UOp): return graph_rewrite(s, PatternMatcher([]))
     name_from_fxn(UOp.variable("a", 1, 10)+1)
     lst = get_viz_list()
+    # name gets deduped by the function call counter
     self.assertEqual(lst[0]["name"], "(a+1) n1")
+
+  # name can also come from a function that returns a TracingKey
+  def test_tracing_key(self):
+    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,), fmt=f"input={inp.render()}"))
+    def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
+    test(UOp.variable("a", 1, 10)+1)
+    lst = get_viz_list()
+    # NOTE: names from TracingKey do not get deduped
+    self.assertEqual(lst[0]["name"], "custom_name")
+    self.assertEqual(lst[0]["fmt"], "input=(a+1)")
+
+  def test_colored_label(self):
+    # NOTE: dataclass repr prints literal escape codes instead of unicode chars
+    @dataclass(frozen=True)
+    class TestStruct:
+      colored_field: str
+    a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
+    a2 = uop_to_json(a)[id(a)]
+    self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+
+  def test_inf_loop(self):
+    a = UOp.variable('a', 0, 10)
+    b = a.replace(op=Ops.DEFINE_REG)
+    pm = PatternMatcher([
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
+      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+    ])
+    with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
+    graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
+    self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
+    # fallback to NOOP with the error message
+    nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
+    self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -124,7 +155,7 @@ def root_rewrite(root:UOp):
   return root.replace(src=new_src)
 root = TrackedPatternMatcher([(UPat(Ops.SINK, src=UPat(Ops.ADD), name="root"), root_rewrite),])
 
-class TestVizTree(TestViz):
+class TestVizTree(BaseTestViz):
   def assertStepEqual(self, step:dict, want:dict):
     for k,v in want.items():
       self.assertEqual(step[k], v, f"failed at '{k}': {v} != {step[k]}\n{step=}")
@@ -155,7 +186,7 @@ def bufs_allocated() -> int:
   gc.collect()
   return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
-class TestVizGC(TestViz):
+class TestVizGC(BaseTestViz):
   def test_gc(self):
     init = bufs_allocated()
     a = UOp.new_buffer("NULL", 10, dtypes.char)
@@ -182,7 +213,7 @@ class TestVizGC(TestViz):
 from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
-class TestVizIntegration(TestViz):
+class TestVizIntegration(BaseTestViz):
   # kernelize has a custom name function in VIZ
   def test_kernelize_tracing(self):
     a = Tensor.empty(4, 4)
@@ -200,7 +231,7 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
 
-from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
 class TestVizProfiler(unittest.TestCase):
@@ -239,8 +270,9 @@ class TestVizProfiler(unittest.TestCase):
     j = json.loads(get_profile(prof))
 
     devices = list(j['layout'])
-    self.assertEqual(devices[0], 'NV')
-    self.assertEqual(devices[1], 'NV:1')
+    self.assertEqual(devices[0], 'NV Graph')
+    self.assertEqual(devices[1], 'NV')
+    self.assertEqual(devices[2], 'NV:1')
 
     nv_events = j['layout']['NV']['timeline']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -253,12 +285,16 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
+    graph_events = j['layout']['NV Graph']['timeline']['shapes']
+    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
+    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
+
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
   a.uop.buffer.allocate()
   return a
 
-class TestVizMemoryLayout(TestViz):
+class TestVizMemoryLayout(BaseTestViz):
   def test_double_alloc(self):
     a = _alloc(1)
     _b = _alloc(1)

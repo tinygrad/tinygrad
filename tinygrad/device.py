@@ -1,10 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Optional, Any, Generic, TypeVar, Iterator, Generator
+from typing import Optional, Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
-                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE
+                             cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -50,14 +50,9 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 
 # **************** Profile ****************
 
-class ProfileEvent: pass
-
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
   device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
-
-@dataclass(frozen=True)
-class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; en:decimal.Decimal; is_copy:bool # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
@@ -70,16 +65,6 @@ class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:boo
 
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
-
-@dataclass
-class ProfileResult: st:Optional[int]=None; en:Optional[int]=None # noqa: E702
-
-@contextlib.contextmanager
-def cpu_profile(name, device="CPU", is_copy=False, display=True) -> Generator[ProfileResult, None, None]:
-  yield (res:=ProfileResult(st:=time.perf_counter_ns()))
-  res.en = en = time.perf_counter_ns()
-  if PROFILE and display:
-    Compiled.profile_events += [ProfileRangeEvent(device, name, decimal.Decimal(st) / 1000, decimal.Decimal(en) / 1000, is_copy=is_copy)]
 
 # **************** Buffer + Allocators ****************
 
@@ -183,6 +168,9 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+  def as_dmaref(self) -> DMARef:
+    assert hasattr(self.allocator, "_as_dmaref"), f"Device {self.device} doesn't support DMA"
+    return self.allocator._as_dmaref(self._buf)
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
@@ -213,6 +201,19 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
+
+@dataclass(frozen=True)
+class DMACPURef:
+  addr: int
+  size: int
+
+@dataclass(frozen=True)
+class DMAFdRef:
+  fd: int
+  offset: int
+  size: int
+
+DMARef = DMACPURef|DMAFdRef
 
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 
@@ -270,6 +271,7 @@ class _MallocAllocator(LRUAllocator['Compiled']):
     offset = round_up(ctypes.addressof(buffer), alignment) - ctypes.addressof(buffer)
     return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
+  def _as_dmaref(self, buf): return DMACPURef(ctypes.addressof(buf), ctypes.sizeof(buf))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
@@ -397,7 +399,7 @@ if PROFILE:
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(Compiled.profile_events+Buffer.profile_events, f)
+    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz

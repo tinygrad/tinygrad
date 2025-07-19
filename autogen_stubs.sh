@@ -149,6 +149,7 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlc36f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrlcb33.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrla06c.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl/ctrl90f1.h \
     --clang-args="-include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
     -o $BASE/nv_gpu.py
   fixup $BASE/nv_gpu.py
@@ -166,6 +167,7 @@ generate_nv() {
   sed -n '1i\
 nv_status_codes = {}
 /^NV_STATUS_CODE/ { s/^NV_STATUS_CODE(\([^,]*\), *\([^,]*\), *"\([^"]*\)") *.*$/\1 = \2\nnv_status_codes[\1] = "\3"/; p }' $NVKERN_SRC/src/common/sdk/nvidia/inc/nvstatuscodes.h >> $BASE/nv_gpu.py
+  python3 -c "import tinygrad.runtime.autogen.nv_gpu"
 
   clang2py -k cdefstum \
     $NVKERN_SRC/src/nvidia/inc/kernel/gpu/fsp/kern_fsp_cot_payload.h \
@@ -180,6 +182,7 @@ nv_status_codes = {}
     $NVKERN_SRC/src/nvidia/inc/kernel/vgpu/rpc_headers.h \
     $NVKERN_SRC/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h \
     $NVKERN_SRC/src/nvidia/generated/g_rpc-structures.h \
+    $NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc/fsp/fsp_nvdm_format.h \
     extra/nv_gpu_driver/g_rpc-message-header.h \
     extra/nv_gpu_driver/gsp_static_config.h \
     extra/nv_gpu_driver/vbios.h \
@@ -187,7 +190,7 @@ nv_status_codes = {}
     -o $BASE/nv/nv.py
 
   fixup $BASE/nv/nv.py
-  python3 -c "import tinygrad.runtime.autogen.nv_gpu"
+  python3 -c "import tinygrad.runtime.autogen.nv.nv"
 }
 
 generate_amd() {
