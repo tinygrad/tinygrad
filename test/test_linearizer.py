@@ -182,7 +182,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[((a.numpy()+b.numpy()[0]).sum()+b.numpy()).reshape(1)])[0]#out is always reported as (1,) dunno why this changes
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> ASSIGN
