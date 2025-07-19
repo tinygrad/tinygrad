@@ -4,7 +4,7 @@ import os, pathlib, struct
 from io import BufferedReader
 from types import SimpleNamespace
 from tinygrad.nn.state import TensorIO
-from tinygrad.tensor import Tensor, dtypes
+from tinygrad.tensor import Tensor
 
 # Protobuf Wire Types
 WIRETYPE_VARINT = 0; WIRETYPE_FIXED64 = 1; WIRETYPE_LENGTH_DELIMITED = 2; WIRETYPE_START_GROUP = 3; WIRETYPE_END_GROUP = 4; WIRETYPE_FIXED32 = 5 # noqa: E702
@@ -24,10 +24,10 @@ class PBType: FLOAT = 1; INT = 2; STRING = 3; FLOATS = 4; INTS = 5; STRINGS = 6;
 PB_INFOS: dict[str, dict] = {
   "OperatorSetIdProto": {1: ("domain", PBType.STRING), 2: ("version", PBType.INT)},
   "StringStringEntryProto": {1: ("key", PBType.STRING), 2: ("value", PBType.STRING)},
-  # TODO: support uint64 parsing (11: "uint64_data") and double parsing (10: "double_data")
   "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
     13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
-    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES)},
+    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES),
+    10: ("double_data", PBType.FLOATS), 11: ("uint64_data", PBType.INTS)},
   "TensorShapeProtoDimension": {1: ("dim_value", PBType.INT), 2: ("dim_param", PBType.STRING)},
   "TensorShapeProto": {1: ("dim", PBType.SUB, True, "TensorShapeProtoDimension")},
   "ModelProto": {1: ("ir_version", PBType.INT), 5: ("model_version", PBType.INT),
@@ -36,16 +36,16 @@ PB_INFOS: dict[str, dict] = {
     8: ("opset_import",PBType.SUB, True, "OperatorSetIdProto")},
   "GraphProto": {2: ("name", PBType.STRING), 10: ("doc_string", PBType.STRING),
     1: ("node", PBType.SUB, True, ("NodeProto", lambda: {"input": [], "output": [], "attribute": [], "domain": None})),
-    5: ("initializer", PBType.SUB, True, ("TensorProto", lambda: {"dims": [], "float_data": [], "int32_data": [], "string_data": [],
-                                                                  "int64_data": [], "double_data": [], "uint64_data": []})),
+    5: ("initializer", PBType.SUB, True, ("TensorProto", lambda: {"dims": [], "float_data": None, "int32_data": None, "string_data": None,
+                                                                  "int64_data": None, "double_data": None, "uint64_data": None, "raw_data": None})),
     11: ("input", PBType.SUB, True, "ValueInfoProto"), 12: ("output", PBType.SUB, True, "ValueInfoProto")},
   "NodeProto": { 1: ("input", PBType.STRING, True), 2: ("output", PBType.STRING, True), 3: ("name", PBType.STRING),
     4: ("op_type", PBType.STRING), 6: ("doc_string", PBType.STRING), 7: ("domain", PBType.STRING),
     5: ("attribute", PBType.SUB, True, ("AttributeProto", lambda: {"floats": [], "ints": [], "strings": []}))},
   "AttributeProto": {1: ("name", PBType.STRING), 20: ("type", PBType.INT), 3: ("i", PBType.INT), 8: ("ints", PBType.INT, True),
     2: ("f", PBType.FLOAT), 7: ("floats", PBType.FLOAT, True), 4: ("s", PBType.BYTES), 9: ("strings", PBType.BYTES, True),
-    5:("t", PBType.SUB, False, ("TensorProto", lambda: {"dims": [], "float_data": [], "int32_data": [], "string_data": [], "int64_data": [],
-                                                        "double_data": [], "uint64_data": []}))},
+    5:("t", PBType.SUB, False, ("TensorProto", lambda: {"dims": [], "float_data": None, "int32_data": None, "string_data": None, "int64_data": None,
+                                                        "double_data": None, "uint64_data": None, "raw_data": None}))},
   "ValueInfoProto": {1: ("name", PBType.STRING), 2: ("type", PBType.SUB, False, "TypeProto"), 3: ("doc_string", PBType.STRING)},
   "TypeProto": {1: ("tensor_type", PBType.SUB, False, "TypeProtoTensor"), 4: ("sequence_type", PBType.SUB, False, "TypeProtoSequence"),
     9: ("optional_type", PBType.SUB, False, "TypeProtoOptional"), 6: ("denotation", PBType.STRING)},
@@ -167,13 +167,12 @@ class OnnxParser:
     while reader.tell() < total_bytes_len + old_pos:
       val = self.decode_varint(reader) # need copy here because packed ints are varint
       values.append(val - 2**64 if val & (1 << 63) else val)
-    obj[key_name] = Tensor(values, dtype=dtypes.int64)
+    obj[key_name] = values
 
   def _handle_packed_floats(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
     value = self._handle_delimited(reader, use_tensor=True)
-    assert isinstance(value, Tensor)
-    obj[key_name] = value.bitcast(dtypes.float32)
+    obj[key_name] = value
 
   def _handle_sub_message(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
     if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")

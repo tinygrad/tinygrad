@@ -25,8 +25,7 @@ attribute_types: dict[int, Callable] = {
 }
 
 # ***** protobuf parsing ******
-from onnx import AttributeProto, TensorProto, TypeProto, helper
-import numpy as np
+from onnx import AttributeProto, TensorProto, TypeProto
 
 def has_field(onnx_type: TypeProto|SimpleNamespace, field):
   if isinstance(onnx_type, TypeProto): return onnx_type.HasField(field)
@@ -49,30 +48,19 @@ def attribute_parse(onnx_attribute: AttributeProto):
 
 def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
   if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  dtype, shape = dtype_parse(onnx_tensor.data_type, "buffer parse"), tuple(onnx_tensor.dims)
-  data = None
-  if len(onnx_tensor.float_data): data = onnx_tensor.float_data
-  elif len(onnx_tensor.int32_data): data = onnx_tensor.int32_data
-  elif len(onnx_tensor.int64_data): data = onnx_tensor.int64_data
-  elif len(onnx_tensor.double_data): data = onnx_tensor.double_data
-  elif len(onnx_tensor.uint64_data): data = onnx_tensor.uint64_data
-  if isinstance(data, Tensor):
-    if len(data) == 1: return Tensor(data.tolist()[0], dtype=dtype).reshape(shape)
-    return data.cast(dtype).reshape(shape).to(Device.DEFAULT)
-  if has_field(onnx_tensor, "raw_data"):
-    raw_data = onnx_tensor.raw_data
-    if not isinstance(raw_data, Tensor): raw_data = Tensor(raw_data)
-    if not is_dtype_supported(data_types[onnx_tensor.data_type]):
-      np_buffer = np.frombuffer(raw_data.data().tobytes(),
-                                dtype=helper.tensor_dtype_to_np_dtype(onnx_tensor.data_type)).copy().reshape(shape)
-      if np_buffer.size == 1: return Tensor(np_buffer.item(), dtype=dtype).reshape(shape)
-      return Tensor(np_buffer, dtype=dtype)
-    ret = raw_data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
-    if shape == ():
-      if ret.dtype is dtypes.float16 and sys.version_info < (3, 12): ret = ret.cast(dtypes.float32)
-      ret = Tensor(ret.item(), dtype=dtype).reshape(shape)
-    return ret
-  return Tensor(None)
+  to_dtype, true_dtype = dtype_parse(onnx_tensor.data_type, "buffer parse"), data_types[onnx_tensor.data_type]
+  shape = tuple(onnx_tensor.dims)
+  keys = ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
+  data = next((val for k in keys if (val := getattr(onnx_tensor, k)) is not None), None)
+  if data is None: raise RuntimeError("empty buffer")
+  if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
+  assert data.dtype is dtypes.uint8, data.dtype
+  data = data.bitcast(true_dtype).reshape(shape)
+  data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
+  if shape == ():
+    if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
+    return Tensor(data.item(), dtype=to_dtype).reshape(shape)
+  return data
 
 def type_parse(onnx_type: TypeProto):
   elem_type = onnx_type
@@ -648,6 +636,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
+    import numpy as np
     if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
