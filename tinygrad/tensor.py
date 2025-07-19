@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -47,7 +47,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # **** Tensor helper functions ****
 
 # this tracks the tensor.py METADATA
-_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
+_METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
