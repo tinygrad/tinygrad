@@ -442,8 +442,8 @@ x86_float16_ops = {Ops.STORE: "vmovss", Ops.LOAD: "vmovss", Ops.ASSIGN: "movss"}
 x86_vec_mov_sz = {2: {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"},
                   4: {Ops.STORE: "vmovd", Ops.LOAD: "vmovd", Ops.ASSIGN: "movss"},
                   8: {Ops.STORE: "vmovq", Ops.LOAD: "vmovq", Ops.ASSIGN: "vmovq"},
-                  16: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"},
-                  32: {Ops.STORE: "vmovdqa", Ops.LOAD: "vmovdqa", Ops.ASSIGN: "vmovdqa"}}
+                  16: {Ops.STORE: "vmovdqu", Ops.LOAD: "vmovdqu", Ops.ASSIGN: "vmovdqu"},
+                  32: {Ops.STORE: "vmovdqu", Ops.LOAD: "vmovdqu", Ops.ASSIGN: "vmovdqu"}}
 x86_int_suf = {1: "b", 2: "w", 4: "d", 8: "q"}
 # NOTE: vec cmove is done at the byte level, x86 doesn't support 2 byte mask granularity
 x86_vec_int_shared = {Ops.WHERE: "vpblendvb", Ops.AND: "vpand", Ops.OR: "vpor", Ops.XOR: "vpxor"}

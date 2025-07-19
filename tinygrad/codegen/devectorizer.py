@@ -204,9 +204,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [128,64,32,16,8,4]
     must_divide = False
   elif ctx is not None and ctx.device == "X86":
-    if buf.dtype.base == dtypes.float: lengths = [4,2]
+    if buf.dtype.base in (dtypes.float,): lengths = [4,2]
     #lengths = [l for l in [8,4,2] if buf.dtype.base.scalar().vec(l).itemsize <= 32]
-    #must_divide = False
+    must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
   elif isinstance(buf.dtype, ImageDType):
