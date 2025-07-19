@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
 assert sys.platform != 'win32'
-from typing import cast, Union, ClassVar
+from typing import cast, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
@@ -299,7 +299,7 @@ class NVKIface:
   root = None
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
-  gpus_info: Union[list, ctypes.Array] = []
+  gpus_info: list|ctypes.Array = []
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings

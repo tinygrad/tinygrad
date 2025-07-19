@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Optional, cast, Final, Callable, Sequence
+from typing import cast, Final, Callable, Sequence
 from enum import Enum, auto
 
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax, AxisType
@@ -24,8 +24,8 @@ class OptOps(Enum):
 @dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
-  axis: Optional[int] = None
-  arg: Optional[int | tuple] = None
+  axis: int|None = None
+  arg: int|tuple|None = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
 
 axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
@@ -50,7 +50,7 @@ class TensorCoreOptions:
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
 class Kernel:
-  def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
+  def __init__(self, ast:UOp, opts:Renderer|None=None):
     assert ast.op is Ops.SINK, ast.op
     self.ast = ast
 
@@ -76,8 +76,8 @@ class Kernel:
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*len(self.sts[0].shape)))
 
     # parameters for optimization
-    self.tensor_core: Optional[TensorCore] = None
-    self.tensor_core_opts: Optional[TensorCoreOptions] = None
+    self.tensor_core: TensorCore|None = None
+    self.tensor_core_opts: TensorCoreOptions|None = None
     self.use_tensor_cores: int = 0
     self.applied_opts: list[Opt] = []
     self.dont_use_locals = False
@@ -144,7 +144,7 @@ class Kernel:
     assert len(self.axis_types) == self.shape_len, "colors size mismatch"
     return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
 
-  def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
+  def colored_shape(self, pad:int|None=None, dense=False) -> str:
     shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
     ret = ' '.join(colored(s, color) for s,color in zip(shape_strs, self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
@@ -340,14 +340,14 @@ class Kernel:
 
   # **** kernel outputs, mostly tensor cores ****
 
-  def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> Optional[TensorCoreOptions]:
+  def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> TensorCoreOptions|None:
     has_cast = tc.dtype_in != tc.dtype_out
     if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
     if mul_op.op is not Ops.MUL: return None
 
-    def buf_index(src:UOp) -> Optional[int]:
+    def buf_index(src:UOp) -> int|None:
       # TODO: apply tc even if the sources are not from LOAD
       if src.op is Ops.LOAD and src.dtype == tc.dtype_in: return self.bufs.index(src)
       try:
@@ -392,8 +392,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[list[Opt]]=None, axis:int=0, tc_select:Optional[int]=None,
-                         tc_opt:Optional[int]=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:list[Opt]|None=None, axis:int=0, tc_select:int|None=None, tc_opt:int|None=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -442,7 +441,7 @@ class Kernel:
     return ret
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
-  def get_optimized_ast(self, name_override:Optional[str]=None) -> UOp:
+  def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821

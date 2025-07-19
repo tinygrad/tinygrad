@@ -1,5 +1,5 @@
 import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
-from typing import Any, Union, cast
+from typing import Any, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -111,7 +111,7 @@ class MetalCompiler(Compiler):
     super().__init__("compile_metal_direct")
   def __reduce__(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
   def compile(self, src:str) -> bytes:
-    ret: Union[Exception, bytes] = CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
+    ret: Exception|bytes = CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
     @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p)
     def callback(blockptr, error, dataPtr, dataLen, errorMessage):
       nonlocal ret
