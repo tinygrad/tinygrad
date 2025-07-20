@@ -457,10 +457,9 @@ class Kernel:
         return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
-        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if
-                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if
-                             resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        changed = tuple(i for i in range(self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
+        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if i in changed)
+        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if i in changed)
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
@@ -472,7 +471,7 @@ class Kernel:
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, (src, permaxis) in enumerate(zip(srcs, tc.permutes_for_shape_str(self.shape_str()))):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(permaxis)))
+            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(permaxis))
 
           # construct the op
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
@@ -490,8 +489,7 @@ class Kernel:
           local_axes = tuple([i for i,t in enumerate(self.axis_types) if t in (AxisType.LOCAL, AxisType.UPCAST) or i in grouped_axes])
           slocal, supcast, sgroup = sorted(self.axes_of(AxisType.LOCAL)), sorted(self.axes_of(AxisType.UPCAST)), sorted(grouped_axes)
           # NOTE: start with UPCAST at the end so it has stride 1 and can merge
-          base_shape = tuple([s for i,s in enumerate(self.full_shape) if i in slocal] + [s for i,s in enumerate(self.full_shape) if i in sgroup] + \
-                             [s for i,s in enumerate(self.full_shape) if i in supcast])
+          base_shape = tuple([self.full_shape[i] for i in slocal] + [self.full_shape[i] for i in sgroup] + [self.full_shape[i] for i in supcast])
           permute_axes = tuple([local_axes.index(i) for i in slocal+sgroup+supcast])
           local_shape = tuple([s if i in local_axes else 1 for i,s in enumerate(self.full_shape)])
           local_src_shape = tuple([self.full_shape[i] if i in self.axes_of(AxisType.GLOBAL) else s for i,s in enumerate(local_shape)])
