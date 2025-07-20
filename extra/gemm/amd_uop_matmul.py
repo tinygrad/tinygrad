@@ -5,7 +5,7 @@ from tinygrad.opt.kernel import AxisType
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
-from tinygrad.kernelize.kernelize import merge_views
+from tinygrad.schedule.kernelize import merge_views
 from tinygrad.shape.view import View
 
 N = 4096
