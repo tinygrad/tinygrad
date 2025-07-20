@@ -1996,13 +1996,13 @@ class TestIndexing(unittest.TestCase):
   def test_simple_store_reshape(self):
     a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(1,32)
     ast = a.schedule()[0].ast
-    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(ast.shape, (32,))
     self.assertEqual(a.uop.shape, (1, 32))
 
   def test_no_reshape_reduceop(self):
     a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
     ast = a.schedule()[0].ast
-    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(ast.shape, (32,))
     self.assertEqual(a.uop.shape, (32,))
 
 def swizzle_cnt(u:UOp) -> int:
