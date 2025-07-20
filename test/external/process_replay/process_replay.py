@@ -4,7 +4,7 @@ import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertoo
 from typing import Callable, Any
 
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
-if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
+if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 REF = os.getenv("GITHUB_REF_NAME", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
