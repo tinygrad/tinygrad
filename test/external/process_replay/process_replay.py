@@ -5,9 +5,6 @@ from typing import Callable, Any
 
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
 if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
-SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
-REF = os.getenv("GITHUB_REF_NAME", "")
-if REF == "master": SKIP_PROCESS_REPLAY = True
 
 try:
   from tinygrad.kernelize.kernelize import get_kernelize_map
@@ -21,7 +18,9 @@ except ImportError as e:
 
 # *** process replay settings
 
+# internal
 PAGE_SIZE = getenv("PAGE_SIZE", 100)
+REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
@@ -33,6 +32,9 @@ def trunc_log(x):
     lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
+# user config
+SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
