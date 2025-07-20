@@ -3,7 +3,7 @@ import unittest, itertools
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.codegen.symbolic import simplify_valid
+from tinygrad.uop.symbolic import simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -98,6 +98,11 @@ class TestValidIdxSimplification(unittest.TestCase):
 
     for v in itertools.permutations([v0,v1,v2,v3]):
       self.assertEqual(simplify_valid(v[0]&v[1]&v[2]&v[3]).render(), "False")
+
+  def test_simplify_valid_from_div(self):
+    x = Variable("x", -100, 100)
+    valid = ((x<0)&((100%x).cast(dtypes.bool)))
+    self.assertIsNone(simplify_valid(valid))
 
   @unittest.expectedFailure  # TODO: fix
   def test_from_merge_views(self):
