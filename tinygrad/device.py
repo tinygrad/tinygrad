@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Optional, Any, Generic, TypeVar, Iterator
+from typing import Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, ctypes.util, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp, mv_address, \
                              cpu_time_execution, colored, Context, round_up, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent
@@ -18,7 +18,7 @@ class _Device:
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
-  def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
+  def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
@@ -72,12 +72,12 @@ class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[l
 @dataclass(frozen=True, eq=True)
 class BufferSpec:
   # TODO: move device, size, dtype here?
-  image: Optional[ImageDType] = None
+  image: ImageDType|None = None
   uncached: bool = False
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
-  external_ptr: Optional[int] = None
+  external_ptr: int|None = None
 
 class MultiBuffer:
   def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
@@ -94,8 +94,8 @@ class MultiBuffer:
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
-               uop_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
+               uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
@@ -223,10 +223,10 @@ class Allocator(Generic[DeviceType]):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
   # overridden in LRUAllocator
-  def alloc(self, size:int, options:Optional[BufferSpec]=None):
+  def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
     return self._alloc(size, options if options is not None else self.default_buffer_spec)
-  def free(self, opaque, size:int, options:Optional[BufferSpec]=None):
+  def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
   # implemented by the runtime
@@ -244,9 +244,9 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
   def __init__(self, dev:DeviceType):
-    self.cache: dict[tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+    self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
     super().__init__(dev)
-  def alloc(self, size:int, options:Optional[BufferSpec]=None):
+  def alloc(self, size:int, options:BufferSpec|None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
@@ -256,7 +256,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
     for (sz,options),opaques in self.cache.items():
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
-  def free(self, opaque:Any, size:int, options:Optional[BufferSpec]=None):
+  def free(self, opaque:Any, size:int, options:BufferSpec|None=None):
     if LRU and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
@@ -272,8 +272,8 @@ class _MallocAllocator(LRUAllocator['Compiled']):
     return (ctypes.c_uint8 * size).from_buffer(buffer, offset)
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _as_dmaref(self, buf): return DMACPURef(ctypes.addressof(buf), ctypes.sizeof(buf))
-  def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, mv_address(src), len(src))
+  def _copyout(self, dest:memoryview, src): ctypes.memmove(mv_address(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator(None) # type: ignore
@@ -333,7 +333,7 @@ class CPUProgram:
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
+  def __init__(self, cachekey:str|None=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -346,7 +346,7 @@ class Compiler:
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, renderer:Renderer|None, compiler:Compiler|None, runtime, graph=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
   def synchronize(self):
@@ -368,7 +368,7 @@ class Compiled:
     # override this in your device implementation
 
 # TODO: move this to each Device
-def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
+def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI

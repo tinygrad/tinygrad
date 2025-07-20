@@ -307,7 +307,7 @@ typedef signed char signed_char128 __attribute__((aligned(128),vector_size(128))
 typedef unsigned char unsigned_char8 __attribute__((aligned(8),vector_size(8)));
 typedef unsigned char unsigned_char4 __attribute__((aligned(4),vector_size(4)));
 typedef unsigned char unsigned_char128 __attribute__((aligned(128),vector_size(128)));
-__attribute__((noinline)) void r_196_24_8_32_4(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
+__attribute__((noinline)) void r_196_32_4_24_8(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
 128))) data2, int* restrict __attribute__((align_value(128))) data3) {
   int32 cast0 = (int32){0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
   int32 val0 = *((int32*)((data3+0)));

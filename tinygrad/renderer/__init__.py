@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Callable, cast, TYPE_CHECKING
+from typing import Callable, cast, TYPE_CHECKING
 import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -52,11 +52,11 @@ class ProgramSpec:
   src:str
   device:str
   ast:UOp  # save the base ast (this is method cache key)
-  uops:Optional[list[UOp]]=None
+  uops:list[UOp]|None=None
 
   # filled in from uops (if we have uops)
-  global_size:Optional[list[int]]=None
-  local_size:Optional[list[int]]=None
+  global_size:list[int]|None=None
+  local_size:list[int]|None=None
   vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
@@ -113,12 +113,12 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
-  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
-  pre_matcher: Optional[PatternMatcher] = None
-  extra_matcher: Optional[PatternMatcher] = None
+  pre_matcher: PatternMatcher|None = None
+  extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()

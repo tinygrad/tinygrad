@@ -5,7 +5,7 @@
 import unittest
 import numpy as np
 import functools
-from typing import List, Optional, Union, cast
+from typing import cast
 from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor
@@ -20,11 +20,11 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 
 class KernelCountException(Exception): pass
-def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
+def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
   if isinstance(t, Tensor): sched = t.schedule()
-  elif isinstance(t, List) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
+  elif isinstance(t, list) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
@@ -1727,7 +1727,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
 class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
+  def check_schedule(self, xt:Tensor|list[Tensor], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
