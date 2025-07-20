@@ -1388,30 +1388,24 @@ def train_stable_diffusion():
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
     def __init__(self):
-      #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+      self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
       self.first_stage_model = AutoencoderKL()
 
-    def __call__(self):
-      pass
-
-  #Device.DEFAULT="CPU"
+  Device.DEFAULT="CPU"
 
   model = StableDiffusion()
-  #load_state_dict(model, torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"])
+  weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
+  weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+  load_state_dict(model, weights)
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-  #load_state_dict(model.model.diffusion_model, safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors"))
-
-  clip_weights = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
-  clip_weights["attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  #load_state_dict(model.cond_stage_model.model, clip_weights)
 
   unet = model.model.diffusion_model
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
   scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
   # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
-  #scheduler.step()
+  scheduler.step()
 
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
@@ -1440,14 +1434,14 @@ def train_stable_diffusion():
     return loss
 
   jit_train_step = TinyJit(train_step, optimize=True)
-  #jit_context_step = TinyJit(model.cond_stage_model)
+  jit_context_step = TinyJit(model.cond_stage_model)
 
   # load prompts for generating images for validation; 2 MB of data total
   with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
     reader = csv.DictReader(f, delimiter="\t")
     eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
   assert len(eval_inputs) == 30_000
-  #unconditional_context = jit_context_step("")
+  unconditional_context = jit_context_step("")
   eval_timesteps = list(reversed(range(1, 1000, 20)))
   # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
   #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
@@ -1465,23 +1459,20 @@ def train_stable_diffusion():
     return x_prev
 
   inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-  dims = 1024
   vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
   text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
-  clip_encoder = OpenClipEncoder(dims, text_cfg, vision_cfg)
+  clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
   loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
-  loaded["attn_mask"] = clip_encoder.attn_mask
-  loaded["mean"] = clip_encoder.mean
-  loaded["std"] = clip_encoder.std
-  #load_state_dict(clip_encoder, loaded)
+  loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
+  load_state_dict(clip_encoder, loaded)
 
+  # NOTE: denoise_step is jitted with bufs from the single unet model defined at the beginning
   @Tensor.train(mode=False)
-  def eval_unet(unet:UNetModel) -> tuple[float, float]:
+  def eval_unet() -> tuple[float, float]:
     clip_scores = []
     inception_activations = []
 
     for batch_idx in range(0, len(eval_inputs), EVAL_BS):
-      break
       batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
       captions = [row["caption"] for row in batch]
       c = jit_context_step(captions)
@@ -1511,32 +1502,11 @@ def train_stable_diffusion():
       clip_score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
       clip_scores.append(clip_score)
 
-    data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
-
-    clip_scores = data['clip_scores'].to("NV")
-    inception_activations = data['inception_activations'].to("NV")
-
-    #clip_score = Tensor.cat(*clip_scores).mean()
-    final_clip_score = clip_scores.mean()
-    def md(a, b):
-      diff = (a - b).abs()
-      max_diff = diff.max()
-      mean_diff = diff.mean()
-      ratio = mean_diff / a.abs().mean()
-      return mean_diff.item(), ratio.item(), max_diff.item()
-
-    print(md(data["final_clip_score"].to("NV"), final_clip_score))
-    # (1.1527880872108653e-09, 2.313903513240234e-09, 1.1527880872108653e-09)
-
-    #fid_score = inception.compute_score(Tensor.stack(*inception_activations))
+    final_clip_score = Tensor.cat(*clip_scores).mean().item()
+    inception_activations = Tensor.cat(*inception_activations)
     fid_score = inception.compute_score(inception_activations, str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz"))
 
-    print(md(data["fid_value"].to("NV"), fid_score))
-    # (3.351784442884309e-06, 2.2888428719526848e-08, 3.351784442884309e-06)
-
-    return clip_score, fid_score
-
-  eval_unet(unet)
+    return final_clip_score, fid_score
 
   # training loop
   num_seen_images = 0
@@ -1568,7 +1538,7 @@ def train_stable_diffusion():
 
       # Only checkpoint collection is required here; eval can be done offline
       # TODO: move eval call to not block training loop
-      clip_score, fid_score = eval_unet(unet)
+      clip_score, fid_score = eval_unet()
       print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
 
 if __name__ == "__main__":
