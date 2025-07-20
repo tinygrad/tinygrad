@@ -232,9 +232,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
-  def load(self, *src:UOp, **kwargs):
-    if 'dtype' not in kwargs: kwargs['dtype'] = self.dtype.base
-    return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
+  def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
