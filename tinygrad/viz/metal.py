@@ -1,20 +1,21 @@
 import sys, subprocess, xml.etree.ElementTree as ET
-from typing import Generator
+from typing import Generator, Callable
 from decimal import Decimal
-from tinygrad.helpers import tqdm
+from tinygrad.helpers import tqdm, unwrap
 
 schema = {"time-info":["update-time", "mabs-epoch", "mct-epoch", "timebase-info", "trace-start-time"],
   "gpu-counter-value":["timestamp", "counter-id", "value", "accelerator-id", "sample-index", "ring-buffer-index"],
   "gpu-counter-info": ["timestamp", "counter-id", "name", "max-value", "accelerator-id", "description", "group-index", "type", "ring-buffer-count",
                       "require-weighted-accumulation", "sample-interval"]}
 
-tags = {"boolean":lambda x:x!="0","uint32":int,"uint64":int,"event-time":int,"sample-time":Decimal,"fixed-decimal":float,"time-since-epoch":Decimal,
-        "mach-absolute-time":Decimal, "mach-continuous-time":Decimal, "mach-timebase-info":lambda _:125/3, "string":str, "gpu-counter-name":str}
+tags:dict[str, Callable] = {
+  "boolean":lambda x:x!="0","uint32":int,"uint64":int,"event-time":int,"sample-time":Decimal,"fixed-decimal":float, "time-since-epoch":Decimal,
+  "mach-absolute-time":Decimal, "mach-continuous-time":Decimal, "mach-timebase-info":lambda _:125/3, "string":str, "gpu-counter-name":str}
 
 # sample_time: Time relative to start in ns
 # trace_start: Wallclock time
 # mach hw time (diff is in behavior if device sleeps, does it matter here?)
-time_info = {}
+time_info:dict = {}
 def to_cpu_time(sample_time:Decimal) -> float:
   perf_ns_ref = time_info["mabs-epoch"]*Decimal(time_info["timebase-info"])
   perf_ns = perf_ns_ref+sample_time
@@ -25,7 +26,7 @@ def parse_counters(fp:str) -> Generator[tuple[str, int, dict], None, None]:
   proc = subprocess.Popen(["xctrace", "export", "--input", fp, "--xpath", xp], stdout=subprocess.PIPE)
   id_cache:dict[str, str] = {}
   schemas, curr_schema = list(schema), ""
-  for event,e in tqdm(ET.iterparse(proc.stdout, events=("start", "end"))):
+  for event,e in tqdm(ET.iterparse(unwrap(proc.stdout), events=("start", "end"))):
     if event == "start" and e.tag == "node": curr_schema = schemas.pop(0)
     elif event == "end" and e.tag == "row":
       row = time_info if curr_schema == "time-info" else {}
