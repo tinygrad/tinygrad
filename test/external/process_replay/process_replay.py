@@ -3,16 +3,26 @@
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
 from typing import Callable, Any
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.kernelize.kernelize import get_kernelize_map
-from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.engine.realize import get_program
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
+if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
+SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+REF = os.getenv("GITHUB_REF_NAME", "")
+if REF == "master": SKIP_PROCESS_REPLAY = True
+
+try:
+  from tinygrad.schedule.kernelize import get_kernelize_map
+  from tinygrad.renderer import Renderer, ProgramSpec
+  from tinygrad.engine.realize import get_program
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+except ImportError as e:
+  print(repr(e))
+  exit(int(ASSERT_DIFF))
 
 # *** process replay settings
 
 # internal
 PAGE_SIZE = getenv("PAGE_SIZE", 100)
-REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
@@ -24,11 +34,6 @@ def trunc_log(x):
     lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
-# user config
-ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
-if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
-SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
-if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
