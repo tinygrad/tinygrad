@@ -1357,6 +1357,7 @@ def train_llama3():
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
   from extra.models.clip import FrozenOpenClipEmbedder
+  from extra.models.clip import OpenClipEncoder
   from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
@@ -1388,7 +1389,7 @@ def train_stable_diffusion():
   class StableDiffusion:
     def __init__(self):
       #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-      #self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
       self.first_stage_model = AutoencoderKL()
 
     def __call__(self):
@@ -1464,6 +1465,17 @@ def train_stable_diffusion():
     return x_prev
 
   #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  dims = 1024
+  vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
+  text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+  clip_encoder = OpenClipEncoder(dims, text_cfg, vision_cfg)
+  loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
+  loaded["attn_mask"] = clip_encoder.attn_mask
+  #loaded["text.attn_mask"] = clip_encoder.text.attn_mask
+  loaded["mean"] = clip_encoder.mean
+  loaded["std"] = clip_encoder.std
+  load_state_dict(clip_encoder, loaded)
+  #self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
 
   @Tensor.train(mode=False)
   def eval_unet(unet:UNetModel) -> tuple[float, float]:
@@ -1501,10 +1513,8 @@ def train_stable_diffusion():
       # Tensor.interpolate does not yet support bicubic
       r = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
       r = Tensor(r).permute(2,0,1).cast(dtypes.float) / 255
-      # clip normalization parameters
-      means = (0.48145466, 0.4578275, 0.40821073)
-      stds = (0.26862954, 0.26130258, 0.27577711)
-      normalized = Tensor.cat((r[0:1]-means[0])/stds[0], (r[1:2]-means[1])/stds[1], (r[2:3]-means[2])/stds[2])
+      normalized = (r - clip_encoder.mean) / clip_encoder.std
+
       def md(a, b):
         diff = (a - b).abs()
         max_diff = diff.max()
@@ -1513,7 +1523,19 @@ def train_stable_diffusion():
         return mean_diff.item(), ratio.item(), max_diff.item()
 
       print(md(data["normalize"].to("NV"), normalized))
-      # (6.14930115716561e-08, 1.7403689867023786e-07, 3.5762786865234375e-07)
+      # (5.500224276033805e-08, 1.5634584826784703e-07, 2.095906097565603e-07)
+
+      texts = []
+      with open(BASEDIR / "checkpoints" / "val_prompt.txt") as f: texts.append(f.read())
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text) for text in texts], dim=0)
+      score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
+
+      print(md(data["score"].to("NV"), score))
+      # without setting gelu.approximate = "tanh" in torch:
+      # (0.0003422945737838745, 0.004007166251540184, 0.0003422945737838745)
+      # with setting gelu.approximate = "tanh" in torch:
+      # (1.7881393432617188e-07, 2.0060247152287047e-06, 1.7881393432617188e-07)
+
       pause = 1
 
 
