@@ -2,11 +2,19 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.kernelize.kernelize import get_kernelize_map
-from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.engine.realize import get_program
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
+if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
+
+try:
+  from tinygrad.kernelize.kernelize import get_kernelize_map
+  from tinygrad.renderer import Renderer, ProgramSpec
+  from tinygrad.engine.realize import get_program
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+except ImportError as e:
+  print(repr(e))
+  exit(int(ASSERT_DIFF))
 
 # *** process replay settings
 
@@ -25,8 +33,6 @@ def trunc_log(x):
   logging.info("\n".join(lines))
 
 # user config
-ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
-if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass

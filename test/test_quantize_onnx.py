@@ -32,7 +32,9 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
     graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init])
 
   # Create and save the model
-  model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  #model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  # TODO remove this once ORT supports 1.18.0
+  model_def = helper.make_model(graph_def, producer_name="single_gemm_example", ir_version=10, opset_imports=[helper.make_opsetid("", 22)])
   onnx.save_model(model_def, model_path)
   return model_path
 
@@ -305,7 +307,7 @@ typedef signed char signed_char128 __attribute__((aligned(128),vector_size(128))
 typedef unsigned char unsigned_char8 __attribute__((aligned(8),vector_size(8)));
 typedef unsigned char unsigned_char4 __attribute__((aligned(4),vector_size(4)));
 typedef unsigned char unsigned_char128 __attribute__((aligned(128),vector_size(128)));
-__attribute__((noinline)) void r_196_24_8_32_4(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
+__attribute__((noinline)) void r_196_32_4_24_8(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
 128))) data2, int* restrict __attribute__((align_value(128))) data3) {
   int32 cast0 = (int32){0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
   int32 val0 = *((int32*)((data3+0)));

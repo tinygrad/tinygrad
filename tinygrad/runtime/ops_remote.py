@@ -5,7 +5,7 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Callable, Iterator, Optional, Any, cast
+from typing import Callable, Iterator, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import multiprocessing, threading, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
@@ -77,7 +77,7 @@ class ProgramFree(RemoteRequest): name: str; datahash: str # noqa: E702
 @dataclass(frozen=True)
 class ProgramExec(RemoteRequest):
   name: str; datahash: str; bufs: tuple[int, ...]; vals: tuple[int, ...] # noqa: E702
-  global_size: Optional[tuple[int, ...]]; local_size: Optional[tuple[int, ...]]; wait: bool # noqa: E702
+  global_size: tuple[int, ...]|None; local_size: tuple[int, ...]|None; wait: bool # noqa: E702
 
 @dataclass(frozen=True)
 class GraphComputeItem:
