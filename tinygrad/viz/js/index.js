@@ -197,9 +197,9 @@ async function renderProfiler() {
       td.onmouseenter = (e) => d3.select(".metadata").html("").text(track.description);
       const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight]);
       for (const t of track.data) {
-        const height = trackYScale(t.y)-padY;
+        const height = trackYScale(t.y);
         arg = { tooltipText: `${t.y}`};
-        data.shapes.push({x:t.x-st, y:trackOffset-height, width:10, height, arg, fillColor:"#2667ff" });
+        data.shapes.push({x:t.x-st, y:trackOffset, width:10, height, arg, fillColor:"#2667ff" });
       }
       trackOffset += trackHeight;
     }
