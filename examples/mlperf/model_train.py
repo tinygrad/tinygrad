@@ -1464,18 +1464,16 @@ def train_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
   dims = 1024
   vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
   text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
   clip_encoder = OpenClipEncoder(dims, text_cfg, vision_cfg)
   loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
   loaded["attn_mask"] = clip_encoder.attn_mask
-  #loaded["text.attn_mask"] = clip_encoder.text.attn_mask
   loaded["mean"] = clip_encoder.mean
   loaded["std"] = clip_encoder.std
-  load_state_dict(clip_encoder, loaded)
-  #self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+  #load_state_dict(clip_encoder, loaded)
 
   @Tensor.train(mode=False)
   def eval_unet(unet:UNetModel) -> tuple[float, float]:
@@ -1483,30 +1481,24 @@ def train_stable_diffusion():
     inception_activations = []
 
     for batch_idx in range(0, len(eval_inputs), EVAL_BS):
-      if False:
-        batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
-        c = jit_context_step([row["caption"] for row in batch])
-        uc = unconditional_context.expand(c.shape)
-        x = Tensor.randn(EVAL_BS,4,64,64)
+      break
+      batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
+      captions = [row["caption"] for row in batch]
+      c = jit_context_step(captions)
+      uc = unconditional_context.expand(c.shape)
+      x = Tensor.randn(EVAL_BS,4,64,64)
 
       for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
-        continue
         reversed_idx = Tensor([50 - step_idx - 1])
         t = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.long)
         alpha_prev = eval_alphas_prev[reversed_idx]
         x = denoise_step(x, t, uc, c, alpha_prev)
       
-      if False:
-        x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
-        x = model.first_stage_model.decoder(x)
-        x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
-
-      if False:
-        inception_activation = inception(x) # 1,2048,1,1
-        inception_activations.append(inception_activation.squeeze(3).squeeze(2))
-
-      data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
-      x = data["x_samples"].to("NV")
+      x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
+      x = model.first_stage_model.decoder(x)
+      x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+      inception_activation = inception(x)
+      inception_activations.append(inception_activation.squeeze(3).squeeze(2))
 
       # clip preprocessing
       y = (x[0].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
@@ -1515,32 +1507,33 @@ def train_stable_diffusion():
       r = Tensor(r).permute(2,0,1).cast(dtypes.float) / 255
       normalized = (r - clip_encoder.mean) / clip_encoder.std
 
-      def md(a, b):
-        diff = (a - b).abs()
-        max_diff = diff.max()
-        mean_diff = diff.mean()
-        ratio = mean_diff / a.abs().mean()
-        return mean_diff.item(), ratio.item(), max_diff.item()
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(caption) for caption in captions], dim=0)
+      clip_score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
+      clip_scores.append(clip_score)
 
-      print(md(data["normalize"].to("NV"), normalized))
-      # (5.500224276033805e-08, 1.5634584826784703e-07, 2.095906097565603e-07)
+    data = safe_load(BASEDIR / "checkpoints" / "val.safetensors")
 
-      texts = []
-      with open(BASEDIR / "checkpoints" / "val_prompt.txt") as f: texts.append(f.read())
-      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text) for text in texts], dim=0)
-      score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
+    clip_scores = data['clip_scores'].to("NV")
+    inception_activations = data['inception_activations'].to("NV")
 
-      print(md(data["score"].to("NV"), score))
-      # without setting gelu.approximate = "tanh" in torch:
-      # (0.0003422945737838745, 0.004007166251540184, 0.0003422945737838745)
-      # with setting gelu.approximate = "tanh" in torch:
-      # (1.7881393432617188e-07, 2.0060247152287047e-06, 1.7881393432617188e-07)
+    #clip_score = Tensor.cat(*clip_scores).mean()
+    final_clip_score = clip_scores.mean()
+    def md(a, b):
+      diff = (a - b).abs()
+      max_diff = diff.max()
+      mean_diff = diff.mean()
+      ratio = mean_diff / a.abs().mean()
+      return mean_diff.item(), ratio.item(), max_diff.item()
 
-      pause = 1
+    print(md(data["final_clip_score"].to("NV"), final_clip_score))
+    # (1.1527880872108653e-09, 2.313903513240234e-09, 1.1527880872108653e-09)
 
+    #fid_score = inception.compute_score(Tensor.stack(*inception_activations))
+    fid_score = inception.compute_score(inception_activations, str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz"))
 
-    clip_score = Tensor.cat(*clip_scores).mean()
-    fid_score = inception.compute_score(Tensor.stack(*inception_activations))
+    print(md(data["fid_value"].to("NV"), fid_score))
+    # (3.351784442884309e-06, 2.2888428719526848e-08, 3.351784442884309e-06)
+
     return clip_score, fid_score
 
   eval_unet(unet)
