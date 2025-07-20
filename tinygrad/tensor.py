@@ -429,7 +429,7 @@ class Tensor(MathTrait):
       else: pad_amt = 2**20 * level_chunks
 
       if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
-      data = data.to("tinyfs:load")[:pad_amt * level_chunks].contiguous().to(self.device)
+      data = data.to("tinyfs:load")[:pad_amt].contiguous().to(self.device)
 
     return data[:size]
 
