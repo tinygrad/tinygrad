@@ -195,7 +195,7 @@ async function renderProfiler() {
       td.style.height = trackHeight+"px";
       td.innerText = track.name;
       td.onmouseenter = (e) => d3.select(".metadata").html("").text(track.description);
-      const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight]);
+      const trackYScale = d3.scaleLinear().domain([0, track["max-value"]]).range([0, trackHeight-padY]);
       for (const t of track.data) {
         const height = trackYScale(t.y);
         arg = { tooltipText: `${t.y}`};
