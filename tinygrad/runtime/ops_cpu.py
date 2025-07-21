@@ -1,8 +1,8 @@
 from __future__ import annotations
 import platform, subprocess, sys, ctypes, functools, time
-from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, round_up
-from tinygrad.device import Compiled, Compiler, BufferSpec, DMACPURef
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface, HCQAllocatorBase
+from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, round_up, wait_cond
+from tinygrad.device import Compiler, BufferSpec, DMACPURef
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import sint
@@ -24,17 +24,15 @@ class ClangJITCompiler(Compiler):
 class CPUComputeQueue(HWQueue):
   def _exec(self, prg, *args): prg.fxn(*[ctypes.c_int64(a) if isinstance(a, int) else ctypes.c_int64(a.va_addr) for a in args])
   def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, signal_addr, value):
-    while to_mv(signal_addr, 4).cast('I')[0] != value: pass
+  def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
   def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
-
   def cmd(self, cmd, *args):
     self.q(cmd, len(args), *args)
     return self
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    return self.cmd(self._exec, prg, *[x.va_addr for x in args_state.bufs], *[x for x in args_state.vals])
+    return self.cmd(self._exec, prg, *[x.va_addr for x in args_state.bufs], *args_state.vals)
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
@@ -81,7 +79,7 @@ class CPUProgram(HCQProgram):
       CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
-    
+
     super().__init__(HCQArgsState, self.dev, self.name, kernargs_alloc_size=0)
 
   def __del__(self):

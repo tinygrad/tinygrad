@@ -1,5 +1,5 @@
 import ctypes, platform, functools
-from tinygrad.device import Compiled, Compiler
+from tinygrad.device import Compiler
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQSignal
 from tinygrad.runtime.ops_cpu import CPUAllocator, CPUProgram, CPUComputeQueue
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
