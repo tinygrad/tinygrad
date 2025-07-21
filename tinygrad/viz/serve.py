@@ -187,21 +187,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif url.path == "/ctxs":
-      if "ctx" in (query:=parse_qs(url.query)):
-        kidx, ridx = int(query["ctx"][0]), int(query["idx"][0])
-        try:
-          # stream details
-          self.send_response(200)
-          self.send_header("Content-Type", "text/event-stream")
-          self.send_header("Cache-Control", "no-cache")
-          self.end_headers()
-          for r in get_details(contexts[1][kidx][ridx]):
-            self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-            self.wfile.flush()
-          self.wfile.write("data: END\n\n".encode("utf-8"))
-          return self.wfile.flush()
-        # pass if client closed connection
-        except (BrokenPipeError, ConnectionResetError): return
+      if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
@@ -212,6 +198,19 @@ class Handler(BaseHTTPRequestHandler):
     self.send_header('Content-Length', str(len(ret)))
     self.end_headers()
     return self.wfile.write(ret)
+
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: END\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
 
 # ** main loop
 

@@ -184,11 +184,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
-backend_test.exclude('test_rms_normalization')  # RMSNormalization
-backend_test.exclude('test_rotary_embedding')  # RotaryEmbedding
-backend_test.exclude('test_attention_3d')  # not piped correctly?
-backend_test.exclude('test_attention_4d')  # not piped correctly?
-
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')

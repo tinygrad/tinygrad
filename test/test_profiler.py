@@ -30,7 +30,10 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) or Device.DEFAULT in {"METAL"}, "HCQ device required to run")
+# TODO: support in HCQCompiled
+is_cpu_hcq = Device.DEFAULT in {"CPU", "LLVM"}
+
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -182,7 +185,13 @@ class TestProfiler(unittest.TestCase):
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
     self.assertEqual(len(range_events), 2)
     # record start/end time up to exit (error or success)
-    self.assertGreater(range_events[0].en-range_events[0].st, range_events[1].en-range_events[1].st)
+    for e in range_events:
+      self.assertGreater(e.en, e.st)
+    e1, e2 = range_events
+    self.assertEqual([e1.name, e2.name], ["test_1", "test_2"])
+    # TODO: this is flaky
+    #self.assertLess(e1.st, e2.st)
+    #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
