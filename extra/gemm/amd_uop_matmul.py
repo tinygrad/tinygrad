@@ -5,8 +5,9 @@ from tinygrad.opt.kernel import AxisType
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.shape.shapetracker import ShapeTracker, strides_for_shape
-from tinygrad.kernelize.kernelize import merge_views
+from tinygrad.schedule.kernelize import merge_views
 from tinygrad.shape.view import View
+from tinygrad.dtype import AddrSpace
 
 N = 4096
 run_count = 5
@@ -62,8 +63,8 @@ def hand_spec():
   bB = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)   # input B
 
   # TODO: this should not be a string, just a number
-  lAs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_A_SZ, local=True), arg="As")
-  lBs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_B_SZ, local=True), arg="Bs")
+  lAs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_A_SZ, addrspace=AddrSpace.LOCAL), arg="As")
+  lBs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(LDS_B_SZ, addrspace=AddrSpace.LOCAL), arg="Bs")
 
   s0 = ShapeTracker.from_shape((N, N, N), (N, 0, 1))
   s1 = ShapeTracker.from_shape((N, N, N), (0, 1, N))

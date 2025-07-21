@@ -1,7 +1,7 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
 from tinygrad.helpers import prod, partition, flatten, dedup
 
@@ -52,11 +52,11 @@ def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
-  if not cast(PtrDType, buf.dtype).local:
+  if cast(PtrDType, buf.dtype).addrspace == AddrSpace.GLOBAL:
     # NOTE: only store the local reduceop in the threads that are actually doing the reduce
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
-  return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
+  return buf.index(idx, valid).store(x.src[1])
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c

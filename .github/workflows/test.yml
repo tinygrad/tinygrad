@@ -504,8 +504,6 @@ jobs:
         run: LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX Runner (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
-      - name: Test ONNX Runner (WEBGPU)
-        run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
       - name: Test Additional ONNX Ops (CPU)
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
@@ -847,7 +845,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: osx-webgpu
-        deps: testing_minimal
+        deps: testing
         webgpu: 'true'
     - name: Test infinity math in WGSL
       run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
@@ -870,6 +868,8 @@ jobs:
     #    pip install $GITHUB_WORKSPACE
     #    cp $GITHUB_WORKSPACE/test/web/test_viz.js .
     #    node test_viz.js
+    - name: Test ONNX Runner (WEBGPU)
+      run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
 
   osxremote:
     name: MacOS (remote metal)

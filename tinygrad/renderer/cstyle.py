@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.devectorizer import no_vectorized_alu
 
@@ -119,7 +119,8 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return (self.smem_prefix if dt.local and self.smem_prefix_for_cast else self.buffer_prefix) + self.render_dtype(dt.base) + "*"
+      prefix = self.smem_prefix if dt.addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast else self.buffer_prefix
+      return prefix + self.render_dtype(dt.base) + "*"
     if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 

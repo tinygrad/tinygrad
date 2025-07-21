@@ -94,7 +94,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace))
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]: idxs[oo] = global_offset+i
@@ -103,7 +103,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, local=ptrdtype.local).vec(vec.dtype.count), tuple(ret))
+  post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace).vec(vec.dtype.count), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
@@ -224,7 +224,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
-      if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, local=ptrdtype.local))
+      if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
       global_offset += fold_length
@@ -305,8 +305,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op is Ops.CUSTOM else None),
   # gate any stores that aren't gated with ifs
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
-    lambda store,idx: UOp(Ops.STORE, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
+  (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
+    lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***

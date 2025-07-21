@@ -5,7 +5,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Timing
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
@@ -303,7 +303,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, local=True), (), 'smem')
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -313,7 +313,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
   def test_local_packed(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, local=True), (), 'smem')
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
@@ -325,7 +325,7 @@ class TestLocalAccess(unittest.TestCase):
     _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
     size = 16
     for dtype in _dtypes:
-      temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, local=True), (), 'smem')
+      temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, addrspace=AddrSpace.LOCAL), (), 'smem')
       uops = to_uops_list([temp], opts=Device[Device.DEFAULT].renderer)
       out = Device[Device.DEFAULT].renderer.render(uops)
       # half is supported in wgsl, so it doesn't have to be packed
@@ -336,7 +336,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skip("tinygrad doesn't support this behavior")
   def test_local_indirect(self):
     uops = []
-    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, local=True), (), 'smem')
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
     st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
