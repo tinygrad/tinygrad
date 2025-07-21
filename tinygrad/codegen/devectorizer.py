@@ -3,7 +3,7 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition, all_same
@@ -115,8 +115,8 @@ def cat_after_store(cat:UOp, data:UOp):
     offset += s.dtype.count
   # dtype CAT
   dtypes: list[PtrDType] = [x.dtype for x in ret if isinstance(x.dtype, PtrDType)]
-  assert len(dtypes) == len(ret) and all_same([x.size for x in dtypes])
-  out_dtype = dtypes[0].base.scalar().vec(sum([x.count for x in dtypes])).ptr(dtypes[0].size)
+  assert len(dtypes) == len(ret) and all_same([(x.size, x.addrspace) for x in dtypes])
+  out_dtype = dtypes[0].base.scalar().vec(sum([x.count for x in dtypes])).ptr(dtypes[0].size, dtypes[0].addrspace)
   return UOp(Ops.PTRCAT, dtype=out_dtype, src=tuple(ret))
 
 def gep_on_store(gep:UOp, st:UOp):
@@ -286,7 +286,7 @@ def no_vectorized_alu(alu:UOp):
 
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1),
+  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1, acc.dtype.addrspace),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(Ops.PTRCAT, acc.dtype, alus)
 
@@ -333,7 +333,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1),
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
               (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
     lst = [acc.load()] + lst  # put acc as the first element
     ctx.acc_num += 1
