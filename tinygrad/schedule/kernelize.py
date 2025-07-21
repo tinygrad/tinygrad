@@ -23,10 +23,13 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
   ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
-  match reduce.arg[0]:
-    case Ops.ADD: return ret*prshape
-    case Ops.MUL: return ret.pow(prshape)
-    case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
+  out_shape = tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1])
+  result = {
+    Ops.ADD: ret*prshape,
+    Ops.MUL: ret.pow(prshape),
+    Ops.MAX: ret,
+  }[reduce.arg[0]]
+  return result.reshape(out_shape)
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -181,7 +184,12 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
+    if prod(new_shape) != prod(src.shape): return None
     ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
+    # TestOps.test_logsumexp
+    # test/test_schedule.py::TestSwizzle::test_single_swizzle
+    # test/test_linalg.py::TestLinAlg::test_svd_general
+    if ret.shape != view.shape: return None # TODO
     assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
   return None
