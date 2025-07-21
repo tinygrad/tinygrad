@@ -25,7 +25,7 @@ class CPUComputeQueue(HWQueue):
   def _exec(self, prg, *args): prg.fxn(*[ctypes.c_int64(a) if isinstance(a, int) else ctypes.c_int64(a.va_addr) for a in args])
   def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = int(time.perf_counter())
+  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args):
     self.q(cmd, len(args), *args)
     return self
@@ -38,11 +38,11 @@ class CPUComputeQueue(HWQueue):
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
 
   def _submit(self, dev):
+    # Execute the commands in the queue: fn, argc, args...
     off = 0
     while off < len(self._q):
       self._q[off](*self._q[off + 2:off + 2 + self._q[off + 1]])
       off += self._q[off + 1] + 2
-    return self
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
