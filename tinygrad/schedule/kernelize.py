@@ -28,7 +28,7 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
     case Ops.MUL: return ret.pow(prshape)
     case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
 
-def split_reduceop(reduce:UOp, x:UOp):#reduce on some shape
+def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
