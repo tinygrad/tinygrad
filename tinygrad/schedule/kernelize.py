@@ -5,10 +5,10 @@ from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
-from tinygrad.kernelize.multi import multi_pm
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
-from tinygrad.kernelize.grouper import group_realizes, ALWAYS_CONTIGUOUS
+from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
 import sys
