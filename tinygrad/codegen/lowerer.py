@@ -57,7 +57,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
     # NOTE: only store the local reduceop in the threads that are actually doing the reduce
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
-  return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
+  return buf.index(idx, valid).store(x.src[1])
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
