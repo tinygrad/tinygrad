@@ -226,7 +226,7 @@ class Kernel:
     # TODO: how does this work with multi-reduce?
     rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]
     for i in range(1, len(self.full_shape)):
-      can_merge = []#if any shape lens differ by one, then we shouldnt merge along that axis
+      can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
         si, sti, last_st = s[i] if i < len(s) else 1, st[i] if i < len(st) else 0, ret[-1][1]
