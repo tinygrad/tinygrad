@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, fcntl
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
@@ -55,6 +55,8 @@ class _System:
     except OSError: return None
 
   def flock_acquire(self, name:str) -> int:
+    import fcntl # to support windows
+
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
