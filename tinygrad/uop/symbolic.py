@@ -407,6 +407,8 @@ def reduce_mul_chain(r:UOp):
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT}
 sym = symbolic_flat+PatternMatcher([
+  # LOAD/STORE -> NOOP
+  (UPat.var('x').store(UPat.var('x').load()), lambda x: x),
   # self ASSIGN is just self
   (UPat(Ops.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # VECTORIZE/CONST, VECTORIZE/GEP
