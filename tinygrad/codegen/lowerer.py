@@ -14,7 +14,8 @@ class IndexContext:
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  if len(axis_types) == 0: axis_types = (AxisType.LOOP,)*(len(ast.full_shape) + len(dedup(flatten([x.arg[1] for x in ast.toposort() if x.op is Ops.REDUCE_AXIS]))))
+  if len(axis_types) == 0: axis_types = (AxisType.LOOP,)*(len(ast.full_shape) + \
+  len(dedup(flatten([x.arg[1] for x in ast.toposort() if x.op is Ops.REDUCE_AXIS]))))
   p = [x for x in ast.toposort() if x.op is Ops.VIEW]#Big hack. needs changing
   full_shape = max([x.arg.shape for x in p], key=lambda shape: (len(shape), shape), default=())
   idxs = []
