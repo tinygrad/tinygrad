@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
-from tinygrad.helpers import prod, partition, flatten
+from tinygrad.helpers import prod, partition, flatten, dedup
 
 # ***** indexing *****
 
@@ -14,7 +14,7 @@ class IndexContext:
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  # if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
+  if len(axis_types) == 0: axis_types = (AxisType.LOOP,)*(len(ast.full_shape) + len(dedup(flatten([x.arg[1] for x in ast.toposort() if x.op is Ops.REDUCE_AXIS]))))
   p = [x for x in ast.toposort() if x.op is Ops.VIEW]#Big hack. needs changing
   full_shape = max([x.arg.shape for x in p], key=lambda shape: (len(shape), shape))
   idxs = []
