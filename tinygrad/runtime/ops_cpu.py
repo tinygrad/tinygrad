@@ -101,4 +101,4 @@ class CPUAllocator(HCQAllocatorBase):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue,
-                     graphable=False)
+                     supports_graph=False)
