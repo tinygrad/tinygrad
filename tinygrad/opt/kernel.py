@@ -225,7 +225,7 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] if s != () else [((), ())] for s,st in zip(shapes, strides)]
+    rets = [[(s[0], st[0])] if s != () else [((0,),(0,))] for s,st in zip(shapes, strides)]
     for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
@@ -481,8 +481,8 @@ class Kernel:
           unroll_offset = self.shape_len - len(self.axes_of(AxisType.UNROLL))
           for i, (src, permaxis) in enumerate(zip(srcs, tc.permutes_for_shape_str(self.shape_str()))):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            permaxis = [ (list(range(unroll_offset)) + list(reversed(range(unroll_offset, self.shape_len))))[i] for i in permaxis]
-            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(permaxis)))
+            n_permaxis = [(list(range(unroll_offset)) + list(reversed(range(unroll_offset, self.shape_len))))[i] for i in permaxis]
+            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(n_permaxis)))
 
           # construct the op
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
