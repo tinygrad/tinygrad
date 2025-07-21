@@ -129,8 +129,8 @@ class HCQGraph(MultiGraphRunner):
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
     # Create variable timeline signals for each device.
-    timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{dev.device_id}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
-    self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
+    timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{dev.device}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
+    self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{dev.device}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
     self.virt_timeline_signals = {dev: dev.signal_t(HCQBuffer(timeline_sigaddrs[dev], 16), owner=dev, is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
