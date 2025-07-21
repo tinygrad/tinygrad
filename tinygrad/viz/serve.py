@@ -22,6 +22,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # ** Metadata for a track_rewrites scope
 
 ref_map:dict[Any, int] = {}
+contexts, ctxs = {}, {}
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
@@ -186,10 +187,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif url.path == "/ctxs":
+    elif url.path == "/ctxs" and args.kernels is not None:
+      global contexts, ctxs
+      if not contexts: ctxs = get_metadata(*(contexts:=load_pickle(args.kernels))[:2])
       if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
-    elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
+    elif url.path == "/get_profile" and args.profile is not None: ret, content_type = get_profile(load_pickle(args.profile)), "application/json"
     else: status_code = 404
 
     # send response
@@ -223,7 +226,6 @@ def reloader():
     time.sleep(0.1)
 
 def load_pickle(path:str):
-  if path is None or not os.path.exists(path): return None
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -242,13 +244,6 @@ if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
-
-  contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
-
-  # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
-
-  profile_ret = get_profile(profile) if profile is not None else None
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
