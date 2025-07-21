@@ -25,7 +25,7 @@ class CPUComputeQueue(HWQueue):
   def _exec(self, prg, *args): prg.fxn(*[ctypes.c_int64(a) if isinstance(a, int) else ctypes.c_int64(a.va_addr) for a in args])
   def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter()
+  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = int(time.perf_counter())
   def cmd(self, cmd, *args):
     self.q(cmd, len(args), *args)
     return self
