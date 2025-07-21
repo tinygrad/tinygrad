@@ -28,7 +28,7 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
     case Ops.MUL: return ret.pow(prshape)
     case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
 
-def split_reduceop(reduce:UOp, x:UOp):
+def split_reduceop(reduce:UOp, x:UOp):#reduce on some shape
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
@@ -39,11 +39,12 @@ def split_reduceop(reduce:UOp, x:UOp):
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and real_strides[i]!=0]): return None
   dim_to_split, divisor = split_candidates[0]
+  if x.shape[dim_to_split]//divisor == 1: return None #no point if there is no meaningful shape change
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.arg[1]) + len(reduce.shape),)).reshape(reduce.shape) #this is unbearably slow now
+  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
