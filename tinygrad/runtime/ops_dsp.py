@@ -1,10 +1,11 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.runtime.ops_cpu import CPUAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -108,8 +109,8 @@ class DSPAllocator(Allocator['DSPDevice']):
       qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
-  def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
-  def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+  def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
+  def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(mv_address(dest), src.va_addr, dest.nbytes)
   def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
 
 class ClangCompiler(Compiler):
@@ -131,7 +132,8 @@ class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     if getenv("MOCKDSP"):
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
+      super().__init__(device, CPUAllocator(self), MockDSPRenderer(),
+        ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -293,11 +295,11 @@ class MockDSPProgram:
       os.chmod(dsp_lib.name, 0o0777)
       # NOTE: this timing includes a docker launch
       proc = subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{os.path.abspath(os.path.dirname(dsp_lib.name))}:/work", "-w", "/work",
-                            "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 5 else ''} /work/"+os.path.basename(dsp_lib.name)],
-                            input=b''.join([bytes(x) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
+        "qemu-hexagon", "-c", f"qemu-hexagon {'-strace' if DEBUG >= 5 else ''} /work/"+os.path.basename(dsp_lib.name)],
+        input=b''.join([bytes(to_mv(x.va_addr, x.size)) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
     offset = 4
     for x in bufs:
-      x[:] = proc.stdout[offset:offset+len(x)]
-      offset += len(x)
+      x.cpu_view()[:] = proc.stdout[offset:offset+x.size]
+      offset += x.size
     assert offset == len(proc.stdout)
     return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time

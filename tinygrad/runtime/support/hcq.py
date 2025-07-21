@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, fcntl, struct, traceback, collections
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
@@ -25,7 +25,9 @@ class FileIOInterface:
     self.fd:int = fd or os.open(path, flags)
   def __del__(self):
     if hasattr(self, 'fd'): os.close(self.fd)
-  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def ioctl(self, request, arg):
+    import fcntl # to support windows
+    return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset):
     x = libc.mmap(start, sz, prot, flags, self.fd, offset)
     if x == 0xffffffffffffffff: raise OSError(f"Failed to mmap {sz} bytes at {hex(start)}: {os.strerror(ctypes.get_errno())}")
@@ -217,7 +219,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:HCQDeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[HCQDeviceType]):
-  def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1):
+  def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1000):
     self.base_buf, self.value_addr, self.timestamp_addr, self.owner = base_buf, base_buf.va_addr+0, base_buf.va_addr+8, owner
     self.is_timeline = is_timeline
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
@@ -286,7 +288,7 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
-    self.buf, self.prg = buf, prg
+    self.buf, self.prg, self.bufs, self.vals = buf, prg, bufs, vals
     self.bind_data:list[tuple[tuple[sint, ...], MMIOInterface, str]] = []
 
   def bind_sints_to_buf(self, *vals:sint, buf:HCQBuffer, fmt, offset=0): self.bind_data.append((vals, buf.cpu_view().view(offset=offset), fmt))
@@ -358,11 +360,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
+               comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000,
+               supports_graph=True):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
+    super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph if supports_graph else None)
 
     # TODO: peer logic is determined based on device name.
     self.peer_group = device.split(":")[0]

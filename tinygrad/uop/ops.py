@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Callable, cast, TYPE_CHECKING, Type, Sequence
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -34,7 +34,7 @@ def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
 def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: Union[UOp, int], var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+def sym_infer(uop: UOp|int, var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -180,7 +180,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
-  def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
+  def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = (simple_self:=self.simplify())._min_max
@@ -223,7 +223,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.CAST, dtype, (self,))
   def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
-  def gep(self, i:Union[tuple[int, ...], int]):
+  def gep(self, i:tuple[int, ...]|int):
     if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -232,9 +232,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
-  def load(self, *src:UOp, **kwargs):
-    if 'dtype' not in kwargs: kwargs['dtype'] = self.dtype.base
-    return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
+  def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
@@ -290,7 +288,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return tuple(itertools.pairwise(itertools.accumulate([self.src[0].shape[self.axis] for _ in self.device], initial=0)))
 
   @functools.cached_property
-  def axis(self) -> Optional[int]:
+  def axis(self) -> int|None:
     if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
@@ -364,7 +362,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @functools.cached_property
-  def _device(self) -> Optional[str|tuple[str, ...]]:
+  def _device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
@@ -402,7 +400,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret
     return ret
   @property
-  def realized(self) -> Optional[Buffer|MultiBuffer]:
+  def realized(self) -> Buffer|MultiBuffer|None:
     # NOTE: this is used by the JIT to determine which inputs we capture
     return self.buffer if self.op in {Ops.BUFFER, Ops.MSTACK} and self.buffer.is_allocated() else None
   @property
@@ -523,7 +521,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     fxn, varnames = self._sym_fxn
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
-  def render(self, simplify=True, pm:Optional[PatternMatcher]=None) -> str:
+  def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
@@ -596,12 +594,12 @@ def printable(loc:tuple[str, int]) -> str:
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
-  def __init__(self, op:Optional[Union[Ops, tuple[Ops, ...], set[Ops]]]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None,
-               src:Optional[Union[tuple[UPat, ...], list[UPat], UPat]]=None, arg:Any=None,
-               name:Optional[str]=None, allow_any_len:bool=False, custom_early_reject:Optional[set[Ops]]=None, location=None):
+  def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|None=None,
+               src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
+               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None):
     assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
-    self.op: Optional[tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
-    self.dtype: Optional[tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
+    self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
+    self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     assert self.name != "ctx", "UPat can't be named ctx"
@@ -633,15 +631,15 @@ class UPat(MathTrait):
 
   @staticmethod
   @functools.cache
-  def var(name:Optional[str]=None, dtype:Optional[Union[DType, tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
+  def var(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.cache
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
+  def cvar(name:str|None=None, dtype:DType|None=None, vec=True): return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name)
   @staticmethod
-  def const(dtype:Optional[Union[DType, tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
+  def const(dtype:DType|tuple[DType, ...]|None, b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
-  def index(self, idx:UPat, valid:Optional[UPat]=None): return UPat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def index(self, idx:UPat, valid:UPat|None=None): return UPat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def view(self, st=None, **kwargs): return UPat(Ops.VIEW, self.dtype, (self,), st, **kwargs)
   def cast(self, dtype=None, **kwargs): return UPat(Ops.CAST, dtype, (self,), **kwargs)
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
@@ -764,7 +762,7 @@ def track_uop(u:UOp):
 
 VIZ = ContextVar("VIZ", 0)
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
-match_stats:dict[UPat, list[Union[int, float]]] = dict()
+match_stats:dict[UPat, list[int|float]] = dict()
 
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
@@ -959,7 +957,7 @@ renderer_infer = PatternMatcher([
 
 # *** what was symbolic.py ***
 
-sint = Union[int, UOp]
+sint = int|UOp
 Variable = UOp
 
-ConstLike = Union[ConstType, Variable, tuple[ConstType, ...]]
+ConstLike = ConstType|Variable|tuple[ConstType, ...]

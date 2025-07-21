@@ -2,7 +2,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
@@ -26,7 +26,7 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: list[tuple[Ops, Optional[DType], list[int], Any]] = pickle.loads(lib)
+    self.uops: list[tuple[Ops, DType|None, list[int], Any]] = pickle.loads(lib)
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
