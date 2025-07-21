@@ -207,41 +207,48 @@
                 return vad_probs;
             }
 
-            function segment_speech(vad_probabilities, threshold=0.5, neg_threshold=0.15, min_silence=1000, min_speech=250, speech_pad=50) {
+            function segment_speech(vad_probabilities, {threshold=0.5, neg_threshold=0.15, min_silence=1000, min_speech=250, speech_pad=50, prob_duration=32.0} = {}) {
                 const SPEECH = 1;
                 const SILENCE = 2;
 
                 let segments = [];
                 let state = SILENCE;
                 let start = 0;
-                let counter_exit = 0;
+                let buffered = 0;
+                let ts = 0;
                 for (var i = 0; i < vad_probabilities.length; ++i) {
+                    ts = i*prob_duration;
                     let prob = vad_probabilities[i];
+
                     switch (state) {
                         case SPEECH:
                             if (prob < threshold-neg_threshold) {
-                                ++counter_exit;
+                                buffered += prob_duration;
                             } else {
-                                counter_exit = 0;
+                                buffered = 0;
                             }
-                            if (counter_exit > min_silence / 32) {
-                                segments.push(start, i-counter_exit);
-                                start = i-counter_exit;
-                                counter_exit = 0;
+
+                            if (buffered >= min_silence) {
+                                let finish = Math.min(ts + prob_duration - buffered + speech_pad, vad_probabilities.length * prob_duration )
+                                segments.push(finish);
+                                buffered = 0;
                                 state = SILENCE;
+                            } else if (true) {
+
                             }
                             break;
 
                         case SILENCE:
                             if (prob > threshold) {
-                                ++counter_exit;
+                                buffered += prob_duration;
                             } else {
-                                counter_exit = 0;
+                                buffered = 0;
                             }
-                            if (counter_exit > min_speech / 32) {
-                                start = i-counter_exit;
-                                // segments.push(start, i-counter_exit);
-                                counter_exit = 0;
+
+                            if (buffered >= min_speech) {
+                                start = Math.max(ts + prob_duration - buffered - speech_pad, 0);
+                                segments.push(start);
+                                buffered = 0;
                                 state = SPEECH;
                             }
                             break;
@@ -251,10 +258,10 @@
                             break;
                     }
                 }
-                if (state === SPEECH && vad_probabilities.length - start > min_speech / 32) {
-                    segments.push(start, vad_probabilities.length-1);
+                if (state === SPEECH && ts - start > min_speech) {
+                    segments.push(ts);
                 }
-                segments = segments.map((x,i) => x*512/16000.0 +(speech_pad/1000.0 * (i % 2 ? -1 : 1)));
+                segments = segments.map((x,i) => x/1000.0);
                 if (segments[0] < 0 && segments.length) segments[0] = 0;
                 if (segments.length && segments[segments.length-1] > vad_probabilities.length * 0.032) segments[segments.length-1] = vad_probabilities.length * 0.032;
                 return segments;
