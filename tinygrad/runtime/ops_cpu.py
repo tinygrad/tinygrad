@@ -22,7 +22,8 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, prg, *args): prg.fxn(*[ctypes.c_int64(a) if isinstance(a, int) else ctypes.c_int64(a.va_addr) for a in args])
+  def _exec(self, prg, bufs, *args):
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]))
   def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
   def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
@@ -32,7 +33,7 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    return self.cmd(self._exec, prg, *[x.va_addr for x in args_state.bufs], *args_state.vals)
+    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals)
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
@@ -51,8 +52,6 @@ class CPUProgram(HCQProgram):
   rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
 
   def __init__(self, dev, name:str, lib:bytes):
-    self.dev, self.name = dev, name
-
     if sys.platform == "win32":
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -80,7 +79,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(HCQArgsState, self.dev, self.name, kernargs_alloc_size=0)
+    super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
 
   def __del__(self):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
