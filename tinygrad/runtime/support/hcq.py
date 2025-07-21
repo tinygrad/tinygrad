@@ -26,7 +26,7 @@ class FileIOInterface:
   def __del__(self):
     if hasattr(self, 'fd'): os.close(self.fd)
   def ioctl(self, request, arg):
-    import fcntl # to be compatible with windows
+    import fcntl # to support windows
     return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset):
     x = libc.mmap(start, sz, prot, flags, self.fd, offset)

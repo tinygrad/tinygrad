@@ -55,7 +55,7 @@ class _System:
     except OSError: return None
 
   def flock_acquire(self, name:str) -> int:
-    import fcntl # to be compatible with windows
+    import fcntl # to support windows
 
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
