@@ -177,7 +177,6 @@ class LLVMRenderer(Renderer):
         if u.op is Ops.DEFINE_REG:
           # store the const here
           kernel.append(f"  store {ldt(u.src[0].dtype)} {r[u.src[0]]}, {ldt(u.dtype)} {r[u]}")
-      elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
