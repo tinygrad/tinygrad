@@ -393,6 +393,14 @@
                     return nextTokens;
                 }
 
+                function format_seek(seek) {
+                    return (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2);
+                }
+
+                function format_text(text, segment_cumlogprob, seek, seek_end) {
+                    return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
+                }
+
                 let segment_cumlogprob = 0;
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
                 for(let i = offset; i < max_range; ++i) {
@@ -409,7 +417,7 @@
                     context.push(decoder_output[0]);
                     if (!DECODER_OUTPUTS_TOKENS) {
                         segment_cumlogprob += nextLogits[decoder_output[0]];
-                        pendingText = (segment_cumlogprob / (i-offset+1)).toFixed(2) + context.slice(offset).map(j => mapping[j]).join('');
+                        pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), segment_cumlogprob / (i-offset+1), seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                     } else {
                         pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     }
