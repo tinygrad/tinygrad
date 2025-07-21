@@ -460,7 +460,7 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not Ops.NOOP)) != len(root.src) else None),
   # remove VECTORIZE from SINK/BARRIER
-  (UPat(Ops.BARRIER, src=(UPat((Ops.VECTORIZE, Ops.SINK), name='sink'),)), lambda sink: UOp(Ops.BARRIER, dtypes.void, sink.src)),
+  (UPat(Ops.BARRIER, src=(UPat((Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT), name='sink'),)), lambda sink: UOp(Ops.BARRIER, dtypes.void, sink.src)),
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK else (x,) for x in root.src)), root.arg)
       if any(x.op in REMOVE_FROM_SINK for x in root.src) else None),

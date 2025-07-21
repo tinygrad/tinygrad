@@ -72,7 +72,7 @@ class PtrDType(DType):
   @property
   def vcount(self): return self.v
   def __repr__(self):
-    return f"{self.base.__repr__()}.ptr({self.size}{', addrspace='+str(self.addrspace) if self.addrspace != AddrSpace.GLOBAL else ''})" + \
+    return f"{self.base.__repr__()}.ptr({self.size}{', '+str(self.addrspace) if self.addrspace != AddrSpace.GLOBAL else ''})" + \
       (f'.vec({self.v})' if self.v != 1 else '')
 
 @dataclass(frozen=True, eq=False)

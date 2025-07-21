@@ -131,7 +131,7 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=(UPat.var("c"),), name="x", allow_any_len=True),
-   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
+   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype.base == x.dtype.base),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, int)),
@@ -157,6 +157,10 @@ spec = PatternMatcher([
   # INDEX takes a <buf, alu, gate?>
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+
+  # LOAD/STORE reg
+  (UPat(Ops.LOAD, src=(UPat((Ops.STORE, Ops.DEFINE_REG)),)), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_REG), UPat())), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
