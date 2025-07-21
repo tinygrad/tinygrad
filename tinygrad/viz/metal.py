@@ -31,7 +31,7 @@ def xctrace_export(fp:str, schemas:list[str]) -> Generator[dict, None, None]:
       row = time_info if curr_schema == "time-info" else {"schema":curr_schema}
       for col,v in zip(schema[curr_schema], e):
         value = tags[v.tag](id_cache[ref] if (ref:=v.attrib.get("ref")) else (v.text or ""))
-        if col == "timestamp" and time_info: value = to_cpu_time(value)
         if (eid:=v.attrib.get("id")): id_cache[eid] = value
+        elif col == "timestamp" and curr_schema == "gpu-counter-value": value = to_cpu_time(value)
         row[col] = value
       yield row
