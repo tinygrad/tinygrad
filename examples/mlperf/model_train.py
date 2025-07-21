@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling, flatten
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1355,7 +1355,7 @@ def train_llama3():
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 def train_stable_diffusion():
-  from extra.models.unet import UNetModel
+  from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
   from extra.models.inception import FidInceptionV3
@@ -1401,6 +1401,19 @@ def train_stable_diffusion():
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
 
   unet = model.model.diffusion_model
+
+  def zero_module(module):
+    for p in get_parameters(module):
+      p.assign(Tensor.zeros_like(p))
+
+  # the mlperf reference inits these weights as zeroes
+  for bb in flatten(unet.input_blocks) + unet.middle_block + flatten(unet.output_blocks):
+    if isinstance(bb, ResBlock):
+      zero_module(bb.out_layers[3])
+    elif isinstance(bb, SpatialTransformer):
+      zero_module(bb.proj_out)
+  zero_module(unet.out[2])
+
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
   scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
@@ -1434,6 +1447,7 @@ def train_stable_diffusion():
     return loss
 
   jit_train_step = TinyJit(train_step, optimize=True)
+  # TODO: if BS and EVAL_BS don't match, need to modify the jit setup and/or pad
   jit_context_step = TinyJit(model.cond_stage_model)
 
   # load prompts for generating images for validation; 2 MB of data total
