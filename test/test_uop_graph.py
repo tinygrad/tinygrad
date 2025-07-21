@@ -545,12 +545,12 @@ class TestUOpGraph(unittest.TestCase):
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = UOp(Ops.STORE, dtypes.void, (glbl.index(idx0, UOp.const(dtypes.bool, False)), val))
-    st1 = UOp(Ops.STORE, dtypes.void, (glbl.index(idx1, UOp.const(dtypes.bool, True)), val))
+    st0 = glbl.index(idx0, UOp.const(dtypes.bool, False)).store(val)
+    st1 = glbl.index(idx0, UOp.const(dtypes.bool, True)).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 5)
-    self.assertEqual(uops[-1], UOp.store(glbl.index(idx1), val))
+    self.assertEqual(uops[-1], glbl.index(idx1).store(val))
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
