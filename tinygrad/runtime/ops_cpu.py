@@ -1,8 +1,7 @@
 from __future__ import annotations
 import platform, subprocess, sys, ctypes, functools, time
-from typing import ClassVar
 from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, round_up
-from tinygrad.device import Compiled, Compiler, BufferSpec
+from tinygrad.device import Compiled, Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface, HCQAllocatorBase
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -101,7 +100,9 @@ class CPUAllocator(HCQAllocatorBase):
   def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
+  def _map(self, buf:HCQBuffer):
+    if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue, None)
+    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue)
