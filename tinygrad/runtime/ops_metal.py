@@ -99,6 +99,8 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
+    from time import sleep
+    sleep(2) # TODO: why is this needed?
     if (proc:=MetalDevice.xctrace_proc) is not None:
       proc.send_signal(signal.SIGINT)
       proc.wait()
