@@ -1,7 +1,8 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, MallocAllocator
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.runtime.ops_cpu import CPUAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
@@ -131,7 +132,7 @@ class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     if getenv("MOCKDSP"):
-      super().__init__(device, MallocAllocator, MockDSPRenderer(), ClangCompiler(None, ["-static"] + compiler_args, 'llvm-objdump'), MockDSPProgram)
+      super().__init__(device, CPUAllocator(self), MockDSPRenderer(), ClangCompiler(None, ["-static"]+compiler_args, 'llvm-objdump'), MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
