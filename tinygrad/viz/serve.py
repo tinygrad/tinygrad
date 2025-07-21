@@ -179,12 +179,6 @@ def get_profile(profile:list[ProfileEvent]):
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
-  def set_sse_headers(self):
-    self.send_response(200)
-    self.send_header("Content-Type", "text/event-stream")
-    self.send_header("Cache-Control", "no-cache")
-    self.end_headers()
-
   def stream_json(self, source:Generator[dict, None, None]):
     try:
       self.send_response(200)
