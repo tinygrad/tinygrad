@@ -1,16 +1,8 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
+# TODO: refactor to enable control over dtype autocasting (and GroupNorm channel count for mlperf)
 #from tinygrad.device import is_dtype_supported
 def is_dtype_supported(x): return False
-def md(a, b):
-  diff = (a - b).abs().mean().item()
-  ratio = diff / a.abs().mean().item()
-  return diff, ratio
-from tinygrad.nn.state import safe_load, get_state_dict
-unet_io = safe_load("/home/hooved/train-sd/training/stable_diffusion/datasets/tensors/unet_training_io.safetensors")
-for k,v in unet_io.items():
-  unet_io[k] = v.to("NV").realize()
-
 from typing import Optional, Union, List, Any, Tuple
 import math
 
