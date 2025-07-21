@@ -105,6 +105,8 @@ runs:
         echo "OMP_NUM_THREADS=1" >> "$GITHUB_ENV"
         # no buffers should be over 300MB in CI
         echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
+        # CI RAM is limited to 16GB, so we set the max alloc mem up to 14GB
+        echo "MAX_ALLOC_MEM=15032385536" >> "$GITHUB_ENV"
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
         else

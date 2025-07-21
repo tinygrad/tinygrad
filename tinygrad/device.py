@@ -143,6 +143,7 @@ class Buffer:
         self._prof_num = num = len(Buffer.profile_events)
         ts = decimal.Decimal(time.perf_counter_ns())/1000
         Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
+    if (mbs:=getenv("MAX_ALLOC_MEM", 0)) > 0 and GlobalCounters.mem_used > mbs: raise RuntimeError(f"Allocated {GlobalCounters.mem_used} > {mbs}")
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
