@@ -288,8 +288,7 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
-    self.buf, self.prg = buf, prg
-    self.bufs, self.vals = bufs, vals
+    self.buf, self.prg, self.bufs, self.vals = buf, prg, bufs, vals
     self.bind_data:list[tuple[tuple[sint, ...], MMIOInterface, str]] = []
 
   def bind_sints_to_buf(self, *vals:sint, buf:HCQBuffer, fmt, offset=0): self.bind_data.append((vals, buf.cpu_view().view(offset=offset), fmt))
