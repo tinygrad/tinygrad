@@ -467,8 +467,6 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  if (ctx.name === "Profiler") return renderProfiler();
-  const step = ctx.steps[currentStep];
   const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
   // close any pending event sources
   let activeSrc = null;
@@ -476,10 +474,12 @@ async function main() {
     if (e.url.split("?")[1] !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
+  if (ctx.name === "Profiler") return renderProfiler();
   if (ckey in cache) {
     ret = cache[ckey];
   }
   // if we don't have a complete cache yet we start streaming rewrites in this step
+  const step = ctx.steps[currentStep];
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
