@@ -195,7 +195,7 @@ class Kernel:
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      self.reshape(lambda shape: [x for x in shape if x != 1])
+      self.reshape(lambda shape: [x for x in shape if resolve(x != 1)])
       return True
     return False
 
