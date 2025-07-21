@@ -225,7 +225,7 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] if s != () else [((0,),(0,))] for s,st in zip(shapes, strides)]
+    rets = [[(s[0], st[0])] if s != () else [(0, 0)] for s,st in zip(shapes, strides)]
     for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
