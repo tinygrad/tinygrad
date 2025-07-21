@@ -56,9 +56,7 @@ class CPUProgram(HCQProgram):
     self.dev, self.name = dev, name
 
     if sys.platform == "win32":
-      PAGE_EXECUTE_READWRITE = 0x40
-      MEM_COMMIT =  0x1000
-      MEM_RESERVE = 0x2000
+      PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
       self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
       ctypes.memmove(self.mem, lib, len(lib))
@@ -105,4 +103,5 @@ class CPUAllocator(HCQAllocatorBase):
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue)
+    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue,
+                     graphable=False)

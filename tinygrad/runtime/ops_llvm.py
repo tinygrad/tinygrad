@@ -73,4 +73,5 @@ class HostLLVMCompiler(LLVMCompiler):
 
 class LLVMDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), LLVMRenderer(), HostLLVMCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue)
+    super().__init__(device, CPUAllocator(self), LLVMRenderer(), HostLLVMCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue,
+                     graphable=False)
