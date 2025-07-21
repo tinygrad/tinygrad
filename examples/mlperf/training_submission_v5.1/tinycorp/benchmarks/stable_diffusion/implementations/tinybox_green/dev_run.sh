@@ -6,16 +6,16 @@
 # TODO: next steps: train to convergence on one big NVIDIA GPU (cloud rented), then on tinybox
 
 # *** dependencies
-#pip install tqdm
-#pip install numpy
+pip install tqdm
+pip install numpy
 
 ## to match mlperf reference clip tokenizer behavior
-#pip install ftfy
-#pip install regex
+pip install ftfy
+pip install regex
 
 ## to use mlperf reference dataloader
-#pip install webdataset
-#pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
+pip install webdataset
+pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
 
 export PYTHONPATH="." NV=1
 
