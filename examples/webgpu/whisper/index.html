@@ -377,7 +377,7 @@
                 // v.fill(0);
                 // v[0] = TOK_NO_TIMESTAMPS;
 
-                function handle_timestamp_tokens(nextTokens, context, last_token_index, one_before_last_token_index) {
+                function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index) {
                     if (!NO_TIMESTAMPS) {
                         if (token_count === 0) {
                             nextTokens = nextTokens.filter((t)=> t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
@@ -404,7 +404,7 @@
                     let nextLogits = decoder_output;
                     if (!DECODER_OUTPUTS_TOKENS) decoder_output = argsort(decoder_output);
                     decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-                    decoder_output = handle_timestamp_tokens(decoder_output, context, last_token_index, one_before_last_token_index);
+                    decoder_output = handle_timestamp_tokens(decoder_output, context, token_count, last_token_index, one_before_last_token_index);
 
                     context.push(decoder_output[0]);
                     if (!DECODER_OUTPUTS_TOKENS) {
