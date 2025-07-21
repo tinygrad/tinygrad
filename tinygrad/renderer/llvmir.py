@@ -172,15 +172,15 @@ class LLVMRenderer(Renderer):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         args.append((r[u], u.dtype))
-      elif u.op == Ops.DEFINE_LOCAL:
-        r[u] = f"%local_{u.arg}"
+      elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
+        r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
-        if self.device == "LLVM": kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
+        if self.device == "LLVM" or u.op is Ops.DEFINE_REG:
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
-      elif u.op is Ops.DEFINE_REG: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -195,13 +195,18 @@ class LLVMRenderer(Renderer):
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
+        # stores pass the first arg through
+        if u.op is Ops.STORE: r[u] = r[u.src[0]]
+
         # generate the phi nodes for the assigns
+        """
         if u.op is Ops.RANGE:
           for x in acc_to_assign:
             if u in x.src:  # if this range is relevant for this acc
               vc += 1
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
               r[x] = f"%acc{vc}"
+        """
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
