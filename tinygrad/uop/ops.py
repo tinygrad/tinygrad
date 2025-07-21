@@ -253,19 +253,19 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...], permute=True):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
+    axis = tuple(sorted([x for x in axis]))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
-    move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
+    move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis)
     if move_early and permute:
       permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
       ret = self.permute(permaxis)
-      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape))])
       assert len(axis) == len(new_axis)
     else:
       ret, new_axis = self, axis
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
-    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    return ret.reshape(tuple([x for i,x in enumerate(self.shape) if i not in axis]))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
