@@ -329,6 +329,7 @@
 
             const DECODER_OUTPUTS_TOKENS = true;
             const NO_TIMESTAMPS = false;
+            const NO_CONTEXT = true;
             let previous_context = [];
             for (let seek = 0; seek < log_specs_full.length;) {
                 let next_speech_seek = next_speech(speech_segments, seek);
@@ -352,7 +353,7 @@
                 const TOK_TS_FIRST = 50363;
                 const TOK_TS_LAST = 51863;
                 let context = [];
-                if (previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
+                if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
                     let prefix = [TOK_STARTOFPREV];
                     let suffix = [TOK_BEGIN_TRANSCRIPTION];
                     if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
