@@ -150,13 +150,7 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     local_args: list[str] = []
-    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN: # prealloc all assigns
-        vc += 1
-        r[u] = r[u.src[1]] = f"%assign{vc}"
-        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
-        acc_to_assign[u.src[0]] = u.src[1]
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
@@ -200,16 +194,6 @@ class LLVMRenderer(Renderer):
 
         # stores pass the first arg through
         if u.op is Ops.STORE: r[u] = r[u.src[0]]
-
-        # generate the phi nodes for the assigns
-        """
-        if u.op is Ops.RANGE:
-          for x in acc_to_assign:
-            if u in x.src:  # if this range is relevant for this acc
-              vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
-              r[x] = f"%acc{vc}"
-        """
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
