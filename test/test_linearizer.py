@@ -192,7 +192,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[((np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()).reshape(1)])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
