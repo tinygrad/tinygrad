@@ -327,8 +327,8 @@
                 return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
             }
 
-            const DECODER_OUTPUTS_TOKENS = true;
-            const NO_TIMESTAMPS = false;
+            const DECODER_OUTPUTS_TOKENS = false;
+            const NO_TIMESTAMPS = true;
             const NO_CONTEXT = true;
             let previous_context = [];
             for (let seek = 0; seek < log_specs_full.length;) {
