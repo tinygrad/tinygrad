@@ -129,8 +129,8 @@ class HCQGraph(MultiGraphRunner):
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
     # Create variable timeline signals for each device.
-    timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{dev.device_id}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
-    self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
+    timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{self.dev_name(dev)}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
+    self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{self.dev_name(dev)}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
     self.virt_timeline_signals = {dev: dev.signal_t(HCQBuffer(timeline_sigaddrs[dev], 16), owner=dev, is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
@@ -201,6 +201,8 @@ class HCQGraph(MultiGraphRunner):
   def collect_timestamps(self):
     # NOTE: Append to any device is fine...
     self.devices[0].profile_events += [ProfileGraphEvent(self.prof_graph_entries, self.prog_graph_deps, [s.timestamp for s in self.prof_signals])]
+
+  def dev_name(self, dev) -> str: return dev.device.replace(":", "_")
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
