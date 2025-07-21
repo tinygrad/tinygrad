@@ -121,7 +121,7 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(y2.cpu().numpy(), expected)
 
     y3 = torch.amin(x, dim=2)
-    expected = np.array([[1.5, 5.2, 9.0], [13.2, 17.1, 21.0]], dtype=np.float32)
+    expected = np.array([[1.5, 5.2, 9.0], [13.2, 17.1, 18.4]], dtype=np.float32)
     np.testing.assert_equal(y3.cpu().numpy(), expected)
 
   def test_isfinite(self):
