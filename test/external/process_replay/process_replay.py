@@ -7,7 +7,7 @@ ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in
 if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
-  from tinygrad.kernelize.kernelize import get_kernelize_map
+  from tinygrad.schedule.kernelize import get_kernelize_map
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
