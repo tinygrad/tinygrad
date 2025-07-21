@@ -1,6 +1,7 @@
 from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.uop.symbolic import sym
@@ -453,7 +454,7 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       # Define buffers
       gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(400), (), 0)
-      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, local=True), (), "temp0")
+      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, addrspace=AddrSpace.LOCAL), (), "temp0")
 
       # Define indices, valids and barrier
       gidx = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 416))
@@ -528,7 +529,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, local=True), (), "temp")
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, addrspace=AddrSpace.LOCAL), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -726,7 +727,7 @@ class TestExpander(unittest.TestCase):
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, addrspace=AddrSpace.LOCAL), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -745,7 +746,7 @@ class TestIFUOps(unittest.TestCase):
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, addrspace=AddrSpace.LOCAL), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))
