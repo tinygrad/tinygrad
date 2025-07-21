@@ -239,7 +239,7 @@ class Kernel:
         else: rets[j].append((s[i], st[i]))
 
     # do the reshapes
-    for i,x in enumerate(rets[:len(self.sts)]): 
+    for i,x in enumerate(rets[:len(self.sts)]):
       if shapes[i] != (): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** apply optimizations ********************
