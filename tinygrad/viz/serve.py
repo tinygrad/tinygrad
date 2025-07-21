@@ -22,7 +22,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # ** Metadata for a track_rewrites scope
 
 ref_map:dict[Any, int] = {}
-contexts:tuple[dict, dict, dict] = ()
+contexts:tuple[dict, dict, dict] = ({}, {}, {})
 ctxs:list[dict] = []
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
@@ -189,8 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif url.path == "/ctxs" and args.kernels is not None:
-      global contexts, ctxs
-      if not contexts: ctxs = get_metadata(*(contexts:=load_pickle(args.kernels))[:2])
+      global ctxs, contexts
+      if not ctxs: ctxs = get_metadata(*(contexts:=load_pickle(args.kernels))[:2])
       if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and args.profile is not None: ret, content_type = get_profile(load_pickle(args.profile)), "application/json"
