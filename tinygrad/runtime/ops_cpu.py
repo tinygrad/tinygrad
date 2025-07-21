@@ -50,7 +50,7 @@ MAP_JIT = 0x0800
 class CPUProgram(HCQProgram):
   rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
 
-  def __init__(self, dev:CPUDevice, name:str, lib:bytes):
+  def __init__(self, dev, name:str, lib:bytes):
     self.dev, self.name = dev, name
 
     if sys.platform == "win32":
