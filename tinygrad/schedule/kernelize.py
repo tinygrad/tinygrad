@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve, sint
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, 
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
+from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
