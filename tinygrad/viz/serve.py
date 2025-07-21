@@ -22,7 +22,8 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # ** Metadata for a track_rewrites scope
 
 ref_map:dict[Any, int] = {}
-contexts, ctxs = {}, {}
+contexts:tuple[dict, dict, dict] = ()
+ctxs:list[dict] = []
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
