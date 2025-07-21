@@ -168,7 +168,7 @@ class Kernel:
   # apply reshape and permute to all shapetrackers
   def reshape(self, new_shape_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
     self.sts = [st.reshape(tuple(new_shape_fxn(st.shape))) for st in self.sts]
-  def permute(self, new_perm_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
+  def permute(self, new_perm_fxn:Callable[[list[int]], Sequence[int]]):
     self.sts = [st.permute(tuple(new_perm_fxn(list(range(len(st.shape)))))) for st in self.sts]
   # axis : the axis to pull from
   # amount : the amount to take
