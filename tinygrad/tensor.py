@@ -3853,7 +3853,9 @@ class Tensor(MathTrait):
       print(t.dropout().numpy())
     ```
     """
+    if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not Tensor.training or p == 0: return self
+    if p == 1: return self.zeros_like()
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   # helper function commonly used for indexing
