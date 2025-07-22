@@ -334,9 +334,14 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
-              (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
-    lst = [acc.load()] + lst  # put acc as the first element
+    #acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
+    #          (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
+    #lst = [acc.load()] + lst  # put acc as the first element
+    reduce_start = red.const_like(identity_element(red.arg, red.dtype.scalar()))
+    is_start = functools.reduce(lambda x,y: x&y, [x.eq(x.const_like(0)) for x in reduce_range]).broadcast(red.dtype.count)
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), (reduce_start,) + tuple(reduce_range), (ctx.acc_num,)) \
+      .index(UOp.const(dtypes.int, 0))
+    lst = [is_start.where(reduce_start, acc.load())] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.store(ret).load() if len(reduce_range) != 0 else ret
