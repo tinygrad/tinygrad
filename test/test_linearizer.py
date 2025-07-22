@@ -704,7 +704,7 @@ class TestLinearizer(unittest.TestCase):
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
     uops = get_program(k.get_optimized_ast(), k.opts).uops
-    stores = [u for u in uops if u.op is Ops.STORE and u.src[0].op is not Ops.DEFINE_REG]
+    stores = [u for u in uops if u.op is Ops.STORE and u.dtype.addrspace != AddrSpace.REG]
 
     # the float4 value stores directly in lds and we skip upcast
     self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
