@@ -3,7 +3,7 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType
+from tinygrad.dtype import dtypes, ImageDType, PtrDType, promo_lattice, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition, all_same
@@ -125,7 +125,7 @@ def gep_on_store(gep:UOp, st:UOp):
   a = {}
   for i,x in enumerate(gep.arg): a[x] = i
   new_arg = tuple(x[1] for x in sorted(a.items()))
-  return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
+  return gep.src[0].store(st.gep(new_arg))
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
@@ -284,17 +284,18 @@ def no_vectorized_alu(alu:UOp):
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
-def no_vectorized_acc(acc:UOp):
+def no_vectorized_acc(acc:UOp, c:UOp):
   if acc.dtype.count == 1: return None
-  alus = tuple(UOp(acc.op, acc.dtype.scalar(),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
-  return UOp(Ops.VECTORIZE, acc.dtype, alus)
+  assert c.arg == 0, "this only supports index 0"
+  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1, cast(PtrDType, acc.dtype).addrspace),
+    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)).index(UOp.const(dtypes.int, 0)) for i in range(acc.dtype.count))
+  return UOp(Ops.PTRCAT, acc.dtype, alus)
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-  (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
+  (UPat(Ops.DEFINE_REG, name="acc").index(UPat.cvar("c")), no_vectorized_acc),
 ])
 
 pm_render = PatternMatcher([
@@ -333,11 +334,12 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    acc = UOp(Ops.DEFINE_REG, red.dtype, (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
-    lst = [acc] + lst  # put acc as the first element
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
+              (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
+    lst = [acc.load()] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.assign(ret) if len(reduce_range) != 0 else ret
+  return acc.store(ret).load() if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
