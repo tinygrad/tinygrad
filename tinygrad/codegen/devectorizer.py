@@ -284,17 +284,18 @@ def no_vectorized_alu(alu:UOp):
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
-def no_vectorized_acc(acc:UOp):
+def no_vectorized_acc(acc:UOp, c:UOp):
   if acc.dtype.count == 1: return None
+  assert c.arg == 0, "this only supports index 0"
   alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1, cast(PtrDType, acc.dtype).addrspace),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)).index(UOp.const(dtypes.int, 0)) for i in range(acc.dtype.count))
   return UOp(Ops.PTRCAT, acc.dtype, alus)
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-  (UPat(Ops.DEFINE_REG, name="acc"), no_vectorized_acc),
+  (UPat(Ops.DEFINE_REG, name="acc").index(UPat.cvar("c")), no_vectorized_acc),
 ])
 
 pm_render = PatternMatcher([
