@@ -97,14 +97,12 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
 class TestRollEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  @unittest.expectedFailure
   def test_roll_mismatched_dims(self):
     with self.assertRaises(RuntimeError):
       torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
     with self.assertRaises(RuntimeError):
       Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
 
-  @unittest.expectedFailure
   def test_roll_extra_shift(self):
     # tinygrad ignores extra shift values instead of raising
     with self.assertRaises(RuntimeError):
