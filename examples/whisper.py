@@ -9,7 +9,6 @@ from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import fetch, trange
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import DTypeLike, dtypes
-from tinygrad.helpers import getenv, fetch
 import numpy as np
 import tiktoken
 from tiktoken import Encoding
@@ -378,7 +377,7 @@ def load_file_waveform(filename):
         return resample2(Tensor(audio), original_sr, RATE).numpy() if original_sr != RATE else audio
     except Exception as e:
       raise RuntimeError(f"Failed to load audio file {filename}: {e}")
-    
+
 def transcribe_file(model, enc: Encoding, filename, output_fh=None, beam=False, no_speech_threshold=0.8):
   return transcribe_waveform(model, enc, [load_file_waveform(filename)], output_fh, beam=beam, no_speech_threshold=no_speech_threshold)
 
