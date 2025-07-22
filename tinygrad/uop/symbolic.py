@@ -407,6 +407,9 @@ def reduce_mul_chain(r:UOp):
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT}
 sym = symbolic_flat+PatternMatcher([
+  # LOAD/STORE REG -> CONST (this is required)
+  (UPat(Ops.DEFINE_REG, name='x').store(UPat(Ops.DEFINE_REG, name='x').load()), lambda x: x.src[0]),
+  (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load()), lambda x: x),
   # self ASSIGN is just self
