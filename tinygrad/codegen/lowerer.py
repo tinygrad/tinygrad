@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
-from tinygrad.helpers import prod, partition, flatten, dedup
+from tinygrad.helpers import prod, partition, flatten
 
 # ***** indexing *****
 
