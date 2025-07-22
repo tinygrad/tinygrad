@@ -510,7 +510,7 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run REMOTE=1 Test (without process replay)
         run: |
-          # TODO: fix this, remote schedule opens devices
+          # TODO: re enable process replay, currently remote schedule opens devices
           CAPTURE_PROCESS_REPLAY=0 REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
