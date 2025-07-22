@@ -161,13 +161,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
-
+  # p = [x for x in ast.toposort() if x.op is Ops.VIEW]#could be more sophisticated
+  # full_shape = max([x.arg.shape for x in p], key=lambda shape: (len(shape), shape), default=())
   @functools.cached_property
   def full_shape(self) -> tuple[sint, ...]:
     if self.op is Ops.VIEW: return self.shape
     # NOTE: if a parent doesn't have st its full_shape is empty
     parent_shapes = [x.full_shape for x in self.src]
-    return tuple(smax(x) for x in zip(*[x for x in parent_shapes if x != ()]))
+    ndim =  max([len(x) for x in parent_shapes], default=0)
+    return tuple(smax(x) for x in zip(*[x+(0,)*(ndim-len(x)) for x in parent_shapes if x != ()]))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
