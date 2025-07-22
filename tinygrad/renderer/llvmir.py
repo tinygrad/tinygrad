@@ -170,13 +170,13 @@ class LLVMRenderer(Renderer):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
         if self.device == "LLVM" or u.op is Ops.DEFINE_REG:
-          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
+          if u.op is Ops.DEFINE_REG:
+            # store the const here
+            kernel.append(f"  store {ldt(u.src[0].dtype)} {r[u.src[0]]}, {ldt(u.dtype)} {r[u]}")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
-        if u.op is Ops.DEFINE_REG:
-          # store the const here
-          kernel.append(f"  store {ldt(u.src[0].dtype)} {r[u.src[0]]}, {ldt(u.dtype)} {r[u]}")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
