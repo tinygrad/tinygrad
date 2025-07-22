@@ -63,7 +63,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"),
      lambda x: f"bitcast<u32>({x.arg})" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
     (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x:
-      f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype)},{x.dtype.size//(4//x.dtype.itemsize) if is_packed(x.dtype) else x.dtype.size}>;"),
+      f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype.base)},{x.dtype.size//(4//x.dtype.itemsize) if is_packed(x.dtype) else x.dtype.size}>;"),
     (UPat(Ops.DEFINE_REG, name="x"), webgpu_define_reg),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
      lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]"),
@@ -98,6 +98,6 @@ class WGSLRenderer(CStyleLanguage):
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
-      f"{name}:{f'array<{self.buf_map(dtype)}>' if isinstance(dtype,PtrDType) else self.buf_map(dtype)};" for name,(dtype,_) in bufs])
+      f"{name}:{f'array<{self.buf_map(dtype.base)}>' if isinstance(dtype,PtrDType) else self.buf_map(dtype)};" for name,(dtype,_) in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>,"
     return prg + "@builtin(local_invocation_id) lindex: vec3<u32>) {\n" + "\n".join(kernel) + "\n}"

@@ -80,8 +80,6 @@ class PythonProgram:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
         elif uop is Ops.CONST: ul[i] = [arg] * warp_size
-        #elif uop is Ops.DEFINE_REG:
-        #ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
           ret:list = []
           if isinstance(dtp[0], ImageDType):
@@ -114,9 +112,6 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        #elif uop is Ops.ASSIGN:
-        #  for j in range(len(inp[0])): inp[0][j] = inp[1][j]
-        #  ul[i] = inp[0]
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
           # here are the models for the WMMA instruction on the different hardware
