@@ -3,7 +3,7 @@ import numpy as np
 import math, random
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
-from tinygrad.engine.search import actions, bufs_from_lin, get_kernel_actions
+from tinygrad.opt.search import actions, bufs_from_lin, get_kernel_actions
 from tinygrad.nn.optim import Adam
 from extra.optimization.extract_policynet import PolicyNet
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, lin_to_feats, time_linearizer

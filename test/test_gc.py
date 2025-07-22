@@ -86,10 +86,10 @@ class TestGC(unittest.TestCase):
     a.realize()
     real_buf = a.uop.buffer
     # after the Tensor UOp is deleted there shouldn't be any references on the Buffer
-    self.assertEqual(real_buf.lb_refcount, 1)
+    self.assertEqual(real_buf.uop_refcount, 1)
     self.assertEqual(bufs_allocated()-init, 1)
     del a.uop
-    self.assertEqual(real_buf.lb_refcount, 0)
+    self.assertEqual(real_buf.uop_refcount, 0)
     self.assertEqual(bufs_allocated()-init, 1) # keep the buffer alive
     del real_buf
     self.assertEqual(bufs_allocated()-init, 0)
@@ -99,14 +99,14 @@ class TestGC(unittest.TestCase):
     a = Tensor.full((4,), 1.).contiguous()
     a.realize()
     real_buf = a.uop.buffer
-    self.assertEqual(real_buf.lb_refcount, 1)
+    self.assertEqual(real_buf.uop_refcount, 1)
     a.assign(Tensor.full((4,), 2.))
     self.assertIs(a.uop.src[0].buffer, real_buf)
     # NOTE: this is still 1, we don't count the ASSIGN
-    self.assertEqual(real_buf.lb_refcount, 1)
+    self.assertEqual(real_buf.uop_refcount, 1)
     a.realize()
     del a
-    self.assertEqual(real_buf.lb_refcount, 0) # no UOps for this Buffer
+    self.assertEqual(real_buf.uop_refcount, 0) # no UOps for this Buffer
     self.assertEqual(bufs_allocated()-init, 1) # Buffer is alive
 
 if __name__ == '__main__':

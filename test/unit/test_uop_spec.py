@@ -2,28 +2,28 @@ from __future__ import annotations
 import unittest
 
 from tinygrad import Tensor
-from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, print_uops
-from tinygrad.uop.spec import type_verify, ast_spec
+from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
 from tinygrad.shape.view import View
+from tinygrad.engine.realize import get_program
+from tinygrad.device import Device
 
 class InvalidASTException(Exception): pass
-def helper_test_verify_ast(*stores:UOp) -> Kernel:
+def helper_test_verify_ast(*stores:UOp):
   sink = UOp(Ops.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
   try: type_verify(list(sink.toposort()), ast_spec)
   except RuntimeError as e: raise InvalidASTException(e.args)
-  k = Kernel(sink)
-  k.linearize()
-  if DEBUG >= 6: print_uops(k.uops)
-  if DEBUG >= 4: print(k.to_program().src)
-  return k
+  program = get_program(sink, Device[Device.DEFAULT].renderer)
 
-class TestVerifyAST(unittest.TestCase):
+  if DEBUG >= 6: print_uops(program.uops)
+  if DEBUG >= 4: print(program.src)
+
+class TestUOpSpec(unittest.TestCase):
   def test_tiny_add(self):
     dtype = dtypes.int
     buf_0 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
@@ -39,10 +39,10 @@ class TestVerifyAST(unittest.TestCase):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), i) for i in range(6)]
     a = UOp(Ops.LOAD, dtype, (bufs[2].view(ShapeTracker.from_shape((32, 1))),))
     b = UOp(Ops.LOAD, dtype, (bufs[3].view(ShapeTracker.from_shape((32, 1))),))
-    st0 = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), a+b)
+    st0 = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), a+b)
     a = UOp(Ops.LOAD, dtype, (bufs[4].view(ShapeTracker.from_shape((32, 32))),))
     b = UOp(Ops.LOAD, dtype, (bufs[5].view(ShapeTracker.from_shape((32, 32))),))
-    st1 = UOp.store(bufs[1], ShapeTracker.from_shape((32, 32)).to_uop(), a+b)
+    st1 = UOp.store(bufs[1].view(ShapeTracker.from_shape((32, 32))), a+b)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st0, st1)
 
   def test_no_implicit_broadcasting(self):
@@ -63,14 +63,14 @@ class TestVerifyAST(unittest.TestCase):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
-    st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r)
+    st = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), r)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_reduce_add_store(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
-    st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
+    st = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), r+a)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_buffer_uops_st(self):
@@ -85,7 +85,7 @@ class TestVerifyAST(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
-    st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
+    st = UOp.store(buf.view(ShapeTracker.from_shape((32, 1))), r.view(r.st.expand((32, 1)))+a)
     with self.assertRaisesRegex(InvalidASTException, "UOp verification failed"): helper_test_verify_ast(st)
 
   def test_const_view_always_valid(self):
@@ -93,6 +93,12 @@ class TestVerifyAST(unittest.TestCase):
     a = UOp.const(dtypes.int, 0).replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(())),))
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
+
+  def test_assert_masked_view_in_const(self):
+    t = Tensor(6).uop
+    a = t.replace(src=(t.src[0].replace(arg=t.st.reshape((1,)).pad(((0, 1),))),))
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      type_verify([a], tensor_uop_spec)
 
 if __name__ == '__main__':
   unittest.main()

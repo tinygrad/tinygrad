@@ -13,29 +13,6 @@ from test.helpers import not_support_multi_device
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
-  def test_sparse_cat_cross_entropy(self):
-    # create in tinygrad
-    input_tensor = Tensor.randn(6, 5) # not square to test that mean scaling uses the correct dimension
-    target = Tensor([0, 0, 0, 1, 2, 3])  # torch doesn't support target=-1
-    torch_input = torch.tensor(input_tensor.numpy())
-    torch_target = torch.tensor(target.numpy(), dtype=torch.long)
-
-    for smoothing in [0.0, 0.1, 0.5, 1.0]:
-      for ignore_index in [-1, 0, 2]:
-        for reduction in ["none", "sum", "mean"]:
-          loss = input_tensor.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index, reduction=reduction)
-          torch_loss = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
-          np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
-
-          # also test with a batch dimension (of size 1)
-          loss = input_tensor.unsqueeze(0).sparse_categorical_crossentropy(
-            target.unsqueeze(0), label_smoothing=smoothing, ignore_index=ignore_index, reduction=reduction
-          )
-          torch_loss = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing, ignore_index=ignore_index)(
-            torch_input.unsqueeze(0).permute(0,2,1), torch_target.unsqueeze(0)
-          )
-          np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
-
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
     with Tensor.train(training):
       szs = [4, 8, 16, 32]

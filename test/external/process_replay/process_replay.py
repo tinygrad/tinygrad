@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools
+import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, to_function_name
-from tinygrad.engine.grouper import get_kernelize_map
-from tinygrad.codegen.kernel import Kernel
-from tinygrad.uop.ops import UOp, Ops
+
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
+if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
+
+try:
+  from tinygrad.schedule.kernelize import get_kernelize_map
+  from tinygrad.renderer import Renderer, ProgramSpec
+  from tinygrad.engine.realize import get_program
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+except ImportError as e:
+  print(repr(e))
+  exit(int(ASSERT_DIFF))
 
 # *** process replay settings
 
@@ -19,12 +28,11 @@ early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
 def trunc_log(x):
-  if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
+  if len(lines:=(x if isinstance(x, str) else repr(x)).splitlines()) > MAX_LINES:
+    lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
 # user config
-ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
-if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
@@ -39,21 +47,22 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_linearize(k:Kernel, _:Kernel, name_override=None, ast_transform=None) -> tuple[str, str, tuple[Any, ...]]:
-  # create a copy because the Kernel class contains optimization parameters (other than applied_opts) in its state
-  # this should be made fully functional. It's fine for process replay since copy returns a fresh instance
-  k2 = k.copy()
-  k2.linearize(name_override=name_override or to_function_name(k.name), ast_transform=ast_transform)
-  def to_str(ret:Kernel) -> str:
-    try: return ret.opts.render(ret.uops)
-    except NotImplementedError: return "" # NULL backend doesn't have a renderer, this is okay
-  return to_str(k2), to_str(k), (k.ast, k.opts, k.applied_opts)
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
+  input_ast = ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast
+  p2 = get_program(input_ast, renderer)
+  def to_str(ret:ProgramSpec) -> str:
+    # PYTHON renderer pickles UOps, first unpickle and decode here
+    if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
+    return ret.src
+  # properly color the name arg
+  ast_repr = codecs.decode(str(input_ast), "unicode_escape")
+  return to_str(p2), to_str(p), (ast_repr, renderer)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "linearize":replay_linearize}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int) -> None:
+def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
@@ -68,8 +77,10 @@ def diff(offset:int) -> None:
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
-      if (replayer:=replayers.get(name)) is None: continue
-      with Context(**ctx_vars): good, compare, metadata = replayer(ret, *args, **kwargs)
+      if (replayer:=fxns.get(name)) is None: continue
+      with Context(**ctx_vars):
+        if (ret:=replayer(ret, *args, **kwargs)) is None: continue
+        good, compare, metadata = ret
       if good != compare:
         for m in metadata: trunc_log(m)
         logging.info(loc)
@@ -83,6 +94,25 @@ def diff(offset:int) -> None:
   conn.commit()
   cur.close()
 
+# *** generic runner to map rows of a table to a function in parallel
+
+def _pmap(fxns:dict[str, Callable]) -> None:
+  conn = db_connection()
+  cur = conn.cursor()
+  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  except sqlite3.OperationalError:
+    raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+  finally:
+    conn.commit()
+    cur.close()
+
+  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
+    inputs = list(range(0, row_count, PAGE_SIZE))
+    list(tqdm(pool.imap_unordered(functools.partial(diff, fxns=fxns), inputs), total=len(inputs)))
+    pool.close()
+    pool.join()
+    pool.terminate()
+
 # *** main loop
 
 if __name__ == "__main__":
@@ -90,20 +120,8 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
-  conn = db_connection()
-  cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
-  except sqlite3.OperationalError:
-    warnings.warn(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?", ProcessReplayWarning)
-    exit(int(ASSERT_DIFF))
-  finally:
-    conn.commit()
-    cur.close()
-
   logging.info(f"running process replay with {ASSERT_DIFF=}")
-  with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
-    inputs = list(range(0, row_count, PAGE_SIZE))
-    list(tqdm(pool.imap_unordered(diff, inputs), total=len(inputs)))
-    pool.close()
-    pool.join()
-    pool.terminate()
+  try: _pmap(replayers)
+  except Exception as e:
+    logging.info("process replay err", e)
+    exit(int(ASSERT_DIFF))

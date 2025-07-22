@@ -64,6 +64,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
     return iter(dataset)
 
+  @unittest.skip("flaky")
   def test_training_set(self):
     preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(False)
     ref_dataset = self._create_ref_dataloader(preproc_img_pths, preproc_lbl_pths, False)

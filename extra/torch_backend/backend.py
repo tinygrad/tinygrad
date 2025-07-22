@@ -59,6 +59,7 @@ view_ops = {
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
+  "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
@@ -351,6 +352,11 @@ def sort_values(input, dim=-1, descending=False, stable=True, values=None, indic
   unwrap(indices).assign(out_indices.cast(dtypes.int64))
   return wrap(out_values), wrap(out_indices)
 
+@torch.library.impl("aten::_linalg_svd", "privateuseone")
+def _linalg_svd(self, full_matrices=False):
+  U, S, Vh = unwrap(self).svd(full_matrices)
+  return wrap(U), wrap(S), wrap(Vh)
+
 # register some decompositions
 from torch._decomp import get_decompositions
 decomps = [
@@ -368,6 +374,7 @@ decomps = [
   aten.threshold,
   aten.nll_loss_forward,
   aten.nll_loss_backward,
+  aten.nll_loss2d_backward,
   # AttributeError: 'int' object has no attribute '_broadcasted'
   aten.sigmoid_backward,
   aten.tanh_backward,
@@ -376,6 +383,7 @@ decomps = [
   aten.softshrink,
   aten.hardshrink,
   aten.log_sigmoid_forward,
+  aten.log_sigmoid_backward,
   aten.isneginf,
   aten.isposinf,
   aten.nan_to_num,
@@ -409,6 +417,7 @@ decomps = [
   #aten.lgamma,
   # this needs copy_strided
   #aten.lerp,
+  aten.norm,
 ]
 for k,v in get_decompositions(decomps).items():
   key = str(k._schema).split("(")[0]
@@ -470,6 +479,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
   "aten.fmin.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.minimum(input, other))),
   "aten.amax.out": lambda self,dim=None: self.max(axis=dim),
+  "aten.amin.out": lambda self,dim=None: self.min(axis=dim),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,

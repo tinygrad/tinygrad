@@ -9,6 +9,7 @@ from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import fetch, trange
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import DTypeLike, dtypes
+from tinygrad.helpers import getenv, fetch
 import numpy as np
 import tiktoken
 from tiktoken import Encoding
@@ -664,7 +665,7 @@ if __name__ == "__main__":
         log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
       # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-      out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
+      out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
       idx = int(out[0,-1].argmax().numpy().item())
       lst.append(idx)
       dec = enc.decode(lst)
