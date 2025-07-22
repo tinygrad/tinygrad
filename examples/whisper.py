@@ -614,7 +614,7 @@ def transcribe_waveform(model: Whisper, enc: tiktoken.Encoding, waveforms, outpu
     to_decode = np.tile(ctx, (5, 1)) if beam else ctx.reshape(1, -1)
     processed, start_time, ctx = process_temperature_loop(model, to_decode, encoded_audio, nsample, start_tokens, eot, enc, beam, no_speech_threshold, start_time, output_fh, transcribed, transcriptions, waveforms, log_spec)
     if not processed: start_time, ctx = start_time + 30, np.array(start_tokens)
-  return transcriptions[0].strip() if transcriptions else transcribed
+  return transcriptions[0].strip() if transcriptions else ""
 
 def listener(q):
   if pyaudio is None:
