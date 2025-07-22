@@ -103,11 +103,16 @@ class CPUAllocator(HCQAllocatorBase):
     elif sys.platform == "win32": addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
-  def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
-  def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
+  def _as_buffer(self, src) -> memoryview
+   self.dev.synchronize()
+   return to_mv(src.va_addr, src.size)
+  def _as_dmaref(self, buf):
+    self.dev.synchronize()
+    return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview):
     with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src):
+    self.dev.synchronize()
     with cpu_profile('CPU -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
