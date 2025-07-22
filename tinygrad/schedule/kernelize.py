@@ -39,7 +39,6 @@ def split_reduceop(reduce:UOp, x:UOp):
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and real_strides[i]!=0]): return None
   dim_to_split, divisor = split_candidates[0]
-  if x.shape[dim_to_split]//divisor == 1: return None #no point if there is no meaningful shape change
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
