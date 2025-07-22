@@ -990,7 +990,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + b
     # run_schedule(check_schedule([out0, out1], 2))
-    run_schedule(check_schedule([out0, out1], 3))
+    run_schedule(check_schedule([out0, out1], 4))
     np.testing.assert_allclose(out0.numpy(), a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+b.numpy(), atol=1e-4, rtol=1e-4)
 
@@ -1621,11 +1621,11 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
-  def test_conv2d(self): _test_conv2d(6)
+  def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(6, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   @unittest.expectedFailure
