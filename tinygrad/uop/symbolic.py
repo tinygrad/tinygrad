@@ -3,7 +3,7 @@ from typing import Any, Literal, cast
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType
+from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
 from tinygrad.uop.transcendental import xpow
 
@@ -407,11 +407,9 @@ def reduce_mul_chain(r:UOp):
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT}
 sym = symbolic_flat+PatternMatcher([
-  # LOAD/STORE REG -> CONST (this is required)
-  (UPat(Ops.DEFINE_REG, name='x').store(UPat(Ops.DEFINE_REG, name='x').load()), lambda x: x.src[0]),
-  (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
   # LOAD/STORE -> NOOP
-  (UPat.var('x').store(UPat.var('x').load()), lambda x: x),
+  (UPat.var('x').store(UPat.var('x').load()), lambda x: x if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
+  (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
   # self ASSIGN is just self
   (UPat(Ops.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # VECTORIZE/CONST, VECTORIZE/GEP
