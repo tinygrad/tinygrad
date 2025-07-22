@@ -155,10 +155,6 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     v["y"].append(v["y"][-1])
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
-#from tinygrad.viz.metal import xctrace_export
-def get_gpu_counters() -> Generator[dict, None, None]:
-  yield "hello world"
-
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   for ev in profile:
