@@ -1,4 +1,3 @@
-from typing import cast
 from tinygrad.dtype import DType, PtrDType, dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
