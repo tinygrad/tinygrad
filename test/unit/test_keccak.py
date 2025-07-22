@@ -38,10 +38,14 @@ class TestKeccak(unittest.TestCase):
     out = Tensor(b"abc").keccak()
     self.assertEqual(bytes(out.tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
 
-  @unittest.expectedFailure
   def test_long(self):
-    out = Tensor(b"\x00" * 4096).keccak()
-    self.assertEqual(bytes(out.tolist()), hashlib.shake_128(b"\x00" * 4096).digest(16))
+    data = b"\x00" * 4
+    self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
+
+    data = b"\x00" * 4096
+    with self.assertRaises(RecursionError):
+      # TODO: fix
+      self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
 if __name__ == "__main__":
   unittest.main()
