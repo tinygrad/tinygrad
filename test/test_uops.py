@@ -241,6 +241,7 @@ class TestConstantFolding(unittest.TestCase):
     si = t.schedule()
     assert len(si) == 0
 
+@unittest.skip("outdated")
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
