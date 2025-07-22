@@ -35,6 +35,7 @@ async function renderDag(graph, additions, recenter=false) {
   }
   if (timeout != null) clearTimeout(timeout);
   const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new layout...";
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
@@ -190,8 +191,12 @@ async function renderProfiler() {
     mainGraph.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
     if (counterSources[k] == null) {
       const eventSource = new EventSource("/get_counters?device="+k);
+      const progressMessage = document.querySelector(".progress-message");
+      progressMessage.innerText = "Fetching GPU counters...";
+      timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
       eventSource.onmessage = (e) => {
         if (e.data === "END") {
+          progressMessage.style.display = "none";
           renderProfiler();
           return eventSource.close();
         }
