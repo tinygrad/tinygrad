@@ -27,7 +27,7 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
 
 def is_packed(dt:DType, odt:DType|None = None) -> bool:
   if odt is None: odt = dt
-  return dt.itemsize < 4 and dt.base != dtypes.half and cast(PtrDType, odt).addrspace != AddrSpace.REG
+  return dt.itemsize < 4 and dt.base != dtypes.half and (not isinstance(odt, PtrDType) or odt.addrspace != AddrSpace.REG)
 
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
