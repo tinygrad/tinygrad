@@ -317,9 +317,9 @@ class Kernel:
     elif opt.op is OptOps.SWAP:
       check(axis < amt, f"swap is only for axis < amt, getting {amt=}, {axis=}")
       check(self.axis_types[axis]==self.axis_types[amt]==AxisType.GLOBAL, f"swap is for globals {self.axis_types[axis]=}, {self.axis_types[amt]=}")
-      def perm_swap(x):
-        x[axis], x[amt] = x[amt], x[axis]
-        return x
+      def perm_swap(permute):
+        permute[axis], permute[amt] = permute[amt], permute[axis]
+        return permute
       self.permute(perm_swap)
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
