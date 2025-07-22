@@ -125,7 +125,7 @@ def gep_on_store(gep:UOp, st:UOp):
   a = {}
   for i,x in enumerate(gep.arg): a[x] = i
   new_arg = tuple(x[1] for x in sorted(a.items()))
-  return UOp(Ops.STORE, src=(gep.src[0], st.gep(new_arg)))
+  return gep.src[0].store(st.gep(new_arg))
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
