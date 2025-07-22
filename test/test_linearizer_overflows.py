@@ -171,7 +171,7 @@ class TestLinearizerOverflowAlt(unittest.TestCase):
     in_st_1 = ShapeTracker(views=(View(shape=(1, BS, 1, 3, 8, 230, 8, 230), strides=(0, 150528, 0, 50176, 0, 224, 0, 1), offset=-675, mask=((0, 1), (0, BS), (0, 1), (0, 3), (0, 8), (3, 227), (0, 8), (3, 227)), contiguous=False),
                                   View(shape=(BS, 1, 64, 112, 112, 3, 7, 7), strides=(10156800, 0, 0, 3680, 2, 3385600, 425040, 231), offset=0, mask=None, contiguous=False))).to_uop()
     in_st_2 = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112, 3, 7, 7), strides=(0, 0, 147, 0, 0, 49, 7, 1), offset=0, mask=None, contiguous=False),)).to_uop()
-    ot_st = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112, 1, 1, 1), strides=(802816, 0, 12544, 112, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)).to_uop()
+    ot_st = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112), strides=(802816, 0, 12544, 112, 1), offset=0, mask=None, contiguous=True),)).to_uop()
     prod = UOp(Ops.LOAD, dtypes.float, (g1.view(in_st_1.arg),)) * UOp(Ops.LOAD, dtypes.float, (g2.view(in_st_2.arg),))
     store = UOp(Ops.STORE, src=(g0.view(ot_st.arg), UOp(Ops.REDUCE_AXIS, dtypes.float, (prod,), (Ops.ADD, (7, 6, 5)))))
     ast = UOp(Ops.SINK, src=(store,))
@@ -183,7 +183,7 @@ class TestLinearizerOverflowAlt(unittest.TestCase):
     in_st_1 = ShapeTracker(views=(View(shape=(1, BS, 1, 3, 8, 230, 8, 230), strides=(0, 150528, 0, 50176, 0, 224, 0, 1), offset=-675, mask=((0, 1), (0, BS), (0, 1), (0, 3), (0, 8), (3, 227), (0, 8), (3, 227)), contiguous=False),
                                   View(shape=(BS, 1, 64, 112, 112, 3, 7, 7), strides=(10156800, 0, 0, 3680, 2, 3385600, 425040, 231), offset=0, mask=None, contiguous=False))).to_uop()
     in_st_2 = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112, 3, 7, 7), strides=(0, 0, 147, 0, 0, 49, 7, 1), offset=0, mask=None, contiguous=False),)).to_uop()
-    ot_st = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112, 1, 1, 1), strides=(802816, 0, 12544, 112, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)).to_uop()
+    ot_st = ShapeTracker(views=(View(shape=(BS, 1, 64, 112, 112), strides=(802816, 0, 12544, 112, 1), offset=0, mask=None, contiguous=True),)).to_uop()
     prod = UOp(Ops.LOAD, dtypes.float, (g1.view(in_st_1.arg),)) * UOp(Ops.LOAD, dtypes.float, (g2.view(in_st_2.arg),))
     store = UOp(Ops.STORE, src=(g0.view(ot_st.arg), UOp(Ops.REDUCE_AXIS, dtypes.float, (prod,), (Ops.ADD, (7, 6, 5)))))
     ast = UOp(Ops.SINK, src=(store,))

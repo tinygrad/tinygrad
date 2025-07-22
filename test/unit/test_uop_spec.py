@@ -85,7 +85,7 @@ class TestUOpSpec(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
-    st = UOp.store(buf.view(ShapeTracker.from_shape((32, 1))), r.view(r.st.expand((32, 1)))+a)
+    st = UOp.store(buf.view(ShapeTracker.from_shape((32,))), r.view(r.st.expand((32,)))+a)
     with self.assertRaisesRegex(InvalidASTException, "UOp verification failed"): helper_test_verify_ast(st)
 
   def test_const_view_always_valid(self):

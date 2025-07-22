@@ -72,10 +72,16 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
+    is_new = False
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
+    # self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*len(self.sts[0].shape)))
+
     if self.sts:
       max_dim = max(len(st.shape) for st in self.sts)
-      self.sts = [st.reshape(st.shape + (1,) * (max_dim - len(st.shape))) for st in self.sts]
+      new_sts = [st.reshape(st.shape + (1,) * (max_dim - len(st.shape))) for st in self.sts]
+      if any(new_sts != st for new_sts, st in zip(new_sts, self.sts)):
+        is_new = True
+        self.sts = new_sts
       self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*max_dim))
 
     # parameters for optimization
@@ -88,7 +94,8 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    if not is_new:
+      self.simplify_merge_adjacent()
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
@@ -199,7 +206,6 @@ class Kernel:
     return False
 
   def simplify_merge_adjacent(self):
-    return # TODO
     assert not hasattr(self, 'axis_types'), "don't call this after init"
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]

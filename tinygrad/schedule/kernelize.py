@@ -46,7 +46,10 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  #return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  # test/test_schedule.py::TestSchedule::test_reduce_expand_child
+  split_axis = [i for i, s in enumerate(splitted.r(*reduce.arg).shape) if s == divisor][0]
+  return splitted.r(*reduce.arg).r(reduce.arg[0], (split_axis,)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
@@ -184,6 +187,8 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
+    # test/test_symbolic_ops.py TestSymbolicOps.test_var
+    if any(isinstance(x, UOp) for x in src.shape): return None
     if prod(new_shape) != prod(src.shape): return None
     ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
     # TestOps.test_logsumexp
@@ -208,10 +213,11 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  if unwrap(view.st).contiguous and view.size == r.size and \
-      (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
-       tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
-    return None
+  # (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
+  # if unwrap(view.st).contiguous and view.size == r.size and \
+  #     (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
+  #      tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
+  #   return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
