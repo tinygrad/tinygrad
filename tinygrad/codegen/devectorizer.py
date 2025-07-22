@@ -343,7 +343,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     lst = [is_start.where(reduce_start, acc.load(*reduce_range))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.load(acc.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
+  return acc.load(acc.store(ret).endrange(*reduce_range)) if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:

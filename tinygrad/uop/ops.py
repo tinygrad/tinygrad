@@ -235,6 +235,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
+  def endrange(self, *rng:UOp): return functools.reduce(lambda x,r: UOp(Ops.ENDRANGE, src=(r,x)), rng[::-1], self)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
