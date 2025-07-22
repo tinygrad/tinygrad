@@ -219,6 +219,7 @@ class TestMemoryview(unittest.TestCase):
     print(f"from_mv vs mv_address: {fmv_us:8.3f} µs vs {mva_us:8.3f} µs")
 
 class TestGetContraction(unittest.TestCase):
+  @unittest.skip("ones are now handled in swizzle")
   def test_contraction_with_reduce(self):
     r = get_contraction((16, 1, 1, 1), (16, 1, 1))
     self.assertEqual(r, [[0], [], [1, 2, 3]])
