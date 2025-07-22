@@ -104,10 +104,16 @@ class CPUAllocator(HCQAllocatorBase):
       offset = round_up(ctypes.addressof(tmpbuf:=(ctypes.c_uint8 * (size + 0x1000))()), 0x1000) - ctypes.addressof(tmpbuf)
       buf = (ctypes.c_uint8 * size).from_buffer(tmpbuf, offset)
     return HCQBuffer(va:=ctypes.addressof(buf), sz:=ctypes.sizeof(buf), meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
-  def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
-  def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
+  def _as_buffer(self, src) -> memoryview:
+    self.dev.synchronize()
+    return to_mv(src.va_addr, src.size)
+  def _as_dmaref(self, buf):
+    self.dev.synchronize()
+    return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
+  def _copyout(self, dest:memoryview, src):
+    self.dev.synchronize()
+    ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
