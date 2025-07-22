@@ -158,19 +158,16 @@ spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat())), lambda: True),
   (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
-  # LOAD on STORE
-  (UPat(Ops.LOAD, src=(UPat(Ops.STORE),)), lambda: True),
-
   # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
-  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.BARRIER))), validate_index),
+  (UPat(Ops.LOAD, src=(index_pat, UPat((Ops.BARRIER, Ops.STORE)))), validate_index),
   (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
   (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"))), validate_store),
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
+  (UPat(Ops.STORE, dtypes.void, src=(index_pat, UPat(name="val"))), validate_store),
+  (UPat(Ops.STORE, dtypes.void, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
+  (UPat(Ops.STORE, dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),

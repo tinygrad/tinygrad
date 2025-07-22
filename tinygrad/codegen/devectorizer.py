@@ -113,6 +113,7 @@ def cat_after_store(cat:UOp, data:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
     offset += s.dtype.count
+  return UOp.sink(*ret)
   # dtype CAT
   dtypes: list[PtrDType] = [x.dtype for x in ret if isinstance(x.dtype, PtrDType)]
   assert len(dtypes) == len(ret) and all_same([(x.size, x.addrspace) for x in dtypes])
@@ -334,12 +335,15 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
-              (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
-    lst = [acc.load()] + lst  # put acc as the first element
+    #acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG),
+    #          (red.const_like(identity_element(red.arg, red.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
+    reduce_start = red.const_like(identity_element(red.arg, red.dtype.scalar()))
+    is_start = functools.reduce(lambda x,y: x&y, [x.eq(x.const_like(0)) for x in reduce_range]).broadcast(red.dtype.count)
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), (reduce_start,), (ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
+    lst = [is_start.where(reduce_start, acc.load(*reduce_range))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.store(ret).load() if len(reduce_range) != 0 else ret
+  return acc.load(acc.store(ret).endrange(*reduce_range)) if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
