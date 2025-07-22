@@ -49,7 +49,7 @@ def do_expand(root:UOp):
       if root.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif root.op is Ops.REDUCE and src.op is Ops.RANGE:
+      elif root.op in {Ops.REDUCE, Ops.STORE} and src.op is Ops.RANGE:
         # for any range args of REDUCE, pass them through
         new_srcs.append(src)
       elif src.dtype.count > 1:
