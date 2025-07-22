@@ -188,14 +188,11 @@ class PTXRenderer(Renderer):
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         r[u] = r[u.src[0]]
         continue
-      #if u.op is Ops.DEFINE_REG:
-        #r[u] = ssa('acc', dtype=self.types[u.dtype.base.scalar()])
-        #continue
       if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
         r[u] = r[u.src[0]]
         if u.op is Ops.STORE:
-          typ = "pred" if u.src[1].dtype == dtypes.bool else self.types[u.src[1].dtype][1:]
-          kernel.append(f"mov.b{typ} {self.r[u.src[0]]}, {self.r[u.src[1]]};")
+          typ = "pred" if u.src[1].dtype == dtypes.bool else ("b"+self.types[u.src[1].dtype][1:])
+          kernel.append(f"mov.{typ} {self.r[u.src[0]]}, {self.r[u.src[1]]};")
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
       elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
