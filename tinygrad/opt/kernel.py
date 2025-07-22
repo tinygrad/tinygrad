@@ -88,7 +88,7 @@ class Kernel:
     self.simplify_ones()
 
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * (len(self.full_shape) - len(self.output_shape))
+    self.axis_types: list[AxisType] = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * (len(self.full_shape) - len(self.output_shape))
 
     self.simplify_merge_adjacent()
 
@@ -184,7 +184,7 @@ class Kernel:
     def new_perm_fxn(x):
       max_insert = min(insert_at,len(x))
       return [i for i in range(max_insert) if i != move_axis]+[move_axis]+[i for i in range(max_insert, len(x)) if i != move_axis] \
-      if move_axis < len(x) else list(range(len(x)))
+      if move_axis < len(x) else x
 
     self.reshape(new_shape_fxn)
     self.permute(new_perm_fxn)
