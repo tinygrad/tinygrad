@@ -293,7 +293,7 @@ def no_vectorized_acc(acc:UOp, c:UOp):
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_REG, name="acc").index(UPat.cvar("c")), no_vectorized_acc),
 ])
@@ -314,7 +314,7 @@ pm_render = PatternMatcher([
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
 ])
 
-# *** Ops.REDUCE -> Ops.DEFINE_ACC+Ops.ASSIGN ***
+# *** Ops.REDUCE -> Ops.DEFINE_ACC ***
 
 @dataclass
 class ReduceContext:

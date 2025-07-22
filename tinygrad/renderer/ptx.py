@@ -215,6 +215,5 @@ class PTXRenderer(Renderer):
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
-      if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
-      elif u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg[0]};"] + kernel
+      if u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg[0]};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items())
