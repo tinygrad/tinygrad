@@ -31,6 +31,7 @@ def get_index(ast:UOp) -> IndexContext:
   for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
     if at == AxisType.GROUP_REDUCE:
       ridxs[i] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), 1000+i)
+
   return IndexContext(idxs, ridxs)
 
 # ***** lowering (given index) *****
