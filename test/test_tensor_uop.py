@@ -105,7 +105,7 @@ class TestReduceOp(unittest.TestCase):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
     sched = a.schedule()
-    assert len(sched) == 1
+    assert len(sched) == 2
     for s in sched:
       assert reduce_kernel.match(s.ast, {})
 
@@ -113,7 +113,7 @@ class TestReduceOp(unittest.TestCase):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()
     sched = a.schedule()
-    assert len(sched) == 1
+    assert len(sched) == 2
     for s in sched:
       assert reduce_kernel.match(s.ast, {})
 
