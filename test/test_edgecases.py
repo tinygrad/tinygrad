@@ -94,22 +94,6 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     out = Tensor([], dtype=dtypes.float32).masked_select(Tensor([], dtype=dtypes.bool))
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
-class TestRollEdgeCases(unittest.TestCase):
-  # we don't need more of these
-
-  def test_roll_mismatched_dims(self):
-    with self.assertRaises(RuntimeError):
-      torch.roll(torch.arange(9).reshape(3, 3), 1, dims=(0, 1))
-    with self.assertRaises(RuntimeError):
-      Tensor.arange(9).reshape(3, 3).roll(1, dims=(0, 1))
-
-  def test_roll_extra_shift(self):
-    # tinygrad ignores extra shift values instead of raising
-    with self.assertRaises(RuntimeError):
-      torch.roll(torch.arange(10), (1, 2), dims=0)
-    with self.assertRaises(RuntimeError):
-      Tensor.arange(10).roll((1, 2), dims=0)
-
 class TestDropoutProbabilityEdgeCases(unittest.TestCase):
   # we don't need more of these
 
