@@ -1393,12 +1393,12 @@ def train_stable_diffusion():
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
       self.first_stage_model = AutoencoderKL()
 
-  Device.DEFAULT="CPU"
+  #Device.DEFAULT="CPU"
 
   model = StableDiffusion()
   weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  load_state_dict(model, weights)
+  #load_state_dict(model, weights)
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
 
   unet = model.model.diffusion_model
@@ -1416,9 +1416,10 @@ def train_stable_diffusion():
   zero_module(unet.out[2])
 
   optimizer = AdamW(get_parameters(unet))
+  grad_scaler = GradScaler()
+
   lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
   lr_scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
-
   # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   lr_scheduler.step()
 
@@ -1547,7 +1548,7 @@ def train_stable_diffusion():
     prompt = batch['txt']
     context = jit_context_step(prompt)
 
-    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, lr_scheduler)
+    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")
 
     num_seen_images += BS
