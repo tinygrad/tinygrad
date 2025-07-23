@@ -71,6 +71,7 @@ class HCQGraph(MultiGraphRunner):
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
+    self.input_replace_map: dict[HCQCompiled, set[int]] = collections.defaultdict(set)
     self.fixedvars: dict[HCQCompiled, dict[Variable, int]] = {}
 
     for j,ji in enumerate(jit_cache):
@@ -156,16 +157,13 @@ class HCQGraph(MultiGraphRunner):
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
         enqueue_queue.exec(ji.prg._prg, self.ji_args[j], tuple(ji.prg.p.global_size or (1,1,1)), tuple(ji.prg.p.local_size or (1,1,1)))
-      elif isinstance(ji.prg, BufferXfer):
+      elif isinstance(ji.prg, (BufferXfer, BufferCopy)):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        enqueue_dev.allocator.map(dest._buf)
-
+        for bufid, src in enumerate(ji.bufs):
+          if (inprep_idx:=self.input_replace.get((j, bufid))) is not None: self.input_replace_map[enqueue_dev].add(inprep_idx)
+          else: enqueue_dev.allocator.map(self.hcq_bufs[j][bufid])
         enqueue_queue.copy(self.hcq_bufs[j][0].va_addr, self.hcq_bufs[j][1].va_addr, dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
-      elif isinstance(ji.prg, BufferCopy):
-        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        enqueue_dev.allocator.map(dest._buf if self.is_cpu(ji.bufs[0].device) else src._buf)
-        enqueue_queue.copy(self.hcq_bufs[j][0].va_addr, self.hcq_bufs[j][1].va_addr, dest.nbytes)
 
       # Encode finish profile timestamp (if needed).
       if PROFILE and self.prof_signal_is_used[j * 2 + 1]: enqueue_queue.timestamp(self.prof_signals[j * 2 + 1])
@@ -188,6 +186,9 @@ class HCQGraph(MultiGraphRunner):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
     for sig in self.queue_signals_to_reset: sig.value = 0
     self.signals['KICK'].value = self.kickoff_value
+
+    for dev in self.devices:
+      for idx_to_map in self.input_replace_map[dev]: dev.allocator.map(input_rawbuffers[idx_to_map]._buf)
 
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 

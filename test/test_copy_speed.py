@@ -59,18 +59,16 @@ class TestCopySpeed(unittest.TestCase):
         Device[Device.DEFAULT].synchronize()
       np.testing.assert_equal(t.numpy(), x.numpy())
 
-  # def testCopytoCPUtoDefaultJit(self):
-  #   @TinyJit
-  #   def _do_copy(x):
-  #     t = x + Tensor.randn(N, N, 2, device="CPU").contiguous().realize()
-  #     return t.to(Device.DEFAULT).realize()
+  def testCopytoCPUtoDefaultJit(self):
+    @TinyJit
+    def _do_copy(x): return t.to(Device.DEFAULT).realize()
 
-  #   for _ in range(5):
-  #     t = Tensor.randn(N, N, 2, device="CPU").contiguous().realize()
-  #     with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
-  #       x = _do_copy(t)
-  #       Device[Device.DEFAULT].synchronize()
-      # np.testing.assert_equal(t.numpy(), x.numpy())
+    for _ in range(5):
+      t = Tensor.randn(N, N, 2, device="CPU").contiguous().realize()
+      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+        x = _do_copy(t)
+        Device[Device.DEFAULT].synchronize()
+      np.testing.assert_equal(t.numpy(), x.numpy())
 
   @unittest.skipIf(CI, "CI doesn't have 6 GPUs")
   @unittest.skipIf(Device.DEFAULT != "GPU", "only test this on GPU")
