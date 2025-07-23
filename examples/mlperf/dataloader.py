@@ -1,4 +1,4 @@
-import os, random, pickle, queue
+import os, random, pickle, queue, struct
 from typing import List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
@@ -6,6 +6,7 @@ from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu
 import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX
+from tinygrad.nn.state import TensorIO
 
 ### ResNet
 
@@ -510,6 +511,58 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       # happens with BENCHMARK set
       pass
 
+# llama3
+
+class BinIdxDataset:
+  def __init__(self, base_path:Path):
+    self.idx_t = Tensor(base_path.with_name(f"{base_path.name}.idx"))
+    self.idx = TensorIO(self.idx_t)
+
+    # parse idx file
+    magic = self.idx.read(9)
+    assert magic == b"MMIDIDX\x00\x00", "invalid index file format"
+    version, = struct.unpack("<Q", self.idx.read(8))
+    assert version == 1, "unsupported index version"
+    dtype_code, = struct.unpack("<B", self.idx.read(1))
+    self.dtype = {1:dtypes.uint8, 2:dtypes.int8, 3:dtypes.int16, 4:dtypes.int32, 5:dtypes.int64, 6:dtypes.float64, 7:dtypes.double, 8:dtypes.uint16}[dtype_code]
+    self.count, = struct.unpack("<Q", self.idx.read(8))
+    doc_count, = struct.unpack("<Q", self.idx.read(8))
+
+    start = self.idx.tell()
+    end = start + self.count * dtypes.int32.itemsize
+    self.sizes = self.idx_t[start:end].bitcast(dtypes.int32)
+
+    start = end
+    end = start + self.count * dtypes.int64.itemsize
+    self.pointers = self.idx_t[start:end].bitcast(dtypes.int64)
+
+    start = end
+    end = start + doc_count * dtypes.int64.itemsize
+    self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64)
+
+    # bin file
+    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin"))
+
+  def _index(self, idx):
+    return self.pointers[idx].item(), self.sizes[idx].item()
+
+  def __getitem__(self, idx):
+    ptr, size = self._index(idx)
+    return self.bin_t[ptr:ptr+size*self.dtype.itemsize].bitcast(self.dtype)
+
+# https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
+class GPTDataset:
+  def __init__(self):
+    pass
+
+def batch_load_llama3(bs:int, base_dir:Path, val:bool=True):
+  if val:
+    dataset = BinIdxDataset(base_dir / "validation" / "c4-validationn-91205-samples.en_text_document")
+    for i in range(dataset.count):
+      yield dataset[i].numpy()
+  else:
+    raise NotImplementedError()
+
 if __name__ == "__main__":
   def load_unet3d(val):
     assert not val, "validation set is not supported due to different sizes on inputs"
@@ -537,6 +590,10 @@ if __name__ == "__main__":
     with tqdm(total=len(dataset.imgs.keys())) as pbar:
       for x in batch_load_retinanet(dataset, val, base_dir):
         pbar.update(x[0].shape[0])
+
+  def load_llama3(val):
+    for x in batch_load_llama3(1, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)):
+      print(x.shape)
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
