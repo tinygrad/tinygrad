@@ -1148,25 +1148,20 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(4, 4, N, N)
     b = Tensor.rand(4, 4, N)
     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    # helper_linearizer_opt(r, [
-    #   [Opt(OptOps.LOCAL, 0, 8)],
-    # ])
-    # return
-    # TODO
     helper_linearizer_opt(r, [
       [Opt(OptOps.LOCAL, 0, 2)],
-      # [Opt(OptOps.LOCAL, 0, 8)],
-      # [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
+      [Opt(OptOps.LOCAL, 0, 8)],
+      [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
       [Opt(OptOps.GROUPTOP, 0, 2)],
       [Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      # [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      # [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
       # Checking how it works with locals + grouped reduce
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
       # Checking how it works with locals + grouped reduce + upcasts
-      # [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
       # many local + many group
       [Opt(OptOps.GROUP, 0, 2)] * 4,
       [Opt(OptOps.LOCAL, 0, 2)] * 4,
