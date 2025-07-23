@@ -93,14 +93,14 @@ class BlockContext:
       # STORE/ASSIGN subtract from the next ctx
       if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
       elif u.op is Ops.STORE:
-        # ugh, deal with non-reduce locals. probably wrong
-        if any(x.op is Ops.DEFINE_LOCAL for x in u.src[0].toposort()):
+        if len(definereg:=[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_REG]):
+          # old assign logic
+          ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in definereg[0].src[1:]])
+        elif any(x.op is Ops.DEFINE_LOCAL for x in u.src[0].toposort()):
+          # deal with non-reduce locals. probably wrong
           idx_context, store_context = ctx.last_ctx(u.src[0]), ctx.last_ctx(u.src[1])
           ctx.child_ctxs[u] = tuple([y for y in store_context if y not in idx_context and y.op is Ops.RANGE])
         else: ctx.child_ctxs[u] = ()
-      elif u.op is Ops.ASSIGN:
-        assert u.src[0].op is Ops.DEFINE_REG
-        ctx.child_ctxs[u] = tuple([y for y in ctx.last_ctx(u.src[1]) if y not in u.src[0].src[1:]])
     return ctx
 
 # ***** make blocks *****

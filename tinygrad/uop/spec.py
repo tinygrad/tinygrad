@@ -1,6 +1,6 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
-from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
+from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 try:
   import z3
@@ -128,10 +128,10 @@ index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
-  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=(UPat.var("c"),), name="x", allow_any_len=True),
-   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
+   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype.base == x.dtype.base),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, int)),
@@ -155,8 +155,11 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+
+  # LOAD on STORE
+  (UPat(Ops.LOAD, src=(UPat(Ops.STORE),)), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
@@ -165,9 +168,8 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"))), validate_store),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -177,7 +179,6 @@ spec = PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
-  (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_REG, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # WMMA has a <a, b, acc>
