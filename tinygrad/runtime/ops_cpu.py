@@ -1,6 +1,6 @@
 from __future__ import annotations
-import platform, subprocess, sys, ctypes, functools, time
-from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, round_up, wait_cond
+import platform, subprocess, sys, ctypes, functools, time, mmap
+from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
@@ -62,10 +62,9 @@ class CPUProgram(HCQProgram):
       ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.mem), ctypes.c_size_t(len(lib)))
       self.fxn = ctypes.CFUNCTYPE(None)(self.mem)
     else:
-      from mmap import mmap, PROT_READ, PROT_WRITE, PROT_EXEC, MAP_ANON, MAP_PRIVATE
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
-      self.mem = mmap(-1, len(lib), MAP_ANON | MAP_PRIVATE | (MAP_JIT if OSX else 0), PROT_READ | PROT_WRITE | PROT_EXEC)
+      self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(False)
       self.mem.write(lib)
@@ -87,11 +86,10 @@ class CPUProgram(HCQProgram):
 
 class CPUAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr: buf = (ctypes.c_uint8 * size).from_address(options.external_ptr)
-    else:
-      offset = round_up(ctypes.addressof(tmpbuf:=(ctypes.c_uint8 * (size + 0x1000))()), 0x1000) - ctypes.addressof(tmpbuf)
-      buf = (ctypes.c_uint8 * size).from_buffer(tmpbuf, offset)
-    return HCQBuffer(va:=ctypes.addressof(buf), sz:=ctypes.sizeof(buf), meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
+    if options.external_ptr: addr, buf = options.external_ptr, None
+    elif sys.platform == "win32": addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
+    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
+    return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
   def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
