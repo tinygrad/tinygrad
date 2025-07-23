@@ -509,10 +509,6 @@ jobs:
         run: CPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
-      - name: Run REMOTE=1 Test (without process replay)
-        run: |
-          # TODO: re enable process replay, currently remote schedule opens devices
-          CAPTURE_PROCESS_REPLAY=0 REMOTEDEV=CPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -536,10 +532,6 @@ jobs:
           opencl: 'true'
       - name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Run REMOTE=1 Test
-        run: |
-          REMOTEDEV=GPU REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
-          REMOTEDEV=GPU IMAGE=2 REMOTE=1 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Test Optimization Helpers
         run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       #- name: Test Action Space
@@ -900,12 +892,11 @@ jobs:
           python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
 
   amdremote:
-    name: Linux (remote amd)
+    name: Linux (remote)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
       REMOTE: 1
-      HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - name: Checkout Code
@@ -913,38 +904,58 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: linux-remote-amd
+          key: linux-remote
           deps: testing_minimal
           amd: 'true'
           llvm: 'true'
+          opencl: 'true'
       - name: Start remote server
         run: |
           start_server() {
             systemd-run --user \
               --unit="$1" \
-              --setenv=REMOTEDEV=AMD \
+              --setenv=REMOTEDEV="$2" \
               --setenv=MOCKGPU=1 \
               --setenv=PYTHONPATH=. \
-              --setenv=PORT="$2" \
+              --setenv=PORT="$3" \
               --working-directory="$(pwd)" \
               python tinygrad/runtime/ops_remote.py
           }
 
-          start_server "remote-server-1" 6667
-          start_server "remote-server-2" 6668
+          start_server "remote-server-amd-1" "AMD" 6667
+          start_server "remote-server-amd-2" "AMD" 6668
+          start_server "remote-server-gpu" "GPU" 7667
+          start_server "remote-server-cpu" "CPU" 8667
       - name: Check Device.DEFAULT and print some source
+        env:
+          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
           python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'AMD', Device.default.properties.real_device"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run REMOTE=1 Test
+      - name: Run REMOTE=1 Test (AMD)
+        env:
+          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
         run: |
           python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py
+      - name: Run REMOTE=1 Test (GPU)
+        env:
+          HOST: 127.0.0.1:7667*6
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
+          IMAGE=2 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
+      - name: Run REMOTE=1 Test (CPU)
+        env:
+          HOST: 127.0.0.1:8667*6
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
       - name: Show remote server logs
         if: always()
         run: |
-          journalctl --user -u remote-server-1 --no-pager
-          journalctl --user -u remote-server-2 --no-pager
+          journalctl --user -u remote-server-amd-1 --no-pager
+          journalctl --user -u remote-server-amd-2 --no-pager
+          journalctl --user -u remote-server-gpu --no-pager
+          journalctl --user -u remote-server-cpu --no-pager
 
   osxtests:
     strategy:
