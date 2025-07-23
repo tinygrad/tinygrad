@@ -1,3 +1,4 @@
+# should this merge with transcendental?
 from typing import Callable
 import functools
 from tinygrad.device import is_dtype_supported
