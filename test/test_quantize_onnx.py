@@ -295,7 +295,7 @@ class TestDSPCache(unittest.TestCase):
               UOp(Ops.CONST, dtypes.int, arg=-256, src=(
                 x36,)),)),
             x41,)),)),)),))""")
-    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=2, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     with Context(DEVECTORIZE=0, QUANTIZE=1):
       k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
       k.apply_opts(opts)
