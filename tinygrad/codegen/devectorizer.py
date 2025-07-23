@@ -106,12 +106,12 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace).vec(vec.dtype.count), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
-def cat_after_store(cat:UOp, data:UOp):
+def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   # TODO: this is written in many places
   offset = 0
   ret: list[UOp] = []
   for s in cat.src:
-    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count)))))
+    ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
   # dtype CAT
   dtypes: list[PtrDType] = [x.dtype for x in ret if isinstance(x.dtype, PtrDType)]
@@ -119,13 +119,13 @@ def cat_after_store(cat:UOp, data:UOp):
   out_dtype = dtypes[0].base.scalar().vec(sum([x.count for x in dtypes])).ptr(dtypes[0].size, dtypes[0].addrspace)
   return UOp(Ops.PTRCAT, dtype=out_dtype, src=tuple(ret))
 
-def gep_on_store(gep:UOp, st:UOp):
+def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
   # fake argsort. TODO: handle duplicates
   a = {}
   for i,x in enumerate(gep.arg): a[x] = i
   new_arg = tuple(x[1] for x in sorted(a.items()))
-  return gep.src[0].store(st.gep(new_arg))
+  return gep.src[0].store(st.gep(new_arg), *sto.src[2:])
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
@@ -135,12 +135,12 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
   # GEP on data of STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st"))), gep_on_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st")), allow_any_len=True, name="sto"), gep_on_store),
   # put PTRCAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
    lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put PTRCAT after STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data"))), cat_after_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data")), allow_any_len=True, name="sto"), cat_after_store),
 ])
 
 # ***** optional patterns *****
@@ -310,8 +310,9 @@ pm_render = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op is Ops.CUSTOM else None),
   # gate any stores that aren't gated with ifs
-  (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store"),
-    lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),))),
+  (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
+    lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src+(UOp(Ops.IF, src=(idx.src[2],)),)) if \
+      len(store.src) <= 2 or store.src[2].op != Ops.IF else None),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***

@@ -56,7 +56,6 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop is Ops.STORE:
-          assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
           for j,val in enumerate(inp[1] if dtp[1].count > 1 else [inp[1]]):
             for (m,o,g),v in zip(inp[0], val):
               if g: _store(m, o+j, v)
