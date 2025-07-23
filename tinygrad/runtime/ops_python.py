@@ -40,18 +40,11 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
+        void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
         if uop is Ops.DEFINE_REG: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
-        if uop is Ops.STORE:
-          assert len(inp) == 2, "expected store is ([(memory, offset, gate)], [value])"
-          for j,val in enumerate(inp[1] if dtp[1].count > 1 else [inp[1]]):
-            for (m,o,g),v in zip(inp[0], val):
-              if g: _store(m, o+j, v)
-          i += 1
-          continue
         if uop is Ops.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
@@ -62,19 +55,30 @@ class PythonProgram:
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
-        if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
+        if uop is Ops.STORE:
+          for j,val in enumerate(inp[1] if dtp[1].count > 1 else [inp[1]]):
+            for (m,o,g),v in zip(inp[0], val):
+              if g: _store(m, o+j, v)
+          ul[i] = inp[0]
+          i += 1
+          continue
+        if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
           assert dtype.fmt is not None and isinstance(dtype, PtrDType)
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
-          buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is Ops.DEFINE_LOCAL else pbufs.pop(0)
-          ul[i] = [buf.cast(dtype.fmt)] * warp_size
+          if uop is Ops.DEFINE_REG:
+            # REGs are per thread
+            ul[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(dtype.fmt) for _ in range(warp_size)]
+            for buf, val in zip(ul[i], inp[0]):
+              for x in range(dtype.size): buf[x] = val
+          else:
+            buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
+            ul[i] = [buf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
         elif uop is Ops.CONST: ul[i] = [arg] * warp_size
-        elif uop is Ops.DEFINE_REG:
-          ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is Ops.INDEX:
           ret:list = []
           if isinstance(dtp[0], ImageDType):
@@ -107,9 +111,6 @@ class PythonProgram:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is Ops.ASSIGN:
-          for j in range(len(inp[0])): inp[0][j] = inp[1][j]
-          ul[i] = inp[0]
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
           # here are the models for the WMMA instruction on the different hardware
