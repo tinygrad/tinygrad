@@ -86,10 +86,10 @@ class CPUProgram(HCQProgram):
 
 class CPUAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr: buf = (ctypes.c_uint8 * size).from_address(options.external_ptr)
-    elif sys.platform == "win32": buf = mmap.mmap(-1, size, access=mmap.ACCESS_WRITE)
-    else: buf = mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE)
-    return HCQBuffer(va:=mv_address(buf), sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
+    if options.external_ptr: addr, buf = options.external_ptr, None
+    elif sys.platform == "win32": addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
+    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
+    return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
   def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
