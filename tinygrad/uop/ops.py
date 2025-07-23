@@ -254,6 +254,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...], permute=True):
+    axis = tuple(sorted(x for x in axis))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis)
