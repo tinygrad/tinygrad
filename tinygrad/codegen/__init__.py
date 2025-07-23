@@ -12,8 +12,9 @@ from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.codegen.expander import migrate_indexing, expander
-from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, \
-  pm_reduce, ReduceContext, correct_load_store, pm_render, get_late_rewrite_patterns
+from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
+  ReduceContext, correct_load_store, pm_render
+from tinygrad.codegen.optional import get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 
 @dataclass
