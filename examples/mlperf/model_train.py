@@ -1416,7 +1416,7 @@ def train_stable_diffusion():
   zero_module(unet.out[2])
 
   optimizer = AdamW(get_parameters(unet))
-  lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
+  lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
   lr_scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
 
   # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
@@ -1547,7 +1547,7 @@ def train_stable_diffusion():
     prompt = batch['txt']
     context = jit_context_step(prompt)
 
-    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, scheduler)
+    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, lr_scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")
 
     num_seen_images += BS
