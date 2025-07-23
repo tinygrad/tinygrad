@@ -267,7 +267,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
-    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].src[1].dtype == dtypes.float.vec(4)
 
   # NOTE: can reenable, it does work. it just makes BEAM slow
   @unittest.expectedFailure
@@ -294,10 +294,10 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in program.uops if u.op is Ops.STORE and u.dtype.addrspace != AddrSpace.REG]
 
     # the first store is to lds and can be upcasted
-    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].src[1].dtype == dtypes.float.vec(4)
     assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
-    assert stores[1].src[-1].dtype == dtypes.float
+    assert stores[1].src[1].dtype == dtypes.float
     assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
 
   def test_zero_fold(self):
@@ -648,7 +648,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(out)[-1]
     uops = get_program(k.get_optimized_ast(), k.opts).uops
     # check that the float4 cast collapses
-    store_vals = [u.src[-1] for u in uops if u.op is Ops.STORE and u.dtype.addrspace != AddrSpace.REG]
+    store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.dtype.addrspace != AddrSpace.REG]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
 
@@ -671,7 +671,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
-    store_val = [u.src[-1] for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
+    store_val = [u.src[1] for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.VECTORIZE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -690,7 +690,7 @@ class TestLinearizer(unittest.TestCase):
     barrier = [u for u in uops if u.op is Ops.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.src[-1].dtype.count > 1 # and store.src[2].op is not Ops.VECTORIZE
+      assert store.src[1].dtype.count > 1 # and store.src[2].op is not Ops.VECTORIZE
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
@@ -707,11 +707,11 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in uops if u.op is Ops.STORE and u.dtype.addrspace != AddrSpace.REG]
 
     # the float4 value stores directly in lds and we skip upcast
-    self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
+    self.assertEqual(stores[0].src[1].dtype, dtypes.float.vec(4))
     #assert stores[0].src[-1].op is not Ops.VECTORIZE
 
     # the global store doesn't change
-    assert stores[1].src[-1].dtype == dtypes.float
+    assert stores[1].src[1].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -730,7 +730,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
     out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
-    assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype == dtypes.float.vec(4)
+    assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -748,18 +748,18 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
-    assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
+    assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):
     return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.float.vec(n)]))
   @staticmethod
   def count_half4(uops: list[UOp]):
     return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.half.vec(4)]))
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()
