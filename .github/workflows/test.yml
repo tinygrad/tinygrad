@@ -496,7 +496,7 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.11'
+          python-version: '3.10'  # keep one in 3.10
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20

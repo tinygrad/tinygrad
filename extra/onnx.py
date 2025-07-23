@@ -83,7 +83,7 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
-class Domain(enum.StrEnum):
+class Domain(enum.Enum):
   ONNX = "ai.onnx"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_TRAINING = "ai.onnx.training"
