@@ -78,8 +78,8 @@ class MetalDevice(Compiled):
       from tinygrad.helpers import fetch
       if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
       # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
-      fetch("https://0x0.st/8dLm.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
-      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
+      fetch("https://0x0.st/8n67.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounters.tracetemplate", gunzip=True)
+      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounters", "--output", path, "--attach", str(os.getpid()),
                                                    "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
       subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
