@@ -335,6 +335,7 @@ jobs:
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
         python -m mypy --strict-equality extra/onnx_parser.py
+        python -m mypy --strict-equality extra/onnx.py
 
   unittest:
     name: Unit Tests
@@ -496,7 +497,7 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.10'  # keep one in 3.10
+          python-version: '3.11'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
