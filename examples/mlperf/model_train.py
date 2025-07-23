@@ -1361,6 +1361,7 @@ def train_stable_diffusion():
   from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  from examples.mlperf.helpers import GradScaler
   from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
@@ -1416,16 +1417,13 @@ def train_stable_diffusion():
 
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler([1000], [1.0], [1.0], [1e-06], [10000000000000]).schedule
-  scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
-  # The first call to scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
-  scheduler.step()
+  lr_scheduler = LambdaLR(optimizer, lr, lambda_lr_callback)
 
-  alphas_cumprod = get_alphas_cumprod()
-  sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
-  sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
+  # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
+  lr_scheduler.step()
 
-  @Tensor.train()
-  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, scheduler:LambdaLR) -> Tensor:
+  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
+                       lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
 
     # Run forward/backward on GPU, optimizer/scheduler steps on CPU
@@ -1435,15 +1433,19 @@ def train_stable_diffusion():
       p.to_("NV")
 
     out = model(x_noised, t, c)
-    loss = ((out - v_true) ** 2).mean()
+    loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
 
     loss.backward().to_("CPU")
 
     for p in get_parameters(model) + [x_noised, t, c, v_true]:
+      if p.grad is not None: p.grad = p.grad / grad_scaler.scale
       p.to_("CPU")
 
-    optimizer.step()
-    scheduler.step()
+    # skip the optimizer step if non-finite grads are detected, jittable with Tensor.where logic
+    grad_scaler.step(optimizer)
+    # the lr still updates even if we skipped an optimizer step
+    lr_scheduler.step()
+
     return loss
 
   jit_train_step = TinyJit(train_step, optimize=True)
@@ -1457,6 +1459,10 @@ def train_stable_diffusion():
   assert len(eval_inputs) == 30_000
   unconditional_context = jit_context_step("")
   eval_timesteps = list(reversed(range(1, 1000, 20)))
+
+  alphas_cumprod = get_alphas_cumprod()
+  sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
+  sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
   # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
   #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
   eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]])
