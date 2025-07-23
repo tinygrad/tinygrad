@@ -80,7 +80,7 @@ class MetalDevice(Compiled):
       # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
       fetch("https://0x0.st/8dLm.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
       MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
-                                            "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
+                                                   "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
       subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
     from tinygrad.runtime.graph.metal import MetalGraph
