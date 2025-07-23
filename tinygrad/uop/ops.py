@@ -167,7 +167,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.shape
     # NOTE: if a parent doesn't have st its full_shape is empty
     parent_shapes = [x.full_shape for x in self.src]
-    return tuple(smax(x) for x in itertools.zip_longest(*[x for x in parent_shapes], fillvalue=0))
+    return tuple(smax(x) for x in itertools.zip_longest(*parent_shapes, fillvalue=0))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -261,7 +261,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if move_early and permute:
       permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
       ret = self.permute(permaxis)
-      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape))])
+      new_axis = tuple(x for x in range(axis[0]+len(move_early), len(self.shape)))
       assert len(axis) == len(new_axis)
     else:
       ret, new_axis = self, axis
