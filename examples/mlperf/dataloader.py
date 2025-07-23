@@ -552,11 +552,30 @@ class BinIdxDataset:
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
-  def __init__(self):
+  def __init__(self, base_path:Path, bs:int):
+    self.indexed_dataset = BinIdxDataset(base_path)
+
+    doc_idx = self._build_doc_idx()
+
+  def _build_doc_idx(self):
     pass
+
+class BlendedGPTDataset:
+  def __init__(self, paths:list[Path], weights:list[float], bs:int):
+    # normalize weights
+    total_weight = sum(weights)
+    self.weights = [w / total_weight for w in weights]
+
+    self.datasets = [GPTDataset(path, bs) for path in paths]
 
 def batch_load_llama3(bs:int, base_dir:Path, val:bool=True):
   if val:
+    dataset = BlendedGPTDataset([
+      base_dir / "validation" / "c4-validationn-91205-samples.en_text_document",
+    ], [
+      1.0
+    ], bs)
+
     dataset = BinIdxDataset(base_dir / "validation" / "c4-validationn-91205-samples.en_text_document")
     for i in range(dataset.count):
       yield dataset[i].numpy()
@@ -592,8 +611,11 @@ if __name__ == "__main__":
         pbar.update(x[0].shape[0])
 
   def load_llama3(val):
+    max_ = 0
     for x in batch_load_llama3(1, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)):
       print(x.shape)
+      max_ = max(max_, x.shape[0])
+    print(f"max seq length: {max_}")
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
