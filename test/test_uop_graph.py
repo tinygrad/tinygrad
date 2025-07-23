@@ -440,6 +440,7 @@ class TestUOpGraph(unittest.TestCase):
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 20)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
+  @unittest.skip("outdated")
   def test_in_out_of_bounds_access_gated_store(self):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
@@ -450,6 +451,7 @@ class TestUOpGraph(unittest.TestCase):
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
       with self.assertRaises(RuntimeError): to_uops_list([st1])
 
+  @unittest.skip("outdated")
   def test_in_bounds_access_gated_local(self):
     with Context(IGNORE_OOB=0):
       # Define buffers

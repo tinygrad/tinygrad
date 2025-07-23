@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, \
-                             colored, Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent
+                             colored, Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent, dedup
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -37,7 +37,8 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    from_env = [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1]
+    dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
+    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1])
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
     if len(from_env) == 1: return from_env[0]
     try:
