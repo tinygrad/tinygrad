@@ -149,25 +149,39 @@ def hand_spec():
 def hand_spec_2():
   N = 4096
 
-  nbIterWaveM = 2
-  nbIterWaveN = 2
-  TM = 4
-  TN = 4
-
-  BK = 8
-  BM = 128
-  BN = 128
   BLOCK_SIZE = 256
 
-  nbWaves = BLOCK_SIZE / 32
-  WN = 64
-  WM = BN * BM / nbWaves / WN
-  nbWaveX = BN / WN
-  nbWaveY = BM / WM
+  BN = 128
+  BM = 128
+  BK = 8
 
-  blockIdx_x = UOp(Ops.SPECIAL, dtypes.int, arg=("gidx0", N//128))
-  blockIdx_y = UOp(Ops.SPECIAL, dtypes.int, arg=("gidx1", N//128))
+  TN = 4
+  TM = 4
+
+  nbWaves = BLOCK_SIZE // 32
+  WN = 64
+  WM = BN * BM // nbWaves // WN
+
+  nbWaveX = BN // WN
+  nbWaveY = BM // WM
+
   threadIdx_x = UOp(Ops.SPECIAL, dtypes.int, arg=("lidx0", 256))
+  waveIndex = threadIdx_x // 32
+  waveIdx = waveIndex % nbWaveX
+  waveIdy = waveIndex // nbWaveX
+  indexInWave = threadIdx_x % 32
+
+  nbThreadXPerWave = 8
+  nbThreadYPerWave = 4
+
+  idxInWave = indexInWave % nbThreadXPerWave
+  idyInWave = indexInWave // nbThreadXPerWave
+
+  nbIterWaveN = WN // (nbThreadXPerWave * TN)
+  nbIterWaveM = WM // (nbThreadYPerWave * TM)
+
+  SUBWN = WN // nbIterWaveN
+  SUBWM = WM // nbIterWaveM
 
   # Thread mapping to read BKxBN block from A
   rAIdx = threadIdx_x % BK
@@ -178,27 +192,15 @@ def hand_spec_2():
 
   strideReadB = BLOCK_SIZE // BN
   strideReadA = BLOCK_SIZE // BK
+  nbReadsB = BN * BK // BLOCK_SIZE
+  nbReadsA = BM * BK // BLOCK_SIZE
 
-  SUBWN = WN / nbIterWaveN
-  SUBWM = WM / nbIterWaveM
+  blockIdx_x = UOp(Ops.SPECIAL, dtypes.int, arg=("gidx0", N//128))
+  blockIdx_y = UOp(Ops.SPECIAL, dtypes.int, arg=("gidx1", N//128))
 
-  nbReadsB = 4
-  nbReadsA = 4
-
-  nbThreadXPerWave = 8
-  nbThreadYPerWave = 4
-
-  waveIndex = threadIdx_x // 32
-  waveIdx = waveIndex % nbWaveX
-  waveIdy = waveIndex // nbWaveX
-
-  indexInWave = threadIdx_x % 32
-  idxInWave = indexInWave % nbThreadXPerWave
-  idyInWave = indexInWave // nbThreadXPerWave
-
-  a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)
-  b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)
-  c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0)
+  a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0)
+  b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)
+  c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)
 
   junk = UOp.const(dtypes.float, 0)
   A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), src=(junk,), arg=0)
@@ -219,7 +221,7 @@ def hand_spec_2():
   i = UOp.range(dtypes.int, nbReadsA, 2)
   index_x = rAIdx + kId
   index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-  As_store = As.index((index_y % BK) * BM + index_x % BM).store(a.index(N * index_y + index_x).load(), i)
+  As_store = As.index((index_x % BK) * BM + index_y % BM).store(a.index(N * index_y + index_x).load(), i)
 
   barrier = UOp(Ops.BARRIER, src=(As_store, Bs_store))
 
@@ -261,23 +263,20 @@ if __name__ == "__main__":
   hprg = hand_spec_2()
   prg = get_program(hprg, Device.default.renderer)
   print(prg.src)
-  #graph_rewrite(hprg, PatternMatcher([]), name="test")
-  exit(0)
-
-  hrunner = CompiledRunner(hprg)
+  hrunner = CompiledRunner(prg)
 
   a = Tensor.randn(N, N).realize()
   b = Tensor.randn(N, N).realize()
   hc = Tensor.zeros(N, N).contiguous().realize()
 
   GlobalCounters.reset()
-  with Context(DEBUG=2, BEAM=4):
+  with Context(DEBUG=2):
     for _ in range(run_count): tc = (a@b).realize()
 
   GlobalCounters.reset()
-  ei = ExecItem(hrunner, [hc.uop.buffer, a.uop.buffer, b.uop.buffer])
+  ei = ExecItem(hrunner, [a.uop.buffer, b.uop.buffer, hc.uop.buffer])
   with Context(DEBUG=2):
     for _ in range(run_count): ei.run(wait=True)
   err = (hc-tc).square().mean().item()
   print(f"hrunner {err}")
-  assert err < 1e-06
+  if err > 1e-06: raise RuntimeError("matmul is wrong!")
