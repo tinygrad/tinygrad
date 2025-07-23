@@ -211,7 +211,8 @@ def hand_spec_2():
 
   c_regs = UOp(Ops.DEFINE_REG, dtypes.float.ptr(TM * nbIterWaveM * TN * nbIterWaveN), src=(junk,), arg=2)
 
-  kId = UOp.range(dtypes.int, N//BK, 0)*BK
+  kId_range = UOp.range(dtypes.int, N//BK, 0)
+  kId = kId_range*BK
 
   i = UOp.range(dtypes.int, nbReadsB, 1)
   index_x = BN * blockIdx_x + rBIdx
@@ -245,7 +246,7 @@ def hand_spec_2():
   y = iterWaveM * TM + yt
   c_regs_idx = c_regs.index(y * TN * nbIterWaveN + x)
   sink = c_regs_idx.store(c_regs_idx.load() + A_col.index(y).load(A_col_store) * B_row.index(x).load(B_row_store),
-                          iterWaveM, iterWaveN, yt, xt, k, kId)
+                          iterWaveM, iterWaveN, yt, xt, k, kId_range)
 
   iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 12)
   iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 13)
