@@ -82,6 +82,7 @@ class CPUProgram(HCQProgram):
     super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
 
   def __del__(self):
+    if getattr(sys, 'is_finalizing', lambda: True)(): return
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUAllocator(HCQAllocatorBase):
