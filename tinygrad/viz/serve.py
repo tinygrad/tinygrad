@@ -181,19 +181,6 @@ def get_counters(device:str):
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
-  def stream_json(self, source:Generator[dict, None, None]):
-    try:
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.send_header("Cache-Control", "no-cache")
-      self.end_headers()
-      for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-        self.wfile.flush()
-      self.wfile.write("data: END\n\n".encode("utf-8"))
-    # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
-
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
