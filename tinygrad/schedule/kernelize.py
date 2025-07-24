@@ -12,7 +12,7 @@ from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
 import sys
-sys.setrecursionlimit(10000)
+sys.setrecursionlimit(50000)
 
 # **** schedule simplifier
 
