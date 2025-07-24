@@ -63,7 +63,6 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
-  xctrace_proc = None
   def __init__(self, device:str):
     self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
@@ -73,15 +72,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
-    if PROFILE and MetalDevice.xctrace_proc is None:
-      # fetch xctrace config
-      cfg = "https://gist.githubusercontent.com/Qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
-      cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
-      os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
-      os.system("rm -rf "+(output:="/tmp/metal.trace"))
-      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
-                                                   "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
-      subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
+    self.start_xctrace()
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -98,12 +89,28 @@ class MetalDevice(Compiled):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
 
+  xctrace_proc = None
+  @classmethod
+  def start_xctrace(cls):
+    if PROFILE.value < 2 or cls.xctrace_proc is not None: return
+    # fetch xctrace config
+    cfg = "https://gist.githubusercontent.com/Qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
+    cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
+    os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
+    # attach gpu counter recorder to this PID
+    os.system("rm -rf "+(output:="/tmp/metal.trace"))
+    cls.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
+                                         "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
+    subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
+
   def _at_profile_finalize(self):
     if (proc:=MetalDevice.xctrace_proc) is not None:
-      # sleep a bit for the counters to finalize. TODO: is there a better way?
-      time.sleep(1)
-      proc.send_signal(signal.SIGINT)
-      proc.wait()
+      # give xctrace time to finalize counters. Otherwise the values get cut off. TODO: is there a better way?
+      try:
+        time.sleep(1)
+        proc.send_signal(signal.SIGINT)
+        proc.wait()
+      except: proc.terminate()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
