@@ -1,21 +1,51 @@
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
-from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import AddrSpace
+from tinygrad.schedule.kernelize import merge_views
+from tinygrad.helpers import getenv
 
 N = 4096
 run_count = 5
 
+BN = 128
+BM = 128
+BK = 8
+
+TN = 4
+TM = 4
+
+def hl_spec_kernel3():
+  nbIterWaveM = 2
+  nbIterWaveN = 2
+
+  # define buffers
+  a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0)
+  b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)
+  c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)
+  As = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BM, AddrSpace.LOCAL), arg=0)
+  Bs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BN, AddrSpace.LOCAL), arg=1)
+  junk = UOp.const(dtypes.float, 0)
+  A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), src=(junk,), arg=0)
+  B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), src=(junk,), arg=1)
+
+  # shape buffers. TODO: permutes
+  full_shape = (N//BM, nbIterWaveM, BM//(nbIterWaveM * TM), TM, N//BN, nbIterWaveN, BN//(nbIterWaveN * TN), TN, N//BK, BK)
+  a = a.reshape((N//BM, nbIterWaveM, BM//(nbIterWaveM * TM), TM, 1, 1, 1, 1, N//BK, BK)).expand(full_shape)
+  b = b.reshape((1, 1, 1, 1, N//BN, nbIterWaveN, BN//(nbIterWaveN * TN), TN, N//BK, BK)).expand(full_shape)
+  c = c.reshape((N//BM, nbIterWaveM, BM//(nbIterWaveM * TM), TM, N//BN, nbIterWaveN, BN//(nbIterWaveN * TN), TN, 1, 1))
+  As = As.reshape((1, nbIterWaveM, BM//(nbIterWaveM * TM), TM, 1, 1, 1, 1, 1, BK)).expand(full_shape)
+  Bs = Bs.reshape((1, 1, 1, 1, 1, nbIterWaveN, BN//(nbIterWaveN * TN), TN, 1, BK)).expand(full_shape)
+  A_col = A_col.reshape((1, nbIterWaveM, 1, TM, 1, 1, 1, 1, 1, 1)).expand(full_shape)
+  B_row = B_row.reshape((1, 1, 1, 1, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape)
+
+  out = (A_col.store(As.store(a.load()).load()).load() * B_row.store(Bs.store(b.load()).load()).load()).r(Ops.ADD, (8, 9))
+  sink = c.store(out).sink(arg=KernelInfo(name="tinygemm"))
+  sink = graph_rewrite(sink, merge_views)
+  return sink
+
 def hand_spec_kernel3():
   BLOCK_SIZE = 256
-
-  BN = 128
-  BM = 128
-  BK = 8
-
-  TN = 4
-  TM = 4
 
   nbWaves = BLOCK_SIZE // 32
   WN = 64
@@ -61,7 +91,7 @@ def hand_spec_kernel3():
   b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)
   c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)
 
-  junk = UOp.const(dtypes.float, 0)
+  junk = UOp.const(dtypes.float, 0) # TODO: remove this
   A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), src=(junk,), arg=0)
   B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), src=(junk,), arg=1)
 
@@ -113,17 +143,17 @@ def hand_spec_kernel3():
   # store c_regs into c
   iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 12)
   iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 13)
-  xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
-  yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
   yt = UOp.range(dtypes.int, TM, 14)
   xt = UOp.range(dtypes.int, TN, 15)
+  xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
+  yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
   indexC = N * (yOut + yt) + xOut + xt
   sink = c[indexC].store(c_regs[TN * nbIterWaveN * (iterWaveM * TM + yt) + (iterWaveN * TN + xt)].load(sink), iterWaveM, iterWaveN, yt, xt)
 
   return sink.sink(arg=KernelInfo(name="tinygemm"))
 
 if __name__ == "__main__":
-  hprg = hand_spec_kernel3()
+  hprg = hl_spec_kernel3() if getenv("HL") else hand_spec_kernel3()
   prg = get_program(hprg, Device.default.renderer)
   print(prg.src)
   hrunner = CompiledRunner(prg)
