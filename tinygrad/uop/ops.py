@@ -867,7 +867,6 @@ if TRACK_MATCH_STATS or PROFILE:
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
   def launch_viz(env_str:str, data:str):
-    if not getenv("LAUNCH", 1): return
     os.environ[env_str] = "0"
     os.environ[f"{env_str}_DATA"] = data
     if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):

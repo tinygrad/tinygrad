@@ -74,10 +74,12 @@ class MetalDevice(Compiled):
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE and MetalDevice.xctrace_proc is None:
-      os.system("rm -rf "+(path:="/tmp/metal.trace"))
-      # fetch an xctrace template that configures
-      fetch("https://0x0.st/8nnh.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
-      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
+      # fetch xctrace config
+      cfg = "https://gist.githubusercontent.com/Qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
+      cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
+      os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
+      os.system("rm -rf "+(output:="/tmp/metal.trace"))
+      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
                                                    "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
       subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
