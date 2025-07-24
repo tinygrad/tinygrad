@@ -438,11 +438,9 @@ class NVKIface:
       hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
       has_cpu_mapping=has_cpu_mapping), view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
-  def map(self, mem:HCQBuffer) -> HCQBuffer:
+  def map(self, mem:HCQBuffer):
     if mem.owner._is_cpu():
-      if not any(x.device.startswith("NV") for x in mem.mapped_devs):
-        mem.mappings[self.dev] = self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
-        return
+      if not any(x.device.startswith("NV") for x in mem.mapped_devs): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
       mem = mem.mappings[next(x for x in mem.mapped_devs if x.device.startswith("NV"))]
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
 

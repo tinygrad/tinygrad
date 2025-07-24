@@ -483,7 +483,10 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     if self.dev in buf.mapped_devs: return
     if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
     if not hasattr(self, '_map'): raise NotImplementedError("map failed: no method implemented")
-    self._map(buf)
+
+    # Since it's unified memory space, any buffer mapping is valid for all devices after successful map.
+    # Devices can save mappings and internal metadata as a new buffer.
+    if (mb:=self._map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
