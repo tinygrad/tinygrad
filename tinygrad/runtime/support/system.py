@@ -13,7 +13,7 @@ class _System:
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
 
   def lock_memory(self, addr:int, size:int):
-    if libc.mlock(loc:=ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+    if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
     self.pagemap().seek(vaddr // mmap.PAGESIZE * 8)
@@ -159,7 +159,7 @@ class PCIIfaceBase:
     if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    if mem.owner._is_cpu():
+    if b.owner._is_cpu():
       System.lock_memory(b.va_addr, b.size)
       paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(b.va_addr, round_up(b.size, 0x1000))], True, False
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
