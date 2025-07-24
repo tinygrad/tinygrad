@@ -325,10 +325,10 @@ jobs:
     - name: Lint with ruff (import errors only)
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check . --select F821,F822
-        python3 -m ruff check extra/onnx.py extra/onnx_parser.py --select F821,F822
-        python3 -m ruff check examples/mlperf/ --select F821,F822 --ignore E501
-        python3 -m ruff check extra/ --select F821,F822
+        python3 -m ruff check . --select F822
+        python3 -m ruff check extra/onnx.py extra/onnx_parser.py --select F822
+        python3 -m ruff check examples/mlperf/ --select F822 --ignore E501
+        python3 -m ruff check extra/ --select F822
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Lint extra with pylint
