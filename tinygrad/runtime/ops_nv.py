@@ -282,7 +282,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
       self.dev.iface.free(opaque)
     except AttributeError: pass
 
-  def _map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
 class GPFifo:
