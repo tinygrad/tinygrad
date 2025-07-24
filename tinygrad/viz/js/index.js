@@ -172,6 +172,7 @@ async function renderProfiler() {
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
