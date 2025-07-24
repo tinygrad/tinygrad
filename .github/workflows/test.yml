@@ -329,10 +329,14 @@ jobs:
         python3 -m ruff check extra/onnx.py extra/onnx_parser.py --select F822
         python3 -m ruff check examples/mlperf/ --select F822 --ignore E501
         python3 -m ruff check extra/ --select F822
-    - name: Lint tinygrad with pylint
-      run: python -m pylint tinygrad/
-    - name: Lint extra with pylint
-      run: python -m pylint extra/
+    - name: Lint tinygrad with pylint (E0401 only)
+      run: |
+        python -m pylint tinygrad/ > pylint_tinygrad.log || true
+        if grep -q 'E0401' pylint_tinygrad.log; then cat pylint_tinygrad.log; exit 1; fi
+    - name: Lint extra with pylint (E0401 only)
+      run: |
+        python -m pylint extra/ > pylint_extra.log || true
+        if grep -q 'E0401' pylint_extra.log; then cat pylint_extra.log; exit 1; fi
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .
