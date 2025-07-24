@@ -223,4 +223,5 @@ class HCQGraph(MultiGraphRunner):
 
   @staticmethod
   def supports_exec_item(dev, ei:ExecItem) -> bool:
-    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) or isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None
+    return (all(issubclass(Device[cast(Buffer, b).device], HCQCompiled) for b in ei.bufs) and \
+      isinstance(ei.prg, (CompiledRunner, BufferXfer)) or (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None))
