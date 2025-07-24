@@ -3,6 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.dtype import AddrSpace
 from tinygrad.schedule.kernelize import merge_views
+from tinygrad.helpers import getenv
 
 N = 4096
 run_count = 5
@@ -152,8 +153,7 @@ def hand_spec_kernel3():
   return sink.sink(arg=KernelInfo(name="tinygemm"))
 
 if __name__ == "__main__":
-  hprg = hand_spec_kernel3()
-  #hprg = hl_spec_kernel3()
+  hprg = hl_spec_kernel3() if getenv("HL") else hand_spec_kernel3()
   prg = get_program(hprg, Device.default.renderer)
   print(prg.src)
   hrunner = CompiledRunner(prg)
