@@ -794,7 +794,7 @@ class AMDDevice(HCQCompiled):
       AMDComputeQueue(self).xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
-    self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
+    self.sqtt_enabled = PROFILE.value >= 2 or (PROFILE and getenv("SQTT"))
     if self.sqtt_enabled:
       if self.arch != 'gfx1100': raise RuntimeError('SQ Thread Tracing is only supported on 7900XTX')
       if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
