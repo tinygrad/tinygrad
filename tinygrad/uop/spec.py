@@ -162,10 +162,8 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.STORE),)), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
-  (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
-  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.BARRIER))), validate_index),
-  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
-  (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
+  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond")), allow_any_len=True), lambda idx,cond: validate_index(idx,cond.src[0])),
+  (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
   # STORE takes a <bufidx, val, gate?>
   (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
