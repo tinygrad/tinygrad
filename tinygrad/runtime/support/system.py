@@ -159,12 +159,12 @@ class PCIIfaceBase:
     if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    if b.owner._is_cpu():
-      System.lock_memory(b.va_addr, b.size)
-      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(b.va_addr, round_up(b.size, 0x1000))], True, False
+    if b.owner is not None and b.owner._is_cpu():
+      System.lock_memory(cast(int, b.va_addr), b.size)
+      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, False
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
       paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
       snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
-    else: raise RuntimeError(f"map failed: {b.owner.device} -> {self.dev.device}")
+    else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=snooped, uncached=uncached)
