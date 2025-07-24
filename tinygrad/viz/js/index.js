@@ -25,6 +25,10 @@ function intersectRect(r1, r2) {
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
+  const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new graph...";
+  if (timeout != null) clearTimeout(timeout);
+  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -33,9 +37,6 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  if (timeout != null) clearTimeout(timeout);
-  const progressMessage = document.querySelector(".progress-message");
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
@@ -171,6 +172,7 @@ async function renderProfiler() {
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
@@ -228,6 +230,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
