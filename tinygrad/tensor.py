@@ -1995,7 +1995,7 @@ class Tensor(MathTrait):
     lbe = (blen := prod(data.shape[1:])) + rate - data_pad - 200
     if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (blen - lbe - 1, 0)]
     else: mb = [(lbe, 0), (1, dsbyte), (blen + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
-    pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
+    pad_mask = ctensor(flatten([[v]*l for l, v in mb]), dtypes.uint8).unsqueeze(0)
 
     data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 
