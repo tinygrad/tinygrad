@@ -27,6 +27,7 @@ async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
   const progressMessage = document.querySelector(".progress-message");
   progressMessage.innerText = "Rendering new graph...";
+  if (timeout != null) clearTimeout(timeout);
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
@@ -36,7 +37,6 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  if (timeout != null) clearTimeout(timeout);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
