@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, CI, mv_address
+from tinygrad.helpers import getenv, CI, mv_address, DEBUG
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -512,6 +512,31 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       assert buf2.as_buffer()[0] == i
+
+  def test_map_cpu_buffer_to_device(self):
+    if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")
+
+    sz = 0x2000
+    cpu_buffer = Buffer("CPU", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+    cpu_buffer._buf.cpu_view().view(fmt='B')[:] = bytes([x & 0xff for x in range(sz)])
+
+    for devid in range(6):
+      if DEBUG >= 2: print(f"Testing map to device {Device.DEFAULT}:{devid}")
+
+      try: d = Device[f"{Device.DEFAULT}:{devid}"]
+      except Exception: break
+
+      local_buf = Buffer(f"{Device.DEFAULT}:{devid}", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+
+      d.allocator.map(cpu_buffer._buf)
+
+      d.hw_copy_queue_t().wait(d.timeline_signal, d.timeline_value - 1) \
+                         .copy(local_buf._buf.va_addr, cpu_buffer._buf.va_addr, sz) \
+                         .signal(d.timeline_signal, d.timeline_value).submit(d)
+      d.timeline_signal.wait(d.timeline_value)
+      d.timeline_value += 1
+
+      np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
 
   @unittest.skipUnless(MOCKGPU, "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
