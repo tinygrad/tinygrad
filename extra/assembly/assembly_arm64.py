@@ -5,7 +5,7 @@ from tinygrad import dtypes
 from tinygrad.uop.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.opt.kernel import Ops, UOp
 from tinygrad.helpers import CI
-from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
+from extra.assembly.assembly import uops_to_asmstyle, AssemblyLanguage
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def compute_offsets(total):
