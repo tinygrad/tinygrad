@@ -514,7 +514,7 @@ class TestHCQ(unittest.TestCase):
       assert buf2.as_buffer()[0] == i
 
   def test_map_cpu_buffer_to_device(self):
-    if Device.DEFAULT == "CPU": self.skipTest("skip cpu device")
+    if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")
 
     sz = 0x2000
     cpu_buffer = Buffer("CPU", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
