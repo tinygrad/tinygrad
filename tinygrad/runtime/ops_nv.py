@@ -439,8 +439,7 @@ class NVKIface:
       has_cpu_mapping=has_cpu_mapping), view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
   def map(self, mem:HCQBuffer) -> HCQBuffer:
-    from tinygrad.runtime.ops_cpu import CPUAllocator
-    if hasattr(mem.owner, 'allocator') and isinstance(mem.owner.allocator, CPUAllocator):
+    if mem.owner._is_cpu():
       if not any(x.device.startswith("NV") for x in mem.mapped_devs):
         mem.mappings[self.dev] = self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
         return

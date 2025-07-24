@@ -159,8 +159,7 @@ class PCIIfaceBase:
     if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    from tinygrad.runtime.ops_cpu import CPUAllocator
-    if hasattr(b.owner, 'allocator') and isinstance(b.owner.allocator, CPUAllocator):
+    if mem.owner._is_cpu():
       System.lock_memory(b.va_addr, b.size)
       paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(b.va_addr, round_up(b.size, 0x1000))], True, False
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):

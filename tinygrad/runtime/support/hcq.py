@@ -437,6 +437,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       except Exception: errs += f"\n{iface_t.__name__}: {traceback.format_exc()}"
     raise RuntimeError(f"Cannot find a usable interface for {type(self).__name__[:-6]}:{self.device_id}:\n{errs}")
 
+  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] in ("CPU", "LLVM")
+
   def finalize(self):
     try: self.synchronize() # Try to finalize device in any case.
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
