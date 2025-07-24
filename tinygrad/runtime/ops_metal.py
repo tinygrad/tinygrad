@@ -34,6 +34,7 @@ libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
+libdispatch.mach_absolute_time.restype = ctypes.c_uint64
 
 @functools.cache
 def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
@@ -71,7 +72,9 @@ class MetalDevice(Compiled):
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
 
-    Compiled.profile_events += [ProfileDeviceEvent(device)]
+    libdispatch.mach_timebase_info(ctypes.byref(timebase:=init_c_struct_t((("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)))()))
+    mach_ns = decimal.Decimal(libdispatch.mach_absolute_time())*(decimal.Decimal(timebase.numer)/decimal.Decimal(timebase.denom))
+    Compiled.profile_events += [ProfileDeviceEvent(device, arg={"mach_ns":mach_ns})]
     self.start_xctrace()
 
     from tinygrad.runtime.graph.metal import MetalGraph
