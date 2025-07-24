@@ -38,7 +38,7 @@ def xctrace_export(fp:str, schemas:list[str]) -> Generator[dict, None, None]:
 
 if __name__ == "__main__":
   print("Reading counters...")
-  data = {}
+  data:dict = {}
   for export in xctrace_export("/tmp/metal.trace", ["time-info", "gpu-counter-value", "gpu-counter-info"]):
     cid = export.pop("counter-id", None)
     if (cid is not None and cid not in data): data[cid] = {"data":[]}

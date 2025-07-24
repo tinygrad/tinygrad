@@ -1,6 +1,6 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal
+import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal, subprocess, time
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, fetch
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -74,14 +74,10 @@ class MetalDevice(Compiled):
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
     if PROFILE and MetalDevice.xctrace_proc is None:
-      import subprocess
-      from tinygrad.helpers import fetch
-      if os.path.exists(path:="/tmp/metal.trace"): os.system(f"rm -rd {path}")
-      # TODO: "GPU Counters" is a custom template, sadly xctrace requires this. Remove once we don't rely on XCode
-      # NOTE: just tracking gpu counters doesn't give hw mach times
-      tid = "8n67" if getenv('TINY') else "8dLm"
-      fetch(f"https://0x0.st/{tid}.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/{tid}.tracetemplate", gunzip=True)
-      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", tid, "--output", path, "--attach", str(os.getpid()),
+      os.system("rm -rf "+(path:="/tmp/metal.trace"))
+      # fetch an xctrace template that configures
+      fetch("https://0x0.st/8nnh.gz", f"{os.environ['HOME']}/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate", gunzip=True)
+      MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", path, "--attach", str(os.getpid()),
                                                    "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
       subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
@@ -101,12 +97,11 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   def _at_profile_finalize(self):
-    from time import sleep
-    sleep(2) # TODO: why is this needed?
     if (proc:=MetalDevice.xctrace_proc) is not None:
+      # sleep a bit for the counters to finalize. TODO: is there a better way?
+      time.sleep(1)
       proc.send_signal(signal.SIGINT)
       proc.wait()
-      print("saved profile data to /tmp/metal.trace")
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
