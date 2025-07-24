@@ -1,6 +1,6 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, merge_dicts
+from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -226,5 +226,6 @@ class HCQGraph(MultiGraphRunner):
 
   @staticmethod
   def supports_exec_item(dev, ei:ExecItem) -> bool:
-    return (all(issubclass(type(Device[cast(Buffer, b).device]), HCQCompiled) for b in ei.bufs) and \
-      (isinstance(ei.prg, (CompiledRunner, BufferXfer)) or (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None)))
+    # MOCKGPU is not supported, since it can't execute commands in parallel
+    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
+    return all(issubclass(type(Device[b.device]), HCQCompiled) for b in ei.bufs if b) and (isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy)
