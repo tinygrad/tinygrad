@@ -328,8 +328,11 @@ jobs:
         python3 -m ruff check .
         python3 -m ruff check extra/onnx.py extra/onnx_parser.py
         python3 -m ruff check examples/mlperf/ --ignore E501
+        python3 -m ruff check extra/
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
+    - name: Lint extra with pylint
+      run: python -m pylint extra/
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .
