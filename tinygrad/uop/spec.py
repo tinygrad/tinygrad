@@ -209,7 +209,7 @@ spec = PatternMatcher([
 
 def verify_sink_dims(sink:UOp):
   if not all_same([s.shape for s in sink.src]): return False
-  for dims in zip(*[x.shape for x in sink.toposort() if x.st is not None]):
+  for dims in zip(*[x.shape for x in sink.toposort() if x.op is Ops.VIEW]):
     if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
       print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
       return False
