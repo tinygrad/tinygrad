@@ -6,6 +6,7 @@ from typing import Optional, Union, List, Any, Tuple
 from examples.mlperf.helpers import gelu_erf
 import math
 from contextlib import contextmanager
+import globvars as gv
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -64,11 +65,16 @@ class CrossAttention:
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     ctx = x if ctx is None else ctx
-    q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
+    #q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
+    q,k,v = gv.data['q'], gv.data['k'], gv.data['v']
     q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
     attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
     h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
-    return h_.sequential(self.to_out)
+    print(gv.md(gv.data["out.1"], h_))
+    # (1.7881393432617188e-07, 8.165836334228516e-06, 0.000244140625)
+    #return h_.sequential(self.to_out)
+    ret = h_.sequential(self.to_out)
+    return ret
 
 class GEGLU:
   def __init__(self, dim_in:int, dim_out:int):

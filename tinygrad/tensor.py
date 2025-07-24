@@ -1992,8 +1992,11 @@ class Tensor(MathTrait):
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(dtype)
+    if dtype is not None:
+      m = self.cast(dtype) - self.cast(dtype).max(axis=axis, keepdim=True).detach()
+    else:
+      m = self - self.max(axis=axis, keepdim=True).detach()
+    #if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
@@ -3857,9 +3860,12 @@ class Tensor(MathTrait):
     print(q.scaled_dot_product_attention(k, v).numpy())
     ```
     """
+    import globvars as gv
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     qk = self.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
+    print(gv.md(gv.data["sim.0"], qk.cast(self.dtype)))
+    # (0.0, 0.0, 5.960464477539063e-08)
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
@@ -3867,7 +3873,15 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    print(gv.md(gv.data["sim.1"], qk.cast(self.dtype).softmax(-1).squeeze(0)))
+    # (1.004422642836289e-07, 0.0004262210277374834, 1.3577518984675407e-06)
+    print(gv.md(gv.data["sim.1"], qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).squeeze(0)))
+    # (1.9107315729627317e-10, 7.826604928595771e-07, 3.14321368932724e-09)
+    print(gv.md(gv.data["out.0"], (qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).dropout(dropout_p) @ value).squeeze(0)))
+    # (1.902179246826563e-05, 0.00023383479856420308, 0.0001366138458251953)
+    print(gv.md(gv.data["out.0"], (qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).dropout(dropout_p).cast(self.dtype) @ value).squeeze(0)))
+    # (1.7881393432617188e-07, 8.165836334228516e-06, 0.000244140625)
+    return qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).dropout(dropout_p).cast(self.dtype) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
