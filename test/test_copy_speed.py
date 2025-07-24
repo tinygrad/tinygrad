@@ -47,7 +47,7 @@ class TestCopySpeed(unittest.TestCase):
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         t.to('CPU').realize()
-  
+
   def testCopyDefaulttoCPUJit(self):
     @TinyJit
     def _do_copy(t): return t.to('CPU').realize()
