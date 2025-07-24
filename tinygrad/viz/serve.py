@@ -172,11 +172,13 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v), "counters":[]} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
-# ** Metal XCtrace parser
 
-def get_metal(): pass
-
-def get_counters(device:str): {"METAL":get_metal}.get(device, None)()
+def get_counters(device:str):
+  # ** Metal XCtrace parser
+  if (device:=device.upper()) == "METAL":
+    from tinygrad.viz.metal import xctrace_export
+    for e in xctrace_export("/tmp/metal.trace", ["gpu-counter-info"]): yield e
+    for e in xctrace_export("/tmp/metal.trace", ["time-info", "gpu-counter-value"]): yield e
 
 # ** HTTP server
 
