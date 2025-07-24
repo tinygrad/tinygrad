@@ -1992,9 +1992,9 @@ class Tensor(MathTrait):
     data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
 
     # create pad mask
-    lbe = (blen := prod(data.shape[1:])) + rate - data_pad - 200
-    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (blen - lbe - 1, 0)]
-    else: mb = [(lbe, 0), (1, dsbyte), (blen + rate - lbe - 202, 0), (1, 0x80), (200 - rate, 0)]
+    lbe = prod(data.shape[1:]) + rate - data_pad - 200
+    if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (200 - rate, 0)]
+    else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
     pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
 
     data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
