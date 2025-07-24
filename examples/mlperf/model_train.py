@@ -1397,7 +1397,8 @@ def train_stable_diffusion():
   class StableDiffusion:
     def __init__(self):
       #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True})
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
+                                                        "clip_tokenizer_version": "sd_mlperf_v5_0"})
       #self.first_stage_model = AutoencoderKL()
 
 
