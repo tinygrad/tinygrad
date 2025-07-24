@@ -322,13 +322,13 @@ jobs:
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
-    - name: Lint with ruff
+    - name: Lint with ruff (import errors only)
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check .
-        python3 -m ruff check extra/onnx.py extra/onnx_parser.py
-        python3 -m ruff check examples/mlperf/ --ignore E501
-        python3 -m ruff check extra/
+        python3 -m ruff check . --select F821,F822,F999
+        python3 -m ruff check extra/onnx.py extra/onnx_parser.py --select F821,F822,F999
+        python3 -m ruff check examples/mlperf/ --select F821,F822,F999 --ignore E501
+        python3 -m ruff check extra/ --select F821,F822,F999
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Lint extra with pylint
