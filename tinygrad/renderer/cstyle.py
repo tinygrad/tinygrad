@@ -135,7 +135,6 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op is Ops.BEFORE: continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
