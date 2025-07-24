@@ -607,7 +607,7 @@ class KFDIface:
 
   def map(self, mem):
     from tinygrad.runtime.ops_cpu import CPUAllocator
-    if hasattr(b.owner, 'allocator') and isinstance(b.owner.allocator, CPUAllocator): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+    if hasattr(mem.owner, 'allocator') and isinstance(mem.owner.allocator, CPUAllocator): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
 
     c_gpus = (ctypes.c_int32 * 1)(self.gpu_id)
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
