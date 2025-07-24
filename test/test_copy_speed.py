@@ -49,6 +49,8 @@ class TestCopySpeed(unittest.TestCase):
         t.to('CPU').realize()
 
   def testCopyDefaulttoCPUJit(self):
+    if Device.DEFAULT == "CPU": return unittest.skip("CPU to CPU copy is a no-op")
+
     @TinyJit
     def _do_copy(t): return t.to('CPU').realize()
 
@@ -60,6 +62,8 @@ class TestCopySpeed(unittest.TestCase):
       np.testing.assert_equal(t.numpy(), x.numpy())
 
   def testCopytoCPUtoDefaultJit(self):
+    if Device.DEFAULT == "CPU": return unittest.skip("CPU to CPU copy is a no-op")
+
     @TinyJit
     def _do_copy(x): return t.to(Device.DEFAULT).realize()
 

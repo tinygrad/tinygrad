@@ -1,7 +1,7 @@
 import collections, time
 from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, merge_dicts
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Variable
