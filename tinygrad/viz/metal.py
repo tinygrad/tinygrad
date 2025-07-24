@@ -35,3 +35,21 @@ def xctrace_export(fp:str, schemas:list[str]) -> Generator[dict, None, None]:
         elif col == "timestamp" and curr_schema == "gpu-counter-value": value = to_cpu_time(value)
         row[col] = value
       yield row
+
+if __name__ == "__main__":
+  print("Reading counters...")
+  data = {}
+  for export in xctrace_export("/tmp/metal.trace", ["time-info", "gpu-counter-value", "gpu-counter-info"]):
+    cid = export.pop("counter-id", None)
+    if (cid is not None and cid not in data): data[cid] = {"data":[]}
+    if (sc:=export.pop("schema", None)) == "gpu-counter-value":
+      data[cid]["data"].append(export)
+    if sc == "gpu-counter-info":
+      for k,v in export.items(): data[cid][k] = v
+
+  for counter in data.values():
+    print("**", counter.pop("name"))
+    print(" ", counter.pop("description"))
+    import pandas as pd
+    df = pd.DataFrame(counter["data"])
+    print(df["value"].describe())
