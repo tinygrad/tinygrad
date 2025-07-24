@@ -9,7 +9,6 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, Buffer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  supports_multi_device = True
   supports_cpu_transfers = True
 
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
@@ -17,7 +16,7 @@ class HCQGraph(MultiGraphRunner):
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last
-    self.devices = sorted(self.devices, key=lambda x: 1 if self.is_cpu(x.device) else 0)
+    self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)
 
     # Replace input buffers with variables.
     self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in jit_cache]
@@ -76,7 +75,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(jit_cache):
       enqueue_dev: HCQCompiled = ji.prg.dev if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
-      if isinstance(ji.prg, BufferCopy): enqueue_dev = Device[ji.bufs[1 if self.is_cpu(ji.bufs[0].device) else 0].device]
+      if isinstance(ji.prg, BufferCopy): enqueue_dev = Device[ji.bufs[1 if Device[ji.bufs[0].device]._is_cpu() else 0].device]
 
       # set any fixedvars on the device
       self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), ji.fixedvars])
@@ -216,7 +215,6 @@ class HCQGraph(MultiGraphRunner):
     self.devices[0].profile_events += [ProfileGraphEvent(self.prof_graph_entries, self.prog_graph_deps, [s.timestamp for s in self.prof_signals])]
 
   def dev_name(self, dev) -> str: return dev.device.replace(":", "_")
-  def is_cpu(self, device) -> bool: return device.startswith("CPU") or device.startswith("LLVM")
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
@@ -224,3 +222,7 @@ class HCQGraph(MultiGraphRunner):
     if PROFILE and self.kickoff_value >= 1: self.collect_timestamps()
 
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
+
+  @staticmethod
+  def supports_exec_item(dev, ei:ExecItem) -> bool:
+    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) or isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None

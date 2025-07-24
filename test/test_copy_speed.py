@@ -52,7 +52,7 @@ class TestCopySpeed(unittest.TestCase):
     @TinyJit
     def _do_copy(t): return t.to('CPU').realize()
 
-    t = Tensor.randn(N, N, 32).contiguous().realize()
+    t = Tensor.randn(N, N, 4).contiguous().realize()
     for _ in range(5):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         x = _do_copy(t)
@@ -64,7 +64,7 @@ class TestCopySpeed(unittest.TestCase):
     def _do_copy(x): return t.to(Device.DEFAULT).realize()
 
     for _ in range(5):
-      t = Tensor.randn(N, N, 2, device="CPU").contiguous().realize()
+      t = Tensor.randn(N, N, 4, device="CPU").contiguous().realize()
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         x = _do_copy(t)
         Device[Device.DEFAULT].synchronize()
