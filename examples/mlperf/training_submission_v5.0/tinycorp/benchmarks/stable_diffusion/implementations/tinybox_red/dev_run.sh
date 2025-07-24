@@ -6,22 +6,21 @@
 # TODO: next steps: train to convergence on one big NVIDIA GPU (cloud rented), then on tinybox
 
 # *** dependencies
-pip install tqdm
-pip install numpy
+#pip install tqdm
+#pip install numpy
 
-## to match mlperf reference clip tokenizer behavior
-pip install ftfy
-pip install regex
+### to match mlperf reference clip tokenizer behavior
+#pip install ftfy
+#pip install regex
 
-## to use mlperf reference dataloader
-pip install webdataset
-pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
+### to use mlperf reference dataloader
+#pip install webdataset
+#pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
 
-export PYTHONPATH="." NV=1
-
+#export PYTHONPATH="." NV=1
+export PYTHONPATH="."
 export MODEL="stable_diffusion"
-
-export BS=1 EVAL_BS=1
+export DEFAULT_FLOAT="HALF" BS=1 EVAL_BS=1
 
 # TODO: this will change when training on a tinybox
 export BASEDIR="/home/hooved/train-sd/training/stable_diffusion"

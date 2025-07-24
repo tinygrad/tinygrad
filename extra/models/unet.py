@@ -1,8 +1,6 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
-# TODO: refactor to enable control over dtype autocasting (and GroupNorm channel count for mlperf)
-#from tinygrad.device import is_dtype_supported
-def is_dtype_supported(x): return False
+from tinygrad.device import is_dtype_supported
 from typing import Optional, Union, List, Any, Tuple
 import math
 

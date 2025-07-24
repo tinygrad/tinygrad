@@ -39,11 +39,9 @@ class CosineAnnealingLRWithWarmup(LR_Scheduler):
     decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + (((self.epoch_counter+1-self.warmup_steps)/self.decay_steps) * math.pi).cos())
     return (self.epoch_counter < self.warmup_steps).where(warmup_lr, decay_lr).cast(self.optimizer.lr.dtype)
 
-try: import numpy as np
-except: pass
 # Reference: https://github.com/mlcommons/training/blob/64b14a9abc74e08779a175abca7d291f8c957632/stable_diffusion/ldm/lr_scheduler.py, Lines 36-97
 class LambdaLinearScheduler:
-  def __init__(self, warm_up_steps, f_min, f_max, f_start, cycle_lengths):
+  def __init__(self, warm_up_steps:int, f_min:float, f_max:float, f_start:float, cycle_lengths:int):
     self.lr_warm_up_steps, self.f_min, self.f_max, self.f_start, self.cycle_lengths = warm_up_steps, f_min, f_max, f_start, cycle_lengths
 
   def schedule(self, n:Tensor) -> Tensor:
@@ -53,7 +51,7 @@ class LambdaLinearScheduler:
 
 # based on torch.optim.lr_scheduler.LambdaLR
 class LambdaLR(LR_Scheduler):
-  def __init__(self, optimizer:Optimizer, base_lr:float, lr_lambda:Callable):
+  def __init__(self, optimizer:Optimizer, base_lr:Tensor, lr_lambda:Callable):
     self.optimizer, self.base_lr, self.lr_lambda = optimizer, base_lr, lr_lambda
     self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device)
 
