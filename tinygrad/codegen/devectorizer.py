@@ -285,9 +285,9 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     identity = red.const_like(identity_element(red.arg, red.dtype.scalar()))
-    is_first = functools.reduce(lambda x,y: x&y, [x.eq(x.const_like(0)) for x in reduce_range]).broadcast(red.dtype.count)
+    in_loop = functools.reduce(operator.or_, [x.ne(x.const_like(0)) for x in reduce_range]).broadcast(red.dtype.count)
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), src=(identity,), arg=(ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
-    lst = [is_first.where(identity, acc.load(*reduce_range))] + lst  # put acc as the first element
+    lst = [in_loop.where(acc.load(*reduce_range), identity)] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.store(ret, *reduce_range).load() if len(reduce_range) != 0 else ret
