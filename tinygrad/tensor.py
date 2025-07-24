@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Optional
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -14,11 +14,11 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.kernelize.kernelize import get_kernelize_map
+from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
-all_tensors: set[weakref.ref[Tensor]] = set()
+all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
   return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
 
@@ -47,7 +47,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # **** Tensor helper functions ****
 
 # this tracks the tensor.py METADATA
-_METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
+_METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -173,8 +173,8 @@ class Tensor(MathTrait):
       self.uop = data
 
     # add to all_tensors after construction succeeds
-    all_tensors.add(weakref.ref(self))
-  def __del__(self): all_tensors.discard(weakref.ref(self))
+    all_tensors[weakref.ref(self)] = None
+  def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
@@ -1582,7 +1582,7 @@ class Tensor(MathTrait):
     if self.ndim != 2 or (n:=self.shape[0]) != self.shape[1]: raise ValueError(f"only 2-D square tensor is supported, getting {self.shape=}")
     return self.flatten().pad(((0, n))).reshape(n, n+1)[:, 0]
 
-  def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]) -> Tensor:
+  def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """
     Rolls the tensor along specified dimension(s).
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
@@ -1595,12 +1595,11 @@ class Tensor(MathTrait):
     print(t.roll(shifts=-1, dims=0).numpy())
     ```
     """
-    dims, rolled = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), self
-    for dim, shift in zip(dims, make_tuple(shifts, 1)):
-      shift = shift % self.shape[dim]
-      rolled = Tensor.cat(rolled[tuple(slice(None) if i != dim else slice(-shift, None) for i in range(rolled.ndim))],
-                          rolled[tuple(slice(None) if i != dim else slice(None, -shift) for i in range(rolled.ndim))], dim=dim)
-    return rolled
+    if dims is None: return self.flatten().roll(shifts, 0).reshape(self.shape)
+    dims, shifts, slices = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), make_tuple(shifts, 1), [slice(None)] * self.ndim
+    if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
+    for dim, shift in zip(dims, shifts): slices[dim] = slice(delta:=self.shape[dim]-shift%self.shape[dim], delta+self.shape[dim])
+    return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim)))[slices]
 
   def rearrange(self, formula:str, **sizes) -> Tensor:
     """
@@ -3854,7 +3853,9 @@ class Tensor(MathTrait):
       print(t.dropout().numpy())
     ```
     """
+    if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not Tensor.training or p == 0: return self
+    if p == 1: return self.zeros_like()
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   # helper function commonly used for indexing
