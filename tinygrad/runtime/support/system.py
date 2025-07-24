@@ -167,4 +167,4 @@ class PCIIfaceBase:
       snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-    self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=snooped, uncached=uncached)
+    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)
