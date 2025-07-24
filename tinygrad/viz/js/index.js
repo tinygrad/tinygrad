@@ -35,6 +35,7 @@ async function renderDag(graph, additions, recenter=false) {
   }
   if (timeout != null) clearTimeout(timeout);
   const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new graph...";
   timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
@@ -228,6 +229,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
