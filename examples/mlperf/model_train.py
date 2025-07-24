@@ -1355,7 +1355,8 @@ def train_llama3():
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 def train_stable_diffusion():
-  Device.DEFAULT="CPU"
+  #Device.DEFAULT="CPU"
+  Device.DEFAULT="NV"
   from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
@@ -1384,8 +1385,13 @@ def train_stable_diffusion():
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
 
+  # NOTE: key differences for mlperf training v5.0 Stable Diffusion UNet from stable_diffusion.py UNet:
+  # - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
+  # - uses epsilon of 1e-6 for GroupNorm in SpatialTransformer, instead of 1e-5
+  # - uses automatic mixed precision for fp16 where GroupNorm weights stay in fp32
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
-    "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True}
+                 "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                 "num_groups":16, "norm_dtype":dtypes.float32, "st_norm_eps":1e-6}
 
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
@@ -1398,16 +1404,16 @@ def train_stable_diffusion():
   model = StableDiffusion()
   weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  load_state_dict(model, weights)
+  #load_state_dict(model, weights)
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
 
-  unet = model.model.diffusion_model
+  unet:UNetModel = model.model.diffusion_model
 
   def zero_module(module):
     for p in get_parameters(module):
       p.assign(Tensor.zeros_like(p))
 
-  # the mlperf reference inits these weights as zeroes
+  # the mlperf reference inits certain weights as zeroes
   for bb in flatten(unet.input_blocks) + unet.middle_block + flatten(unet.output_blocks):
     if isinstance(bb, ResBlock):
       zero_module(bb.out_layers[3])
@@ -1431,8 +1437,8 @@ def train_stable_diffusion():
     # Run forward/backward on GPU, optimizer/scheduler steps on CPU
     # NOTE: This prevents OOM when training on a single GPU with 10GB VRAM with BS=1
     # NOTE: This will change when running on a tinybox, as will number of GPUs, parallelism, etc.
-    for p in get_parameters(model) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
-      p.to_("NV")
+    #for p in get_parameters(model) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
+      #p.to_("NV")
 
     out = model(x_noised, t, c)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
@@ -1549,7 +1555,8 @@ def train_stable_diffusion():
 
     # encode prompt
     prompt = batch['txt']
-    context = jit_context_step(prompt)
+    #context = jit_context_step(prompt)
+    context = Tensor.randn(1,77,1024, dtype=dtypes.float)
 
     loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")

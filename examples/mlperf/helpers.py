@@ -391,3 +391,7 @@ class GradScaler:
       Tensor.realize(self.scale, self.growth_tracker)
     else:
       opt.step()
+
+# Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
+def gelu_erf(x:Tensor) -> Tensor:
+  return 0.5 * x * (1.0 + (x / 1.4142135623730951).erf())

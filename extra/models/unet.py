@@ -1,8 +1,11 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
+from tinygrad.dtype import DType
 from typing import Optional, Union, List, Any, Tuple
+from examples.mlperf.helpers import gelu_erf
 import math
+from contextlib import contextmanager
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -12,11 +15,18 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
   return out.cast(dtypes.float16) if is_dtype_supported(dtypes.float16) else out
 
+@contextmanager
+def default_float(dtype:DType):
+  original = dtypes.default_float
+  dtypes.default_float = dtype
+  try: yield
+  finally: dtypes.default_float = original
+
 class ResBlock:
-  def __init__(self, channels:int, emb_channels:int, out_channels:int):
-    self.in_layers = [
-      #GroupNorm(32, channels),
-      GroupNorm(16, channels),
+  def __init__(self, channels:int, emb_channels:int, out_channels:int, num_groups:int=32, norm_dtype:DType=dtypes.default_float):
+    with default_float(norm_dtype):
+      self.in_layers = [GroupNorm(num_groups, channels)]
+    self.in_layers += [
       Tensor.silu,
       Conv2d(channels, out_channels, 3, padding=1),
     ]
@@ -24,9 +34,9 @@ class ResBlock:
       Tensor.silu,
       Linear(emb_channels, out_channels),
     ]
-    self.out_layers = [
-      #GroupNorm(32, out_channels),
-      GroupNorm(16, out_channels),
+    with default_float(norm_dtype):
+      self.out_layers = [GroupNorm(num_groups, out_channels)]
+    self.out_layers += [
       Tensor.silu,
       lambda x: x,  # needed for weights loading code to work
       Conv2d(out_channels, out_channels, 3, padding=1),
@@ -34,10 +44,13 @@ class ResBlock:
     self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else (lambda x: x)
 
   def __call__(self, x:Tensor, emb:Tensor) -> Tensor:
-    h = x.sequential(self.in_layers)
+    # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
+    h = x.sequential(self.in_layers[0:2]).cast(self.in_layers[2].weight.dtype)
+    h = self.in_layers[2](h)
     emb_out = emb.sequential(self.emb_layers)
     h = h + emb_out.reshape(*emb_out.shape, 1, 1)
-    h = h.sequential(self.out_layers)
+    h = h.sequential(self.out_layers[0:3]).cast(self.out_layers[3].weight.dtype)
+    h = self.out_layers[3](h)
     return self.skip_connection(x) + h
 
 class CrossAttention:
@@ -64,7 +77,8 @@ class GEGLU:
 
   def __call__(self, x:Tensor) -> Tensor:
     x, gate = self.proj(x).chunk(2, dim=-1)
-    return x * gate.gelu()
+    #return x * gate.gelu()
+    return x * gelu_erf(gate)
 
 class FeedForward:
   def __init__(self, dim:int, mult:int=4):
@@ -94,12 +108,14 @@ class BasicTransformerBlock:
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
 class SpatialTransformer:
-  def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1):
+  def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1,
+               norm_dtype=dtypes.default_float, norm_eps:float=1e-5):
     if isinstance(ctx_dim, int):
       ctx_dim = [ctx_dim]*depth
     else:
       assert isinstance(ctx_dim, list) and depth == len(ctx_dim)
-    self.norm = GroupNorm(32, channels, eps=1e-06)
+    with default_float(norm_dtype):
+      self.norm = GroupNorm(32, channels, eps=norm_eps)
     assert channels == n_heads * d_head
     self.proj_in  = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head) for d in range(depth)]
@@ -109,7 +125,8 @@ class SpatialTransformer:
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     b, c, h, w = x.shape
     x_in = x
-    x = self.norm(x)
+    # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
+    x = self.norm(x).cast(self.proj_in.weight.dtype)
     ops = [ (lambda z: z.reshape(b, c, h*w).permute(0,2,1)), (lambda z: self.proj_in(z)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     for block in self.transformer_blocks:
@@ -136,7 +153,9 @@ class Upsample:
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/openaimodel.py#L472
 class UNetModel:
-  def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int, channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None, n_heads:Optional[int]=None):
+  def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int,
+               channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None,
+               n_heads:Optional[int]=None, num_groups:int=32, norm_dtype:DType=dtypes.default_float, st_norm_eps:float=1e-5):
     self.model_ch = model_ch
     self.num_res_blocks = [num_res_blocks] * len(channel_mult)
 
@@ -176,12 +195,13 @@ class UNetModel:
     for idx, mult in enumerate(channel_mult):
       for _ in range(self.num_res_blocks[idx]):
         layers: List[Any] = [
-          ResBlock(ch, time_embed_dim, model_ch*mult),
+          ResBlock(ch, time_embed_dim, model_ch*mult, num_groups, norm_dtype),
         ]
         ch = mult * model_ch
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
-          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx]))
+          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_dtype=norm_dtype,
+                                           norm_eps=st_norm_eps))
 
         self.input_blocks.append(layers)
         input_block_channels.append(ch)
@@ -195,9 +215,9 @@ class UNetModel:
 
     d_head, n_heads = get_d_and_n_heads(ch)
     self.middle_block: List = [
-      ResBlock(ch, time_embed_dim, ch),
-      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1]),
-      ResBlock(ch, time_embed_dim, ch),
+      ResBlock(ch, time_embed_dim, ch, num_groups, norm_dtype),
+      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1], norm_dtype=norm_dtype, norm_eps=st_norm_eps),
+      ResBlock(ch, time_embed_dim, ch, num_groups, norm_dtype),
     ]
 
     self.output_blocks = []
@@ -205,22 +225,23 @@ class UNetModel:
       for i in range(self.num_res_blocks[idx] + 1):
         ich = input_block_channels.pop()
         layers = [
-          ResBlock(ch + ich, time_embed_dim, model_ch*mult),
+          ResBlock(ch + ich, time_embed_dim, model_ch*mult, num_groups, norm_dtype),
         ]
         ch = model_ch * mult
 
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
-          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx]))
+          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_dtype=norm_dtype,
+                                           norm_eps=st_norm_eps))
 
         if idx > 0 and i == self.num_res_blocks[idx]:
           layers.append(Upsample(ch))
           ds //= 2
         self.output_blocks.append(layers)
 
-    self.out = [
-      #GroupNorm(32, ch),
-      GroupNorm(16, ch),
+    with default_float(norm_dtype):
+      self.out = [GroupNorm(num_groups, ch)]
+    self.out += [
       Tensor.silu,
       Conv2d(model_ch, out_ch, 3, padding=1),
     ]
@@ -255,4 +276,6 @@ class UNetModel:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
-    return x.sequential(self.out)
+    # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
+    x = x.sequential(self.out[0:2]).cast(self.out[2].weight.dtype)
+    return self.out[2](x)
