@@ -76,9 +76,11 @@ def get_child(obj, key):
   return obj
 def word_wrap(x, wrap=80):
   if len(ansistrip(x)) <= wrap: return x
+  if len(lines:=x.splitlines()) > 1: return "\n".join(word_wrap(line, wrap) for line in lines)
   i = 0
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
+
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
@@ -295,11 +297,6 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   return fp
 
 # *** Exec helpers
-
-def cpu_time_execution(cb, enable):
-  if enable: st = time.perf_counter()
-  cb()
-  if enable: return time.perf_counter()-st
 
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:

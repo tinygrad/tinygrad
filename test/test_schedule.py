@@ -15,7 +15,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.kernelize.kernelize import merge_views, get_kernelize_map, Kernel
+from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 

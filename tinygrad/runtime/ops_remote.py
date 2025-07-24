@@ -389,7 +389,7 @@ class RemoteDevice(Compiled):
     renderer_instance = renderer_class(*renderer[2])
     renderer_instance.device = device
     graph = fromimport('tinygrad.runtime.graph.remote', "RemoteGraph") if self.properties.graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph)
+    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph, id(self.conn))
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)

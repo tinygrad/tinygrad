@@ -211,6 +211,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
@@ -233,7 +234,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
-  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
+  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, self.dtype, (self,)+src, **kwargs)
+  def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
@@ -266,7 +268,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret, new_axis = self, axis
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
-  def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self): return self.alu(Ops.CONTIGUOUS)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
@@ -645,7 +646,7 @@ class UPat(MathTrait):
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
   def gep(self, i:int|None=None, **kwargs): return UPat(Ops.GEP, None, (self,), (i,) if i is not None else None, **kwargs)
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
-  def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
+  def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
@@ -856,7 +857,7 @@ if TRACK_MATCH_STATS or PROFILE:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
-    if getenv("PRINT_MATCH_STATS", 1):
+    if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"

@@ -10,11 +10,11 @@ from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, AddrSpace
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.kernelize.kernelize import view_left
+from tinygrad.schedule.kernelize import view_left
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -495,7 +495,7 @@ class Kernel:
           local_src_shape = tuple([self.full_shape[i] if i in self.axes_of(AxisType.GLOBAL) else s for i,s in enumerate(local_shape)])
           st = ShapeTracker.from_shape(base_shape).permute(permute_axes).reshape(local_shape).expand(local_src_shape)
           local_size = st.real_size()
-          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, local=True), (), f"temp{self.reduceops.index(op)}")
+          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, addrspace=AddrSpace.LOCAL), (), f"temp{self.reduceops.index(op)}")
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce

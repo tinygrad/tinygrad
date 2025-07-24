@@ -3,6 +3,7 @@ from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
+from enum import Enum, auto
 
 ConstType = float|int|bool
 
@@ -15,6 +16,8 @@ class DTypeMetaClass(type):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
     return ret
+
+class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
 
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
@@ -38,8 +41,8 @@ class DType(metaclass=DTypeMetaClass):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
-  def ptr(self, size=-1, local=False) -> PtrDType:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1, size)
+  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
+    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
   def nbytes(self): raise RuntimeError("only ptr types have nbytes")
   @property
@@ -50,7 +53,7 @@ class DType(metaclass=DTypeMetaClass):
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
   _base: DType
-  local: bool
+  addrspace: AddrSpace
   v: int
   size: int = -1  # -1 is unlimited size
   @property
@@ -60,22 +63,23 @@ class PtrDType(DType):
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
     if isinstance(self, ImageDType):
-      return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size, self.shape)
-    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz, self.size)
-  def ptr(self, size=-1, local=False): raise RuntimeError("can't make a pointer from a pointer")
+      return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
+    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
+  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: return 0  # TODO: this should be an exception
     return self.size*self.itemsize
   @property
   def vcount(self): return self.v
   def __repr__(self):
-    return f"{self.base.__repr__()}.ptr({self.size}{', local=True' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
+    return f"{self.base.__repr__()}.ptr({self.size}{', '+str(self.addrspace) if self.addrspace != AddrSpace.GLOBAL else ''})" + \
+      (f'.vec({self.v})' if self.v != 1 else '')
 
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, size=-1, local=False) -> PtrDType:
-    assert not local, "images can't be local"
+  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
+    assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
@@ -149,9 +153,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, prod(shp), shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, prod(shp), shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

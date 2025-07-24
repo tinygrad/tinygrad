@@ -29,7 +29,7 @@ if __name__ == "__main__":
   c = Tensor.zeros(N, N).contiguous().realize()
 
   GlobalCounters.reset()
-  with Context(DEBUG=2, BEAM=4):
+  with Context(DEBUG=2):
     for _ in range(run_count): tc = (a@b).realize()
 
   GlobalCounters.reset()
