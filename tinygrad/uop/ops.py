@@ -149,6 +149,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
+    #if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}: return ShapeTracker.from_shape((self.dtype.size,))
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
@@ -236,10 +237,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
-  def alu(self, arg, *src:UOp):
+  def alu(self, op, *src:UOp, **kwargs):
     out_dtype = (self, *src)[-1].dtype
-    if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return UOp(arg, out_dtype, (self,)+src)
+    if op in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    return UOp(op, out_dtype, (self,)+src, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
@@ -337,7 +338,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self
   def view(self, new_st:ShapeTracker) -> UOp: return UOp(Ops.VIEW, self.dtype, (self,), new_st)
 
-  def _mop(self, op:Ops, arg):
+  def _mop(self, op:Ops, arg) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret

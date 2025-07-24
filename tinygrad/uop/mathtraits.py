@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes
 
 class MathTrait:
   # required to implement
-  def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
+  def alu(self:T, op:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b) -> T: raise NotImplementedError
 
   # great functions you get!
