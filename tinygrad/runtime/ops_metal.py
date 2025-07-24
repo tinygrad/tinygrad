@@ -34,7 +34,6 @@ libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
-libdispatch.mach_absolute_time.restype = ctypes.c_uint64
 
 @functools.cache
 def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
@@ -72,9 +71,7 @@ class MetalDevice(Compiled):
     self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
     self.timeline_value = 0
 
-    libdispatch.mach_timebase_info(ctypes.byref(timebase:=init_c_struct_t((("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)))()))
-    mach_ns = decimal.Decimal(libdispatch.mach_absolute_time())*(decimal.Decimal(timebase.numer)/decimal.Decimal(timebase.denom))
-    Compiled.profile_events += [ProfileDeviceEvent(device, arg={"mach_ns":mach_ns})]
+    Compiled.profile_events += [ProfileDeviceEvent(device)]
     self.start_xctrace()
 
     from tinygrad.runtime.graph.metal import MetalGraph
@@ -97,7 +94,7 @@ class MetalDevice(Compiled):
   def start_xctrace(cls):
     if PROFILE.value < 2 or cls.xctrace_proc is not None: return
     # fetch xctrace config
-    cfg = "https://gist.githubusercontent.com/Qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
+    cfg = "https://gist.githubusercontent.com/qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
     cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
     os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
     # attach gpu counter recorder to this PID
@@ -113,7 +110,7 @@ class MetalDevice(Compiled):
         time.sleep(1)
         proc.send_signal(signal.SIGINT)
         proc.wait()
-      except: proc.terminate()
+      except Exception: proc.terminate()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))

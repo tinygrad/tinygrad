@@ -8,7 +8,7 @@ from tinygrad.engine.realize import get_runner
 MOCKGPU = getenv("MOCKGPU")
 
 @contextlib.contextmanager
-def helper_collect_profile(*devs, level=1):
+def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
   saved = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
   Compiled.profile_events.clear()
@@ -17,7 +17,7 @@ def helper_collect_profile(*devs, level=1):
   cpu_events.clear()
 
   profile_list = []
-  with Context(PROFILE=level):
+  with Context(PROFILE=1):
     yield profile_list
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
@@ -208,15 +208,6 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(graphs), runs)
     for ge in graphs:
       self.assertEqual(len(ge.ents), len(graphs))
-
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "metal supports counters")
-  def test_counters_copy(self):
-    N = 4
-    a = Tensor.full((N, N), 1.).contiguous().realize()
-    b = Tensor.full((N, N), 2.).contiguous().realize()
-    with helper_collect_profile(TestProfiler.d0, level=2) as profile:
-      TestProfiler.d0.start_xctrace()
-      a.assign(b).realize()
 
 if __name__ == "__main__":
   unittest.main()

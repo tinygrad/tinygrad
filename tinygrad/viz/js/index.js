@@ -25,6 +25,10 @@ function intersectRect(r1, r2) {
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
+  const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new graph...";
+  if (timeout != null) clearTimeout(timeout);
+  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -33,10 +37,6 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  if (timeout != null) clearTimeout(timeout);
-  const progressMessage = document.querySelector(".progress-message");
-  progressMessage.innerText = "Rendering new layout...";
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
@@ -116,7 +116,6 @@ const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
-const counterSources = {};
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -135,14 +134,13 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=40]);
-  for (const [k, { timeline, mem, counters }] of Object.entries(layout)) {
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
+  for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
+    div.innerText = k;
     div.style.padding = `${padding}px`;
-    const mainGraph = div.appendChild(document.createElement("div"));
-    mainGraph.innerText = k;
-    mainGraph.onclick = () => { // TODO: make this feature more visible
+    div.onclick = () => { // TODO: make this feature more visible
       focusedDevice = k === focusedDevice ? null : k;
       const prevScroll = profiler.node().scrollTop;
       renderProfiler();
@@ -173,8 +171,8 @@ async function renderProfiler() {
     // position shapes on the canvas and scale to fit fixed area
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
-    if (area === 0) mainGraph.style.pointerEvents = "none";
-    else mainGraph.style.cursor = "pointer";
+    if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
@@ -188,44 +186,8 @@ async function renderProfiler() {
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
       data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
-    mainGraph.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
-    if (counterSources[k] == null) {
-      const eventSource = new EventSource("/get_counters?device="+k);
-      const progressMessage = document.querySelector(".progress-message");
-      progressMessage.innerText = "Fetching GPU counters...";
-      timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
-      eventSource.onmessage = (e) => {
-        if (e.data === "END") {
-          progressMessage.style.display = "none";
-          renderProfiler();
-          return eventSource.close();
-        }
-        const ret = JSON.parse(e.data);
-        if (ret.schema == "gpu-counter-info") profileRet.layout[k].counters[ret["counter-id"]] = { ...ret, data:[] };
-        else if (ret.schema == "gpu-counter-value") {
-          profileRet.layout[k].counters[ret["counter-id"]].data.push(ret);
-        }
-      };
-      counterSources[k] = eventSource;
-    }
-    let graphOffset = startY+area+padding;
-    const graphHeight = 32;
-    const padY = 2;
-    for (const counter of Object.values(counters)) {
-      const td = div.appendChild(document.createElement("div"));
-      td.style.height = graphHeight+"px";
-      td.innerText = counter.name;
-      td.onmouseenter = (e) => d3.select(".metadata").html("").text(counter.description);
-      const counterYScale = d3.scaleLinear().domain([0, counter["max-value"]]).range([0, graphHeight-padY]);
-      for (const { timestamp, value } of counter.data) {
-        const height = counterYScale(value);
-        arg = { tooltipText: `${value}`};
-        data.shapes.push({x:timestamp-st, y:graphOffset, width:10, height, arg, fillColor:"#2667ff" });
-      }
-      graphOffset += graphHeight;
-    }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${rect(mainGraph).height+graphHeight*counters.length+padding}px`;
+    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -502,7 +464,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
