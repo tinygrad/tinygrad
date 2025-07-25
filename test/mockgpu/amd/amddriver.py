@@ -40,6 +40,7 @@ class AMDDriver(VirtDriver):
     super().__init__()
 
     self._exec_event = threading.Event()
+    self._done_event = threading.Event()
     self._exec_thread = threading.Thread(target=self._exec_loop, daemon=True)
     self._exec_thread.start()
 
@@ -155,10 +156,19 @@ class AMDDriver(VirtDriver):
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
       for ev in evs:
-        if ev.event_id in self.mmu_event_ids and "MOCKGPU_EMU_FAULTADDR" in os.environ:
-          ev.memory_exception_data.gpu_id = 1
-          ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
-          ev.memory_exception_data.failure.NotPresent = 1
+        if ev.event_id in self.mmu_event_ids:
+          if "MOCKGPU_EMU_FAULTADDR" in os.environ:
+            ev.memory_exception_data.gpu_id = 1
+            ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
+            ev.memory_exception_data.failure.NotPresent = 1
+        else:
+          any_exec = False
+          for gpu in self.gpus.values():
+            for q in gpu.queues:
+              if q.executing: any_exec = True
+          if any_exec:
+            self._done_event.wait()
+            self._done_event.clear()
     else:
       name = "unknown"
       for k,v in kfd_ioctls.__dict__.items():
@@ -172,6 +182,7 @@ class AMDDriver(VirtDriver):
       self._exec_event.wait()
       self._exec_event.clear()
       self._emulate_execute()
+      self._done_event.set()
 
   def _emulate_execute(self):
     any_executing = True
