@@ -1976,7 +1976,9 @@ class Tensor(MathTrait):
 
     # https://keccak.team/keccak_specs_summary.html
 
-    def ctensor(l: Sequence[ConstType], dtype: DType = dtypes.uint64): return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l))
+    def ctensor(l: Sequence[ConstType], dtype: DType = dtypes.uint64):
+      # TODO: contiguous is here for compile speed
+      return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l)).contiguous()
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
