@@ -41,7 +41,6 @@ class PythonProgram:
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
         void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP}
-        if uop is Ops.DEFINE_REG: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -68,8 +67,6 @@ class PythonProgram:
           if uop is Ops.DEFINE_REG:
             # REGs are per thread
             ul[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(dtype.fmt) for _ in range(warp_size)]
-            for buf, val in zip(ul[i], inp[0]):
-              for x in range(dtype.size): buf[x] = val
           else:
             buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
             ul[i] = [buf.cast(dtype.fmt)] * warp_size
