@@ -171,8 +171,7 @@ class LLVMRenderer(Renderer):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
         if self.device == "LLVM" or u.op is Ops.DEFINE_REG:
-          # put alloca in the beginning of the function always
-          kernel = [f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]"] + kernel
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
