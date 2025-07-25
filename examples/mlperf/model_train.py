@@ -1389,9 +1389,10 @@ def train_stable_diffusion():
   # - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
   # - uses epsilon of 1e-6 for GroupNorm in SpatialTransformer, instead of 1e-5
   # - uses automatic mixed precision for fp16 where GroupNorm weights stay in fp32
+  # - uses erf for gelu instead of tanh approximation default
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
                  "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                 "num_groups":16, "norm_dtype":dtypes.float32, "st_norm_eps":1e-6}
+                 "num_groups":16, "norm_dtype":dtypes.float32, "st_norm_eps":1e-6, "gelu_approx":"erf"}
 
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
@@ -1430,6 +1431,18 @@ def train_stable_diffusion():
 
   init_scale = 2.0**16 if dtypes.default_float is dtypes.float16 else 1.0
   grad_scaler = GradScaler(init_scale)
+
+  import globvars as gv
+  loaded = safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors")
+  for k,v in loaded.items():
+    if all(pat not in k for pat in ("in_layers.0", "out_layers.0", "norm")) and k not in {"out.0.weight", "out.0.bias"}:
+      loaded[k] = v.to("NV").cast(dtypes.half)
+  load_state_dict(unet, loaded)
+  ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"])
+  gv.md(gv.d["ret"], ret)
+  # diff.abs().mean(): 4.9233436584472656e-05
+  # (diff.abs() / (a.abs() + 2e-5)).mean(): 0.01229095458984375
+  # diff.abs().max(): 0.0002593994140625
 
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:

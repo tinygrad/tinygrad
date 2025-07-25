@@ -2,7 +2,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
-from typing import Optional, Union, List, Any, Tuple
+from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 from contextlib import contextmanager
@@ -71,45 +71,49 @@ class CrossAttention:
     return h_.sequential(self.to_out)
 
 class GEGLU:
-  def __init__(self, dim_in:int, dim_out:int):
+  def __init__(self, dim_in:int, dim_out:int, gelu_approx:str="tanh"):
     self.proj = Linear(dim_in, dim_out * 2)
+    assert gelu_approx in {"tanh", "erf"}
+    self.gelu = Tensor.gelu if gelu_approx == "tanh" else gelu_erf
+    assert gelu_approx=="erf"
     self.dim_out = dim_out
 
   def __call__(self, x:Tensor) -> Tensor:
     x, gate = self.proj(x).chunk(2, dim=-1)
-    #return x * gate.gelu()
-    return x * gelu_erf(gate)
+    return x * self.gelu(gate)
 
 class FeedForward:
-  def __init__(self, dim:int, mult:int=4):
-    self.net = [
-      GEGLU(dim, dim*mult),
+  def __init__(self, dim:int, mult:int=4, gelu_approx:str="tanh"):
+    self.net: tuple[GEGLU, Callable, Linear] = (
+      GEGLU(dim, dim*mult, gelu_approx=gelu_approx),
       lambda x: x,  # needed for weights loading code to work
       Linear(dim*mult, dim)
-    ]
+    )
 
   def __call__(self, x:Tensor) -> Tensor:
-    return x.sequential(self.net)
+    return x.sequential(list(self.net))
 
 class BasicTransformerBlock:
-  def __init__(self, dim:int, ctx_dim:int, n_heads:int, d_head:int):
+  def __init__(self, dim:int, ctx_dim:int, n_heads:int, d_head:int, norm_dtype:DType=dtypes.default_float, gelu_approx:str="tanh"):
     self.attn1 = CrossAttention(dim, dim, n_heads, d_head)
-    self.ff    = FeedForward(dim)
+    self.ff    = FeedForward(dim, gelu_approx=gelu_approx)
     self.attn2 = CrossAttention(dim, ctx_dim, n_heads, d_head)
-    self.norm1 = LayerNorm(dim)
-    self.norm2 = LayerNorm(dim)
-    self.norm3 = LayerNorm(dim)
+    with default_float(norm_dtype):
+      self.norm1 = LayerNorm(dim)
+      self.norm2 = LayerNorm(dim)
+      self.norm3 = LayerNorm(dim)
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
-    x = x + self.attn1(self.norm1(x))
-    x = x + self.attn2(self.norm2(x), ctx=ctx)
-    x = x + self.ff(self.norm3(x))
+    # casts are to match behavior of torch automatic mixed precision with fp16, where Norm weights stay in fp32
+    x = x + self.attn1(self.norm1(x).cast(self.attn1.to_q.weight.dtype))
+    x = x + self.attn2(self.norm2(x).cast(self.attn2.to_q.weight.dtype), ctx=ctx)
+    x = x + self.ff(self.norm3(x).cast(self.ff.net[0].proj.weight.dtype))
     return x
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
 class SpatialTransformer:
   def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1,
-               norm_dtype=dtypes.default_float, norm_eps:float=1e-5):
+               norm_dtype=dtypes.default_float, norm_eps:float=1e-5, gelu_approx:str="tanh"):
     if isinstance(ctx_dim, int):
       ctx_dim = [ctx_dim]*depth
     else:
@@ -118,7 +122,7 @@ class SpatialTransformer:
       self.norm = GroupNorm(32, channels, eps=norm_eps)
     assert channels == n_heads * d_head
     self.proj_in  = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
-    self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head) for d in range(depth)]
+    self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head, norm_dtype, gelu_approx) for d in range(depth)]
     self.proj_out = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.use_linear = use_linear
 
@@ -155,7 +159,8 @@ class Upsample:
 class UNetModel:
   def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int,
                channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None,
-               n_heads:Optional[int]=None, num_groups:int=32, norm_dtype:DType=dtypes.default_float, st_norm_eps:float=1e-5):
+               n_heads:Optional[int]=None, num_groups:int=32, norm_dtype:DType=dtypes.default_float, st_norm_eps:float=1e-5,
+               gelu_approx="tanh"):
     self.model_ch = model_ch
     self.num_res_blocks = [num_res_blocks] * len(channel_mult)
 
@@ -201,7 +206,7 @@ class UNetModel:
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
           layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_dtype=norm_dtype,
-                                           norm_eps=st_norm_eps))
+                                           norm_eps=st_norm_eps, gelu_approx=gelu_approx))
 
         self.input_blocks.append(layers)
         input_block_channels.append(ch)
@@ -216,7 +221,8 @@ class UNetModel:
     d_head, n_heads = get_d_and_n_heads(ch)
     self.middle_block: List = [
       ResBlock(ch, time_embed_dim, ch, num_groups, norm_dtype),
-      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1], norm_dtype=norm_dtype, norm_eps=st_norm_eps),
+      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1], norm_dtype=norm_dtype, norm_eps=st_norm_eps,
+                         gelu_approx=gelu_approx),
       ResBlock(ch, time_embed_dim, ch, num_groups, norm_dtype),
     ]
 
@@ -232,7 +238,7 @@ class UNetModel:
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
           layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_dtype=norm_dtype,
-                                           norm_eps=st_norm_eps))
+                                           norm_eps=st_norm_eps, gelu_approx=gelu_approx))
 
         if idx > 0 and i == self.num_res_blocks[idx]:
           layers.append(Upsample(ch))
