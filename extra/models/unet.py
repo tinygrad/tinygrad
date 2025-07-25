@@ -6,6 +6,7 @@ from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 from contextlib import contextmanager
+import globvars as gv
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -104,10 +105,22 @@ class BasicTransformerBlock:
       self.norm3 = LayerNorm(dim)
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
-    # casts are to match behavior of torch automatic mixed precision with fp16, where Norm weights stay in fp32
-    x = x + self.attn1(self.norm1(x).cast(self.attn1.to_q.weight.dtype))
-    x = x + self.attn2(self.norm2(x).cast(self.attn2.to_q.weight.dtype), ctx=ctx)
-    x = x + self.ff(self.norm3(x).cast(self.ff.net[0].proj.weight.dtype))
+    # casts are to match behavior of torch automatic mixed precision with fp16
+    if gv.measure_layernorm:
+      gv.md(gv.d["pre_layernorm"], x)
+      # diff.abs().mean(): 0.00011557340621948242
+      # a.abs().mean(): 0.0286712646484375
+      # diff.abs().max(): 0.00054931640625
+      # gv.md(gv.d["post_layernorm"], self.norm1(x))
+      # (0.00011557340621948242, 0.018341064453125, 0.00054931640625)
+      gv.md(gv.d["post_layernorm"], self.norm1(x))
+      # (8.271194383269176e-05, 0.022466247901320457, 0.0006093382835388184)
+      gv.md(gv.d["post_layernorm"], self.norm1(x.cast(self.norm1.weight.dtype)))
+      # (8.215704292524606e-05, 0.022630253806710243, 0.00054165069013834)
+      gv.measure_layernorm=False
+    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)).cast(self.attn1.to_q.weight.dtype))
+    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)).cast(self.attn2.to_q.weight.dtype), ctx=ctx)
+    x = x + self.ff(self.norm3(x.cast(self.norm3.weight.dtype)).cast(self.ff.net[0].proj.weight.dtype))
     return x
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
@@ -283,5 +296,14 @@ class UNetModel:
       for bb in b:
         x = run(x, bb)
     # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
-    x = x.sequential(self.out[0:2]).cast(self.out[2].weight.dtype)
+    gv.md(gv.d["pre_groupnorm"], x)
+    # diff.abs().mean(): 0.09295284003019333
+    # a.abs().mean(): 16.88650894165039
+    # diff.abs().max(): 0.6875
+    # (0.09295284003019333, 2.7316200733184814, 0.6875)
+    gv.md(gv.d["post_groupnorm"], x.sequential(self.out[0:1]))
+    # (0.00011306125816190615, 0.03592322766780853, 0.0014357473701238632)
+    gv.md(gv.d["post_groupnorm"], x.cast(self.out[0].weight.dtype).sequential(self.out[0:1]))
+    # (0.00011230213567614555, 0.03606769070029259, 0.0014325473457574844)
+    x = x.cast(self.out[0].weight.dtype).sequential(self.out[0:2]).cast(self.out[2].weight.dtype)
     return self.out[2](x)
