@@ -23,13 +23,11 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
   ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
-  out_shape = tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1])
-  result = {
+  return {
     Ops.ADD: ret*prshape,
     Ops.MUL: ret.pow(prshape),
-    Ops.MAX: ret,
-  }[reduce.arg[0]]
-  return result.reshape(out_shape)
+    Ops.MAX: ret, # NOTE: Ops.MAX is passthrough
+  }[reduce.arg[0]].reshape(tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1]))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -213,11 +211,6 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  # (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), swizzle_reduceop),
-  # if unwrap(view.st).contiguous and view.size == r.size and \
-  #     (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
-  #      tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
-  #   return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
