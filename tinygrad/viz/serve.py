@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, subprocess
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET, statistics
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -160,15 +160,6 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
 
 # Metal XCtrace
 
-def xctrace_export(schema:str) -> subprocess.Popen[bytes]:
-  return subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
-                           f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
-
-def xctrace_to_cpu_time(sample_time:int, mabs_epoch:int, timebase:float) -> float:
-  # sample time is nanoseconds passed since start, mabs time is the monotonic hw clock
-  perf_ns_base = Decimal(mabs_epoch)*Decimal(timebase)
-  return float((perf_ns_base+Decimal(sample_time))/Decimal("1_000"))
-
 def parse_xml(stream:Iterable[bytes]) -> Generator[dict]:
   cols:list[str] = []
   id_cache:dict = {}
@@ -177,11 +168,44 @@ def parse_xml(stream:Iterable[bytes]) -> Generator[dict]:
     if e.tag == "col": cols.append(unwrap(next(iter(e)).text))
     if e.tag == "row": yield {k:id_cache.get(v.attrib.get("ref"), v.text or v) for k,v in zip(cols, e)}
 
-MTL_COUNTER_GROUPS = {"ALU": [], "DRAM":[], "SRAM":[]}
+xctrace_cache:dict[str, list[dict]] = {}
+def xctrace_export(schema:str) -> list[dict]:
+  if (cret:=xctrace_cache.get(schema)) is not None: return cret
+  try:
+    proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
+                             f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
+    xctrace_cache[schema] = ret = list(tqdm(parse_xml(proc.stdout), desc=f"parsing {schema}"))
+    return ret
+  finally:
+    proc.terminate()
+    proc.wait()
 
-class CounterSummary(TypedDict):
-  utilization: float  # utilization as a percentage of peak
-  breakdown: list[dict] # breakdown per metric
+MTL_COUNTER_GROUPS = {"ALU":[11, 13, 15, 17, 19, 21, 23], "DRAM":[62, 64], "SRAM":[25]}
+
+def get_metal_counters(st:int, et:int):
+  # start by getting monotonic time at the start of trace
+  time_info = list(xctrace_export("time-info"))[0]
+  num, denom = [int(f.text) for f in time_info["timebase-info"].findall("mach-timebase-info-field")]
+  start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
+
+  # aggregate counter values in this time range
+  counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
+  counter_values:dict[int, float] = {}
+  for r in xctrace_export("gpu-counter-value"):
+    sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
+    if sample_ts < st: continue
+    if sample_ts > et: break
+    counter_values.setdefault(int(r["counter-id"]), []).append(float(r["value"]))
+  ret = {}
+  for group, counters in MTL_COUNTER_GROUPS.items():
+    for c in counters:
+      if (values:=counter_values.get(c)): ret.setdefault(group, {})[counter_info[c]["name"]] = statistics.mean(values)
+  return ret
+
+def get_hw_counters(device:str, st:int, et:int):
+  ret = {}
+  if device == "METAL": ret = get_metal_counters(st, et)
+  return json.dumps(ret).encode("utf-8")
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -218,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
       if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
+    elif url.path == "/get_hw_counters":
+      ret, content_type = get_hw_counters((q:=parse_qs(url.query))["device"][0].upper(), int(q["st"][0]), int(q["et"][0])), "application/json"
     else: status_code = 404
 
     # send response
