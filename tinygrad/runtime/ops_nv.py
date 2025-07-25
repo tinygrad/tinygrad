@@ -620,3 +620,82 @@ class NVDevice(HCQCompiled[HCQSignal]):
         if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM {i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr:#x} warp_pc={e.hwwWarpEsrPc64:#x}"]
 
     raise RuntimeError("\n".join(report))
+
+  def hevc_decoder(self) -> NVVideoDecoder: return NVVideoDecoder(self, nv_gpu.cudaVideoCodec_HEVC)
+
+class NVVideoDecoder:
+  def __init__(self, dev:NVDevice, codec:int, out_chroma_format:int = nv_gpu.cudaVideoChromaFormat_YUV420):
+    self.dev, self.out_chroma_format = dev, out_chroma_format
+    self.parser_params = nv_gpu.CUVIDPARSERPARAMS(
+      CodecType=codec, ulMaxNumDecodeSurfaces=20, ulMaxDisplayDelay=4,
+      pfnSequenceCallback=self.on_sequence_callback,
+      pfnDecodePicture=self.on_decode_picture,
+      pfnDisplayPicture=self.on_display_picture,
+      pUserData=ctypes.addressof(self),
+    )
+    self.parser = ctypes.c_void_p()
+    ret = nv_gpu.cuvidCreateVideoParser(ctypes.byref(self.parser), ctypes.byref(self.parser_params))
+    if ret != 0: raise RuntimeError(f"Failed to create video parser: {ret}")
+    self.decoder = None
+
+  def __del__(self):
+    if hasattr(self, 'parser') and self.parser:
+      nv_gpu.cuvidDestroyVideoParser(self.parser)
+    if hasattr(self, 'decoder') and self.decoder:
+      nv_gpu.cuvidDestroyDecoder(self.decoder)
+  @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+  def on_sequence_callback(user_data, format_data):
+      try:
+          self = ctypes.cast(user_data, ctypes.POINTER(NVVideoDecoder)).contents[0]
+      except Exception:
+          return 0  # Failure
+      format = ctypes.cast(format_data, ctypes.POINTER(nv_gpu.CUVIDEOFORMAT)).contents
+
+      # Clean up existing decoder if present
+      if hasattr(self, 'decoder') and self.decoder:
+          nv_gpu.cuvidDestroyDecoder(self.decoder)
+
+      create_info = nv_gpu.CUVIDDECODECREATEINFO(CodecType=format.codec, ulNumDecodeSurfaces=20, ulNumOutputSurfaces=4,
+                                                 ulWidth=format.coded_width, ulHeight=format.coded_height,
+                                                 ChromaFormat=self.out_chroma_format, OutputFormat=self.out_chroma_format,
+                                                 targetWidth=format.coded_width, targetHeight=format.coded_height)
+      self.decoder = ctypes.c_void_p()
+      ret = nv_gpu.cuvidCreateDecoder(ctypes.byref(self.decoder), ctypes.byref(create_info))
+      return 1 if ret == 0 else 0
+  @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+  def on_decode_picture(user_data, pic_params):
+      try:
+          self = ctypes.cast(user_data, ctypes.POINTER(NVVideoDecoder)).contents[0]
+          ret = nv_gpu.cuvidDecodePicture(self.decoder, pic_params)
+          return 1 if ret == 0 else 0
+      except Exception:
+          return 0
+  @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+  def on_display_picture(user_data, disp_info):
+      try:
+          self = ctypes.cast(user_data, ctypes.POINTER(NVVideoDecoder)).contents[0]
+          proc_params = nv_gpu.CUVIDPROCPARAMS(
+              progressive_frame=disp_info.contents.progressive_frame,
+              top_field_first=disp_info.contents.top_field_first
+          )
+          dev_ptr = ctypes.c_void_p()
+          pitch = ctypes.c_uint()
+          ret = nv_gpu.cuvidMapVideoFrame(
+              self.decoder,
+              disp_info.contents.picture_index,
+              ctypes.byref(dev_ptr),
+              ctypes.byref(pitch),
+              ctypes.byref(proc_params)
+          )
+          if ret != 0:
+              return 0
+
+          # TODO: Do something with the decoded frame
+
+          nv_gpu.cuvidUnmapVideoFrame(self.decoder, dev_ptr)
+          return 1
+      except Exception:
+          return 0
+  def decode(self, data:bytes):
+    packet = nv_gpu.CUVIDSOURCEDATAPACKET(payload_size=len(data), payload=ctypes.cast(data, ctypes.c_void_p))
+    nv_gpu.cuvidParseVideoData(self.parser, ctypes.byref(packet))

@@ -21445,6 +21445,92 @@ NV2080_CTRL_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INT
 NV2080_CTRL_INTERNAL_MIGMGR_EXPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS
 NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS
 NV2080_CTRL_INTERNAL_MIGMGR_IMPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS
+
+# cuda/nvcuvid.h
+cudaVideoCodec_MPEG1 = 0
+cudaVideoCodec_MPEG2 = 1
+cudaVideoCodec_MPEG4 = 2
+cudaVideoCodec_VC1 = 3
+cudaVideoCodec_H264 = 4
+cudaVideoCodec_JPEG = 5
+cudaVideoCodec_H264_SVC = 6
+cudaVideoCodec_H264_MVC = 7
+cudaVideoCodec_HEVC = 8
+cudaVideoCodec_VP8 = 9
+cudaVideoCodec_VP9 = 10
+cudaVideoCodec_AV1 = 11
+cudaVideoCodec_NumCodecs = 12
+cudaVideoCodec_YUV420 = 13
+cudaVideoCodec_YV12 = 14
+cudaVideoCodec_NV12 = 15
+cudaVideoCodec_YUYV = 16
+cudaVideoCodec_UYVY = 17
+
+cudaVideoChromaFormat_Monochrome = 0
+cudaVideoChromaFormat_YUV420 = 1
+cudaVideoChromaFormat_YUV422 = 2
+cudaVideoChromaFormat_YUV444 = 3
+cudaVideoChromaFormat_NumFormats = 4
+
+class struct_CUVIDDECODECREATEINFO(Structure):
+  _fields_ = [
+    ('ulWidth', ctypes.c_ulong),
+    ('ulHeight', ctypes.c_ulong),
+    ('ulNumDecodeSurfaces', ctypes.c_ulong),
+    ('CodecType', ctypes.c_int),
+    ('ChromaFormat', ctypes.c_int),
+    ('ulCreationFlags', ctypes.c_ulong),
+    ('bitDepthMinus8', ctypes.c_ulong),
+    ('ulIntraDecodeOnly', ctypes.c_ulong),
+    ('ulMaxWidth', ctypes.c_ulong),
+    ('ulMaxHeight', ctypes.c_ulong),
+    ('targetWidth', ctypes.c_ulong),
+    ('targetHeight', ctypes.c_ulong),
+    ('ulNumOutputSurfaces', ctypes.c_ulong),
+    ('vidmemspace', ctypes.c_ulong),
+    ('target_rect', ctypes.c_ulong * 4),
+    ('enableHistogram', ctypes.c_ulong),
+    ('outputFormat', ctypes.c_int),
+    ('deinterlaceMode', ctypes.c_int),
+    ('display_area', ctypes.c_ulong * 4),
+  ]
+CUVIDDECODECREATEINFO = struct_CUVIDDECODECREATEINFO
+
+class struct_CUVIDPARSERPARAMS(Structure):
+  _fields_ = [
+    ('CodecType', ctypes.c_int),
+    ('ulMaxNumDecodeSurfaces', ctypes.c_ulong),
+    ('ulClockRate', ctypes.c_ulong),
+    ('ulErrorThreshold', ctypes.c_ulong),
+    ('ulMaxDisplayDelay', ctypes.c_ulong),
+    ('pfnSequenceCallback', ctypes.c_void_p),
+    ('pfnDecodePicture', ctypes.c_void_p),
+    ('pfnDisplayPicture', ctypes.c_void_p),
+    ('pfnGetOperatingPoint', ctypes.c_void_p),
+    ('pfnGetSEIMsg', ctypes.c_void_p),
+    ('pUserData', ctypes.c_void_p),
+    ('ulReserved1', ctypes.c_ulong),
+    ('pvReserved2', ctypes.c_void_p * 7),
+  ]
+CUVIDPARSERPARAMS = struct_CUVIDPARSERPARAMS
+
+class struct_CUVIDPICPARAMS(Structure):
+  _fields_ = [
+    ('PicWidthInMbs', ctypes.c_int),
+    ('FrameHeightInMbs', ctypes.c_int),
+    ('CurrPicIdx', ctypes.c_int),
+    ('field_pic_flag', ctypes.c_int),
+    ('bottom_field_flag', ctypes.c_int),
+    ('second_field', ctypes.c_int),
+    ('nBitstreamDataLen', ctypes.c_uint),
+    ('pBitstreamData', ctypes.POINTER(ctypes.c_ubyte)),
+    ('nNumSlices', ctypes.c_uint),
+    ('pSliceDataOffsets', ctypes.POINTER(ctypes.c_uint)),
+    ('ref_pic_flag', ctypes.c_int),
+    ('intra_pic_flag', ctypes.c_int),
+    ('Reserved', ctypes.c_uint * 30),
+  ]
+CUVIDPICPARAMS = struct_CUVIDPICPARAMS
 class struct_NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_PARAMS(Structure):
     pass
 
