@@ -1388,7 +1388,7 @@ def train_stable_diffusion():
   # NOTE: key differences for mlperf training v5.0 Stable Diffusion UNet from stable_diffusion.py UNet:
   # - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
   # - uses epsilon of 1e-6 for GroupNorm in SpatialTransformer, instead of 1e-5
-  # - uses automatic mixed precision for fp16 where GroupNorm weights stay in fp32
+  # - matches torch automatic mixed precision fp16 behavior: norms stay in fp32, extra casts
   # - uses erf for gelu instead of tanh approximation default
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
                  "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
@@ -1440,10 +1440,10 @@ def train_stable_diffusion():
   load_state_dict(unet, loaded)
   ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"])
   gv.md(gv.d["ret"], ret)
-  # diff.abs().mean(): 6.824731826782227e-05
+  # diff.abs().mean(): 6.80685043334961e-05
   # a.abs().mean(): 0.0292816162109375
-  # diff.abs().max(): 0.00042724609375
-  # (6.824731826782227e-05, 0.00616455078125, 0.00042724609375)
+  # diff.abs().max(): 0.000335693359375
+  # (6.80685043334961e-05, 0.0292816162109375, 0.000335693359375)
 
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:

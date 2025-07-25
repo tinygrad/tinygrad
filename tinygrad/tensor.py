@@ -1992,10 +1992,8 @@ class Tensor(MathTrait):
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    if dtype is not None:
-      m = self.cast(dtype) - self.cast(dtype).max(axis=axis, keepdim=True).detach()
-    else:
-      m = self - self.max(axis=axis, keepdim=True).detach()
+    m = self - self.max(axis=axis, keepdim=True).detach()
+    if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
@@ -3869,7 +3867,7 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).dropout(dropout_p).cast(self.dtype) @ value
+    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
