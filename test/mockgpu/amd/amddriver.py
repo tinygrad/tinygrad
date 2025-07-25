@@ -1,4 +1,4 @@
-import pathlib, re, ctypes, mmap, collections, functools, copy, os, threading
+import pathlib, re, ctypes, mmap, collections, functools, copy, os
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.am.am as am
 from tinygrad.helpers import from_mv
@@ -38,11 +38,6 @@ class DRMFileDesc(VirtFileDesc):
 class AMDDriver(VirtDriver):
   def __init__(self, gpus=6):
     super().__init__()
-
-    self._exec_event = threading.Event()
-    self._done_event = threading.Event()
-    self._exec_thread = threading.Thread(target=self._exec_loop, daemon=True)
-    self._exec_thread.start()
 
     # NOTE: gpu ids start from one (id 0 is skipped in KFDIface._is_usable_gpu)
     self.tracked_files += [VirtFile('/dev/kfd', functools.partial(KFDFileDesc, driver=self))] + \
@@ -152,23 +147,14 @@ class AMDDriver(VirtDriver):
 
       # Track writes to doorbell, calling callback
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
-      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._exec_event.set())
+      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._emulate_execute())
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
       for ev in evs:
-        if ev.event_id in self.mmu_event_ids:
-          if "MOCKGPU_EMU_FAULTADDR" in os.environ:
-            ev.memory_exception_data.gpu_id = 1
-            ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
-            ev.memory_exception_data.failure.NotPresent = 1
-        else:
-          any_exec = False
-          for gpu in self.gpus.values():
-            for q in gpu.queues:
-              if q.executing: any_exec = True
-          if any_exec:
-            self._done_event.wait()
-            self._done_event.clear()
+        if ev.event_id in self.mmu_event_ids and "MOCKGPU_EMU_FAULTADDR" in os.environ:
+          ev.memory_exception_data.gpu_id = 1
+          ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
+          ev.memory_exception_data.failure.NotPresent = 1
     else:
       name = "unknown"
       for k,v in kfd_ioctls.__dict__.items():
@@ -177,19 +163,10 @@ class AMDDriver(VirtDriver):
       exit(1)
     return 0
 
-  def _exec_loop(self):
-    while True:
-      self._exec_event.wait()
-      self._exec_event.clear()
-      self._emulate_execute()
-      self._done_event.set()
-
   def _emulate_execute(self):
-    any_executing = True
-    while any_executing:
-      any_executing = False
+    any_progress = True
+    while any_progress:
+      any_progress = False
       for gpu in self.gpus.values():
         for q in gpu.queues:
-          if q.executing:
-            q.execute()
-            if q.executing: any_executing = True
+          if q.executing: any_progress |= q.execute() > 0
