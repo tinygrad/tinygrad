@@ -406,6 +406,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
   def _at_profile_finalize(self):
+    self.synchronize() # Expect device to be synchronizes
+
     def _sync(d:HCQCompiled, q_t:Callable[[], HWQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.next_timeline()).submit(d)
       st = time.perf_counter_ns()
