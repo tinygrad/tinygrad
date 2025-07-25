@@ -51,9 +51,7 @@ class TestKeccak(unittest.TestCase):
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
     data = b"\x00" * 4096
-    with self.assertRaises(RecursionError):
-      # TODO: fix
-      self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
+    self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
 if __name__ == "__main__":
   unittest.main()
