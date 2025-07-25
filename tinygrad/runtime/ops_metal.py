@@ -94,7 +94,7 @@ class MetalDevice(Compiled):
   def start_xctrace(cls):
     if PROFILE.value < 2 or cls.xctrace_proc is not None: return
     # fetch xctrace config
-    cfg = "https://gist.githubusercontent.com/Qazalin/96680d79e12ab18f19403ac696ced8d2/raw/33af6e90a28d19b45bad2bf6864b9129c8ea576a/GPUCounter.xml"
+    cfg = "https://gist.githubusercontent.com/qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
     cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
     os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
     # attach gpu counter recorder to this PID

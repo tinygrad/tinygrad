@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, subprocess
+import xml.etree.ElementTree as ET
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, Generator
+from typing import Any, TypedDict, Generator, Iterable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
@@ -154,6 +155,33 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     v["x"].append(step)
     v["y"].append(v["y"][-1])
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+
+# ** GPU counter parsers
+
+# Metal XCtrace
+
+def xctrace_export(schema:str) -> subprocess.Popen[bytes]:
+  return subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
+                           f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
+
+def xctrace_to_cpu_time(sample_time:int, mabs_epoch:int, timebase:float) -> float:
+  # sample time is nanoseconds passed since start, mabs time is the monotonic hw clock
+  perf_ns_base = Decimal(mabs_epoch)*Decimal(timebase)
+  return float((perf_ns_base+Decimal(sample_time))/Decimal("1_000"))
+
+def parse_xml(stream:Iterable[bytes]) -> Generator[dict]:
+  cols:list[str] = []
+  id_cache:dict = {}
+  for _,e in ET.iterparse(stream, events=("end",)):
+    if (eid:=e.attrib.get("id")) is not None: id_cache[eid] = e.text
+    if e.tag == "col": cols.append(unwrap(next(iter(e)).text))
+    if e.tag == "row": yield {k:id_cache.get(v.attrib.get("ref"), v.text or v) for k,v in zip(cols, e)}
+
+MTL_COUNTER_GROUPS = {"ALU": [], "DRAM":[], "SRAM":[]}
+
+class CounterSummary(TypedDict):
+  utilization: float  # utilization as a percentage of peak
+  breakdown: list[dict] # breakdown per metric
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
