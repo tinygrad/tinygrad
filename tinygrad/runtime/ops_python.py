@@ -68,8 +68,6 @@ class PythonProgram:
           if uop is Ops.DEFINE_REG:
             # REGs are per thread
             ul[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(dtype.fmt) for _ in range(warp_size)]
-            for buf, val in zip(ul[i], inp[0]):
-              for x in range(dtype.size): buf[x] = val
           else:
             buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
             ul[i] = [buf.cast(dtype.fmt)] * warp_size
