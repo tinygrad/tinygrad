@@ -27,7 +27,7 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps, "key":next((key for key in k.keys if isinstance(key, str)), None)})
     for key in k.keys: ref_map[key] = i
   return ret
 
@@ -201,9 +201,12 @@ def get_metal_counters(st:int, et:int):
       if (values:=counter_values.get(c)): ret.setdefault(group, {})[counter_info[c]["name"]] = statistics.mean(values)
   return ret
 
-def get_hw_counters(device:str, st:int, et:int):
-  ret = {}
-  if device == "METAL": ret = get_metal_counters(st, et)
+hw_counters = {"METAL":get_metal_counters}
+def get_stats(prg:str):
+  ret = []
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent) and e.name == prg:
+      ret.append({"duration":float(e.en-e.st), **(hw_counters.get(e.device, lambda *_:{})(e.st, e.en))})
   return json.dumps(ret).encode("utf-8")
 
 def get_profile(profile:list[ProfileEvent]):
@@ -241,8 +244,7 @@ class Handler(BaseHTTPRequestHandler):
       if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
-    elif url.path == "/get_hw_counters":
-      ret, content_type = get_hw_counters((q:=parse_qs(url.query))["device"][0].upper(), int(q["st"][0]), int(q["et"][0])), "application/json"
+    elif url.path == "/stats": ret, content_type = get_stats(parse_qs(url.query)["name"][0]), "application/json"
     else: status_code = 404
 
     # send response
