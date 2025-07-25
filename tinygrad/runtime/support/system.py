@@ -12,16 +12,20 @@ class _System:
 
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
 
+  def lock_memory(self, addr:int, size:int):
+    if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+
+  def system_paddrs(self, vaddr:int, size:int) -> list[int]:
+    self.pagemap().seek(vaddr // mmap.PAGESIZE * 8)
+    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
 
     if data is not None: to_mv(va, len(data))[:] = data
-
-    # Read pagemap to get the physical address of each page. The pages are locked.
-    self.pagemap().seek(va // mmap.PAGESIZE * 8)
-    return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+    return va, self.system_paddrs(va, size)
 
   def pci_reset(self, gpu): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
@@ -155,6 +159,12 @@ class PCIIfaceBase:
     if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    if (ifa:=getattr(b.owner, "iface", None)) is None or not isinstance(ifa, PCIIfaceBase): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
-    paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
-    self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
+    if b.owner is not None and b.owner._is_cpu():
+      System.lock_memory(cast(int, b.va_addr), b.size)
+      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, False
+    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
+      paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
+      snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
+    else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+
+    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)

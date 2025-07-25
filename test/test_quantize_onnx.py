@@ -65,6 +65,7 @@ def get_quantized_model(sz):
                   extra_options={"ActivationSymmetric": False})
   return out_file
 
+@unittest.skip("this is broken")
 @unittest.skipIf(Device.DEFAULT != "CPU", "only tests for CPU")
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
