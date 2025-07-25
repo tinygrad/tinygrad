@@ -74,8 +74,7 @@ class Kernel:
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
     max_dim = max(len(st.shape) for st in self.sts)
-    new_sts = [st.reshape(st.shape + (1,) * (max_dim - len(st.shape))) for st in self.sts]
-    self.sts = new_sts
+    self.sts = [st.reshape(st.shape + (1,) * (max_dim - len(st.shape))) for st in self.sts]
     self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*max_dim))
 
     # parameters for optimization
