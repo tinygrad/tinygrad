@@ -2,6 +2,21 @@ from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import CI
+
+@unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
+@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
+class TestHashing(unittest.TestCase):
+  def _python_hash_1mb(self, data:bytes):
+    chunks = [data[i:i+4096] for i in range(0, len(data), 4096)]
+    chunk_hashes = [hashlib.shake_128(chunk).digest(16) for chunk in chunks]
+    return hashlib.shake_128(b''.join(chunk_hashes)).digest(16)
+
+  @unittest.skipIf(CI, "very slow")
+  def test_abc(self):
+    expected = self._python_hash_1mb(b"abc" + b"\x00" * (2**20 - 3))
+    out = Tensor(b"abc").hash()
+    self.assertEqual(bytes(out.data()), expected)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
@@ -50,10 +65,8 @@ class TestKeccak(unittest.TestCase):
     data = b"\x00" * 4
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
-    data = b"\x00" * 4096
-    with self.assertRaises(RecursionError):
-      # TODO: fix
-      self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
+    data = b"\x00" * (1000 if CI else 4096)
+    self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
 if __name__ == "__main__":
   unittest.main()
