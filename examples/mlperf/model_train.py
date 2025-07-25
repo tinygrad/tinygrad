@@ -1438,29 +1438,29 @@ def train_stable_diffusion():
     if all(pat not in k for pat in ("in_layers.0", "out_layers.0", "norm")) and k not in {"out.0.weight", "out.0.bias"}:
       loaded[k] = v.to("NV").cast(dtypes.half)
   load_state_dict(unet, loaded)
-  ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"])
+  ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"], softmax_dtype=dtypes.float32)
   gv.md(gv.d["ret"], ret)
   # diff.abs().mean(): 6.431341171264648e-05
   # a.abs().mean(): 0.037750244140625
   # diff.abs().max(): 0.00030517578125
   # (6.431341171264648e-05, 0.037750244140625, 0.00030517578125)
 
-  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
+  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
 
     # Run forward/backward on GPU, optimizer/scheduler steps on CPU
     # NOTE: This prevents OOM when training on a single GPU with 10GB VRAM with BS=1
     # NOTE: This will change when running on a tinybox, as will number of GPUs, parallelism, etc.
-    #for p in get_parameters(model) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
+    #for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
       #p.to_("NV")
 
-    out = model(x_noised, t, c)
+    out = unet(x_noised, t, c, upcast_softmax=True)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
 
     loss.backward().to_("CPU")
 
-    for p in get_parameters(model) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
+    for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
       if p.grad is not None: p.grad = p.grad / grad_scaler.scale
       p.to_("CPU")
 

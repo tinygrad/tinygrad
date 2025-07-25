@@ -1,12 +1,11 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, DTypeLike
 from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 from contextlib import contextmanager
-import globvars as gv
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -63,11 +62,11 @@ class CrossAttention:
     self.head_size = d_head
     self.to_out = [Linear(n_heads*d_head, query_dim)]
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
     ctx = x if ctx is None else ctx
     q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
     q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
-    attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
+    attention = Tensor.scaled_dot_product_attention(q, k, v, softmax_dtype=softmax_dtype).transpose(1,2)
     h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
     return h_.sequential(self.to_out)
 
@@ -104,10 +103,10 @@ class BasicTransformerBlock:
       self.norm2 = LayerNorm(dim)
       self.norm3 = LayerNorm(dim)
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
     # casts are to match behavior of torch automatic mixed precision with fp16
-    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)).cast(self.attn1.to_q.weight.dtype))
-    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)).cast(self.attn2.to_q.weight.dtype), ctx=ctx)
+    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)).cast(self.attn1.to_q.weight.dtype), softmax_dtype=softmax_dtype)
+    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)).cast(self.attn2.to_q.weight.dtype), ctx=ctx, softmax_dtype=softmax_dtype)
     x = x + self.ff(self.norm3(x.cast(self.norm3.weight.dtype)).cast(self.ff.net[0].proj.weight.dtype))
     return x
 
@@ -127,7 +126,7 @@ class SpatialTransformer:
     self.proj_out = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.use_linear = use_linear
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
     b, c, h, w = x.shape
     x_in = x
     # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
@@ -135,7 +134,7 @@ class SpatialTransformer:
     ops = [ (lambda z: z.reshape(b, c, h*w).permute(0,2,1)), (lambda z: self.proj_in(z)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     for block in self.transformer_blocks:
-      x = block(x, ctx=ctx)
+      x = block(x, ctx=ctx, softmax_dtype=softmax_dtype)
     ops = [ (lambda z: self.proj_out(z)), (lambda z: z.permute(0,2,1).reshape(b, c, h, w)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     return x + x_in
@@ -253,7 +252,7 @@ class UNetModel:
       Conv2d(model_ch, out_ch, 3, padding=1),
     ]
 
-  def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None) -> Tensor:
+  def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
     t_emb = timestep_embedding(tms, self.model_ch)
     emb   = t_emb.sequential(self.time_embed)
 
@@ -266,28 +265,23 @@ class UNetModel:
       ctx = ctx.cast(dtypes.float16)
       x   = x  .cast(dtypes.float16)
 
-    def run(x:Tensor, bb) -> Tensor:
+    def run(x:Tensor, bb, softmax_dtype:DTypeLike|None=None) -> Tensor:
       if isinstance(bb, ResBlock): x = bb(x, emb)
-      elif isinstance(bb, SpatialTransformer): x = bb(x, ctx)
+      elif isinstance(bb, SpatialTransformer): x = bb(x, ctx, softmax_dtype=softmax_dtype)
       else: x = bb(x)
       return x
 
     saved_inputs = []
     for b in self.input_blocks:
       for bb in b:
-        x = run(x, bb)
+        x = run(x, bb, softmax_dtype=softmax_dtype)
       saved_inputs.append(x)
     for bb in self.middle_block:
-      x = run(x, bb)
+      x = run(x, bb, softmax_dtype=softmax_dtype)
     for b in self.output_blocks:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
-        x = run(x, bb)
+        x = run(x, bb, softmax_dtype=softmax_dtype)
     # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
-    #gv.md(gv.d["pre_groupnorm"], x)
-    # diff.abs().mean(): 0.09301980584859848
-    # a.abs().mean(): 16.88650894165039
-    # diff.abs().max(): 0.6484375
-    # (0.09301980584859848, 16.88650894165039, 0.6484375)
     x = x.cast(self.out[0].weight.dtype).sequential(self.out[0:2]).cast(self.out[2].weight.dtype)
     return self.out[2](x)
