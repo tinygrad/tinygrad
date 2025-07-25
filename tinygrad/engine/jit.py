@@ -42,17 +42,13 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
 
   for ji in jit_cache:
     match ji.prg:
-      case CompiledRunner():
-        ji_graph_dev = ji.prg.dev
-        # All GraphRunners can graph CompiledRunners
-        can_be_graphed = ji_graph_dev.graph is not None
-      case BufferXfer():
-        ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
-        # All *Multi*GraphRunner support graphing BufferXfers
-        can_be_graphed = ji_graph_dev.graph is not None and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
+      case CompiledRunner(): ji_graph_dev = ji.prg.dev
+      case BufferXfer(): ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
+      case BufferCopy(): ji_graph_dev = next((Device[unwrap(b).device] for b in ji.bufs if unwrap(b).device not in {"CPU", "LLVM"}), None)
       case ViewOp(): continue # ViewOps are just ignored
-      case _: can_be_graphed = False # Everything else is not graphed and flushes existing graph if it's being constructed
+      case _: ji_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
 
+    can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item(ji_graph_dev, ji)
     is_multigraph = can_be_graphed and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
     can_share_graph = can_be_graphed and (type(ji_graph_dev) is type(current_device) if is_multigraph else ji_graph_dev == current_device)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
@@ -130,8 +126,13 @@ class GraphRunner(Runner):
 
     return list({id(x):x for x in wait_nodes}.values())
 
+  @staticmethod
+  def supports_exec_item(dev, ei:ExecItem) -> bool: return isinstance(ei.prg, CompiledRunner)
+
 # a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner): pass
+class MultiGraphRunner(GraphRunner):
+  @staticmethod
+  def supports_exec_item(dev, ei:ExecItem) -> bool: return isinstance(ei.prg, (CompiledRunner, BufferXfer))
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
