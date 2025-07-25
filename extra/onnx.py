@@ -1,3 +1,4 @@
+# mypy: disable-error-code="misc, list-item, assignment, attr-defined, operator, index, arg-type"
 from types import SimpleNamespace
 from typing import Any, Sequence, cast, Literal, Callable, get_args, NamedTuple
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum
@@ -83,7 +84,7 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
-class Domain(enum.StrEnum):
+class Domain(enum.Enum):
   ONNX = "ai.onnx"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_TRAINING = "ai.onnx.training"

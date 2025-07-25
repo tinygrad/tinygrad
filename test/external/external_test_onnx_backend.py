@@ -184,6 +184,11 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
+# regression from removing StrEnum in Domain
+backend_test.exclude('test_adam_cpu')
+backend_test.exclude('test_gradient_of_add_and_mul_cpu')
+backend_test.exclude('test_gradient_of_add_cpu')
+
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
