@@ -1,14 +1,11 @@
 import yaml
 from typing import Tuple, Set, Dict
 from tinygrad import dtypes
-from tinygrad.codegen.assembly import AssemblyCodegen, Register
+from extra.assembly.assembly import AssemblyCodegen, Register
 from tinygrad.opt.kernel import Ops
 from tinygrad.uop.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
-
-# ugh, is this really needed?
-from extra.helpers import enable_early_exec
-early_exec = enable_early_exec()
+import subprocess
 
 boilerplate_start = """
 .global _start
@@ -198,6 +195,6 @@ class RDNACodegen(AssemblyCodegen):
                 'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
 
     code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
-    obj = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
-    asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
+    obj = subprocess.run([str(ROCM_LLVM_PATH / "llvm-mc"), '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], input=code.encode("utf-8"), capture_output=True, check=True).stdout
+    asm = subprocess.run([str(ROCM_LLVM_PATH / "ld.lld"), "/dev/stdin", "-o", "/dev/stdout", "--pie"], input=obj, capture_output=True, check=True).stdout
     return asm
