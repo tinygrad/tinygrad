@@ -108,7 +108,9 @@ class MetalDevice(Compiled):
       try:
         proc.send_signal(signal.SIGINT)
         proc.wait()
-      except Exception as e: proc.terminate()
+      except Exception:
+        proc.terminate()
+        proc.wait()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))

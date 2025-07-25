@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET, statistics
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, Generator, Iterable
+from typing import Any, TypedDict, Generator, IO
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
@@ -160,7 +160,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
 
 # Metal XCtrace
 
-def parse_xml(stream:Iterable[bytes]) -> Generator[dict]:
+def parse_xml(stream:IO[bytes]) -> Generator[dict]:
   cols:list[str] = []
   id_cache:dict = {}
   for _,e in ET.iterparse(stream, events=("end",)):
@@ -174,7 +174,7 @@ def xctrace_export(schema:str) -> list[dict]:
   try:
     proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
                              f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
-    xctrace_cache[schema] = ret = list(tqdm(parse_xml(proc.stdout), desc=f"parsing {schema}"))
+    xctrace_cache[schema] = ret = list(tqdm(parse_xml(unwrap(proc.stdout)), desc=f"parsing {schema}"))
     return ret
   finally:
     proc.terminate()
@@ -187,16 +187,15 @@ def get_metal_counters(st:int, et:int):
   time_info = list(xctrace_export("time-info"))[0]
   num, denom = [int(f.text) for f in time_info["timebase-info"].findall("mach-timebase-info-field")]
   start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
-
   # aggregate counter values in this time range
   counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
-  counter_values:dict[int, float] = {}
+  counter_values:dict[int, list[float]] = {}
   for r in xctrace_export("gpu-counter-value"):
     sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
     if sample_ts < st: continue
     if sample_ts > et: break
     counter_values.setdefault(int(r["counter-id"]), []).append(float(r["value"]))
-  ret = {}
+  ret:dict[str, dict[str, float]] = {}
   for group, counters in MTL_COUNTER_GROUPS.items():
     for c in counters:
       if (values:=counter_values.get(c)): ret.setdefault(group, {})[counter_info[c]["name"]] = statistics.mean(values)
