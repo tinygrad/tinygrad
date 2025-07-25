@@ -1,5 +1,5 @@
 # PROFILE=2 VIZ=1 python ./extra/gemm/amd_uop_matmul.py
-import pickle
+import pickle, statistics
 from tinygrad.viz.serve import xctrace_export, parse_xml, xctrace_to_cpu_time
 from tinygrad.helpers import ProfileRangeEvent,temp
 
@@ -16,36 +16,19 @@ time_info = get("time-info")[0]
 num, denom = [int(field.text) for field in time_info["timebase-info"].findall("mach-timebase-info-field")]
 mabs_epoch, timebase = int(time_info["mabs-epoch"]), num/denom
 
-cntr_info = {}
-for row in get("gpu-counter-info"): cntr_info[row.pop("counter-id")] = row
-
-metric_groups = {}
+counter_values:dict[int, float] = {}
 for row in get("gpu-counter-value"):
   sample_ts = xctrace_to_cpu_time(int(row["timestamp"]), mabs_epoch, timebase)
   if sample_ts < tinygemm.st: continue
   if sample_ts > tinygemm.en: break
-  metric_groups.setdefault(row.pop("counter-id"), []).append({"ts":sample_ts, "value":row["value"]})
+  counter_values.setdefault(row.pop("counter-id"), []).append(float(row["value"]))
 
+COUNTER_GROUPS = {"ALU":[11, 13, 15, 17, 19, 21, 23], "DRAM":[62, 64], "SRAM":[25]}
+counter_info = {}
+for row in get("gpu-counter-info"): counter_info[row.pop("counter-id")] = row
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
-
-# Number of plots
-n = len(metric_groups)
-
-# Create subplot layout with one row per metric
-fig = make_subplots(rows=n, cols=1, shared_xaxes=True)
-
-for i, (k, v) in enumerate(metric_groups.items(), start=1):
-  info = cntr_info[k]
-  df = pd.DataFrame(v)
-  fig.add_trace(
-    go.Scatter(x=df["ts"], y=df["value"], mode="lines", name=info["name"]),
-    row=i, col=1
-  )
-  fig.update_yaxes(title_text=info["name"], row=i, col=1)
-
-fig.update_layout(height=250*n, showlegend=False, title_text="GPU Metrics")
-fig.update_xaxes(title_text="Timestamp", row=n, col=1)
-fig.show()
+ret = {}
+for k,v in counter_values.items():
+  if (group:=next((g for g,lst in COUNTER_GROUPS.items() if int(k) in lst), None)) is None: continue
+  ret.setdefault(group, {})[counter_info[k]["name"]] = statistics.mean(v)
+print(ret)
