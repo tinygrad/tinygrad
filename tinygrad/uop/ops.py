@@ -372,7 +372,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
-    return dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
+    return next((x._device for x in self.src if x._device is not None), None)
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
