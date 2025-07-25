@@ -116,7 +116,6 @@ const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
-const counterSources = {};
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -136,10 +135,9 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
-  for (const [k, { timeline, mem, counters }] of Object.entries(layout)) {
+  for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
-    const deviceGroup = deviceList.appendChild(document.createElement("div"));
-    const div = deviceGroup.appendChild(document.createElement("div"));
+    const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
     div.style.padding = `${padding}px`;
     div.onclick = () => { // TODO: make this feature more visible
@@ -189,43 +187,7 @@ async function renderProfiler() {
       data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
     }
     // lastly, adjust device rect by number of levels
-    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area}px`;
-    if (counterSources[k] == null) {
-      const eventSource = new EventSource("/get_counters?device="+k);
-      const progressMessage = document.querySelector(".progress-message");
-      progressMessage.innerText = "Fetching GPU counters...";
-      timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
-      eventSource.onmessage = (e) => {
-        if (e.data === "END") {
-          progressMessage.style.display = "none";
-          renderProfiler();
-          return eventSource.close();
-        }
-        const ret = JSON.parse(e.data);
-        if (ret.schema == "gpu-counter-info") profileRet.layout[k].counters[ret["counter-id"]] = { ...ret, data:[] };
-        else if (ret.schema == "gpu-counter-value") {
-          profileRet.layout[k].counters[ret["counter-id"]].data.push(ret);
-        }
-      };
-      counterSources[k] = eventSource;
-    }
-    let graphOffset = startY+area+padding;
-    const graphHeight = 32;
-    const padY = 2;
-    for (const counter of Object.values(counters)) {
-      const td = div.appendChild(document.createElement("div"));
-      td.style.height = graphHeight+"px";
-      td.innerText = counter.name;
-      td.onmouseenter = (e) => d3.select(".metadata").html("").text(counter.description);
-      const counterYScale = d3.scaleLinear().domain([0, counter["max-value"]]).range([0, graphHeight-padY]);
-      for (const { timestamp, value } of counter.data) {
-        const height = counterYScale(value);
-        arg = { tooltipText: `${value}`};
-        data.shapes.push({x:timestamp-st, y:graphOffset, width:10, height, arg, fillColor:"#2667ff" });
-      }
-      graphOffset += graphHeight;
-    }
-    deviceGroup.style.height = `${rect(div).height+graphHeight*counters.length+padding}px`;
+    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;

@@ -169,16 +169,8 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v), "counters":[]} for k,v in dev_events.items()}
+  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
-
-
-def get_counters(device:str):
-  # ** Metal XCtrace parser
-  if (device:=device.upper()) == "METAL":
-    from tinygrad.viz.metal import xctrace_export
-    for e in xctrace_export("/tmp/metal.trace", ["gpu-counter-info"]): yield e
-    for e in xctrace_export("/tmp/metal.trace", ["time-info", "gpu-counter-value"]): yield e
 
 # ** HTTP server
 
@@ -198,7 +190,6 @@ class Handler(BaseHTTPRequestHandler):
       if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
       ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
-    elif url.path == "/get_counters": return self.stream_json(get_counters(parse_qs(url.query)["device"][0]))
     else: status_code = 404
 
     # send response
