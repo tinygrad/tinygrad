@@ -2019,6 +2019,38 @@ class Tensor(MathTrait):
       state = state.kernelize()
     return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
+  def _hash_1mb(self) -> Tensor:
+    assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
+    assert self.ndim == 2, "only support batched 1d tensors"
+    assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
+
+    blocks = self.shape[0] * self.shape[1] // 4096
+    data = self.reshape(blocks, 4096)
+    block_hashes = data.keccak("shake_128").reshape(self.shape[0], 4096)
+    return block_hashes.keccak("shake_128").reshape(self.shape[0], 16)
+
+  def hash(self) -> Tensor:
+    """
+    Calculates a 16-byte hash of the tensor.
+    ```python exec="false source="above" session="tensor" result="python"
+    t = Tensor(b"Hello World!").hash()
+    print(t.data().hex())
+    ```
+    """
+
+    data = self.flatten().bitcast(dtypes.uint8)
+    if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+    base_chunks = ceildiv(data.shape[0], 2**20)
+    tree_depth = math.ceil(math.log(base_chunks, 65536)) if base_chunks > 1 else 0
+
+    level_chunks = base_chunks
+    for _ in range(tree_depth + 1):
+      data = data.reshape(level_chunks, 2**20)._hash_1mb().flatten()
+      if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+      level_chunks = ceildiv(data.shape[0], 2**20)
+
+    return data[:16]
+
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
     if dtype is not None: m = m.cast(dtype)
