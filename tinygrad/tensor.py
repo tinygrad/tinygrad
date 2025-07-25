@@ -1991,13 +1991,16 @@ class Tensor(MathTrait):
         state = state.bitwise_xor((state.roll(shifts=-1, dims=2) ^ -1) & state.roll(shifts=-2, dims=2)).flatten(1) ^ rnd_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 
-  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(dtype)
+  def _softmax(self, axis, dtype:DTypeLike|None=None, upcast_asap=False) -> tuple[Tensor, Tensor, Tensor]:
+    if upcast_asap:
+      m = self.cast(dtype) - self.cast(dtype).max(axis=axis, keepdim=True).detach()
+    else:
+      m = self - self.max(axis=axis, keepdim=True).detach()
+      if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX"), upcast_asap=False) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -2020,7 +2023,7 @@ class Tensor(MathTrait):
     if _single_kernel:
       _, e, ss = self.contiguous()._softmax(axis, dtype)
       return e.div(ss).fuse()
-    _, e, ss = self._softmax(axis, dtype)
+    _, e, ss = self._softmax(axis, dtype, upcast_asap)
     return e.div(ss)
 
   def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
@@ -3867,7 +3870,19 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    import globvars as gv
+    if gv.measure_softmax:
+      gv.md(gv.d["post_softmax"], gv.d["pre_softmax"].cast(self.dtype).softmax(-1))
+      # diff.abs().mean(): 3.4400411408341824e-08
+      # a.abs().mean(): 0.000244140625
+      # diff.abs().max(): 2.3387838155031204e-07
+      # (3.4400411408341824e-08, 0.000244140625, 2.3387838155031204e-07)
+      gv.md(gv.d["post_softmax"], gv.d["pre_softmax"].cast(self.dtype).softmax(-1, dtype=dtypes.float32))
+      # (1.9201477907682118e-10, 0.000244140625, 1.1722366410893414e-09)
+      gv.md(gv.d["post_softmax"], gv.d["pre_softmax"].cast(self.dtype).softmax(-1, dtype=dtypes.float32, upcast_asap=True))
+      # (1.9662622918747985e-10, 0.000244140625, 1.1688410239685254e-09)
+      gv.measure_softmax=False
+    return qk.cast(self.dtype).softmax(-1, dtype=dtypes.float32).dropout(dropout_p).cast(self.dtype) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")

@@ -19,3 +19,4 @@ d = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/mixed
 for v in d.values(): v.to_("NV").realize()
 
 measure_layernorm=True
+measure_softmax=True

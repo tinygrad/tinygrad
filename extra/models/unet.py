@@ -284,7 +284,7 @@ class UNetModel:
       for bb in b:
         x = run(x, bb)
     # to match behavior of torch automatic mixed precision with fp16, where GroupNorm weights stay in fp32
-    gv.md(gv.d["pre_groupnorm"], x)
+    #gv.md(gv.d["pre_groupnorm"], x)
     # diff.abs().mean(): 0.09301980584859848
     # a.abs().mean(): 16.88650894165039
     # diff.abs().max(): 0.6484375

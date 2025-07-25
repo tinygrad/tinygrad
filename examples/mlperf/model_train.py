@@ -1440,10 +1440,10 @@ def train_stable_diffusion():
   load_state_dict(unet, loaded)
   ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"])
   gv.md(gv.d["ret"], ret)
-  # diff.abs().mean(): 6.80685043334961e-05
-  # a.abs().mean(): 0.0292816162109375
-  # diff.abs().max(): 0.000335693359375
-  # (6.80685043334961e-05, 0.0292816162109375, 0.000335693359375)
+  # diff.abs().mean(): 6.431341171264648e-05
+  # a.abs().mean(): 0.037750244140625
+  # diff.abs().max(): 0.00030517578125
+  # (6.431341171264648e-05, 0.037750244140625, 0.00030517578125)
 
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, model:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
