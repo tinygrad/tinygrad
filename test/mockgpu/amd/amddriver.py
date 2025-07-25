@@ -1,4 +1,4 @@
-import pathlib, re, ctypes, mmap, collections, functools, copy, os
+import pathlib, re, ctypes, mmap, collections, functools, copy, os, threading
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.am.am as am
 from tinygrad.helpers import from_mv
@@ -38,6 +38,10 @@ class DRMFileDesc(VirtFileDesc):
 class AMDDriver(VirtDriver):
   def __init__(self, gpus=6):
     super().__init__()
+
+    self._exec_event = threading.Event()
+    self._exec_thread = threading.Thread(target=self._exec_loop, daemon=True)
+    self._exec_thread.start()
 
     # NOTE: gpu ids start from one (id 0 is skipped in KFDIface._is_usable_gpu)
     self.tracked_files += [VirtFile('/dev/kfd', functools.partial(KFDFileDesc, driver=self))] + \
@@ -147,7 +151,7 @@ class AMDDriver(VirtDriver):
 
       # Track writes to doorbell, calling callback
       struct.doorbell_offset = self._alloc_doorbell(struct.gpu_id)
-      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._emulate_execute())
+      self.track_address(struct.doorbell_offset, struct.doorbell_offset + 8, lambda mv,off: None, lambda mv, off: self._exec_event.set())
     elif nr == kfd_ioctls.AMDKFD_IOC_WAIT_EVENTS:
       evs = (kfd.struct_kfd_event_data * struct.num_events).from_address(struct.events_ptr)
       for ev in evs:
@@ -163,10 +167,18 @@ class AMDDriver(VirtDriver):
       exit(1)
     return 0
 
+  def _exec_loop(self):
+    while True:
+      self._exec_event.wait()
+      self._exec_event.clear()
+      self._emulate_execute()
+
   def _emulate_execute(self):
-    any_progress = True
-    while any_progress:
-      any_progress = False
+    any_executing = True
+    while any_executing:
+      any_executing = False
       for gpu in self.gpus.values():
         for q in gpu.queues:
-          if q.executing: any_progress |= q.execute() > 0
+          if q.executing:
+            q.execute()
+            if q.executing: any_executing = True
