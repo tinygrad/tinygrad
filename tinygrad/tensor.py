@@ -1258,7 +1258,7 @@ class Tensor(MathTrait):
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self.realize()._getitem(indices).assign(v)
+      self._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
     if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
