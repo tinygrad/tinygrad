@@ -512,6 +512,24 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
+    if Device.DEFAULT != "CPU":
+      # setting multiple devices fail
+      with self.assertRaises(subprocess.CalledProcessError):
+        subprocess.run([f'{Device.DEFAULT}=1 CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                        shell=True, check=True)
+
+      # setting device via DEV
+      subprocess.run([f'DEV={Device.DEFAULT.capitalize()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+      subprocess.run([f'DEV={Device.DEFAULT.lower()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+      subprocess.run([f'DEV={Device.DEFAULT.upper()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+
+      with self.assertRaises(subprocess.CalledProcessError):
+        subprocess.run([f'DEV={Device.DEFAULT} CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                        shell=True, check=True)
+
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:
       Tensor.arange(4).reshape(3,2)

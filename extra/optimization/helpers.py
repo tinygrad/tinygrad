@@ -6,6 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.helpers import getenv
+from tinygrad.engine.realize import get_program
 inf, nan = float('inf'), float('nan')
 UOps = Ops
 
@@ -115,7 +116,7 @@ def time_linearizer(lin:Kernel, rawbufs:list[Buffer], allow_test_size=True, max_
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
-  p = lin.to_program()
+  p = get_program(lin.get_optimized_ast(), lin.opts)
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
 

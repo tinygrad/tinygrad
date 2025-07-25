@@ -15,8 +15,8 @@ class TestSearchUtil(unittest.TestCase):
   def test_bufs_from_lin(self):
     a = Tensor([1,2,3,4]).realize()
     si = (a+1).schedule()[0]
-    rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
-    assert len(rawbufs) == len(lin.membufs) == 2
+    rawbufs = bufs_from_lin(Kernel(si.ast))
+    assert len(rawbufs) == 2
     assert all(r is not None for r in rawbufs)
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)
@@ -25,8 +25,8 @@ class TestSearchUtil(unittest.TestCase):
     a = Tensor.randn(4, 4).realize()
     b = a+a[0]
     si = b.schedule()[0]
-    rawbufs = bufs_from_lin(k:=Kernel(si.ast))
-    assert len(rawbufs) == len(k.membufs) == 2
+    rawbufs = bufs_from_lin(Kernel(si.ast))
+    assert len(rawbufs) == 2
     assert all(r is not None for r in rawbufs)
     assert all(isinstance(r, Buffer) for r in rawbufs)
     assert all(r.size > 0 for r in rawbufs)

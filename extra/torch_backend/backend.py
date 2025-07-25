@@ -352,6 +352,11 @@ def sort_values(input, dim=-1, descending=False, stable=True, values=None, indic
   unwrap(indices).assign(out_indices.cast(dtypes.int64))
   return wrap(out_values), wrap(out_indices)
 
+@torch.library.impl("aten::_linalg_svd", "privateuseone")
+def _linalg_svd(self, full_matrices=False):
+  U, S, Vh = unwrap(self).svd(full_matrices)
+  return wrap(U), wrap(S), wrap(Vh)
+
 # register some decompositions
 from torch._decomp import get_decompositions
 decomps = [
@@ -412,6 +417,7 @@ decomps = [
   #aten.lgamma,
   # this needs copy_strided
   #aten.lerp,
+  aten.norm,
 ]
 for k,v in get_decompositions(decomps).items():
   key = str(k._schema).split("(")[0]
@@ -473,6 +479,7 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
   "aten.fmin.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.minimum(input, other))),
   "aten.amax.out": lambda self,dim=None: self.max(axis=dim),
+  "aten.amin.out": lambda self,dim=None: self.min(axis=dim),
   # TODO: this gets the shape wrong
   #"aten.arange.start_out": Tensor.arange,
   "aten.lerp.Scalar_out": Tensor.lerp,
