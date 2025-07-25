@@ -1,4 +1,4 @@
-from typing import Optional, cast, Generator
+from typing import cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
@@ -54,13 +54,13 @@ class Runner:
     self.first_run, self.display_name, self.device, self.estimates = True, display_name, device, estimates
   @property
   def dev(self): return Device[self.device]
-  def exec(self, rawbufs:list[Buffer], var_vals:Optional[dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:list[Buffer], var_vals:dict[Variable, int]|None=None) -> float|None:
     return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None, prg=None):
+  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
@@ -70,7 +70,7 @@ class CompiledRunner(Runner):
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -140,10 +140,10 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 @dataclass(frozen=True)
 class ExecItem:
   prg: Runner
-  bufs: list[Optional[Buffer]]
-  metadata: Optional[tuple[Metadata, ...]] = None
+  bufs: list[Buffer|None]
+  metadata: tuple[Metadata, ...]|None = None
   fixedvars: dict[Variable, int] = field(default_factory=dict)
-  def run(self, _var_vals:Optional[dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def run(self, _var_vals:dict[Variable, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
@@ -188,7 +188,7 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem,
 
 capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:list[ScheduleItem], var_vals:Optional[dict[Variable, int]]=None, do_update_stats=True):
+def run_schedule(schedule:list[ScheduleItem], var_vals:dict[Variable, int]|None=None, do_update_stats=True):
   for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
