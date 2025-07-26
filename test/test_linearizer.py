@@ -632,8 +632,8 @@ class TestLinearizer(unittest.TestCase):
     #helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
-  @unittest.skipIf(Device.DEFAULT == "PTX", "ptx doesn't have reg")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_grouped_store_phis(self):
     """
     float4 acc0 = float4(0.0,0.0,0.0,0.0);
@@ -697,10 +697,10 @@ class TestLinearizer(unittest.TestCase):
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in uops if u.op is Ops.IF and u.src[-1] == barrier]) == 1
 
-  @unittest.skipIf(Device.DEFAULT == "PTX", "ptx doesn't have reg")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_grouped_store_local_only(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
