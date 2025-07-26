@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, subprocess
+import xml.etree.ElementTree as ET, statistics
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, Generator
+from typing import Any, TypedDict, Generator, IO
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
@@ -172,6 +173,55 @@ def get_profile(profile:list[ProfileEvent]):
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+
+# ** GPU counter parsers
+
+# Metal XCtrace
+
+def parse_xml(stream:IO[bytes]) -> Generator[dict]:
+  cols:list[str] = []
+  id_cache:dict = {}
+  for _,e in ET.iterparse(stream, events=("end",)):
+    if (eid:=e.attrib.get("id")) is not None: id_cache[eid] = e.text
+    if e.tag == "col": cols.append(unwrap(next(iter(e)).text))
+    if e.tag == "row": yield {k:id_cache.get(v.attrib.get("ref"), v.text or v) for k,v in zip(cols, e)}
+
+xctrace_cache:dict[str, list[dict]] = {}
+
+def xctrace_export(schema:str) -> list[dict]:
+  if (cret:=xctrace_cache.get(schema)) is not None: return cret
+  try:
+    proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
+                             f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
+    xctrace_cache[schema] = ret = list(tqdm(parse_xml(unwrap(proc.stdout)), desc=f"parsing {schema}"))
+    return ret
+  finally:
+    proc.terminate()
+    proc.wait()
+
+MTL_COUNTER_GROUPS = {"ALU":[11, 13, 15, 17, 19, 21, 23], "DRAM":[62, 64], "SRAM":[25]}
+
+def get_metal_counters(st:int, et:int):
+  # start by getting monotonic time at the start of trace
+  time_info = list(xctrace_export("time-info"))[0]
+  num, denom = [int(f.text) for f in time_info["timebase-info"].findall("mach-timebase-info-field")]
+  start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
+  # aggregate counter values in this time range
+  counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
+  counter_values:dict[int, list[float]] = {}
+  for r in xctrace_export("gpu-counter-value"):
+    sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
+    if sample_ts < st: continue
+    if sample_ts > et: break
+    counter_values.setdefault(int(r["counter-id"]), []).append(float(r["value"]))
+  ret:dict[str, float] = {}
+  for k,v in counter_values.items():
+    ret[counter_info[k]["name"]] = statistics.mean(v)
+  for name,lst in MTL_COUNTER_GROUPS.items():
+    if (vals:=[r for c in lst if (info:=counter_info[c])["type"] == "Percentage" and (r:=ret.get(info["name"]))]): ret[name] = max(vals)
+  return ret
+
+hw_counters = {"METAL":get_metal_counters}
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
