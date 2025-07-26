@@ -1358,6 +1358,7 @@ def train_stable_diffusion():
   #Device.DEFAULT="CPU"
   Device.DEFAULT="NV"
   from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
+  from extra.models import unet as unet_module
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
   from extra.models.inception import FidInceptionV3
@@ -1392,7 +1393,7 @@ def train_stable_diffusion():
   # - uses erf for gelu instead of tanh approximation default
   unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
                  "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                 "num_groups":16, "norm_dtype":dtypes.float32, "st_norm_eps":1e-6, "gelu_approx":"erf"}
+                 "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
 
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
@@ -1407,6 +1408,8 @@ def train_stable_diffusion():
   weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
   #load_state_dict(model, weights)
+  unet_module.linear = unet_module.AutocastLinear
+  unet_module.conv2d = unet_module.AutocastConv2d
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
 
   unet:UNetModel = model.model.diffusion_model
@@ -1434,16 +1437,16 @@ def train_stable_diffusion():
 
   import globvars as gv
   loaded = safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors")
-  for k,v in loaded.items():
-    if all(pat not in k for pat in ("in_layers.0", "out_layers.0", "norm")) and k not in {"out.0.weight", "out.0.bias"}:
-      loaded[k] = v.to("NV").cast(dtypes.half)
+  #for k,v in loaded.items():
+    #if all(pat not in k for pat in ("in_layers.0", "out_layers.0", "norm")) and k not in {"out.0.weight", "out.0.bias"}:
+    #loaded[k] = v.to("NV").cast(dtypes.half)
   load_state_dict(unet, loaded)
   ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"], softmax_dtype=dtypes.float32)
   gv.md(gv.d["ret"], ret)
-  # diff.abs().mean(): 6.431341171264648e-05
-  # a.abs().mean(): 0.037750244140625
-  # diff.abs().max(): 0.00030517578125
-  # (6.431341171264648e-05, 0.037750244140625, 0.00030517578125)
+  # diff.abs().mean(): 4.184246063232422e-05
+  # a.abs().mean(): 0.041748046875
+  # diff.abs().max(): 0.000244140625
+  # (4.184246063232422e-05, 0.041748046875, 0.000244140625)
 
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
@@ -1455,10 +1458,11 @@ def train_stable_diffusion():
     #for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
       #p.to_("NV")
 
-    out = unet(x_noised, t, c, upcast_softmax=True)
+    out = unet(x_noised, t, c, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
+    loss.backward()
 
-    loss.backward().to_("CPU")
+    #loss.backward().to_("CPU")
 
     for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
       if p.grad is not None: p.grad = p.grad / grad_scaler.scale

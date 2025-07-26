@@ -20,7 +20,7 @@
 #export PYTHONPATH="." NV=1
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
-export DEFAULT_FLOAT="HALF" BS=1 EVAL_BS=1
+export BS=1 EVAL_BS=1
 
 # TODO: this will change when training on a tinybox
 export BASEDIR="/home/hooved/train-sd/training/stable_diffusion"
