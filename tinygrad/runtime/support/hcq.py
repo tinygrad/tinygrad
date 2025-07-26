@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
 try: import fcntl # windows misses that
-except ImportError: fcntl = None
+except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
