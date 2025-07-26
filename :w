@@ -188,6 +188,8 @@ def parse_xml(stream:IO[bytes]) -> Generator[dict]:
 
 xctrace_cache:dict[str, list[dict]] = {}
 
+from tinygrad.helpers import diskcache
+@diskcache
 def xctrace_export(schema:str) -> list[dict]:
   if (cret:=xctrace_cache.get(schema)) is not None: return cret
   try:
@@ -209,13 +211,16 @@ def get_metal_counters(st:int, et:int):
   # aggregate counter values in this time range
   counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
   counter_values:dict[int, list[float]] = {}
+  print(xctrace_export("gpu-counter-value"))
   for r in xctrace_export("gpu-counter-value"):
     sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
     if sample_ts < st: continue
     if sample_ts > et: break
     counter_values.setdefault(int(r["counter-id"]), []).append(float(r["value"]))
+  print(counter_values)
   ret:dict[str, float] = {}
   for k,v in counter_values.items():
+    print(counter_info[k]["name"], statistics.mean(v))
     ret[counter_info[k]["name"]] = statistics.mean(v)
   for name,lst in MTL_COUNTER_GROUPS.items():
     if (vals:=[r for c in lst if (info:=counter_info[c])["type"] == "Percentage" and (r:=ret.get(info["name"]))]): ret[name] = max(vals)
