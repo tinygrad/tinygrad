@@ -335,12 +335,6 @@ async function renderProfiler() {
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
-runtimeStats = {}
-async function renderRuntimeStats(name) {
-  if (runtimeStats[name] == null) runtimeStats[name] = await (await fetch(`/stats?name=${name}`)).json();
-  console.log(runtimeStats[name])
-}
-
 // ** zoom and recentering
 
 const svgZoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
@@ -511,8 +505,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  // ** runtime stats
-  if (ctx.key != null) renderRuntimeStats(ctx.key);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
