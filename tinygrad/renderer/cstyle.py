@@ -268,7 +268,7 @@ class IntelRenderer(OpenCLRenderer):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = []
-    for name, dtype_in, dtype_out in set((uop.arg[0], uop.src[0].dtype, uop.dtype) for uop in uops if uop.op is Ops.WMMA):
+    for name, dtype_in, dtype_out in set((uop.arg[0], uop.src[0].dtype.scalar(), uop.dtype.scalar()) for uop in uops if uop.op is Ops.WMMA):
       dt_in = ("ushort", "bf16") if dtype_in == dtypes.bfloat16 else (dtype_in.name, "f16")
       prefix.append(f"""{dtype_out.name}8 __{name}({dt_in[0]}16 a, {dt_in[0]}16 b, {dtype_out.name}8 c) {{
     return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
@@ -306,11 +306,11 @@ class MetalRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    wmma_args = set((uop.dtype, uop.src[0].dtype, uop.arg[0]) for uop in uops if uop.op is Ops.WMMA)
+    wmma_args = set((uop.dtype.scalar(), uop.src[0].dtype.scalar(), uop.arg[0]) for uop in uops if uop.op is Ops.WMMA)
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
     for dtype_out, dtype_in, name in wmma_args: prefix.append(
-  f"""{(dstr_out:=self.render_dtype(dtype_out))} __{name}({(dstr_in:=self.render_dtype(dtype_in))} a, {dstr_in} b, {dstr_out} c){{
-  simdgroup_{self.render_dtype(dtype_in.scalar())}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out.scalar())}8x8 mat_c;
+  f"""{(dstr_out:=self.render_dtype(dtype_out.vec(2)))} __{name}({(dstr_in:=self.render_dtype(dtype_in.vec(2)))} a, {dstr_in} b, {dstr_out} c){{
+  simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
@@ -362,7 +362,7 @@ class CUDARenderer(CStyleLanguage):
 
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
-    wmma_args = set((uop.arg[0], uop.arg[1], uop.src[0].dtype, uop.dtype, uop.arg[6]) for uop in uops if uop.op is Ops.WMMA)
+    wmma_args = set((uop.arg[0], uop.arg[1], uop.src[0].dtype.scalar(), uop.dtype.scalar(), uop.arg[6]) for uop in uops if uop.op is Ops.WMMA)
     for name, (N, M, K), dtype_in, dtype_out, upcast_axes in wmma_args:
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
@@ -459,14 +459,14 @@ class AMDRenderer(CStyleLanguage):
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-    for name, dtype_in, dtype_out in set((uop.arg[0], uop.src[0].dtype, uop.dtype) for uop in uops if uop.op is Ops.WMMA):
+    for name, dtype_in, dtype_out in set((uop.arg[0], uop.src[0].dtype.scalar(), uop.dtype.scalar()) for uop in uops if uop.op is Ops.WMMA):
       if self.tensor_cores == tc.amd_cdna:
-        prefix.append(f"#define __{name} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if dtype_out == dtypes.half else 'bf16_1k'}")
+        prefix.append(f"#define __{name} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if dtype_in == dtypes.half else 'bf16_1k'}")
       # #define __WMMA_16_16_16_half_half __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
       elif self.tensor_cores == tc.amd_rdna4:
-        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_in]}_16x16x16_{type_map[dtype_out]}_w32_gfx12")
-      elif dtype_in == dtypes.float:
-        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_out == dtypes.half else 'bf16'}_w32")
+        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")
+      elif dtype_out == dtypes.float:
+        prefix.append(f"#define __{name} __builtin_amdgcn_wmma_f32_16x16x16_{'f16' if dtype_in == dtypes.half else 'bf16'}_w32")
       else: prefix.append(f"static inline __attribute__((device)) half8 __{name}"+"""(half16 a, half16 b, half8 c) {
   half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
   c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
