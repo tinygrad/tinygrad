@@ -180,7 +180,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
       break
 
   # if it wasn't split, we return None. otherwise we CAT them
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if len(ret) > 1 else None
+  if len(ret) <= 1: return None
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp(Ops.NOOP, src=tuple(ret))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
