@@ -118,7 +118,9 @@ class CStyleLanguage(Renderer):
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      prefix = self.smem_prefix if dt.addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast else self.buffer_prefix
+      prefix = ""
+      if dt.addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
+      if dt.addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
       return prefix + self.render_dtype(dt.base) + "*"
     if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
