@@ -70,9 +70,11 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
 
+  # late rewrite patterns (without sym)
+  ret.append(RewriteStep(symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2), lambda _: opts, name="late rewrite"))
+
   # final rules for the renderer (without sym)
-  pm_final_rewrite = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)+pm_render+extra_matcher
-  ret.append(RewriteStep(pm_final_rewrite, lambda _: opts, name="final rewrite"))
+  ret.append(RewriteStep(symbolic_simple+pm_render+extra_matcher, name="renderer rewrite"))
 
   # return the list (with optional linearizer)
   return ret + (rewrites_for_linearizer if linearizer else [])
