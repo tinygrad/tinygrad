@@ -240,6 +240,21 @@ generate_io_uring() {
   fixup $BASE/io_uring.py
 }
 
+generate_ib() {
+  clang2py -k cdefstum \
+    /usr/include/infiniband/verbs.h \
+    /usr/include/infiniband/verbs_api.h \
+    /usr/include/infiniband/ib_user_ioctl_verbs.h \
+    /usr/include/rdma/ib_user_verbs.h \
+    -o $BASE/ib.py
+
+  sed -i "s\import ctypes\import ctypes, ctypes.util\g" "$BASE/ib.py"
+  sed -i "s\FIXME_STUB\libibverbs\g" "$BASE/ib.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)\g" "$BASE/ib.py"
+
+  fixup $BASE/ib.py
+}
+
 generate_libc() {
   clang2py -k cdefstum \
     $(dpkg -L libc6-dev | grep sys/mman.h) \
@@ -465,6 +480,7 @@ elif [ "$1" == "nvdrv" ]; then generate_nvdrv
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
+elif [ "$1" == "ib" ]; then generate_ib
 elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl

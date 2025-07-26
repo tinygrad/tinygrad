@@ -16,6 +16,7 @@ from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.runtime.support.ib import IBCtx, IBConn, SGE
 
 # ***** API *****
 
@@ -35,6 +36,7 @@ class RemoteProperties:
   offset_supported: bool
   graph_supported: bool
   graph_supports_multi: bool
+  ib_gid: bytes|None
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -46,10 +48,16 @@ class Event(RemoteRequest): event_session: SessionKey; event: int # noqa: E702
 class Wait(RemoteRequest): event: int
 
 @dataclass(frozen=True)
+class IBConnect(RemoteRequest): host: str; gid: bytes; qp_num: int # noqa: E702
+
+@dataclass(frozen=True)
 class BufferAlloc(RemoteRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
 
 @dataclass(frozen=True)
 class BufferOffset(RemoteRequest): buffer_num: int; size: int; offset: int; sbuffer_num: int # noqa: E702
+
+@dataclass(frozen=True)
+class BufferIOVAS(RemoteRequest): buffer_nums: list[tuple[SessionKey, int]] # noqa: E702
 
 @dataclass(frozen=True)
 class BufferFree(RemoteRequest): buffer_num: int # noqa: E702
@@ -111,9 +119,9 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
-eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferFree,
-                                       CopyIn, CopyOut, Transfer, BatchTransfer, ProgramAlloc, ProgramFree, ProgramExec, GraphComputeItem, GraphAlloc,
-                                       GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
+eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferIOVAS,
+                                       BufferFree, CopyIn, CopyOut, Transfer, BatchTransfer, IBConnect, ProgramAlloc, ProgramFree, ProgramExec,
+                                       GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -160,6 +168,12 @@ class RemoteHandler:
     self.base_device = base_device
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
+    try: self.ib_ctx: IBCtx|None = IBCtx(getenv("IB_DEV", 0))
+    except (IndexError, AttributeError): self.ib_ctx = None
+    self.ib_lock = asyncio.Lock()
+    self.ib_conns: dict[str, IBConn|None] = {}
+    self.iova_cache: dict[tuple[SessionKey, int], tuple[int, int, int]] = {}
+
   async def __call__(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
     while (req_hdr:=(await reader.readline()).decode().strip()):
       req_method, req_path, _ = req_hdr.split(' ')
@@ -170,6 +184,30 @@ class RemoteHandler:
       req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
       res_status, res_body = await self.handle(req_method, req_path, req_body)
       writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
+
+  async def ib_connect(self, ssession:SessionKey, dsession:SessionKey) -> IBConn|None:
+    if self.ib_ctx is None: return None
+    await self.ib_lock.acquire()
+    conn = RemoteConnection(dsession.host)
+    if dsession.host not in self.ib_conns:
+      props = safe_eval(ast.parse(conn.q(GetProperties(session=dsession), wait=True), mode="eval").body)
+      if props.ib_gid is not None:
+        self.ib_conns[dsession.host] = ib_conn = IBConn(self.ib_ctx)
+        ibxc_ret = conn.q(IBConnect(ssession.host, ib_conn.gid, ib_conn.qp_num, session=dsession), wait=True)
+        ib_conn.connect(*struct.unpack('<16sQ', ibxc_ret))
+      else:
+        self.ib_conns[dsession.host] = None
+    self.ib_lock.release()
+    return self.ib_conns[dsession.host]
+
+  async def get_iovas(self, bufs:list[tuple[SessionKey, int]]) -> list[tuple[int, int, int]]:
+    await self.ib_lock.acquire()
+    if (rbufs:=[buf for buf in bufs if buf not in self.iova_cache]):
+      conn = RemoteConnection(rbufs[0][0].host)
+      resp = await conn.aq(BufferIOVAS(rbufs, session=rbufs[0][0]), wait=True)
+      self.iova_cache.update({rbuf: struct.unpack('<QQQ', resp[i*24:(i+1)*24]) for i,rbuf in enumerate(rbufs)})
+    self.ib_lock.release()
+    return [self.iova_cache[buf] for buf in bufs]
 
   async def handle(self, method:str, path:str, body:bytes) -> tuple[http.HTTPStatus, bytes]:
     status, ret = http.HTTPStatus.OK, b""
@@ -188,6 +226,7 @@ class RemoteHandler:
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args), offset_supported=hasattr(dev.allocator, '_offset'),
               graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+              ib_gid=bytes(self.ib_ctx.gid_attr.raw) if self.ib_ctx is not None else None,
             )
             ret = repr(rp).encode()
           case Event():
@@ -200,9 +239,19 @@ class RemoteHandler:
           case Wait():
             assert await session.events[c.event].wait()
             del session.events[c.event] # do not leak memory
+          case IBConnect():
+            self.ib_conns[c.host] = ibc = IBConn(unwrap(self.ib_ctx))
+            ibc.connect(c.gid, c.qp_num)
+            ret = struct.pack('<16sQ', ibc.gid, ibc.qp_num)
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
             session.buffers[c.buffer_num] = Buffer(dev.device, c.size, dtypes.uint8, options=c.options, preallocate=True)
+          case BufferIOVAS():
+            rets = []
+            for buffer_session,buffer_num in c.buffer_nums:
+              iova, mr = unwrap(self.ib_ctx).reg(buf:=self.sessions[buffer_session].buffers[buffer_num])
+              rets.append(struct.pack("<QQQ", iova, mr.contents.rkey, buf.nbytes))
+            ret = b"".join(rets)
           case BufferOffset():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already exists"
             session.buffers[c.buffer_num] = session.buffers[c.sbuffer_num].view(c.size, dtypes.uint8, c.offset).allocate()
@@ -220,16 +269,29 @@ class RemoteHandler:
                 sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
                 dbuf.copyin(data)
             else:
-              conn = RemoteConnection(c.dsession.host)
+              conn, ib_conn = RemoteConnection(c.dsession.host), await self.ib_connect(unwrap(c.session), c.dsession)
               sbuf = session.buffers[c.buffer_num]
-              sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
-              conn.q(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
+              if ib_conn is not None:
+                src_iova, src_mr = unwrap(self.ib_ctx).reg(sbuf)
+                dst_iova, dst_key, dst_size = (await self.get_iovas([(c.dsession, c.dbuffer_num)]))[0]
+                assert sbuf.nbytes == dst_size, f"{sbuf.nbytes} != {dst_size}"
+                for d in Device._opened_devices: Device[d].synchronize()
+                ib_conn.rdma_write([SGE(dst_iova, dst_key, src_iova, src_mr.contents.lkey, dst_size)])
+              else:
+                sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
+                await conn.aq(CopyIn(c.dbuffer_num, conn.req.h(data), session=c.dsession), wait=True)
           case BatchTransfer():
-            conn = RemoteConnection(c.dbuffer_nums[0][0].host)
-            for (sbuf_session,sbuf_num),(dbuf_session,dbuf_num) in zip(c.sbuffer_nums, c.dbuffer_nums):
-              sbuf = self.sessions[sbuf_session].buffers[sbuf_num]
-              sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
-              await conn.aq(CopyIn(dbuf_num, conn.req.h(data), session=dbuf_session), wait=True)
+            conn, ib_conn = RemoteConnection(c.dbuffer_nums[0][0].host), await self.ib_connect(c.sbuffer_nums[0][0], c.dbuffer_nums[0][0])
+            if ib_conn is not None:
+              sbufs = [unwrap(self.ib_ctx).reg(self.sessions[s].buffers[bi]) for s,bi in c.sbuffer_nums]
+              dbufs = await self.get_iovas(c.dbuffer_nums)
+              for d in Device._opened_devices: Device[d].synchronize()
+              ib_conn.rdma_write([SGE(di, dk, si, sm.contents.lkey, ds) for (di,dk,ds),(si,sm) in zip(dbufs, sbufs)])
+            else:
+              for (sbuf_session,sbuf_num),(dbuf_session,dbuf_num) in zip(c.sbuffer_nums, c.dbuffer_nums):
+                sbuf = self.sessions[sbuf_session].buffers[sbuf_num]
+                sbuf.copyout(data:=memoryview(bytearray(sbuf.nbytes)))
+                await conn.aq(CopyIn(dbuf_num, conn.req.h(data), session=dbuf_session), wait=True)
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
