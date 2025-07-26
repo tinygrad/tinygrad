@@ -4,6 +4,7 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.dtype import AddrSpace
 from tinygrad.schedule.kernelize import merge_views
 from tinygrad.helpers import getenv
+from tinygrad.shape.shapetracker import ShapeTracker
 
 N = 4096
 run_count = 5
@@ -20,13 +21,14 @@ def hl_spec_kernel3():
   nbIterWaveN = 2
 
   # define buffers
-  a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0)
-  b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1)
-  c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2)
-  As = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BM, AddrSpace.LOCAL), arg=0)
-  Bs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BN, AddrSpace.LOCAL), arg=1)
-  A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), arg=0)
-  B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), arg=1)
+  # TODO: remove these views once the defines have a shape
+  a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=0).view(ShapeTracker.from_shape((N*N,)))
+  b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=1).view(ShapeTracker.from_shape((N*N,)))
+  c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N), arg=2).view(ShapeTracker.from_shape((N*N,)))
+  As = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BM, AddrSpace.LOCAL), arg=0).view(ShapeTracker.from_shape((BK*BM,)))
+  Bs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BN, AddrSpace.LOCAL), arg=1).view(ShapeTracker.from_shape((BK*BN,)))
+  A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), arg=0).view(ShapeTracker.from_shape((nbIterWaveM * TM,)))
+  B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), arg=1).view(ShapeTracker.from_shape((nbIterWaveN * TN,)))
 
   # shape buffers. TODO: permutes
   full_shape = (N//BM, nbIterWaveM, BM//(nbIterWaveM * TM), TM, N//BN, nbIterWaveN, BN//(nbIterWaveN * TN), TN, N//BK, BK)
