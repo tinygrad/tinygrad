@@ -122,8 +122,8 @@ class PythonProgram:
                   (c_i, c_j) = c_map(lane_id, elem_idx)
                   out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
             return out
-
-          assert isinstance(first_src_dtype := self.uops[idp[0]][1], DType) # mypy
+          first_src_dtype = self.uops[idp[0]][1]
+          assert isinstance(first_src_dtype, DType) # mypy
           dims, dtype_in, device, threads = arg[1], first_src_dtype.scalar(), arg[4], arg[5]
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
           if device == "METAL":
