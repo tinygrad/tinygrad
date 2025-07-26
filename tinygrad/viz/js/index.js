@@ -507,12 +507,11 @@ async function main() {
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
     const div = metadata.appendChild(document.createElement("div"));
-    div.className = "rewrite-container";
     div.style.maxHeight = "200px";
     div.style.overflow = "auto";
     for (const [i, s] of ctx.runtime_stats.entries()) {
-      const fmt = `${s.device}  ${i+1} ${formatTime(s.duration)}`;
-      div.appendChild(codeBlock(fmt, "txt"));
+      const p = div.appendChild(document.createElement("p"));
+      p.innerText = `Run ${i+1} ${formatTime(s.duration)}`;
     }
   }
   // ** rewrite steps
