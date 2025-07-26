@@ -1622,14 +1622,14 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  def test_conv2d_fused(self): _test_conv2d(5, FUSE_CONV_BW=1)
+  def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   @unittest.expectedFailure
-  def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(6, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
@@ -1996,13 +1996,13 @@ class TestIndexing(unittest.TestCase):
   def test_simple_store_reshape(self):
     a = Tensor.empty(32, 32).sum(axis=1)+Tensor.empty(1,32)
     ast = a.schedule()[0].ast
-    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(ast.shape, (1, 32))
     self.assertEqual(a.uop.shape, (1, 32))
 
   def test_no_reshape_reduceop(self):
     a = Tensor.empty(32, 32).sum(axis=(1,)).contiguous()
     ast = a.schedule()[0].ast
-    self.assertEqual(ast.shape, (32, 1))
+    self.assertEqual(ast.shape, (32,))
     self.assertEqual(a.uop.shape, (32,))
 
 def swizzle_cnt(u:UOp) -> int:

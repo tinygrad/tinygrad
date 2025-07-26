@@ -141,7 +141,7 @@ class TestLinearizer(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     with Context(FUSE_ARANGE=1):
       sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
-    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
+    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256)
     helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
 
   def test_two_nested_range(self):
@@ -181,7 +181,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(4, 1).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()[0]])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> ASSIGN
@@ -191,7 +191,7 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.randn(2, ).realize()
     b = Tensor.randn(1, 1).realize()
     out = (a.reshape(2, 1).expand(2, 3) + b[0]).sum() + b[0]
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()])[0]
+    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3)) + b.numpy()[0]).sum() + b.numpy()[0]])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
@@ -923,7 +923,7 @@ class TestFloat4(unittest.TestCase):
     # from llama 7B shard 4 gpus
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
+        UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000,), strides=(0, 32000, 1,), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(96000), arg=0, src=()),)),
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
           UOp(Ops.CAST, dtypes.float, arg=None, src=(

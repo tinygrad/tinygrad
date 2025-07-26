@@ -23,10 +23,11 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
   ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
-  match reduce.arg[0]:
-    case Ops.ADD: return ret*prshape
-    case Ops.MUL: return ret.pow(prshape)
-    case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
+  return {
+    Ops.ADD: ret*prshape,
+    Ops.MUL: ret.pow(prshape),
+    Ops.MAX: ret, # NOTE: Ops.MAX is passthrough
+  }[reduce.arg[0]].reshape(tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1]))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -79,7 +80,7 @@ sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
   # contiguous/buffer/copy/assign is already contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.ASSIGN)),)), lambda root: root.src[0]),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,),
     (t.size, x.st.views[0].offset)).reshape(t.shape) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
@@ -166,11 +167,11 @@ merge_views = PatternMatcher([
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
-  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and \
-      tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)):
+  if unwrap(view.st).contiguous and len(r.full_shape) < len(view.shape) and r.full_shape != () and \
+      tuple(x for x in r.full_shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
+    if (contraction:=get_contraction_with_reduce(view.shape, r.full_shape, r.arg[1])) is None: return None
     for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
@@ -200,10 +201,8 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  if unwrap(view.st).contiguous and view.size == r.size and \
-      (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
-       tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
-    return None
+  # arg[2] = True is fuse marker
+  if unwrap(view.st).contiguous and view.shape == r.full_shape and (not (len(r.arg) == 3 and r.arg[2])): return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -408,8 +407,6 @@ def limit_bufs(root:UOp):
 finalize_contiguous = PatternMatcher([
   # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
-  # merge contiguous
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONTIGUOUS),), name="x"), lambda x: x.src[0]),
   # simplify views
   (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
 ])
