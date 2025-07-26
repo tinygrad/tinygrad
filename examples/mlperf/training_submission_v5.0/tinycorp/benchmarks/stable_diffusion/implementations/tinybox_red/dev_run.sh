@@ -9,22 +9,29 @@
 #pip install tqdm
 #pip install numpy
 
-### to match mlperf reference clip tokenizer behavior
+#### to match mlperf reference clip tokenizer behavior
 #pip install ftfy
 #pip install regex
 
-### to use mlperf reference dataloader
+## PIL is for validation step: preprocessing the generated images before clip vision encoder encodes the image
+#pip install pillow
+
+## for inception, calculating the frechet distance, which uses scipy.linalg
+#pip install scipy
+
+#### to use mlperf reference dataloader
 #pip install webdataset
 #pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
+source venv/bin/activate
+export DEBUG=2
 
-#export PYTHONPATH="." NV=1
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
 export BS=1 EVAL_BS=1
 
-# TODO: this will change when training on a tinybox
-export BASEDIR="/home/hooved/train-sd/training/stable_diffusion"
+export BASEDIR="/home/hooved/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"
+mkdir -p $UNET_CKPTDIR
 
 #export WANDB=1 PARALLEL=0
 export PARALLEL=0

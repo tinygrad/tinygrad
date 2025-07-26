@@ -1355,7 +1355,6 @@ def train_llama3():
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 def train_stable_diffusion():
-  Device.DEFAULT="NV"
   from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
   from extra.models import unet as unet_module
   from extra.models.clip import FrozenOpenClipEmbedder
@@ -1431,9 +1430,11 @@ def train_stable_diffusion():
   # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   lr_scheduler.step()
 
-  init_scale = 2.0**16 if dtypes.default_float is dtypes.float16 else 1.0
+  #init_scale = 2.0**16 if dtypes.default_float is dtypes.float16 else 1.0
+  init_scale = 2.0**16
   grad_scaler = GradScaler(init_scale)
 
+  @TinyJit
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
@@ -1441,19 +1442,16 @@ def train_stable_diffusion():
     out = unet(x_noised, t, c, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
     loss.backward()
-
-    for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
-      if p.grad is not None:
-        p.grad = p.grad / grad_scaler.scale
+    for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
 
     # skip the optimizer step if non-finite grads are detected, jittable with Tensor.where logic
     grad_scaler.step(optimizer)
+    #optimizer.step()
     # the lr still updates even if we skipped an optimizer step
     lr_scheduler.step()
 
     return loss
 
-  jit_train_step = TinyJit(train_step, optimize=True)
   # TODO: if BS and EVAL_BS don't match, need to modify the jit setup and/or pad
   jit_context_step = TinyJit(model.cond_stage_model)
 
@@ -1483,14 +1481,14 @@ def train_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-  #inception = FidInceptionV3()
+  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  inception = FidInceptionV3()
   vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
   text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
   clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
   loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
   loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-  load_state_dict(clip_encoder, loaded)
+  #load_state_dict(clip_encoder, loaded)
 
   # NOTE: denoise_step is jitted with bufs from the single unet model defined at the beginning
   @Tensor.train(mode=False)
@@ -1538,6 +1536,7 @@ def train_stable_diffusion():
   num_seen_images = 0
   dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   for i, batch in enumerate(dl):
+    print(f"step {i} started")
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
@@ -1555,11 +1554,11 @@ def train_stable_diffusion():
     context = jit_context_step(prompt)
     context = Tensor.randn(1,77,1024, dtype=dtypes.float)
 
-    loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
+    loss = train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")
 
     num_seen_images += BS
-    if CKPT_IMAGE_INTERVAL % num_seen_images == 0:
+    if num_seen_images % CKPT_IMAGE_INTERVAL == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
       safe_save(get_state_dict(unet), UNET_CKPTDIR)
