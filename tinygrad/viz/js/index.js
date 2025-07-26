@@ -510,7 +510,7 @@ async function main() {
     div.style.maxHeight = "100px";
     div.style.overflow = "auto";
     for (const [i, s] of ctx.runtime_stats.entries()) {
-r     const p = div.appendChild(document.createElement("p"));
+      const p = div.appendChild(document.createElement("p"));
       p.innerText = `Run ${i}`;
       for (const [k, v] of Object.entries(s)) {
         p.innerText += `\n${k} ${typeof v === "string" ? v : formatUnit(v.value, v.fmt)}`

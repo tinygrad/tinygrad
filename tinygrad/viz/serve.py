@@ -176,8 +176,8 @@ def get_profile(profile:list[ProfileEvent]):
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
-    if isinstance(e, ProfileRangeEvent) and e.name == key:
-      ret.append({"Device":e.device, "Duration": {"value":float(e.en-e.st), "fmt":"time"}})
+    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
+      ret.append({"Device":e.device, "Duration":{"value":float(e.en-e.st), "fmt":"time"}})
   return ret
 
 # ** HTTP server
