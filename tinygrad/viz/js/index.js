@@ -107,7 +107,7 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
-const formatUnit = (d, unit="") => unit === "time" ? formatTime(d) : d3.format(".3~s")(d)+unit;
+const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
                    "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
@@ -362,7 +362,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-function codeBlock(st, language, { loc, wrap }) {
+function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
@@ -507,14 +507,12 @@ async function main() {
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
     const div = metadata.appendChild(document.createElement("div"));
-    div.style.maxHeight = "100px";
+    div.className = "rewrite-container";
+    div.style.maxHeight = "200px";
     div.style.overflow = "auto";
     for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      p.innerText = `Run ${i}`;
-      for (const [k, v] of Object.entries(s)) {
-        p.innerText += `\n${k} ${typeof v === "string" ? v : formatUnit(v.value, v.fmt)}`
-      }
+      const fmt = `${s.device}  ${i+1} ${formatTime(s.duration)}`;
+      div.appendChild(codeBlock(fmt, "txt"));
     }
   }
   // ** rewrite steps
