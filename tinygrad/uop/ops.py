@@ -169,8 +169,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.shape
     # NOTE: if a parent doesn't have st its full_shape is empty
     parent_shapes = [x.full_shape for x in self.src]
-    ndim =  max([len(x) for x in parent_shapes], default=0)
-    return tuple(smax(x) for x in zip(*[x+(0,)*(ndim-len(x)) for x in parent_shapes if x != ()]))
+
+    return tuple(smax(x) for x in itertools.zip_longest(*parent_shapes, fillvalue=1))
+
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
