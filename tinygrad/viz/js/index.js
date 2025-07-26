@@ -362,7 +362,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-function codeBlock(st, language, { loc, wrap }) {
+function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
@@ -505,6 +505,15 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  if (ctx.runtime_stats != null) {
+    const div = metadata.appendChild(document.createElement("div"));
+    div.style.maxHeight = "200px";
+    div.style.overflow = "auto";
+    for (const [i, s] of ctx.runtime_stats.entries()) {
+      const p = div.appendChild(document.createElement("p"));
+      p.innerText = `Run ${i+1} ${formatTime(s.duration)}`;
+    }
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
