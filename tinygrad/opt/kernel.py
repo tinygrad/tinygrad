@@ -230,7 +230,7 @@ class Kernel:
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
-        si, sti, last_st = (s[i],st[i],ret[-1][1]) if i < len(s) else (1,0,1)
+        si, sti, last_st = (s[i],st[i],ret[-1][1]) if i < len(s) else (1, 0, ret[-1][1])
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
       if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
