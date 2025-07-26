@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
-from tinygrad.helpers import getenv, flatten, AMX, prod, partition, all_same
+from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -111,11 +111,7 @@ def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
-  # dtype CAT
-  dtypes: list[PtrDType] = [x.dtype for x in ret if isinstance(x.dtype, PtrDType)]
-  assert len(dtypes) == len(ret) and all_same([(x.size, x.addrspace) for x in dtypes])
-  out_dtype = dtypes[0].base.scalar().vec(sum([x.count for x in dtypes])).ptr(dtypes[0].size, dtypes[0].addrspace)
-  return UOp(Ops.PTRCAT, dtype=out_dtype, src=tuple(ret))
+  return UOp(Ops.NOOP, src=tuple(ret))
 
 def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -184,7 +180,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
       break
 
   # if it wasn't split, we return None. otherwise we CAT them
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if len(ret) > 1 else None
+  if len(ret) <= 1: return None
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp(Ops.NOOP, src=tuple(ret))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -287,10 +284,11 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     input_ranges = tuple([x for x in inp.toposort(gate=lambda x: x.op is not Ops.STORE) if x.op is Ops.RANGE and x not in reduce_range])
     identity = red.const_like(identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
-    lst = [acc.store(identity, UOp(Ops.NOOP, src=input_ranges)).load(*reduce_range)] + lst  # put acc as the first element
+    do_store = acc.store(identity, UOp(Ops.NOOP, src=input_ranges)) if len(input_ranges) else acc.store(identity)
+    lst = [acc.load(do_store, *reduce_range)] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.store(ret, *reduce_range).load() if len(reduce_range) != 0 else ret
+  return acc.load(acc.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
 
 def no_vectorized_reduce(inp:UOp, red:UOp):
   if inp.dtype != red.dtype:
