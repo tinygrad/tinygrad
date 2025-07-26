@@ -1,4 +1,5 @@
-import os, random, pickle, queue, struct
+import functools
+import os, random, pickle, queue, struct, math
 from typing import List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
@@ -552,21 +553,43 @@ class BinIdxDataset:
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
-  def __init__(self, base_path:Path, bs:int):
+  def __init__(self, base_path:Path, samples:int, seqlen:int, shuffle:bool):
+    self.samples, self.seqlen = samples, seqlen
+    self.shuffle = shuffle
+
     self.indexed_dataset = BinIdxDataset(base_path)
 
     doc_idx = self._build_doc_idx()
+    sample_idx = self._build_sample_idx()
+
+  @functools.cached_property
+  def tokens_per_epoch(self) -> int:
+    return sum(self.indexed_dataset.sizes.tolist())
+
+  @functools.cached_property
+  def num_epochs(self) -> int:
+    # we need enough epochs to cover the requested amount of tokens
+    num_epochs = 1
+    num_tokens = self.tokens_per_epoch
+    while num_tokens < self.samples * self.seqlen:
+      num_epochs += 1
+      num_tokens += self.tokens_per_epoch
+    return num_epochs
 
   def _build_doc_idx(self):
-    pass
+    def _build_doc_idx():
+      pass
 
 class BlendedGPTDataset:
-  def __init__(self, paths:list[Path], weights:list[float], bs:int):
+  def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, shuffle:bool):
     # normalize weights
     total_weight = sum(weights)
     self.weights = [w / total_weight for w in weights]
 
-    self.datasets = [GPTDataset(path, bs) for path in paths]
+    self.samples = samples
+    samples_per_blend = [math.ceil(self.samples * w) for w in self.weights]
+
+    self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, shuffle) for i,path in enumerate(paths)]
 
 def batch_load_llama3(bs:int, base_dir:Path, val:bool=True):
   if val:
