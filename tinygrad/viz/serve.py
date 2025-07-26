@@ -227,7 +227,7 @@ def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
     if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "duration":float(e.en-e.st), "stats":(hw_counters.get(e.device, lambda *_:None)(e.st, e.en))})
+      ret.append({"device":e.device, "duration":float(e.en-e.st)})
   return ret
 
 # ** HTTP server
