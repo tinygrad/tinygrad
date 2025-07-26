@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
-from tinygrad.helpers import getenv, flatten, AMX, prod, partition, all_same
+from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -111,11 +111,7 @@ def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
-  # dtype CAT
-  dtypes: list[PtrDType] = [x.dtype for x in ret if isinstance(x.dtype, PtrDType)]
-  assert len(dtypes) == len(ret) and all_same([(x.size, x.addrspace) for x in dtypes])
-  out_dtype = dtypes[0].base.scalar().vec(sum([x.count for x in dtypes])).ptr(dtypes[0].size, dtypes[0].addrspace)
-  return UOp(Ops.PTRCAT, dtype=out_dtype, src=tuple(ret))
+  return ret[0].sink(*ret[1:])
 
 def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
