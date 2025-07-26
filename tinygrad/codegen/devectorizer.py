@@ -154,7 +154,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
-  elif buf.dtype.addrspace == AddrSpace.REG:
+  elif cast(PtrDType, buf.dtype).addrspace == AddrSpace.REG:
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -359,7 +359,7 @@ def reduce_collapse(red:UOp):
   replaces: dict[UOp, UOp] = {}
   for u in included:
     for s in u.src:
-      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_VAR, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL}:
+      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
