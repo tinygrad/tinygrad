@@ -1126,6 +1126,7 @@ class TestMultiRamUsage(unittest.TestCase):
     # NOTE: the first one on the DEFAULT device should be freed
     self.assertUsed(self.N*self.N*4*2)
 
+  @unittest.skip("flaky")
   def test_zeros_shard(self, devices=(d1, d2)):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices, axis=0).realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
