@@ -1355,7 +1355,6 @@ def train_llama3():
     print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
 
 def train_stable_diffusion():
-  #Device.DEFAULT="CPU"
   Device.DEFAULT="NV"
   from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
   from extra.models import unet as unet_module
@@ -1398,16 +1397,16 @@ def train_stable_diffusion():
   # TODO: refactor examples/stable_diffusion.py as needed
   class StableDiffusion:
     def __init__(self):
-      #self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
-      #self.first_stage_model = AutoencoderKL()
+      self.first_stage_model = AutoencoderKL()
+      self.model=None
 
 
   model = StableDiffusion()
   weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  #load_state_dict(model, weights)
+  load_state_dict(model, weights)
   unet_module.linear = unet_module.AutocastLinear
   unet_module.conv2d = unet_module.AutocastConv2d
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
@@ -1435,38 +1434,17 @@ def train_stable_diffusion():
   init_scale = 2.0**16 if dtypes.default_float is dtypes.float16 else 1.0
   grad_scaler = GradScaler(init_scale)
 
-  import globvars as gv
-  loaded = safe_load(BASEDIR / "checkpoints" / "unet_training_init_model.safetensors")
-  #for k,v in loaded.items():
-    #if all(pat not in k for pat in ("in_layers.0", "out_layers.0", "norm")) and k not in {"out.0.weight", "out.0.bias"}:
-    #loaded[k] = v.to("NV").cast(dtypes.half)
-  load_state_dict(unet, loaded)
-  ret = unet(gv.d["x"], gv.d["timesteps"].cast(dtypes.int), gv.d["context"], softmax_dtype=dtypes.float32)
-  gv.md(gv.d["ret"], ret)
-  # diff.abs().mean(): 4.184246063232422e-05
-  # a.abs().mean(): 0.041748046875
-  # diff.abs().max(): 0.000244140625
-  # (4.184246063232422e-05, 0.041748046875, 0.000244140625)
-
   def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                        lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
-
-    # Run forward/backward on GPU, optimizer/scheduler steps on CPU
-    # NOTE: This prevents OOM when training on a single GPU with 10GB VRAM with BS=1
-    # NOTE: This will change when running on a tinybox, as will number of GPUs, parallelism, etc.
-    #for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
-      #p.to_("NV")
 
     out = unet(x_noised, t, c, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
     loss.backward()
 
-    #loss.backward().to_("CPU")
-
     for p in get_parameters(unet) + [x_noised, t, c, v_true] + get_parameters(grad_scaler):
-      if p.grad is not None: p.grad = p.grad / grad_scaler.scale
-      p.to_("CPU")
+      if p.grad is not None:
+        p.grad = p.grad / grad_scaler.scale
 
     # skip the optimizer step if non-finite grads are detected, jittable with Tensor.where logic
     grad_scaler.step(optimizer)
@@ -1484,7 +1462,7 @@ def train_stable_diffusion():
     reader = csv.DictReader(f, delimiter="\t")
     eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
   assert len(eval_inputs) == 30_000
-  #unconditional_context = jit_context_step("")
+  unconditional_context = jit_context_step("")
   eval_timesteps = list(reversed(range(1, 1000, 20)))
 
   alphas_cumprod = get_alphas_cumprod()
@@ -1505,14 +1483,14 @@ def train_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev
 
-  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-  inception = FidInceptionV3()
+  inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  #inception = FidInceptionV3()
   vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
   text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
   clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
   loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
   loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-  #load_state_dict(clip_encoder, loaded)
+  load_state_dict(clip_encoder, loaded)
 
   # NOTE: denoise_step is jitted with bufs from the single unet model defined at the beginning
   @Tensor.train(mode=False)
@@ -1574,15 +1552,14 @@ def train_stable_diffusion():
 
     # encode prompt
     prompt = batch['txt']
-    #context = jit_context_step(prompt)
+    context = jit_context_step(prompt)
     context = Tensor.randn(1,77,1024, dtype=dtypes.float)
 
     loss = jit_train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
     print(f"step {i}: loss: {loss.item():.9f}")
 
     num_seen_images += BS
-    if False:
-    #if CKPT_IMAGE_INTERVAL % num_seen_images == 0:
+    if CKPT_IMAGE_INTERVAL % num_seen_images == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
       safe_save(get_state_dict(unet), UNET_CKPTDIR)
