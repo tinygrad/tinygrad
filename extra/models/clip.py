@@ -9,6 +9,16 @@ from PIL import Image
 import numpy as np
 import re, gzip
 
+# to match tokenizer used in mlperf reference of stable diffusion training
+try:
+  import ftfy, html, regex
+  # from open_clip.tokenizer:
+  def basic_clean(text):
+    text = ftfy.fix_text(text)
+    text = html.unescape(html.unescape(text))
+    return text.strip()
+except ImportError: pass
+
 @lru_cache()
 def default_bpe():
   # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -53,8 +63,8 @@ class Tokenizer:
     cs = [chr(n) for n in cs]
     return dict(zip(bs, cs))
   class ClipTokenizer:
-    def __init__(self):
-      self.byte_encoder = Tokenizer.bytes_to_unicode()
+    def __init__(self, version=None):
+      self.byte_encoder, self.version = Tokenizer.bytes_to_unicode(), version
       merges = gzip.open(default_bpe()).read().decode("utf-8").split('\n')
       merges = merges[1:49152-256-2+1]
       merges = [tuple(merge.split()) for merge in merges]
@@ -62,11 +72,18 @@ class Tokenizer:
       vocab = vocab + [v+'</w>' for v in vocab]
       for merge in merges:
         vocab.append(''.join(merge))
-      vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+      # used for mlperf training v5.0 Stable Diffusion
+      # TODO: identify specific clip versions (if they exist) that these settings correspond to
+      if self.version == "sd_mlperf_v5_0":
+        vocab.extend(['<start_of_text>', '<end_of_text>'])
+        self.cache = {'<start_of_text>': '<start_of_text>', '<end_of_text>': '<end_of_text>'}
+        self.pat = regex.compile(r"""<start_of_text>|<end_of_text>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""", regex.IGNORECASE)
+      else:
+        vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+        self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
+        self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
       self.encoder = dict(zip(vocab, range(len(vocab))))
       self.bpe_ranks = dict(zip(merges, range(len(merges))))
-      self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-      self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
 
     def bpe(self, token):
       if token in self.cache:
@@ -110,8 +127,14 @@ class Tokenizer:
 
     def encode(self, text:str, pad_with_zeros:bool=False) -> List[int]:
       bpe_tokens: List[int] = []
-      text = Tokenizer.whitespace_clean(text.strip()).lower()
-      for token in re.findall(self.pat, text):
+      if self.version == "sd_mlperf_v5_0":
+        text = Tokenizer.whitespace_clean(basic_clean(text)).lower()
+        re_module = regex
+      else:
+        text = Tokenizer.whitespace_clean(text.strip()).lower()
+        re_module = re
+
+      for token in re_module.findall(self.pat, text):
         token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
         bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
       # Truncation, keeping two slots for start and end tokens.
@@ -350,8 +373,8 @@ class Open:
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L396
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L498
 class FrozenOpenClipEmbedder(Embedder):
-  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool, ln_penultimate:bool=False):
-    self.tokenizer = Tokenizer.ClipTokenizer()
+  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool, ln_penultimate:bool=False, clip_tokenizer_version=None):
+    self.tokenizer = Tokenizer.ClipTokenizer(version=clip_tokenizer_version)
     self.model = Open.ClipTextTransformer(dims, n_heads, layers)
     self.return_pooled = return_pooled
     self.input_key = "txt"
