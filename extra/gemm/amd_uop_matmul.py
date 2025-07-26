@@ -37,8 +37,7 @@ def hl_spec_kernel3():
   Bs = Bs.reshape((1, 1, 1, 1, 1, nbIterWaveN, BN//(nbIterWaveN * TN), TN, 1, BK)).expand(full_shape)
   A_col = A_col.reshape((1, nbIterWaveM, 1, TM, 1, 1, 1, 1, 1, 1)).expand(full_shape)
   B_row = B_row.reshape((1, 1, 1, 1, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape)
-
-  out = (A_col.store(As.store(a.load()).load()).load() * B_row.store(Bs.store(b.load()).load()).load()).r(Ops.ADD, (8, 9))
+  out = (A_col.load(A_col.store(As.load(As.store(a.load())))) * B_row.load(B_row.store(Bs.load(Bs.store(b.load()))))).r(Ops.ADD, (8, 9))
   sink = c.store(out).sink(arg=KernelInfo(name="tinygemm"))
   sink = graph_rewrite(sink, merge_views)
   return sink
