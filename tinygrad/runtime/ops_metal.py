@@ -150,6 +150,7 @@ class MetalCompiler(Compiler):
 class MetalProgram:
   def __init__(self, dev:MetalDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
+    if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base=None)]
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
@@ -168,7 +169,6 @@ class MetalProgram:
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
-    if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base=None)]
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.max_total_threads:

@@ -362,7 +362,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-function codeBlock(st, language, { loc, wrap }) {
+function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
@@ -470,23 +470,31 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
+  const step = ctx.steps[currentStep];
+  const ckey = step?.query;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== ckey) e.close();
+    const url = new URL(e.url);
+    if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
   if (ckey in cache) {
     ret = cache[ckey];
   }
+  // ** Raw text view
+  if (!(ckey.startsWith("ctxs"))) {
+    if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    console.log(ret);
+    return;
+  }
+  // ** UOp rewrite steps view
   // if we don't have a complete cache yet we start streaming rewrites in this step
-  const step = ctx.steps[currentStep];
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
-    const eventSource = new EventSource(`/ctxs?${ckey}`);
+    const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
@@ -505,6 +513,15 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  if (ctx.runtime_stats != null) {
+    const div = metadata.appendChild(document.createElement("div"));
+    div.style.maxHeight = "200px";
+    div.style.overflow = "auto";
+    for (const [i, s] of ctx.runtime_stats.entries()) {
+      const p = div.appendChild(document.createElement("p"));
+      p.innerText = `Run ${i+1} ${formatTime(s.duration)}`;
+    }
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));

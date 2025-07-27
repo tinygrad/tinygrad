@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, ProfileProgramEvent, Device
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -22,15 +22,17 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # ** Metadata for a track_rewrites scope
 
 ref_map:dict[Any, int] = {}
-supports_callback = {}
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    for key in k.keys:
-      ref_map[key] = i
-      if (cb:=supports_callback.get(key)) is not None: steps.append({"name":cb[0], "callback":key})
-    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
+              "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
+    ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    # use the first key to get runtime profiling data about this context
+    if k.keys and isinstance(runtime_key:=k.keys[0], str):
+      if getenv("PROFILE_VALUE") >= 2: r["runtime_stats"] = get_runtime_stats(runtime_key)
+      steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
+    for key in k.keys: ref_map[key] = i
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call
@@ -111,9 +113,6 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
-    elif isinstance(e, ProfileProgramEvent):
-      fxn = functools.partial(Device[e.device].compiler.disassemble, lib=e.lib)
-      supports_callback[e.name] = ("assembly", fxn)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -178,6 +177,13 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
+def get_runtime_stats(key) -> list[dict]:
+  ret:list[dict] = []
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
+      ret.append({"device":e.device, "duration":float(e.en-e.st)})
+  return ret
+
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
@@ -192,13 +198,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif url.path == "/ctxs":
-      if "ctx" in (q:=parse_qs(url.query)):
-        ctx_idx, step_idx = int(q["ctx"][0]), int(q["idx"][0])
-        extract = ctxs[ctx_idx]["steps"][step_idx]
-        if (cb:=extract.get("callback")) is not None: return supports_callback[cb][1]()
-        return self.stream_json(get_details(contexts[1][ctx_idx][step_idx]))
-      ret, content_type = json.dumps(ctxs).encode(), "application/json"
+    elif (query:=parse_qs(url.query)):
+      return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
+    elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
 
@@ -255,10 +257,10 @@ if __name__ == "__main__":
 
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
-  profile_ret = get_profile(profile) if profile is not None else None
-
   # NOTE: this context is a tuple of list[keys] and list[values]
   ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
+
+  profile_ret = get_profile(profile) if profile is not None else None
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
