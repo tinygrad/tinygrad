@@ -456,7 +456,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count != null ? `- ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
@@ -483,6 +483,17 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
+  // ** Disassembly view
+  if (ckey.startsWith("/disasm")) {
+    if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    displayGraph("profiler");
+    document.querySelector(".metadata").innerHTML = "";
+    const root = document.createElement("div");
+    root.className = "raw-text";
+    root.appendChild(codeBlock(ret.src, "x86asm"));
+    return document.querySelector(".profiler").replaceChildren(root);
+  }
+  // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];

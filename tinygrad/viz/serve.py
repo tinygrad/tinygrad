@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
+from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -27,6 +29,7 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
               "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
+    if isinstance(k.ret, ProgramSpec): steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
     ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
     # use the first key to get runtime profiling data about this context
     if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
@@ -182,6 +185,12 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "duration":float(e.en-e.st)})
   return ret
 
+def get_disassembly(ctx:list[str]):
+  if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
+  lib = Device[prg.device].compiler.compile(prg.src)
+  with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
+  return json.dumps({"src":buf.getvalue()}).encode()
+
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
@@ -197,7 +206,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
+      if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
+      else: return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
