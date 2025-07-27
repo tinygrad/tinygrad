@@ -191,6 +191,7 @@ class TracingKey:
   keys:tuple[str, ...]=()                # optional keys to search for related traces
   fmt:str|None=None                      # optional detailed formatting
   cat:str|None=None                      # optional category to color this by
+  ret:Any=None
 
 class ProfileEvent: pass
 
