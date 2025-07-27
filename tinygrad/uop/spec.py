@@ -144,18 +144,18 @@ spec = PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
   # early LOAD has a <bufview, store?>
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)),)), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat(Ops.STORE))), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)),)), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat(Ops.STORE))), lambda: True),
 
   # early STORE has a <bufview, val>
-  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat())), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat())), lambda: True),
 
   # **** new style load/store ****
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat())), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
   # LOAD on STORE
   (UPat(Ops.LOAD, src=(UPat(Ops.STORE),), allow_any_len=True), lambda: True),
@@ -165,8 +165,8 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),

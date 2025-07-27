@@ -122,8 +122,8 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   return gep.src[0].store(st.gep(new_arg), *sto.src[2:])
 
 load_store_folding = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), name="buf")), UPat.var("vec"),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"),
                         UPat.var("mask"))), expand_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
@@ -153,6 +153,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [128,64,32,16,8,4]
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+    pass
+  elif cast(PtrDType, buf.dtype).addrspace == AddrSpace.REG:
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -233,9 +235,8 @@ def no_vectorized_alu(alu:UOp):
 def no_vectorized_acc(acc:UOp, c:UOp):
   if acc.dtype.count == 1: return None
   assert c.arg == 0, "this only supports index 0"
-  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1, cast(PtrDType, acc.dtype).addrspace),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)).index(UOp.const(dtypes.int, 0)) for i in range(acc.dtype.count))
-  return UOp(Ops.PTRCAT, acc.dtype, alus)
+  new_acc = acc.replace(dtype=acc.dtype.base.scalar().ptr(acc.dtype.count, cast(PtrDType, acc.dtype).addrspace))
+  return UOp(Ops.PTRCAT, acc.dtype, tuple([new_acc.index(UOp.const(dtypes.int, i)) for i in range(acc.dtype.count)]))
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
