@@ -262,13 +262,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
-    if move_early:
-      permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
-      ret = self.permute(permaxis)
-      new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
-      assert len(axis) == len(new_axis)
-    else:
-      ret, new_axis = self, axis
+    permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
+    ret = self.permute(permaxis)
+    new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+    assert len(axis) == len(new_axis)
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
