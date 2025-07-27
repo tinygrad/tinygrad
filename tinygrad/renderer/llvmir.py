@@ -160,6 +160,7 @@ class LLVMRenderer(Renderer):
 
     name = "test"
     for u in uops:
+      if u.op is Ops.NOOP: continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
@@ -170,13 +171,7 @@ class LLVMRenderer(Renderer):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
         if self.device == "LLVM" or u.op is Ops.DEFINE_REG:
-          # put alloca in the beginning of the function always
-          kernel = [f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]"] + kernel
-          if u.op is Ops.DEFINE_REG:
-            # store the const here. TODO: this should be INDEX and STORE and shouldn't be handcoded here
-            for i in range(u.dtype.size):
-              kernel.append(f"  {r[u]}_idx_{i} = getelementptr inbounds {ldt(u.dtype.base)}, {ldt(u.dtype)} {r[u]}, i32 {i}")
-              kernel.append(f"  store {ldt(u.src[0].dtype)} {r[u.src[0]]}, {ldt(u.dtype)} {r[u]}_idx_{i}")
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
@@ -193,9 +188,6 @@ class LLVMRenderer(Renderer):
         if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
-
-        # stores pass the first arg through
-        if u.op is Ops.STORE: r[u] = r[u.src[0]]
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'

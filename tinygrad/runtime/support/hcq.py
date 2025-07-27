@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
+try: import fcntl # windows misses that
+except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
@@ -25,9 +27,7 @@ class FileIOInterface:
     self.fd:int = fd or os.open(path, flags)
   def __del__(self):
     if hasattr(self, 'fd'): os.close(self.fd)
-  def ioctl(self, request, arg):
-    import fcntl # to support windows
-    return fcntl.ioctl(self.fd, request, arg)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset):
     x = libc.mmap(start, sz, prot, flags, self.fd, offset)
     if x == 0xffffffffffffffff: raise OSError(f"Failed to mmap {sz} bytes at {hex(start)}: {os.strerror(ctypes.get_errno())}")
@@ -406,6 +406,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
   def _at_profile_finalize(self):
+    self.synchronize() # Expect device to be synchronizes
+
     def _sync(d:HCQCompiled, q_t:Callable[[], HWQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.next_timeline()).submit(d)
       st = time.perf_counter_ns()

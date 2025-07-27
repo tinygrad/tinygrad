@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, smax, AxisType
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
@@ -73,7 +73,8 @@ class Kernel:
       self.sts.append(unwrap(x.src[0].st))
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
-    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape for x in self.sts])]), (0,)*len(self.sts[0].shape)))
+    full_shape = ast.full_shape
+    self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
     # parameters for optimization
     self.tensor_core: TensorCore|None = None

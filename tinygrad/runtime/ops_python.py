@@ -40,8 +40,7 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK}
-        if uop is Ops.DEFINE_REG: idp = [idp[0]]
+        void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.STORE}
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
@@ -49,7 +48,7 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -59,7 +58,6 @@ class PythonProgram:
           for j,val in enumerate(inp[1] if dtp[1].count > 1 else [inp[1]]):
             for (m,o,g),v in zip(inp[0], val):
               if g: _store(m, o+j, v)
-          ul[i] = inp[0]
           i += 1
           continue
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
@@ -68,8 +66,6 @@ class PythonProgram:
           if uop is Ops.DEFINE_REG:
             # REGs are per thread
             ul[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(dtype.fmt) for _ in range(warp_size)]
-            for buf, val in zip(ul[i], inp[0]):
-              for x in range(dtype.size): buf[x] = val
           else:
             buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
             ul[i] = [buf.cast(dtype.fmt)] * warp_size
