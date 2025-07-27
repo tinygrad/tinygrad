@@ -484,7 +484,7 @@ async function main() {
     ret = cache[ckey];
   }
   // ** Raw text view
-  if (!(ckey.startsWith("ctxs"))) {
+  if (!(ckey.startsWith("/ctxs"))) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     console.log(ret);
     return;
