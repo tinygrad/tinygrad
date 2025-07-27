@@ -144,8 +144,8 @@ class MetalCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
       shader.flush()
-      proc = subprocess.Popen(["python3","compiler_explorer.py",shader.name], cwd=f"{pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu",
-                              stdout=subprocess.PIPE, text=True, bufsize=1)
+      proc = subprocess.Popen(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}",
+                              stdout=subprocess.PIPE, shell=True, text=True, bufsize=1)
       for line in unwrap(proc.stdout): print(line, end="")
       ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
