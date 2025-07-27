@@ -72,12 +72,11 @@ class Kernel:
       self.sts.append(unwrap(x.st))
       self.sts.append(unwrap(x.src[0].st))
 
-    max_dim = max(len(st.shape) for st in self.sts)
-    self.sts = [st.reshape(st.shape + (1,) * (max_dim - len(st.shape))) for st in self.sts]
-
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
     full_shape = ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
+
+    self.sts = [st.reshape(st.shape + (1,) * (len(full_shape) - len(st.shape))) for st in self.sts]
 
     # parameters for optimization
     self.tensor_core: TensorCore|None = None

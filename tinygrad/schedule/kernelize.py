@@ -22,12 +22,12 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   # must have all stride 0 in the relevant axis (NOTE: can do partial)
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
-  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
-  return {
-    Ops.ADD: ret*prshape,
-    Ops.MUL: ret.pow(prshape),
-    Ops.MAX: ret, # NOTE: Ops.MAX is passthrough
-  }[reduce.arg[0]].reshape(tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1]))
+  new_shape = tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1])
+  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape))).reshape(new_shape)
+  match reduce.arg[0]:
+    case Ops.ADD: return ret*prshape
+    case Ops.MUL: return ret.pow(prshape)
+    case Ops.MAX: return ret # NOTE: Ops.MAX is passthrough
 
 def split_reduceop(reduce:UOp, x:UOp):
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -79,7 +79,7 @@ sym = symbolic_simple+PatternMatcher([
   # remove contiguous if we can just view the buffer
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf"),)),)),
    lambda root,view,buf: view if view.st.contiguous and view.size == buf.size else None),
-  # contiguous/buffer/copy/assign is already contiguous
+  # contiguous/buffer/assign is already contiguous
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.ASSIGN)),)), lambda root: root.src[0]),
   # substitute BITCAST/CONTIGUOUS with BUFFER_VIEW on DISK
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,),
