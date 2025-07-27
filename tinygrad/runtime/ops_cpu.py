@@ -93,9 +93,9 @@ class CPUAllocator(HCQAllocatorBase):
   def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
   def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview):
-    with cpu_profile(prof_desc, self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
+    with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src):
-    with cpu_profile(prof_desc, self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
+    with cpu_profile('CPU -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
