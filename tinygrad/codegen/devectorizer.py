@@ -235,9 +235,8 @@ def no_vectorized_alu(alu:UOp):
 def no_vectorized_acc(acc:UOp, c:UOp):
   if acc.dtype.count == 1: return None
   assert c.arg == 0, "this only supports index 0"
-  alus = tuple(UOp(acc.op, acc.dtype.base.scalar().ptr(1, cast(PtrDType, acc.dtype).addrspace),
-    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)).index(UOp.const(dtypes.int, 0)) for i in range(acc.dtype.count))
-  return UOp(Ops.PTRCAT, acc.dtype, alus)
+  new_acc = acc.replace(dtype=acc.dtype.base.scalar().ptr(acc.dtype.count, cast(PtrDType, acc.dtype).addrspace))
+  return UOp(Ops.PTRCAT, acc.dtype, tuple([new_acc.index(UOp.const(dtypes.int, i)) for i in range(acc.dtype.count)]))
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes

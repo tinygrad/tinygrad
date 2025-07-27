@@ -1,6 +1,6 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, subprocess, signal
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal, os
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, fetch
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, fetch
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -168,7 +168,10 @@ class MetalCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
       shader.flush()
-      ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+      proc = subprocess.Popen(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}",
+                              stdout=subprocess.PIPE, shell=True, text=True, bufsize=1)
+      for line in unwrap(proc.stdout): print(line, end="")
+      ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
