@@ -162,7 +162,7 @@ async function renderProfiler() {
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+        ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
       const arg = { tooltipText:formatTime(e.dur), ...ref };
       // offset y by depth
