@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import dtypes, Device, Tensor, Context
 from tinygrad.dtype import AddrSpace
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import get_program, ExecItem, CompiledRunner
@@ -24,6 +25,7 @@ class TestDefineReg(unittest.TestCase):
     with Context(DEBUG=0):
       self.assertEqual((b-a).mean().item(), 0.0)
 
+  @unittest.skipIf(getenv("PTX"), "ptx needs regs to be unrolled")
   def test_simple_loop(self): self.test_simple(AxisType.LOOP)
 
 if __name__ == '__main__':
