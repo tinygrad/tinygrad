@@ -470,11 +470,13 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
+  const step = ctx.steps[currentStep];
+  const ckey = step?.query;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== ckey) e.close();
+    const url = new URL(e.url);
+    if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
@@ -482,11 +484,10 @@ async function main() {
     ret = cache[ckey];
   }
   // if we don't have a complete cache yet we start streaming rewrites in this step
-  const step = ctx.steps[currentStep];
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
-    const eventSource = new EventSource(`/ctxs?${ckey}`);
+    const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();

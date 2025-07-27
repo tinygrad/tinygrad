@@ -25,8 +25,10 @@ ref_map:dict[Any, int] = {}
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
+              "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
     ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    # use the first key to get runtime profiling data about this context
     if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
     for key in k.keys: ref_map[key] = i
   return ret
@@ -194,9 +196,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif url.path == "/ctxs":
-      if "ctx" in (q:=parse_qs(url.query)): return self.stream_json(get_details(contexts[1][int(q["ctx"][0])][int(q["idx"][0])]))
-      ret, content_type = json.dumps(ctxs).encode(), "application/json"
+    elif (query:=parse_qs(url.query)):
+      return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
+    elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
 
