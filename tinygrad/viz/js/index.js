@@ -486,8 +486,13 @@ async function main() {
   // ** Raw text view
   if (!(ckey.startsWith("/ctxs"))) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    console.log(ret);
-    return;
+    displayGraph("profiler");
+    document.querySelector(".metadata").innerHTML = "";
+    const root = document.createElement("div");
+    root.className = "raw-text";
+    // this can become a full feature assembly viewer
+    root.appendChild(codeBlock(ret.src, "x86asm"));
+    return document.querySelector(".profiler").replaceChildren(root);
   }
   // ** UOp rewrite steps view
   // if we don't have a complete cache yet we start streaming rewrites in this step

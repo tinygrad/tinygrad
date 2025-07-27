@@ -187,7 +187,7 @@ def get_runtime_stats(key) -> list[dict]:
   return ret
 
 def get_disassembly(ctx:list[str]):
-  prg:ProgramSpec = contexts[0][int(ctx[0])].ret
+  if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = Device[prg.device].compiler.compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
   return json.dumps({"src":buf.getvalue()}).encode()
