@@ -17,7 +17,7 @@ class TestLinearizerDumb(unittest.TestCase):
   def test_unmerged_ifs(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.half.ptr(1605632), arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(25088, 0, 49, 7, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
+        UOp(Ops.VIEW, dtypes.half.ptr(1605632), arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7), strides=(25088, 0, 49, 7, 1), offset=0, mask=None, contiguous=True),)), src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(1605632), arg=0, src=()),)),
         UOp(Ops.MAX, dtypes.half, arg=None, src=(
           UOp(Ops.MUL, dtypes.half, arg=None, src=(
@@ -32,7 +32,7 @@ class TestLinearizerDumb(unittest.TestCase):
                       UOp(Ops.VIEW, dtypes.half.ptr(2359296), arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 512, 3, 3), strides=(0, 0, 4608, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(2359296), arg=2, src=()),)),)),)),)),)),)),
             UOp(Ops.CONST, dtypes.half, arg=0.9999950000374996, src=(
-              x16:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+              x16:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
           UOp(Ops.CONST, dtypes.half, arg=0.0, src=(
              x16,)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, arg=(-1, 2, 1)), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0)]
@@ -49,20 +49,20 @@ class TestLinearizerDumb(unittest.TestCase):
   def test_max_simplify_and_cancel(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.int.ptr(1000), arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
+        UOp(Ops.VIEW, dtypes.int.ptr(1000), arg=ShapeTracker(views=(View(shape=(1000,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1000), arg=0, src=()),)),
         UOp(Ops.MUL, dtypes.int, arg=None, src=(
           UOp(Ops.CAST, dtypes.int, arg=None, src=(
             UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
               UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
                 UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                  UOp(Ops.VIEW, dtypes.float.ptr(1000), arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
+                  UOp(Ops.VIEW, dtypes.float.ptr(1000), arg=ShapeTracker(views=(View(shape=(1000,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1000), arg=1, src=()),)),)),
                 UOp(Ops.LOAD, dtypes.float, arg=None, src=(
-                  UOp(Ops.VIEW, dtypes.float.ptr(1), arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
+                  UOp(Ops.VIEW, dtypes.float.ptr(1), arg=ShapeTracker(views=(View(shape=(1000,), strides=(0,), offset=0, mask=None, contiguous=False),)), src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1), arg=2, src=()),)),)),)),
               UOp(Ops.CONST, dtypes.bool, arg=True, src=(
-                x14:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1000, 1), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                x14:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1000,), strides=(0,), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
           UOp(Ops.ADD, dtypes.int, arg=None, src=(
             UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (1,)), src=(
               UOp(Ops.WHERE, dtypes.int, arg=None, src=(
@@ -85,7 +85,7 @@ class TestLinearizerDumb(unittest.TestCase):
   def test_expander_new_srcs(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(25, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)), src=(
+        UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(25,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(25), arg=0, src=()),)),
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
           UOp(Ops.LOAD, dtypes.float, arg=None, src=(
@@ -106,7 +106,7 @@ class TestLinearizerDumb(unittest.TestCase):
   def test_llama_embedding(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.half.ptr(4096), arg=ShapeTracker(views=(View(shape=(4096, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=(
+        UOp(Ops.VIEW, dtypes.half.ptr(4096), arg=ShapeTracker(views=(View(shape=(4096,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(4096), arg=0, src=()),)),
         UOp(Ops.CAST, dtypes.half, arg=None, src=(
           UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
@@ -125,14 +125,14 @@ class TestLinearizerDumb(unittest.TestCase):
                             UOp(Ops.CONST, dtypes.int, arg=0, src=(
                                x16,)),)),)),
                         UOp(Ops.CONST, dtypes.int, arg=-1, src=(
-                          x19:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
+                          x19:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 32000), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
                       UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-                        UOp(Ops.VIEW, dtypes.int.ptr(1), arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
+                        UOp(Ops.VIEW, dtypes.int.ptr(1), arg=ShapeTracker(views=(View(shape=(4096, 32000), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=(
                           UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), arg=1, src=()),)),)),)),
                     UOp(Ops.CONST, dtypes.bool, arg=True, src=(
                        x19,)),)),)),
                 UOp(Ops.LOAD, dtypes.half, arg=None, src=(
-                  UOp(Ops.VIEW, dtypes.half.ptr(131072000), arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(1, 4096, 0), offset=0, mask=None, contiguous=False),)), src=(
+                  UOp(Ops.VIEW, dtypes.half.ptr(131072000), arg=ShapeTracker(views=(View(shape=(4096, 32000), strides=(1, 4096), offset=0, mask=None, contiguous=False),)), src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(131072000), arg=2, src=()),)),)),)),)),)),)),)),))
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     prg = get_program(k.get_optimized_ast(), k.opts)

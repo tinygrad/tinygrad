@@ -76,6 +76,8 @@ class Kernel:
     full_shape = ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
+    self.sts = [st.reshape(st.shape + (1,) * (len(full_shape) - len(st.shape))) for st in self.sts]
+
     # parameters for optimization
     self.tensor_core: TensorCore|None = None
     self.tensor_core_opts: TensorCoreOptions|None = None
