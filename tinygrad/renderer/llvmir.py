@@ -188,9 +188,6 @@ class LLVMRenderer(Renderer):
         if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
-
-        # stores pass the first arg through
-        if u.op is Ops.STORE: r[u] = r[u.src[0]]
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'

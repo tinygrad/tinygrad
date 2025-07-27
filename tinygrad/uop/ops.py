@@ -169,7 +169,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.shape
     # NOTE: if a parent doesn't have st its full_shape is empty
     parent_shapes = [x.full_shape for x in self.src]
-    return tuple(smax(x) for x in zip(*[x for x in parent_shapes if x != ()]))
+    return tuple(smax(x) for x in itertools.zip_longest(*parent_shapes, fillvalue=1))
   @property
   def shape(self) -> tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -236,8 +236,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
-  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, self.dtype, (self,)+src, **kwargs)
+  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
+  def barrier(self): return UOp(Ops.BARRIER, src=(self,))
   def alu(self, op, *src:UOp, **kwargs):
     out_dtype = (self, *src)[-1].dtype
     if op in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
@@ -256,12 +257,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def valid(self): return UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
-  def r(self, op:Ops, axis:tuple[int, ...], permute=True):
+  def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
     move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
-    if move_early and permute:
+    if move_early:
       permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
       ret = self.permute(permaxis)
       new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
@@ -858,7 +859,7 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ: launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ: launch_viz(VIZ, temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -868,9 +869,10 @@ if TRACK_MATCH_STATS or PROFILE:
       print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {(ret[2]+ret[3])*1000.:9.2f} ms -- TOTAL")
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
-  def launch_viz(env_str:str, data:str):
-    os.environ[env_str] = "0"
+  def launch_viz(var:ContextVar, data:str):
+    os.environ[(env_str:=var.key)] = "0"
     os.environ[f"{env_str}_DATA"] = data
+    os.environ[f"{env_str}_VALUE"] = str(var.value)
     if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
       args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
       args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []

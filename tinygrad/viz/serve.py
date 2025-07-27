@@ -26,7 +26,8 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
     for key in k.keys: ref_map[key] = i
   return ret
 
@@ -171,6 +172,13 @@ def get_profile(profile:list[ProfileEvent]):
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+
+def get_runtime_stats(key) -> list[dict]:
+  ret:list[dict] = []
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
+      ret.append({"device":e.device, "duration":float(e.en-e.st)})
+  return ret
 
 # ** HTTP server
 
