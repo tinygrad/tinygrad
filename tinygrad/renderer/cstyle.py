@@ -75,6 +75,10 @@ extra_pm = PatternMatcher([
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
+# (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
+def wmma_args(uops:list[UOp]):
+  return dedup((uop.arg[0], uop.arg[1], uop.src[0].dtype.scalar(), uop.dtype.scalar(), *(uop.arg[4:8])) for uop in uops if uop.op is Ops.WMMA)
+
 class CStyleLanguage(Renderer):
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
@@ -208,7 +212,7 @@ class ClangRenderer(CStyleLanguage):
   def _render_defines(self, uops) -> list[str]:
     prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
     # https://github.com/corsix/amx
-    for name, (N, M, _), dtype_in in dedup((uop.arg[0], uop.arg[1], uop.src[0].dtype) for uop in uops if uop.op is Ops.WMMA):
+    for name, (N, M, _), dtype_in, _, _, _, _, _ in wmma_args(uops):
       prefix += [
         '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
@@ -268,7 +272,7 @@ class IntelRenderer(OpenCLRenderer):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix = []
-    for name, dtype_in, dtype_out in dedup((uop.arg[0], uop.src[0].dtype.scalar(), uop.dtype.scalar()) for uop in uops if uop.op is Ops.WMMA):
+    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops):
       dt_in = ("ushort", "bf16") if dtype_in == dtypes.bfloat16 else (dtype_in.name, "f16")
       prefix.append(f"""{dtype_out.name}8 __{name}({dt_in[0]}16 a, {dt_in[0]}16 b, {dtype_out.name}8 c) {{
     return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
@@ -306,9 +310,8 @@ class MetalRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
-    wmma_args = dedup((uop.dtype.scalar(), uop.src[0].dtype.scalar(), uop.arg[0]) for uop in uops if uop.op is Ops.WMMA)
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    for dtype_out, dtype_in, name in wmma_args: prefix.append(
+    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops): prefix.append(
   f"""{(dstr_out:=self.render_dtype(dtype_out.vec(2)))} __{name}({(dstr_in:=self.render_dtype(dtype_in.vec(2)))} a, {dstr_in} b, {dstr_out} c){{
   simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
@@ -362,8 +365,7 @@ class CUDARenderer(CStyleLanguage):
 
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
-    wmma_args = dedup((uop.arg[0], uop.arg[1], uop.src[0].dtype.scalar(), uop.dtype.scalar(), uop.arg[6]) for uop in uops if uop.op is Ops.WMMA)
-    for name, (N, M, K), dtype_in, dtype_out, upcast_axes in wmma_args:
+    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in wmma_args(uops):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
       n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)] # 4 => CUDA reg size in bytes
@@ -458,8 +460,7 @@ class AMDRenderer(CStyleLanguage):
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
-    # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-    for name, dtype_in, dtype_out in dedup((uop.arg[0], uop.src[0].dtype.scalar(), uop.dtype.scalar()) for uop in uops if uop.op is Ops.WMMA):
+    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if self.tensor_cores == tc.amd_cdna:
         prefix.append(f"#define __{name} __builtin_amdgcn_mfma_f32_16x16x16{'f16' if dtype_in == dtypes.half else 'bf16_1k'}")
       # #define __WMMA_16_16_16_half_half __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
