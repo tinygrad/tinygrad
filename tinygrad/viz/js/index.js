@@ -483,18 +483,17 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Raw text view
-  if (!(ckey.startsWith("/ctxs"))) {
+  // ** Disassembly view
+  if (ckey.startsWith("/disasm")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displayGraph("profiler");
     document.querySelector(".metadata").innerHTML = "";
     const root = document.createElement("div");
     root.className = "raw-text";
-    // this can become a full feature assembly viewer
     root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
   }
-  // ** UOp rewrite steps view
+  // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];

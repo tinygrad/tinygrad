@@ -1,4 +1,4 @@
-import pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, subprocess
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
