@@ -76,6 +76,9 @@ class Kernel:
     full_shape = ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
+    # extend all shapes of all shapetrackers
+    self.sts = [x.reshape(x.shape+(1,)*(len(full_shape)-len(x.shape))) for x in self.sts]
+
     # parameters for optimization
     self.tensor_core: TensorCore|None = None
     self.tensor_core_opts: TensorCoreOptions|None = None
@@ -448,6 +451,8 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st = self.sts[self.bufs.index(op)]
+        # late remove all ones
+        st = st.reshape(tuple([x for x in st.shape if resolve(x != 1)]))
         # NOTE: if CONST got masked after applying opts, we create a new VALID
         if op.op is Ops.CONST and any(v.mask is not None for v in st.views): return op.view(st).valid()
         # otherwise we just replace the VIEW source
