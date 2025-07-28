@@ -40,7 +40,7 @@ class Ops(FastEnum):
   SPECIAL = auto()
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
+  REDUCE_AXIS = auto(); REDUCE_INTO = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
 
   # optimization helper ops
   UNROLL = auto(); CONTRACT = auto(); GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702

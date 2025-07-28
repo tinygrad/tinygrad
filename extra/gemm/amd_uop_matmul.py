@@ -29,6 +29,8 @@ def hl_spec_kernel3():
   Bs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BN, AddrSpace.LOCAL), arg=1).view(ShapeTracker.from_shape((BK*BN,)))
   A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), arg=0).view(ShapeTracker.from_shape((nbIterWaveM * TM,)))
   B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), arg=1).view(ShapeTracker.from_shape((nbIterWaveN * TN,)))
+  acc = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM * nbIterWaveN * TN, AddrSpace.REG), arg=2) \
+    .view(ShapeTracker.from_shape((nbIterWaveM * TM * nbIterWaveN * TN,)))
 
   # shape buffers. TODO: permutes
   full_shape = (N//BM, nbIterWaveM, BM//(nbIterWaveM * TM), TM, N//BN, nbIterWaveN, BN//(nbIterWaveN * TN), TN, N//BK, BK)
@@ -40,8 +42,12 @@ def hl_spec_kernel3():
   A_col = A_col.reshape((1, nbIterWaveM, 1, TM, 1, 1, 1, 1, 1, 1)).expand(full_shape)
   B_row = B_row.reshape((1, 1, 1, 1, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape)
 
+  acc = acc.reshape((1, nbIterWaveM, 1, TM, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape[:-2]+(1,1))
+
   #out = (a.load() * b.load()).r(Ops.ADD, (8, 9))
-  out = (As.load(As.store(a.load())) * Bs.load(Bs.store(b.load()))).r(Ops.ADD, (8, 9))
+  out = (As.load(As.store(a.load())) * Bs.load(Bs.store(b.load()))) #.r(Ops.ADD, (8, 9))
+  out = UOp(Ops.REDUCE_INTO, out.dtype, (acc, out), Ops.ADD)
+
   #out = (A_col.load(A_col.store(As.load(As.store(a.load())))) * B_row.load(B_row.store(Bs.load(Bs.store(b.load()))))).r(Ops.ADD, (8, 9))
 
   axis_types = (
@@ -51,6 +57,7 @@ def hl_spec_kernel3():
 
   from tinygrad.opt.kernel import axis_colors
   shape = '_'.join([colored(str(s), axis_colors[at]) for s,at in zip(full_shape, axis_types)])
+  print(shape)
   sink = c.store(out).sink(arg=KernelInfo(name="tg_"+shape, axis_types=axis_types))
   sink = graph_rewrite(sink, merge_views)
   return sink
@@ -170,6 +177,7 @@ if __name__ == "__main__":
   hprg = hl_spec_kernel3() if getenv("HL") else hand_spec_kernel3()
   prg = get_program(hprg, Device.default.renderer)
   print(prg.src)
+  exit(0)
   hrunner = CompiledRunner(prg)
 
   a = Tensor.randn(N, N).realize()
