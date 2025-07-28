@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, statistics
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
 import xml.etree.ElementTree as ET, subprocess
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -204,26 +204,34 @@ def xctrace_export(schema:str) -> list[dict]:
     proc.terminate()
     proc.wait()
 
-MTL_COUNTER_GROUPS = {"ALU":[11, 13, 15, 17, 19, 21, 23], "DRAM":[62, 64], "SRAM":[25]}
-
-def get_metal_counters(st:int, et:int):
+def get_metal_counters(st:Decimal, et:Decimal):
   # start by getting monotonic time at the start of trace
   time_info = list(xctrace_export("time-info"))[0]
   num, denom = [int(f.text) for f in time_info["timebase-info"].findall("mach-timebase-info-field")]
   start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
   # aggregate counter values in this time range
   counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
-  counter_values:dict[int, list[float]] = {}
+  # calculate the mean counter values in the passed in time range
+  acc:dict[int, int] = {}
+  samples:dict[int, int] = {}
   for r in xctrace_export("gpu-counter-value"):
     sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
     if sample_ts < st: continue
     if sample_ts > et: break
-    counter_values.setdefault(int(r["counter-id"]), []).append(float(r["value"]))
-  ret:dict[str, float] = {}
-  for k,v in counter_values.items():
-    ret[counter_info[k]["name"]] = statistics.mean(v)
-  for name,lst in MTL_COUNTER_GROUPS.items():
-    if (vals:=[r for c in lst if (info:=counter_info[c])["type"] == "Percentage" and (r:=ret.get(info["name"]))]): ret[name] = max(vals)
+    if (i:=int(r["counter-id"])) not in acc: acc[i], samples[i] = 0, 0
+    acc[i] += float(r["value"])
+    samples[i] += 1
+  # aggregate counter values into sub-units
+  MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(60, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
+                  "Occupancy":[*range(1, 6), *range(7, 10), *range(48, 52)]}
+  # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.
+  MTL_UNITS = {"Bandwidth":"GB/s"}
+  ret:dict[str, dict] = {}
+  for k,lst in MTL_SUBUNITS.items():
+    subunits:list[dict] = []
+    for i in lst: subunits.append({"value":acc[i]/samples[i] if i in acc else 0, **counter_info[i]})
+    value = max([v["value"] for v in subunits])
+    ret[k] = {"unit":MTL_UNITS.get(k, "%"), "value":value, "subunits":subunits}
   return ret
 
 hw_counters = {"METAL":get_metal_counters}
@@ -232,7 +240,7 @@ def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
     if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "duration":float(e.en-e.st)})
+      ret.append({"device":e.device, "duration":float(e.en-e.st), **hw_counters.get(e.device, lambda *_:{})(e.st, e.en)})
   return ret
 
 def get_disassembly(ctx:list[str]):
