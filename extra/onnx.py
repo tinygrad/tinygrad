@@ -1,5 +1,5 @@
 # mypy: disable-error-code="misc, list-item, assignment, operator, index, arg-type"
-from typing import Any, Sequence, cast, Literal, NamedTuple
+from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
@@ -40,19 +40,6 @@ def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
   warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
   assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
   return default_dtype
-
-class Domain(enum.Enum):
-  """
-  ONNX operator domains.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
-  """
-  ONNX = "ai.onnx"
-  ONNX_ML = "ai.onnx.ml"
-  AI_ONNX_TRAINING = "ai.onnx.training"
-  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
-  @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
 # ***** protobuf parsing ******
 class PBBufferedReader(BufferedReader):
@@ -121,18 +108,40 @@ class OnnxPBParser:
     self.reader = PBBufferedReader(self.tensor)
 
   # ***** parsing helpers *****
-  def _parse_message(self, end_pos: int):
+  def _parse_message(self, end_pos: int) -> Generator[tuple[int, WireType], None, None]:
     while self.reader.tell() < end_pos:
       tag = self.reader.decode_varint()
       yield tag >> 3, WireType(tag & 0x07)
 
-  def _decode_end_pos(self):
+  def _decode_end_pos(self) -> int:
     str_len = self.reader.decode_varint()
     start_pos = self.reader.tell()
     return start_pos + str_len
 
   # ***** protobuf parsing *****
-  def parse_ModelProto(self) -> dict:
+  def parse(self) -> dict:
+    """
+    Recursively parses the ONNX model into a nested dictionary.
+
+    Usage:
+    ```python
+    from extra.onnx import OnnxPBParser
+    output = OnnxPBParser("your_model.onnx").parse()
+    ```
+
+    The output structure closely follows the official `onnx` library's `MessageToDict` format:
+    ```python
+    import onnx
+    from google.protobuf.json_format import MessageToDict
+    output = MessageToDict(onnx.load("your_model.onnx"), preserving_proto_field_name=True)
+    ```
+
+    Some fields are omitted when compared to the official onnx one since they're not used for execution.
+    In addition, this parser adds extra `parsed_*` fields for convenience, such as `parsed_node` (an `OnnxNode` object) and `parsed_tensor` (a `Tensor` object), directly into the output dictionary.
+    """
+    return self._parse_ModelProto()
+
+  def _parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
     obj: dict[str, Any] = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
@@ -353,6 +362,19 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
+class Domain(enum.Enum):
+  """
+  ONNX operator domains.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
+  """
+  ONNX = "ai.onnx"
+  ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_TRAINING = "ai.onnx.training"
+  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
+
 class OpSetId(NamedTuple):
   domain: Domain
   version: int
@@ -402,7 +424,7 @@ class OnnxRunner:
     model_path: The ONNX model, provided as a file path (a string or Path object) or a Tensor.
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
-    model = OnnxPBParser(model_path, load_external_data=True).parse_ModelProto()
+    model = OnnxPBParser(model_path, load_external_data=True).parse()
     graph = model["graph"]
     self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
@@ -569,7 +591,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype, "EyeLike op") if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_fallback(OnnxDataType(dtype).to_dtype(), "EyeLike op") if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -623,7 +645,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   # ***** Casting Ops *****
   # TODO: saturate
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to, "Cast op"))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_fallback(OnnxDataType(to).to_dtype(), "Cast op"))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -1104,7 +1126,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
-    elif output_dtype != 0: out_dtype = dtype_parse(output_dtype, "QuantizeLinear op")
+    elif output_dtype != 0: out_dtype = dtype_fallback(OnnxDataType(output_dtype).to_dtype(), "QuantizeLinear op")
     else: out_dtype = dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
