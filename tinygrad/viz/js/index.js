@@ -518,10 +518,17 @@ async function main() {
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
-    for (const stats of ctx.runtime_stats) {
-      const table = metadata.appendChild(document.createElement("table"));
+    const div = metadata.appendChild(document.createElement("div"));
+    div.style.maxHeight = "200px";
+    div.style.overflow = "auto";
+    for (const [i, s] of ctx.runtime_stats.entries()) {
+      const p = div.appendChild(document.createElement("p"));
+      p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`
+      p.style.marginBottom = "4px";
+      if (i > 0) p.style.marginTop = "8px";
+      const table = div.appendChild(document.createElement("table"));
       const tbody = table.appendChild(document.createElement("tbody"));
-      for (const [k,v] of Object.entries(stats)) {
+      for (const [k,v] of Object.entries(s)) {
         const tr = tbody.appendChild(document.createElement("tr"));
         tr.className = "main-row";
         tr.appendChild(document.createElement("td")).innerText = k;

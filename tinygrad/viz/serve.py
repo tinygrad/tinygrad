@@ -212,7 +212,7 @@ def get_metal_counters(st:Decimal, et:Decimal):
   # aggregate counter values in this time range
   counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
   # calculate the mean counter values in the passed in time range
-  acc:dict[int, int] = {}
+  acc:dict[int, float] = {}
   samples:dict[int, int] = {}
   for r in xctrace_export("gpu-counter-value"):
     sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
@@ -225,7 +225,7 @@ def get_metal_counters(st:Decimal, et:Decimal):
   MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(60, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
                   "Occupancy":[*range(1, 6), *range(7, 10), *range(48, 52)]}
   # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.
-  MTL_UNITS = {"Bandwidth":"GB/s"}
+  MTL_UNITS = {"Bandwidth":" GB/s"}
   ret:dict[str, dict] = {}
   for k,lst in MTL_SUBUNITS.items():
     subunits:list[dict] = []
