@@ -5,6 +5,9 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.schedule.kernelize import merge_views, view_left
 from tinygrad.helpers import getenv, colored, prod, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
+from tinygrad.opt.kernel import axis_colors
+
+def to_colored(full_shape, axis_types): return '_'.join([colored(str(s), axis_colors[at]) for s,at in zip(full_shape, axis_types)])
 
 N = 4096
 run_count = 5
@@ -16,6 +19,7 @@ BK = 8
 TN = 4
 TM = 4
 
+# NOTE: this is from testgrad
 # change reduceop axes and input ShapeTrackers, view gets replaced with a reshape.
 # src->r->view  -->   src->view->r
 def swizzle_reduceop(src:UOp, r:UOp, view:UOp):
@@ -47,7 +51,8 @@ def top_spec_kernel3():
   L = 16
   sink = sink.reshape((N//L, L, N//L, L)) #.lift({0:UOp.range(dtypes.int, N//BM, 0), 2:UOp.range(dtypes.int, N//BN, 1)})
   sink = graph_rewrite(sink, view_left+pm)
-  return sink.replace(arg=KernelInfo(name="top", axis_types=(AxisType.GLOBAL, AxisType.LOCAL, AxisType.GLOBAL, AxisType.LOCAL, AxisType.REDUCE)))
+  axis_types = (AxisType.GLOBAL, AxisType.LOCAL, AxisType.GLOBAL, AxisType.LOCAL, AxisType.REDUCE)
+  return sink.replace(arg=KernelInfo(name="top_"+to_colored(sink.full_shape, axis_types), axis_types=axis_types))
 
 def hl_spec_kernel3():
   nbIterWaveM = 2
@@ -82,9 +87,7 @@ def hl_spec_kernel3():
     AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
     AxisType.REDUCE, AxisType.UNROLL)
 
-  from tinygrad.opt.kernel import axis_colors
-  shape = '_'.join([colored(str(s), axis_colors[at]) for s,at in zip(full_shape, axis_types)])
-  sink = c.store(out).sink(arg=KernelInfo(name="tg_"+shape, axis_types=axis_types))
+  sink = c.store(out).sink(arg=KernelInfo(name="tg_"+to_colored(full_shape, axis_types), axis_types=axis_types))
   sink = graph_rewrite(sink, merge_views)
   return sink
 
