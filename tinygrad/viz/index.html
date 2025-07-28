@@ -243,13 +243,20 @@
     font-size: 0.95em;
   }
   table td {
-    padding: 8px 12px;
     border-bottom: 1px solid #2c2f40;
     vertical-align: top;
-    text-transform: capitalize;
   }
-  table tr.main-row:hover {
+  table tr:last-child > td {
+     border-bottom: none;
+  }
+  tr.main-row:hover {
     background-color: #2a2d3a;
+  }
+  tr.sub-row {
+    max-width: 150px;
+  }
+  tr.main-row > td, tr.sub-row > td {
+    padding: 8px 12px;
   }
   </style>
 </head>

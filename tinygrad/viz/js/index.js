@@ -519,13 +519,13 @@ async function main() {
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
     const div = metadata.appendChild(document.createElement("div"));
-    div.style.maxHeight = "200px";
+    div.style.maxHeight = "250px";
     div.style.overflow = "auto";
     for (const [i, s] of ctx.runtime_stats.entries()) {
       const p = div.appendChild(document.createElement("p"));
       p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`
       p.style.marginBottom = "4px";
-      if (i > 0) p.style.marginTop = "8px";
+      p.style.marginTop = `${i > 0 ? 8 : 12}px`;
       const table = div.appendChild(document.createElement("table"));
       const tbody = table.appendChild(document.createElement("tbody"));
       for (const [k,v] of Object.entries(s)) {
@@ -544,7 +544,7 @@ async function main() {
         const subunits = subunitTd.appendChild(document.createElement("table"));
         for (const u of v.subunits) {
           const tr = subunits.appendChild(document.createElement("tr"));
-          tr.style.maxWidth = "250px";
+          tr.className = "sub-row";
           tr.appendChild(document.createElement("td")).innerText = u.name;
           tr.appendChild(document.createElement("td")).innerText = formatUnit(u.value, v.unit);
         }
