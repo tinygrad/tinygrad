@@ -4057,14 +4057,14 @@ class Tensor(MathTrait):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
   
-  def newtonschulz(self, steps=3, eps=1e-7) -> Tensor:
+  def newton_schulz(self, steps:int=3, eps:float=1.0e-7, params=(2,-1.5,0.5)) -> Tensor:
+    """
+    performs the newton schulz algorithm for a matrix A.
+    """
     assert self.ndim == 2
-    a, b, c = (3.4445,-4.7750, 2.0315)
     G = self / (self.square().sum().sqrt() + eps)
     G = G.T if G.shape[0] > G.shape[1] else G
-    for _ in range(steps):
-      A = G @ G.T
-      G = a * G + (b * A + c * A @ A) @ G
+    for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.T) @ x, [G]*i) for i, p in enumerate(params, 1))
     return G.T if G.shape[0] > G.shape[1] else G
 
   def qr(self) -> tuple[Tensor, Tensor]:
