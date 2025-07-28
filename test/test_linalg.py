@@ -62,5 +62,12 @@ class TestLinAlg(unittest.TestCase):
       orthogonality_helper(Q)
       reconstruction_helper([Q,R],a)
 
+  def test_newton_schulz(self):
+    coefficients = [(1.5,-0.5), (2,-1.5,0.5)]
+    a = Tensor.randn(4,4)
+    for coefs in coefficients:
+      b = Tensor.newton_schulz(a, steps=10,params=coefs)
+      orthogonality_helper(b.T,tolerance=1e-3)
+
 if __name__ == "__main__":
   unittest.main()
