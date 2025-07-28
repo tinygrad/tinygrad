@@ -162,7 +162,7 @@ async function renderProfiler() {
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+        ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
       const arg = { tooltipText:formatTime(e.dur), ...ref };
       // offset y by depth
@@ -456,7 +456,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count != null ? `- ${u.match_count}` : '');
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
