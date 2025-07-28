@@ -591,19 +591,27 @@ class BlendedGPTDataset:
 
     self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, shuffle) for i,path in enumerate(paths)]
 
-def batch_load_llama3(bs:int, base_dir:Path, val:bool=True):
+  def get(self, bs:int):
+    pass
+
+def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, val:bool=True):
   if val:
     dataset = BlendedGPTDataset([
       base_dir / "validation" / "c4-validationn-91205-samples.en_text_document",
     ], [
       1.0
-    ], bs)
-
-    dataset = BinIdxDataset(base_dir / "validation" / "c4-validationn-91205-samples.en_text_document")
-    for i in range(dataset.count):
-      yield dataset[i].numpy()
+    ], samples, seqlen, False)
   else:
-    raise NotImplementedError()
+    dataset = BlendedGPTDataset([
+      base_dir / "c4-train.en_5_text_document",
+      base_dir / "c4-train.en_6_text_document",
+      base_dir / "c4-train.en_7_text_document",
+    ], [
+      1.0, 1.0, 1.0
+    ], samples, seqlen, True)
+
+  for i in range(math.ceil(samples / bs)):
+    yield dataset.get(bs)
 
 if __name__ == "__main__":
   def load_unet3d(val):
