@@ -10,6 +10,7 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/x86asm.min.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -215,14 +216,21 @@
   #device-list > div {
     min-height: 32px;
     max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: auto;
+    overflow-y: hidden;
     white-space: nowrap;
     display: flex;
-    cursor: pointer;
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  .raw-text {
+    padding: 0 8px;
+    width: 100%;
+    height: 100%;
+  }
+  .raw-text code {
+    max-height: none !important;
   }
   </style>
 </head>
@@ -238,10 +246,10 @@
         </svg>
       </button>
     </div>
+    <div class="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view profiler"></div>
     <div class="view graph">
-      <div class="progress-message">Rendering new layout...</div>
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>

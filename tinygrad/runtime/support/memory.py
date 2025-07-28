@@ -162,7 +162,7 @@ class MemoryManager:
                palloc_ranges:list[tuple[int, int]], first_lv:int=0):
     self.dev, self.vram_size, self.va_shifts, self.va_base, lvl_msb = dev, vram_size, va_shifts, va_base, va_shifts + [va_bits + 1]
     self.pte_covers, self.pte_cnt = [1 << x for x in va_shifts][::-1], [1 << (lvl_msb[i+1] - lvl_msb[i]) for i in range(len(lvl_msb) - 1)][::-1]
-    self.pt_t, self.palloc_ranges, self.level_cnt = pt_t, palloc_ranges, len(va_shifts)
+    self.pt_t, self.palloc_ranges, self.level_cnt, self.va_bits = pt_t, palloc_ranges, len(va_shifts), va_bits
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device

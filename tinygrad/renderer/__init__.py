@@ -4,6 +4,7 @@ import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.opt.tc import TensorCore
   from tinygrad.opt.kernel import Opt
@@ -27,7 +28,7 @@ class Estimates:
     dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
-        if u.op in {Ops.LOAD, Ops.STORE}:
+        if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
           dont_count = dont_count.union(u.src[0].toposort())
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
@@ -40,8 +41,10 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.LOAD: lds += u.dtype.itemsize * mults
-      elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
+      elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+        lds += u.dtype.itemsize * mults
+      elif u.op is Ops.STORE and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+        lds += u.src[1].dtype.itemsize * mults
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     return Estimates(flops, lds, lds) # TODO: properly track memory, lds is always a high estimate

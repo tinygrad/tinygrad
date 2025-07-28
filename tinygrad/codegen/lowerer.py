@@ -1,7 +1,7 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
 from tinygrad.helpers import prod, partition, flatten
 
@@ -48,16 +48,17 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
-  barrier = (UOp(Ops.BARRIER, dtypes.void, (x.src[1],)),) if buf.op is Ops.DEFINE_LOCAL else ()
+  barrier = tuple([y.barrier() if buf.op is Ops.DEFINE_LOCAL else y for y in x.src[1:]])
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
+  assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
-  if not cast(PtrDType, buf.dtype).local:
+  if cast(PtrDType, buf.dtype).addrspace == AddrSpace.GLOBAL:
     # NOTE: only store the local reduceop in the threads that are actually doing the reduce
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
-  return UOp(Ops.STORE, dtypes.void, (buf.index(idx, valid), x.src[1]))
+  return buf.index(idx, valid).store(x.src[1], *[x for x in UOp.sink(idx, valid).toposort() if x.op is Ops.RANGE])
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c

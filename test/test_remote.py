@@ -32,7 +32,6 @@ class TestRemoteMultiHost(unittest.TestCase):
     # Verify that everything is in one big cross-host graph
     assert len(do.captured._jit_cache) == 1 and isinstance(do.captured._jit_cache[0].prg, RemoteGraph), repr(do.captured)
 
-  @unittest.expectedFailure # multihost-aware schedule is in separate pr
   @Context(JIT_BATCH_SIZE=2**32)
   def test_multihost_aware_schedule(self):
     @TinyJit

@@ -30,7 +30,10 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) or Device.DEFAULT in {"METAL"}, "HCQ device required to run")
+# TODO: support in HCQCompiled
+is_cpu_hcq = Device.DEFAULT in {"CPU", "LLVM"}
+
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
