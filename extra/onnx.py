@@ -1,5 +1,5 @@
 # mypy: disable-error-code="misc, list-item, assignment, operator, index, arg-type"
-from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
+from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, get_args
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
@@ -137,7 +137,9 @@ class OnnxPBParser:
     ```
 
     Some fields are omitted when compared to the official onnx one since they're not used for execution.
-    In addition, this parser adds extra `parsed_*` fields for convenience, such as `parsed_node` (an `OnnxNode` object) and `parsed_tensor` (a `Tensor` object), directly into the output dictionary.
+    In addition, this parser adds extra `parsed_*` fields for convenience such as
+    `parsed_node` (an `OnnxNode` object) and `parsed_tensor` (a `Tensor` object), directly
+    into the output dictionary.
     """
     return self._parse_ModelProto()
 
