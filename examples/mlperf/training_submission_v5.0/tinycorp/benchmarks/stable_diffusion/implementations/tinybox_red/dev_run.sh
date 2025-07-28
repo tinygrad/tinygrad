@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# NOTE: The current settings are sufficient to test whether this tinygrad implementation matches the mlperf reference implementation.
-#   The approach is to test I/O with each component, ensuring tinygrad/ref implementations match.
-#   The focus is on correctness, not speed - I use CPU because my local GPU isn't big enough for holding all the training params.
-# TODO: next steps: train to convergence on one big NVIDIA GPU (cloud rented), then on tinybox
-
 # *** dependencies
 #pip install tqdm
 #pip install numpy
@@ -23,11 +18,20 @@
 #pip install webdataset
 #pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
 source venv/bin/activate
-export DEBUG=2
+export DEBUG=4
+#export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
+#export IGNORE_JIT_FIRST_BEAM=1
+
+#export SEED=$RANDOM
+#DATETIME=$(date "+%m%d%H%M")
+#LOGFILE="sd_red_${DATETIME}_${SEED}.log"
+export HCQDEV_WAIT_TIMEOUT_MS=300000
+#export BEAM_TIMEOUT_SEC=20
 
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
-export BS=1 EVAL_BS=1
+#export GPUS=6 BS=6 EVAL_BS=6
+export GPUS=1 BS=1 EVAL_BS=1
 
 export BASEDIR="/home/hooved/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"

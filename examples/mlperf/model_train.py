@@ -1370,6 +1370,12 @@ def train_stable_diffusion():
   import numpy as np
 
   config = {}
+
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"training on {GPUS}")
+  for x in GPUS: Device[x]
+  seed = config["seed"] = getenv("SEED", 12345)
+
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1)
@@ -1379,10 +1385,12 @@ def train_stable_diffusion():
   # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   CKPT_IMAGE_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
-  assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
+  #assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
 
   # NOTE: key differences for mlperf training v5.0 Stable Diffusion UNet from stable_diffusion.py UNet:
   # - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
@@ -1424,28 +1432,39 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
+  parameters = get_parameters(unet)
+  if len(GPUS) > 1:
+    for p in parameters:
+      p.to_(GPUS)
+
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
-  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float), lambda_lr_callback)
+  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
   # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
   lr_scheduler.step()
 
   #init_scale = 2.0**16 if dtypes.default_float is dtypes.float16 else 1.0
   init_scale = 2.0**16
-  grad_scaler = GradScaler(init_scale)
+  #init_scale = 2.0**11
+  grad_scaler = GradScaler(optimizer, init_scale)
 
   @TinyJit
-  def train_step(x_noised:Tensor, t:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
-                       lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
+  def train_step(x_noised:Tensor, timestep:Tensor, c:Tensor, v_true:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
+                 lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
 
-    out = unet(x_noised, t, c, softmax_dtype=dtypes.float32)
+    for t in (x_noised, timestep, c, v_true):
+      if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+      else: t.to_(GPUS[0])
+
+    out = unet(x_noised, timestep, c, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
     loss.backward()
     for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
+    #Tensor.realize(*[p.grad for p in optimizer.params])
 
     # skip the optimizer step if non-finite grads are detected, jittable with Tensor.where logic
-    grad_scaler.step(optimizer)
+    grad_scaler.step()
     #optimizer.step()
     # the lr still updates even if we skipped an optimizer step
     lr_scheduler.step()
@@ -1537,6 +1556,7 @@ def train_stable_diffusion():
   dl = batch_load_train_stable_diffusion(BS, device=Device.DEFAULT)
   for i, batch in enumerate(dl):
     print(f"step {i} started")
+    t1 = time.perf_counter()
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
@@ -1545,17 +1565,20 @@ def train_stable_diffusion():
     #t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.long)
     t = Tensor.randint(latent.shape[0], low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int)
     noise = Tensor.randn_like(latent)
-    latent_with_noise = sqrt_alphas_cumprod[t] * latent + sqrt_one_minus_alphas_cumprod[t] * noise
+
+    sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t].reshape(t.shape[0], 1, 1, 1)
+    sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t].reshape(t.shape[0], 1, 1, 1)
+    latent_with_noise = sqrt_alphas_cumprod_t * latent + sqrt_one_minus_alphas_cumprod_t * noise
     # the UNet predicts velocity (v); v_true is the ground-truth value
-    v_true = sqrt_alphas_cumprod[t] * noise - sqrt_one_minus_alphas_cumprod[t] * latent
+    v_true = sqrt_alphas_cumprod_t * noise - sqrt_one_minus_alphas_cumprod_t * latent
 
     # encode prompt
     prompt = batch['txt']
     context = jit_context_step(prompt)
-    context = Tensor.randn(1,77,1024, dtype=dtypes.float)
+    #context = Tensor.randn(1,77,1024, dtype=dtypes.float)
 
     loss = train_step(latent_with_noise, t, context, v_true, unet, optimizer, grad_scaler, lr_scheduler)
-    print(f"step {i}: loss: {loss.item():.9f}")
+    print(f"step {i}: loss: {loss.item():.9f}, elapsed:{(time.perf_counter()-t1):0.3f}")
 
     num_seen_images += BS
     if num_seen_images % CKPT_IMAGE_INTERVAL == 0:

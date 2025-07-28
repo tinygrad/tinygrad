@@ -359,12 +359,17 @@ class BoxCoder(object):
 # based on torch.cuda.amp.grad_scaler.py class GradScaler
 # this is used in mlperf training reference for Stable Diffusion v2, with default setting of "precision: 16" in pytorch lightning config
 class GradScaler:
-  def __init__(self, init_scale:float=2.0**16, growth_factor:float=2.0, backoff_factor:float=0.5, growth_interval:int=2000):
-    self.scale, self.growth_tracker = Tensor(init_scale), Tensor(0)
+  def __init__(self, optimizer:LAMB, init_scale:float=2.0**16, growth_factor:float=2.0, backoff_factor:float=0.5, growth_interval:int=2000):
+    self.scale, self.growth_tracker = Tensor(init_scale).to(optimizer.device), Tensor(0).to(optimizer.device)
     self.growth_factor, self.backoff_factor, self.growth_interval = growth_factor, backoff_factor, growth_interval
+    self.opt = optimizer
 
-  def step(self, opt:LAMB):
-    grads_all_finite = Tensor.cat(*[unwrap(t.grad).flatten() for t in opt.params]).isfinite().all()
+  def step(self):
+    opt = self.opt
+    grads_all_finite = []
+    for t in opt.params:
+      grads_all_finite.append(t.grad.isfinite().all().unsqueeze(0))
+    grads_all_finite = Tensor.cat(*grads_all_finite).all()
 
     # if any non-finite grads were detected, skip the optimizer step (modified version of LAMB._step)
     opt.b1_t *= grads_all_finite.where(opt.b1, 1.0)
@@ -386,7 +391,9 @@ class GradScaler:
     at_interval = (self.growth_tracker == self.growth_interval)
     scale_if_all_finite = at_interval.where(self.scale * self.growth_factor, self.scale)
     self.scale.assign(grads_all_finite.where(scale_if_all_finite, self.scale * self.backoff_factor))
-    self.growth_tracker.assign(grads_all_finite.where(at_interval.where(Tensor(0), self.growth_tracker + 1), Tensor(0)))
+    self.growth_tracker.assign(
+      grads_all_finite.where(at_interval.where(Tensor(0, device=opt.device), self.growth_tracker + 1), Tensor(0, device=opt.device))
+    )
     Tensor.realize(self.scale, self.growth_tracker)
 
 # Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation

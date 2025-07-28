@@ -58,4 +58,5 @@ class LambdaLR(LR_Scheduler):
   def get_lr(self):
     # LR_Scheduler.schedule_step increments self.epoch_counter by 1 before calling get_lr,
     #  but we need to calc. our first lr with self.epoch_counter=0
-    return self.base_lr * self.lr_lambda(self.epoch_counter - 1)
+    ret = self.base_lr * self.lr_lambda(self.epoch_counter - 1)
+    return ret.to(self.optimizer.device)
