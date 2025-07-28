@@ -162,8 +162,6 @@ merge_views = PatternMatcher([
   # only unmaksed VIEW on CONST replaces the ShapeTracker
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
    lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
-  # simplify views
-  (UPat(Ops.VIEW, src=(UPat.var('x'),), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
 ])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
@@ -413,6 +411,8 @@ finalize_contiguous = PatternMatcher([
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
   # merge contiguous
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONTIGUOUS),), name="x"), lambda x: x.src[0]),
+  # simplify views
+  (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
