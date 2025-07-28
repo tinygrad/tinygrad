@@ -132,10 +132,13 @@ jobs:
       run: |
         cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+        cp tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
         ./autogen_stubs.sh libc
         ./autogen_stubs.sh io_uring
+        ./autogen_stubs.sh ib
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
     - name: Verify WebGPU autogen
       run: |
         cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
