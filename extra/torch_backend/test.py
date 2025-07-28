@@ -199,7 +199,7 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(recon, a.cpu().numpy(), atol=1e-6)
 
   def test_linalg_det(self):
-    a = torch.diag(torch.tensor([1,2,3,4,5],dtype = torch.float32, device=device))
+    a = torch.diag(torch.tensor([1,2,3,4,5], dtype = torch.float32, device=device))
     b = torch.linalg.det(a)
     np.testing.assert_equal(b.cpu().numpy(), 120.0)
 
