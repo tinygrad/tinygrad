@@ -96,8 +96,7 @@ class TestRealWorld(unittest.TestCase):
       with Context(JIT=0): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
 
-  # @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
-  @unittest.skip("skipping for now, flaky")
+  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
     from examples.beautiful_mnist import Model
     with Tensor.train():
