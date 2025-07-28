@@ -153,7 +153,7 @@ runs:
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
-          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev"
+          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libibverbs-dev libc6-dev"
         fi
         # **** CUDA ****
         if [[ "${{ inputs.cuda }}" == "true" ]]; then

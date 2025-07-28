@@ -80,6 +80,8 @@ extern "C" __attribute__((global)) void kernel3_registers(float *a, float *b, fl
 
   // Iteration over BK blocks.
   for (int kId = 0; kId < N; kId += BK) {
+    __syncthreads();
+
     // We populate the Shared Memory with Ks row and columns
     for (int i = 0; i < nbReadsB; i++) {
       int index_x = BN * blockIdx.x + rBIdx;
@@ -123,7 +125,6 @@ extern "C" __attribute__((global)) void kernel3_registers(float *a, float *b, fl
         }
       }
     }
-    __syncthreads();
   }
 
   for (int iterWaveM = 0; iterWaveM < nbIterWaveM; iterWaveM++) {

@@ -25,6 +25,10 @@ function intersectRect(r1, r2) {
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
+  const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new graph...";
+  if (timeout != null) clearTimeout(timeout);
+  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -33,9 +37,6 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  if (timeout != null) clearTimeout(timeout);
-  const progressMessage = document.querySelector(".progress-message");
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
@@ -161,7 +162,7 @@ async function renderProfiler() {
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+        ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
       const arg = { tooltipText:formatTime(e.dur), ...ref };
       // offset y by depth
@@ -171,6 +172,7 @@ async function renderProfiler() {
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
@@ -228,6 +230,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
@@ -359,7 +362,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-function codeBlock(st, language, { loc, wrap }) {
+function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
@@ -372,6 +375,14 @@ function codeBlock(st, language, { loc, wrap }) {
   }
   ret.appendChild(code);
   return ret;
+}
+
+function appendRow(table, name, value, unit, cls) {
+  const tr = table.appendChild(document.createElement("tr"));
+  tr.className = cls;
+  tr.appendChild(document.createElement("td")).innerText = name;
+  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : value.toFixed(2)+(unit != null ? " "+unit : "%");
+  return tr;
 }
 
 function setActive(e) {
@@ -453,7 +464,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
@@ -467,23 +478,35 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
+  const ckey = step?.query;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== ckey) e.close();
+    const url = new URL(e.url);
+    if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
+  if (ctx.name === "Profiler") return renderProfiler();
   if (ckey in cache) {
     ret = cache[ckey];
   }
+  // ** Disassembly view
+  if (ckey.startsWith("/disasm")) {
+    if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    displayGraph("profiler");
+    document.querySelector(".metadata").innerHTML = "";
+    const root = document.createElement("div");
+    root.className = "raw-text";
+    root.appendChild(codeBlock(ret.src, "x86asm"));
+    return document.querySelector(".profiler").replaceChildren(root);
+  }
+  // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
-    const eventSource = new EventSource(`/ctxs?${ckey}`);
+    const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
@@ -502,6 +525,28 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  if (ctx.runtime_stats != null) {
+    const div = metadata.appendChild(document.createElement("div"));
+    div.className = "stats-list";
+    for (const [i, s] of ctx.runtime_stats.entries()) {
+      const p = div.appendChild(document.createElement("p"));
+      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
+      const table = div.appendChild(document.createElement("table"));
+      const tbody = table.appendChild(document.createElement("tbody"));
+      for (const { name, value, unit, subunits } of s.data) {
+          const mainRow = appendRow(tbody, name, value, unit, "main-row");
+          if (!subunits?.length) continue;
+          const subunitRow = tbody.appendChild(document.createElement("tr"));
+          subunitRow.style.display = "none";
+          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
+          mainRow.style.cursor = "pointer";
+          const td = subunitRow.appendChild(document.createElement("td"));
+          td.colSpan = 2;
+          const table = td.appendChild(document.createElement("table"));
+          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
+      }
+    }
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));

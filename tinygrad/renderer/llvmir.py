@@ -139,7 +139,7 @@ class LLVMRenderer(Renderer):
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
-    # NOTE: MallocAllocator promises 0x20 alignment
+    # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
     sprefix = "".join([f" {x}" for x in (prefix or []) + [self.abi] if x is not None])
     return "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
@@ -150,13 +150,7 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     local_args: list[str] = []
-    acc_to_assign: dict[UOp, UOp] = {}
     for u in uops:
-      if u.op is Ops.ASSIGN: # prealloc all assigns
-        vc += 1
-        r[u] = r[u.src[1]] = f"%assign{vc}"
-        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
-        acc_to_assign[u.src[0]] = u.src[1]
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
@@ -166,21 +160,21 @@ class LLVMRenderer(Renderer):
 
     name = "test"
     for u in uops:
+      if u.op is Ops.NOOP: continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         args.append((r[u], u.dtype))
-      elif u.op == Ops.DEFINE_LOCAL:
-        r[u] = f"%local_{u.arg}"
+      elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
+        r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
-        if self.device == "LLVM": kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype)}], align 16")
+        if self.device == "LLVM" or u.op is Ops.DEFINE_REG:
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
-      elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
-      elif u.op is Ops.DEFINE_REG: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -194,14 +188,6 @@ class LLVMRenderer(Renderer):
         if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
-
-        # generate the phi nodes for the assigns
-        if u.op is Ops.RANGE:
-          for x in acc_to_assign:
-            if u in x.src:  # if this range is relevant for this acc
-              vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)} [ {r[x]}, %loop_entry_{u.arg} ], [ {r[acc_to_assign[x]]}, %loop_latch_{u.arg} ]")
-              r[x] = f"%acc{vc}"
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'

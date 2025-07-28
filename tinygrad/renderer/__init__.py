@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Optional, Callable, cast, TYPE_CHECKING
+from typing import Callable, cast, TYPE_CHECKING
 import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.opt.tc import TensorCore
   from tinygrad.opt.kernel import Opt
@@ -27,7 +28,7 @@ class Estimates:
     dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
-        if u.op in {Ops.LOAD, Ops.STORE}:
+        if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
           dont_count = dont_count.union(u.src[0].toposort())
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
@@ -40,8 +41,10 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.LOAD: lds += u.dtype.itemsize * mults
-      elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
+      elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+        lds += u.dtype.itemsize * mults
+      elif u.op is Ops.STORE and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+        lds += u.src[1].dtype.itemsize * mults
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     return Estimates(flops, lds, lds) # TODO: properly track memory, lds is always a high estimate
@@ -52,11 +55,11 @@ class ProgramSpec:
   src:str
   device:str
   ast:UOp  # save the base ast (this is method cache key)
-  uops:Optional[list[UOp]]=None
+  uops:list[UOp]|None=None
 
   # filled in from uops (if we have uops)
-  global_size:Optional[list[int]]=None
-  local_size:Optional[list[int]]=None
+  global_size:list[int]|None=None
+  local_size:list[int]|None=None
   vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
@@ -113,12 +116,12 @@ class Renderer:
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
-  global_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
-  local_max: Optional[tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
-  pre_matcher: Optional[PatternMatcher] = None
-  extra_matcher: Optional[PatternMatcher] = None
+  pre_matcher: PatternMatcher|None = None
+  extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
