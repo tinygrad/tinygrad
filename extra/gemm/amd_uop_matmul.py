@@ -91,7 +91,7 @@ def hl_spec_kernel3():
   sink = graph_rewrite(sink, merge_views)
   return sink
 
-def hand_spec_kernel3():
+def hand_spec_kernel3(kernel4=getenv("K4", 0)):
   BLOCK_SIZE = 256
 
   nbWaves = BLOCK_SIZE // 32
@@ -149,51 +149,130 @@ def hand_spec_kernel3():
   i = UOp.range(dtypes.int, c_regs.dtype.size, 16)
   init_store = c_regs[i].store(UOp.const(dtypes.float, 0.0), i)
 
-  kId_range = UOp.range(dtypes.int, N//BK, 0)
-  kId = kId_range*BK
+  if kernel4:
+    regA = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbReadsA, AddrSpace.REG), arg=3)
+    regB = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbReadsB, AddrSpace.REG), arg=4)
 
-  # load from globals into locals
-  i = UOp.range(dtypes.int, nbReadsB, 1)
-  index_x = BN * blockIdx_x + rBIdx
-  index_y = rBIdy + i * strideReadB + kId
-  Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(b[N * index_y + index_x].load(), i)
+    # initial load from globals into locals (0)
+    kId = 0
 
-  i = UOp.range(dtypes.int, nbReadsA, 2)
-  index_x = rAIdx + kId
-  index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-  As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
+    # load from globals into locals
+    i = UOp.range(dtypes.int, nbReadsB, 0)
+    index_x = BN * blockIdx_x + rBIdx
+    index_y = rBIdy + i * strideReadB + kId
+    Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(b[N * index_y + index_x].load(), i)
 
-  barrier = UOp(Ops.BARRIER, src=(As_store, Bs_store))
+    i = UOp.range(dtypes.int, nbReadsA, 1)
+    index_x = rAIdx + kId
+    index_y = BM * blockIdx_y + rAIdy + i * strideReadA
+    As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
 
-  k = UOp.range(dtypes.int, BK, 3)
 
-  # load from locals into registers
-  iterWave = UOp.range(dtypes.int, nbIterWaveN, 4)
-  i = UOp.range(dtypes.int, TN, 5)
-  index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i
-  B_row_store = B_row[iterWave*TN + i].store(Bs[k*BN + index].load(barrier), iterWave, i)
+    # iterate over the middle chunk
+    kId_range = UOp.range(dtypes.int, N//BK-1, 2)
+    kId = kId_range*BK
 
-  iterWave = UOp.range(dtypes.int, nbIterWaveM, 6)
-  i = UOp.range(dtypes.int, TM, 7)
-  index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
-  A_col_store = A_col[iterWave*TM + i].store(As[k*BM + index].load(barrier), iterWave, i)
+    barrier = UOp(Ops.BARRIER, src=(As_store, Bs_store, kId))
 
-  # do the GEMM math
-  iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 8)
-  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 9)
-  yt = UOp.range(dtypes.int, TM, 10)
-  xt = UOp.range(dtypes.int, TN, 11)
-  x = iterWaveN * TN + xt
-  y = iterWaveM * TM + yt
-  c_regs_idx = c_regs[y * TN * nbIterWaveN + x]
-  sink = c_regs_idx.store(c_regs_idx.load(init_store) + A_col[y].load(A_col_store) * B_row[x].load(B_row_store),
-                          iterWaveM, iterWaveN, yt, xt, k, kId_range)
+    # load from globals into registers (next round)
+    i = UOp.range(dtypes.int, nbReadsB, 3)
+    index_x = BN * blockIdx_x + rBIdx
+    index_y = rBIdy + i * strideReadB + kId + BK
+    regB_store = regB[i].store(b[N * index_y + index_x].load(), i)
+
+    i = UOp.range(dtypes.int, nbReadsA, 4)
+    index_x = rAIdx + kId + BK
+    index_y = BM * blockIdx_y + rAIdy + i * strideReadA
+    regA_store = regA[i].store(a[N * index_y + index_x].load(), i)
+
+    def inner_loop(first_range, inp_dep=(), ext_loop=()):
+      # inner unroll
+      k = UOp.range(dtypes.int, BK, first_range+0)
+
+      # load from locals into registers
+      iterWave = UOp.range(dtypes.int, nbIterWaveN, first_range+1)
+      i = UOp.range(dtypes.int, TN, first_range+2)
+      index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i
+      B_row_store = B_row[iterWave*TN + i].store(Bs[k*BN + index].load(*inp_dep), iterWave, i)
+
+      iterWave = UOp.range(dtypes.int, nbIterWaveM, first_range+3)
+      i = UOp.range(dtypes.int, TM, first_range+4)
+      index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
+      A_col_store = A_col[iterWave*TM + i].store(As[k*BM + index].load(*inp_dep), iterWave, i)
+
+      # do the GEMM math
+      iterWaveM = UOp.range(dtypes.int, nbIterWaveM, first_range+5)
+      yt = UOp.range(dtypes.int, TM, first_range+6)
+      iterWaveN = UOp.range(dtypes.int, nbIterWaveN, first_range+7)
+      xt = UOp.range(dtypes.int, TN, first_range+8)
+      x = iterWaveN * TN + xt
+      y = iterWaveM * TM + yt
+      c_regs_idx = c_regs[y * TN * nbIterWaveN + x]
+      sink = c_regs_idx.store(c_regs_idx.load(init_store) + A_col[y].load(A_col_store) * B_row[x].load(B_row_store),
+                              iterWaveM, iterWaveN, yt, xt, k, *ext_loop)
+      return sink
+
+    sink = inner_loop(5, (barrier, regB_store, regA_store), (kId_range,))
+
+    # load from registers into locals
+    i = UOp.range(dtypes.int, nbReadsB, 14)
+    index_x = BN * blockIdx_x + rBIdx
+    index_y = rBIdy + i * strideReadB + kId + BK
+    Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(regB[i].load(sink, regB_store), i, kId_range)
+
+    i = UOp.range(dtypes.int, nbReadsA, 15)
+    index_x = rAIdx + kId + BK
+    index_y = BM * blockIdx_y + rAIdy + i * strideReadA
+    As_store = As[(index_x % BK) * BM + index_y % BM].store(regA[i].load(sink, Bs_store, regA_store), i, kId_range)
+
+    # final iteration without the copy
+    sink = inner_loop(16, (As_store,), ())
+  else:
+    kId_range = UOp.range(dtypes.int, N//BK, 0)
+    kId = kId_range*BK
+
+    # load from globals into locals
+    i = UOp.range(dtypes.int, nbReadsB, 1)
+    index_x = BN * blockIdx_x + rBIdx
+    index_y = rBIdy + i * strideReadB + kId
+    Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(b[N * index_y + index_x].load(), i)
+
+    i = UOp.range(dtypes.int, nbReadsA, 2)
+    index_x = rAIdx + kId
+    index_y = BM * blockIdx_y + rAIdy + i * strideReadA
+    As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
+
+    barrier = UOp.barrier(As_store, Bs_store)
+
+    k = UOp.range(dtypes.int, BK, 3)
+
+    # load from locals into registers
+    iterWave = UOp.range(dtypes.int, nbIterWaveN, 4)
+    i = UOp.range(dtypes.int, TN, 5)
+    index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i
+    B_row_store = B_row[iterWave*TN + i].store(Bs[k*BN + index].load(barrier), iterWave, i)
+
+    iterWave = UOp.range(dtypes.int, nbIterWaveM, 6)
+    i = UOp.range(dtypes.int, TM, 7)
+    index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
+    A_col_store = A_col[iterWave*TM + i].store(As[k*BM + index].load(barrier), iterWave, i)
+
+    # do the GEMM math
+    iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 8)
+    yt = UOp.range(dtypes.int, TM, 9)
+    iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 10)
+    xt = UOp.range(dtypes.int, TN, 12)
+    x = iterWaveN * TN + xt
+    y = iterWaveM * TM + yt
+    c_regs_idx = c_regs[y * TN * nbIterWaveN + x]
+    sink = c_regs_idx.store(c_regs_idx.load(init_store) + A_col[y].load(A_col_store) * B_row[x].load(B_row_store),
+                            iterWaveM, iterWaveN, yt, xt, k, kId_range)
 
   # store c_regs into c
-  iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 12)
-  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 13)
-  yt = UOp.range(dtypes.int, TM, 14)
-  xt = UOp.range(dtypes.int, TN, 15)
+  iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 1000)
+  yt = UOp.range(dtypes.int, TM, 1001)
+  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 1002)
+  xt = UOp.range(dtypes.int, TN, 1003)
   xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
   yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
   indexC = N * (yOut + yt) + xOut + xt
