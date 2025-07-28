@@ -11,7 +11,7 @@ __attribute__((device)) inline void __syncthreads() {
 
 #define BLOCK_SIZE 256
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, BLOCK_SIZE)))
-kernel3_registers(float *a, float *b, float *c)
+kernel4_gmem_db(float *a, float *b, float *c)
 {
   constexpr int N = 4096;
   constexpr float alpha = 1.0;
@@ -79,25 +79,39 @@ kernel3_registers(float *a, float *b, float *c)
 
   float c_regs[TM * nbIterWaveM * TN * nbIterWaveN] = {0.0f};
 
+  for (int i = 0; i < nbReadsB; i++) {
+    int index_x = BN * blockIdx.x + rBIdx;
+    int index_y = rBIdy + i * strideReadB;
+    Bs[index_y % BK][index_x % BN] = b[N * index_y + index_x];
+  }
+
+  for (int i = 0; i < nbReadsA; i++) {
+    int index_x = rAIdx;
+    int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
+    As[(index_x % BK)][(index_y % BM)] = a[N * index_y + index_x];
+  }
+
+  __syncthreads();
   // Iteration over BK blocks.
   for (int kId = 0; kId < N; kId += BK) {
-    __syncthreads();
+    float regA[nbReadsA];
+    float regB[nbReadsB];
+    if (kId < N - BK) {
+      // We populate the Shared Memory with Ks row and columns
+      for (int i = 0; i < nbReadsB; i++) {
+        int index_x = BN * blockIdx.x + rBIdx;
+        int index_y = rBIdy + i * strideReadB + kId + BK;
+        regB[i] = b[N * index_y + index_x]; // row
+      }
 
-    // We populate the Shared Memory with Ks row and columns
-    for (int i = 0; i < nbReadsB; i++) {
-      int index_x = BN * blockIdx.x + rBIdx;
-      int index_y = rBIdy + i * strideReadB + kId;
-      Bs[index_y % BK][index_x % BN] = b[N * index_y + index_x];
+      for (int i = 0; i < nbReadsA; i++) {
+        int index_x = rAIdx + kId + BK;
+        int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
+        regA[i] = a[N * index_y + index_x]; // column
+      }
     }
 
-    for (int i = 0; i < nbReadsA; i++) {
-      int index_x = rAIdx + kId;
-      int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
-      As[(index_x % BK)][(index_y % BM)] = a[N * index_y + index_x];
-    }
-
-    __syncthreads();
-    for (int k = 0; k < BK; k++) {
+    for (int k = 0; k < BK; k += 1) {
       // we cache A & B for the entire Wave tile
       for (int iterWave = 0; iterWave < nbIterWaveN; iterWave++) {
         for (int i = 0; i < TN; i++) {
@@ -125,6 +139,21 @@ kernel3_registers(float *a, float *b, float *c)
           }
         }
       }
+    }
+    __syncthreads();
+    if (kId < N - BK) {
+      for (int i = 0; i < nbReadsB; i++) {
+        int index_x = BN * blockIdx.x + rBIdx;
+        int index_y = rBIdy + i * strideReadB + kId + BK;
+        Bs[index_y % BK][index_x % BN] = regB[i]; // row
+      }
+
+      for (int i = 0; i < nbReadsA; i++) {
+        int index_x = rAIdx + kId + BK;
+        int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
+        As[(index_x % BK)][(index_y % BM)] = regA[i];
+      }
+      __syncthreads();
     }
   }
 
