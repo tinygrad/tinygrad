@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, tempfile
 import xml.etree.ElementTree as ET, subprocess
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -192,17 +192,12 @@ def parse_xml(stream:IO[bytes]) -> Generator[dict, None, None]:
     if e.tag == "row": yield {k:id_cache.get(v.attrib.get("ref"), v.text or v) for k,v in zip(cols, e)}
 
 xctrace_cache:dict[str, list[dict]] = {}
-
 def xctrace_export(schema:str) -> list[dict]:
   if (cret:=xctrace_cache.get(schema)) is not None: return cret
-  try:
-    proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
-                             f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
-    xctrace_cache[schema] = ret = list(tqdm(parse_xml(unwrap(proc.stdout)), desc=f"parsing {schema}"))
-    return ret
-  finally:
-    proc.terminate()
-    proc.wait()
+  proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
+                           f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
+  xctrace_cache[schema] = ret = list(tqdm(parse_xml(unwrap(proc.stdout)), desc=f"parsing {schema}"))
+  return ret
 
 def get_metal_counters(st:Decimal, et:Decimal):
   # start by getting monotonic time at the start of trace
@@ -211,7 +206,6 @@ def get_metal_counters(st:Decimal, et:Decimal):
   start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
   # aggregate counter values in this time range
   counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
-  # calculate the mean counter values in the passed in time range
   acc:dict[int, float] = {}
   samples:dict[int, int] = {}
   for r in xctrace_export("gpu-counter-value"):
@@ -221,7 +215,7 @@ def get_metal_counters(st:Decimal, et:Decimal):
     if (i:=int(r["counter-id"])) not in acc: acc[i], samples[i] = 0, 0
     acc[i] += float(r["value"])
     samples[i] += 1
-  # aggregate counter values into sub-units
+  # group counters into subunits
   MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(60, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
                   "Occupancy":[*range(1, 6), *range(7, 10)]}
   # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.

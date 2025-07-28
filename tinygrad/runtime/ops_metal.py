@@ -97,7 +97,7 @@ class MetalDevice(Compiled):
     cfg = "https://gist.githubusercontent.com/qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
     cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
     os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
-    # attach gpu counter recorder to this PID
+    # start recording hardware counters
     os.system("rm -rf "+(output:="/tmp/metal.trace"))
     cls.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
                                          "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
@@ -105,12 +105,8 @@ class MetalDevice(Compiled):
 
   def _at_profile_finalize(self):
     if (proc:=MetalDevice.xctrace_proc) is not None:
-      try:
-        proc.send_signal(signal.SIGINT)
-        proc.wait()
-      except Exception:
-        proc.terminate()
-        proc.wait()
+      proc.send_signal(signal.SIGINT)
+      proc.wait()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLCompileOptions"))
