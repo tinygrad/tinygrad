@@ -1686,9 +1686,9 @@ class Tensor(MathTrait):
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
     ret = self._apply_uop(UOp.r, op=op, axis=axis)
-    # REDUCE_AXIS now has keepdims=False semantics by default
-    # When keepdim=True, we need to add the 1s back
-    return ret.reshape(tuple(1 if i in axis else s for i,s in enumerate(self.shape))) if keepdim else ret
+    # UOp.r maintains keepdims=True internally for gradient compatibility
+    # We implement keepdims=False semantics at the Tensor level by default
+    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
   def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Tensor:
     """
