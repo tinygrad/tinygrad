@@ -152,8 +152,8 @@ def hand_spec_kernel3():
 
   # do the GEMM math
   iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 8)
-  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 9)
-  yt = UOp.range(dtypes.int, TM, 10)
+  yt = UOp.range(dtypes.int, TM, 9)
+  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 10)
   xt = UOp.range(dtypes.int, TN, 11)
   x = iterWaveN * TN + xt
   y = iterWaveM * TM + yt
@@ -163,8 +163,8 @@ def hand_spec_kernel3():
 
   # store c_regs into c
   iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 12)
-  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 13)
-  yt = UOp.range(dtypes.int, TM, 14)
+  yt = UOp.range(dtypes.int, TM, 13)
+  iterWaveN = UOp.range(dtypes.int, nbIterWaveN, 14)
   xt = UOp.range(dtypes.int, TN, 15)
   xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
   yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
