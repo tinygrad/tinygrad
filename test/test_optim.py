@@ -2,9 +2,10 @@ import numpy as np
 import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.nn.optim import Adam, SGD, AdamW
+from tinygrad.nn.optim import Adam, SGD, AdamW, Muon
 from tinygrad.helpers import CI
 from tinygrad.device import is_dtype_supported
+from muon import SingleDeviceMuon as TorchMuon
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -41,6 +42,14 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
+def _to_bf16(a: np.ndarray) -> np.ndarray:
+    return torch.tensor(a).bfloat16().float().numpy()
+
+def TorchMuonFactory(params, *, lr=1e-3, momentum=0.9, weight_decay=0.0, **kw):
+  params = [torch.nn.Parameter(p.clone().detach()) for p in params]
+  call_kw = dict(lr=lr, momentum=momentum, weight_decay=weight_decay)
+  return TorchMuon(params, **call_kw)
+
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
   def setUp(self):
@@ -50,13 +59,20 @@ class TestOptim(unittest.TestCase):
     Tensor.training = self.old_training
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
-    for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),
-                   step(torch.tensor, torch_optim, steps, **opts)):
-      np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
+    for x, y in zip(step(Tensor, tinygrad_optim, steps, **opts), step(torch.tensor, torch_optim, steps, **opts)):
+      # Muon’s core math is bf16, so compare at that precision and
+      # relax tolerances accordingly (1 LSB of bf16 ≈ 2‑8 ≈ 0.008)
+      if tinygrad_optim is Muon:
+        xa, ya = _to_bf16(x), _to_bf16(y)
+        atol, rtol = 8e-3, 8e-3
+      else:
+        xa, ya = x, y
+      np.testing.assert_allclose(xa, ya, atol=atol, rtol=rtol)
 
   def _test_sgd(self, steps, opts, atol, rtol): self._test_optim(SGD, torch.optim.SGD, steps, opts, atol, rtol)
   def _test_adam(self, steps, opts, atol, rtol): self._test_optim(Adam, torch.optim.Adam, steps, opts, atol, rtol)
   def _test_adamw(self, steps, opts, atol, rtol): self._test_optim(AdamW, torch.optim.AdamW, steps, opts, atol, rtol)
+  def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, TorchMuonFactory, steps, opts, atol, rtol)
 
   def test_multistep_sgd_high_lr_teeny(self): self._test_sgd(2, {'lr': 1.1, 'teeny': True}, 1e-6, 1e-5)
   def test_multistep_adam_high_lr_teeny(self): self._test_adam(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)
@@ -93,6 +109,10 @@ class TestOptim(unittest.TestCase):
 
   def test_multistep_adamw(self): self._test_adamw(10, {'lr': 0.001}, 1e-5, 0)
   def test_multistep_adamw_high_lr(self): self._test_adamw(10, {'lr': 10}, 5e-4, 2e-3)
+
+  def test_muon_basic(self):        self._test_muon(1, {'lr':1e-3},                        1e-5, 1e-5)
+  def test_muon_momentum(self):     self._test_muon(5, {'lr':1e-3,'momentum':0.9},         2e-4, 5e-4)
+  def test_muon_weight_decay(self): self._test_muon(5, {'lr':1e-3,'weight_decay':0.1},     2e-4, 5e-4)
 
   def test_duped_weights(self):
     for Opt in [Adam, AdamW, SGD]:

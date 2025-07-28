@@ -164,3 +164,49 @@ class LAMB(Optimizer):
         r = 1.0
       ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
+
+def Muon(params: list[Tensor], lr=1e-3, momentum=0.90, steps=5, eps=1e-7, weight_decay=0.0, fused=FUSE_OPTIM, nesterov=True):
+  """
+  Muon optimiser (faithful port of https://github.com/KellerJordan/muon).
+
+      m ← β·m + (1‑β)·∇θ
+      u ← (1‑β)·∇θ + β·m          # Nesterov update
+      O ← NS₅(u)                  # 5‑step Newton–Schulz in bf16
+      θ ← θ − lr·O
+  """
+  return _Muon(params, lr, momentum, steps, eps, weight_decay, nesterov, fused)
+
+class _Muon(Optimizer):
+  def __init__(self, params, lr, beta, k, eps, wd, nesterov, fused):
+    super().__init__(params, lr, fused)
+    self.beta, self.k, self.eps = beta, k, eps
+    self.wd, self.nesterov = wd, nesterov
+    self.m = self._new_optim_param()  # momentum buffer
+
+  # ----- Newton–Schulz (always runs in bf16) -------------------------
+  def _orthonorm(self, mat: Tensor) -> Tensor:
+    a, b, c = 3.4445, -4.7750, 2.0315
+    X = mat.cast(dtypes.bfloat16)  # bf16 work space
+    if X.shape[0] > X.shape[1]:
+      X, trans = X.T, True
+    else:
+      trans = False
+    X /= X.square().sum().sqrt() + self.eps  # ‖X‖₂ ≤ 1
+    for _ in range(self.k):
+      A = X @ X.T
+      X = a * X + (b * A + c * (A @ A)) @ X
+    X = X.cast(dtypes.default_float)  # back to fp32
+    return X.T if trans else X
+
+  def _step(self, params, grads):
+    out = []
+    for i, (p, g) in enumerate(zip(params, grads)):
+      if self.wd:
+        g = g + self.wd * p.detach()  # decoupled WD
+      self.m[i].assign(self.beta * self.m[i] + (1.0 - self.beta) * g)
+      upd = (1.0 - self.beta) * g + self.beta * self.m[i] if self.nesterov else self.m[i]
+      if upd.ndim == 4:
+        upd = upd.reshape(upd.shape[0], -1)  # conv → 2‑D
+      O = self._orthonorm(upd)
+      out.append((p.detach() - self.lr * O.cast(p.dtype)).cast(p.dtype))
+    return out, self.m
