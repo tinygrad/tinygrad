@@ -1265,14 +1265,11 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+    idxs = Tensor(indices, dtype=self.dtype, device=self.device)
+    mask = (Tensor.arange(self.shape[0], dtype=self.dtype, device=self.device) == idxs)
+    mask = mask.reshape((mask.shape[0],) + (1,) * (self.ndim - 1))
+    fill = v._broadcast_to(self.shape)
+    self.uop = mask.where(fill, self).uop
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
@@ -4391,3 +4388,5 @@ if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+
+
