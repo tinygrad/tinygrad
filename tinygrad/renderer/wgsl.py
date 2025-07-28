@@ -40,11 +40,6 @@ wgsl_matcher = PatternMatcher([
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   ]) + extra_pm
 
-def webgpu_define_reg(ctx, x):
-  ret = [f"var {ctx[x]}: array<{ctx.buf_map(x.dtype)},{x.dtype.size//(4//x.dtype.itemsize) if is_packed(x.dtype) else x.dtype.size}>;"]
-  for i in range(x.dtype.size): ret.append(f"{ctx[x]}[{i}] = {ctx[x.src[0]]};")
-  return ' '.join(ret)
-
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
   global_max = (65535, 65535, 65535)
@@ -64,7 +59,8 @@ class WGSLRenderer(CStyleLanguage):
      lambda x: f"bitcast<u32>({x.arg})" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
     (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x:
       f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype.base)},{x.dtype.size//(4//x.dtype.itemsize) if is_packed(x.dtype) else x.dtype.size}>;"),
-    (UPat(Ops.DEFINE_REG, name="x"), webgpu_define_reg),
+    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:
+     f"var {ctx[x]}: array<{ctx.buf_map(x.dtype)},{x.dtype.size//(4//x.dtype.itemsize) if is_packed(x.dtype) else x.dtype.size}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
      lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]"),
     (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
