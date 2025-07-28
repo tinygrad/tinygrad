@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 import itertools
-from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
+from tinygrad.helpers import dedup, flatten, getenv, unwrap, prod, FUSE_OPTIM
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
 
@@ -81,6 +81,14 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   """
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
+# Muon applies the newton schulz algorithm on b. also can include momentum
+def Muon(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False, fused=FUSE_OPTIM):
+  """
+  Muon optimizer.
+  - Described: https://paperswithcode.com/method/sgd
+  """
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused, newton_schulz=True)
+
 class LARS(Optimizer):
   """
   Layer-wise Adaptive Rate Scaling (LARS) optimizer with optional momentum and weight decay.
@@ -88,9 +96,11 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, \
+             classic=True, tcoef=0.001, fused=FUSE_OPTIM, newton_schulz=False):
     super().__init__(params, lr, fused)
-    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
+    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef, self.newton_schulz = \
+    momentum, weight_decay, nesterov, classic, tcoef, newton_schulz
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -109,6 +119,7 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      if self.newton_schulz: self.b[i].assign(Tensor.newtonschulz(self.b[i].reshape(self.b[i].shape[0], -1)).reshape(self.b[i].shape))
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append((t.detach() - g).cast(t.dtype))
@@ -164,14 +175,3 @@ class LAMB(Optimizer):
         r = 1.0
       ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
-
-
-def newtonschulz(G: Tensor,steps=5,eps=1e-7):
-  assert G.ndim == 2
-  a, b, c = (3.4445,-4.7750, 2.0315)
-  G = G / (G.square().sum().sqrt() + eps)
-  G = G.T if G.shape[0] > G.shape[1] else G
-  for _ in range(steps):
-    A = G @ G.T
-    G = a * G + (b * A + c * A @ A) @ G
-  return G.T if G.shape[0] > G.shape[1] else G

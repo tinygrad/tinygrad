@@ -4056,6 +4056,16 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+  
+  def newtonschulz(self, steps=3, eps=1e-7) -> Tensor:
+    assert self.ndim == 2
+    a, b, c = (3.4445,-4.7750, 2.0315)
+    G = self / (self.square().sum().sqrt() + eps)
+    G = G.T if G.shape[0] > G.shape[1] else G
+    for _ in range(steps):
+      A = G @ G.T
+      G = a * G + (b * A + c * A @ A) @ G
+    return G.T if G.shape[0] > G.shape[1] else G
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
