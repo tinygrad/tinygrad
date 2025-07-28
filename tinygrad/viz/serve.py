@@ -240,7 +240,7 @@ def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
     if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "duration":float(e.en-e.st), **hw_counters.get(e.device, lambda *_:{})(e.st, e.en)})
+      ret.append({"duration":{"value":float(e.en-e.st), "unit":"us"}, **hw_counters.get(e.device, lambda *_:{})(e.st, e.en)})
   return ret
 
 def get_disassembly(ctx:list[str]):

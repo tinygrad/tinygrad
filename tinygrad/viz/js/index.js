@@ -107,7 +107,7 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
-const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
+const formatUnit = (d, unit="") => unit === "us" ? formatTime(d) : (unit === "%" ? d.toFixed(2) : d3.format(".3~s")(d))+unit;
 
 const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
                    "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
@@ -518,12 +518,30 @@ async function main() {
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
-    const div = metadata.appendChild(document.createElement("div"));
-    div.style.maxHeight = "200px";
-    div.style.overflow = "auto";
-    for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      p.innerText = `Run ${i+1} ${formatTime(s.duration)}`;
+    for (const stats of ctx.runtime_stats) {
+      const table = metadata.appendChild(document.createElement("table"));
+      const tbody = table.appendChild(document.createElement("tbody"));
+      for (const [k,v] of Object.entries(stats)) {
+        const tr = tbody.appendChild(document.createElement("tr"));
+        tr.className = "main-row";
+        tr.appendChild(document.createElement("td")).innerText = k;
+        tr.appendChild(document.createElement("td")).innerText = formatUnit(v.value, v.unit);
+        // subunits
+        if (!v.subunits?.length) continue;
+        const subunitRow = tbody.appendChild(document.createElement("tr"));
+        subunitRow.style.display = "none";
+        tr.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
+        tr.style.cursor = "pointer";
+        const subunitTd = subunitRow.appendChild(document.createElement("td"));
+        subunitTd.colSpan = 2;
+        const subunits = subunitTd.appendChild(document.createElement("table"));
+        for (const u of v.subunits) {
+          const tr = subunits.appendChild(document.createElement("tr"));
+          tr.style.maxWidth = "250px";
+          tr.appendChild(document.createElement("td")).innerText = u.name;
+          tr.appendChild(document.createElement("td")).innerText = formatUnit(u.value, v.unit);
+        }
+      }
     }
   }
   // ** rewrite steps
