@@ -28,5 +28,15 @@ class TestDefineReg(unittest.TestCase):
   @unittest.skipIf(getenv("PTX"), "ptx needs regs to be unrolled")
   def test_simple_loop(self): self.test_simple(AxisType.LOOP)
 
+  def test_reduce_into(self):
+    N = 16
+    b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N*N), arg=0).view(ShapeTracker.from_shape((N,N,1)))
+    a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(N*N*N), arg=1).view(ShapeTracker.from_shape((N,N,N)))
+    a_reg = UOp(Ops.DEFINE_REG, dtypes.float.ptr(N, AddrSpace.REG), arg=0).view(ShapeTracker.from_shape((N,N,1), (0,1,0)))
+    ret = UOp(Ops.REDUCE_INTO, dtypes.float, src=(a_reg, a.load()), arg=Ops.ADD)
+    sink = b.store(ret).sink(arg=KernelInfo(name="regcopy"))
+    prg = get_program(sink, Device.default.renderer)
+    print(prg.src)
+
 if __name__ == '__main__':
   unittest.main()

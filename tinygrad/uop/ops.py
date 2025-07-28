@@ -138,6 +138,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def st(self) -> ShapeTracker|None:
     if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
     from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op is Ops.REDUCE_INTO: return self.src[0].st
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
