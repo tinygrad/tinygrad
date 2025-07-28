@@ -377,6 +377,14 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
+function appendRow(table, name, value, unit, cls) {
+  const tr = table.appendChild(document.createElement("tr"));
+  tr.className = cls;
+  tr.appendChild(document.createElement("td")).innerText = name;
+  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : value.toFixed(2)+(unit != null ? " "+unit : "%");
+  return tr;
+}
+
 function setActive(e) {
   if (e == null) return;
   e.classList.add("active");
@@ -519,36 +527,23 @@ async function main() {
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   if (ctx.runtime_stats != null) {
     const div = metadata.appendChild(document.createElement("div"));
-    div.style.maxHeight = "250px";
-    div.style.overflow = "auto";
+    div.className = "stats-list";
     for (const [i, s] of ctx.runtime_stats.entries()) {
       const p = div.appendChild(document.createElement("p"));
-      p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`
-      p.style.marginBottom = "4px";
-      p.style.marginTop = `${i > 0 ? 8 : 12}px`;
+      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
       const table = div.appendChild(document.createElement("table"));
       const tbody = table.appendChild(document.createElement("tbody"));
-      for (const [k,v] of Object.entries(s)) {
-        const tr = tbody.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
-        const formatValue = (raw) => v.unit === "us" ? formatTime(raw) : raw.toFixed(2)+(v.unit ? " "+v.unit : "%");
-        tr.appendChild(document.createElement("td")).innerText = k;
-        tr.appendChild(document.createElement("td")).innerText = formatValue(v.value);
-        // subunits
-        if (!v.subunits?.length) continue;
-        const subunitRow = tbody.appendChild(document.createElement("tr"));
-        subunitRow.style.display = "none";
-        tr.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
-        tr.style.cursor = "pointer";
-        const subunitTd = subunitRow.appendChild(document.createElement("td"));
-        subunitTd.colSpan = 2;
-        const subunits = subunitTd.appendChild(document.createElement("table"));
-        for (const u of v.subunits) {
-          const tr = subunits.appendChild(document.createElement("tr"));
-          tr.className = "sub-row";
-          tr.appendChild(document.createElement("td")).innerText = u.name;
-          tr.appendChild(document.createElement("td")).innerText = formatValue(u.value);
-        }
+      for (const { name, value, unit, subunits } of s.data) {
+          const mainRow = appendRow(tbody, name, value, unit, "main-row");
+          if (!subunits?.length) continue;
+          const subunitRow = tbody.appendChild(document.createElement("tr"));
+          subunitRow.style.display = "none";
+          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
+          mainRow.style.cursor = "pointer";
+          const td = subunitRow.appendChild(document.createElement("td"));
+          td.colSpan = 2;
+          const table = td.appendChild(document.createElement("table"));
+          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
       }
     }
   }

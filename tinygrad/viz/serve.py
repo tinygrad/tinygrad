@@ -226,21 +226,19 @@ def get_metal_counters(st:Decimal, et:Decimal):
                   "Occupancy":[*range(1, 6), *range(7, 10)]}
   # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.
   MTL_UNITS = {"Bandwidth":"GB/s"}
-  ret:dict[str, dict] = {}
+  ret:list[dict] = []
   for k,lst in MTL_SUBUNITS.items():
-    subunits:list[dict] = []
-    for i in lst: subunits.append({"value":acc[i]/samples[i] if i in acc else 0, **counter_info[i]})
+    subunits = [{"value":acc[i]/samples[i] if i in acc else 0, **counter_info[i]} for i in lst]
     value = max([v["value"] for v in subunits if v])
-    ret[k] = {"unit":MTL_UNITS.get(k), "value":value, "subunits":subunits}
+    ret.append({"name":k, "value":value, "unit":MTL_UNITS.get(k), "subunits":subunits})
   return ret
-
-hw_counters = {"METAL":get_metal_counters}
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
     if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"Duration":{"value":float(e.en-e.st), "unit":"us"}, **hw_counters.get(e.device, lambda *_:{})(e.st, e.en)})
+      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]+
+                 {"METAL":get_metal_counters}.get(e.device, lambda *_:{})(e.st, e.en)})
   return ret
 
 def get_disassembly(ctx:list[str]):
