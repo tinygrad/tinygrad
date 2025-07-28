@@ -216,7 +216,7 @@ def get_metal_counters(st:Decimal, et:Decimal):
     acc[i] += float(r["value"])
     samples[i] += 1
   # group counters into subunits
-  MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(60, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
+  MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(61, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
                   "Occupancy":[*range(1, 6), *range(7, 10)]}
   # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.
   MTL_UNITS = {"Bandwidth":"GB/s"}
