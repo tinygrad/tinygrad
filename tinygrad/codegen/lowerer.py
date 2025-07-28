@@ -52,14 +52,12 @@ def get_index(ast:UOp) -> IndexContext:
 # ***** lowering (given index) *****
 
 def lower_reduce_into(ctx: IndexContext, x: UOp):
-  print("reduce into")
-  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
-
   # x.src[1] is the big
   axis_arg = [i for i,(s0,s1) in enumerate(zip(x.src[0].shape, x.src[1].shape)) if s0 != s1]
   reduce_idxs = shape_to_idx([s for i,s in enumerate(x.src[1].shape) if i in axis_arg],
-                             [s for i,s in enumerate(ctx.axis_types) if i in axis_arg], ctx.start+len(new_idxs))
-  new_idxs += reduce_idxs
+                             [s for i,s in enumerate(ctx.axis_types) if i in axis_arg], ctx.start)
+  print("reduce into", [x.arg for x in reduce_idxs])
+  new_idxs = shape_to_idx(x.src[0].shape[:-len(reduce_idxs)], ctx.axis_types[:-len(reduce_idxs)], ctx.start+len(reduce_idxs)) + reduce_idxs
 
   idx, valid = x.src[0].arg.to_indexed_uops(new_idxs)
   used_idxs = [x for x in UOp.sink(idx, valid).toposort() if x in new_idxs]
@@ -103,6 +101,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
+  print("lower_load", [x.arg for x in ctx.idxs])
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + x.src[1:])
 

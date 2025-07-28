@@ -44,11 +44,12 @@ def hl_spec_kernel3():
 
   acc = acc.reshape((1, nbIterWaveM, 1, TM, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape[:-2]+(1,1))
 
-  #out = (a.load() * b.load()).r(Ops.ADD, (8, 9))
-  out = (As.load(As.store(a.load())) * Bs.load(Bs.store(b.load()))) #.r(Ops.ADD, (8, 9))
-  out = UOp(Ops.REDUCE_INTO, out.dtype, (acc, out), Ops.ADD)
+  #out = a.load() * b.load()
+  #out = As.load(As.store(a.load())) * Bs.load(Bs.store(b.load()))
+  out = A_col.load(A_col.store(As.load(As.store(a.load())))) * B_row.load(B_row.store(Bs.load(Bs.store(b.load()))))
 
-  #out = (A_col.load(A_col.store(As.load(As.store(a.load())))) * B_row.load(B_row.store(Bs.load(Bs.store(b.load()))))).r(Ops.ADD, (8, 9))
+  #out = out.r(Ops.ADD, (8, 9))
+  out = UOp(Ops.REDUCE_INTO, out.dtype, (acc, out), Ops.ADD)
 
   axis_types = (
     AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
