@@ -107,7 +107,7 @@ function formatTime(ts, dur=ts) {
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
 }
-const formatUnit = (d, unit="") => unit === "us" ? formatTime(d) : (unit === "%" ? d.toFixed(2) : d3.format(".3~s")(d))+unit;
+const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
                    "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
@@ -531,8 +531,9 @@ async function main() {
       for (const [k,v] of Object.entries(s)) {
         const tr = tbody.appendChild(document.createElement("tr"));
         tr.className = "main-row";
+        const formatValue = (raw) => v.unit === "us" ? formatTime(raw) : raw.toFixed(2)+(v.unit ? " "+v.unit : "%");
         tr.appendChild(document.createElement("td")).innerText = k;
-        tr.appendChild(document.createElement("td")).innerText = formatUnit(v.value, v.unit);
+        tr.appendChild(document.createElement("td")).innerText = formatValue(v.value);
         // subunits
         if (!v.subunits?.length) continue;
         const subunitRow = tbody.appendChild(document.createElement("tr"));
@@ -546,7 +547,7 @@ async function main() {
           const tr = subunits.appendChild(document.createElement("tr"));
           tr.className = "sub-row";
           tr.appendChild(document.createElement("td")).innerText = u.name;
-          tr.appendChild(document.createElement("td")).innerText = formatUnit(u.value, v.unit);
+          tr.appendChild(document.createElement("td")).innerText = formatValue(u.value);
         }
       }
     }
