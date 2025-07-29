@@ -48,7 +48,6 @@ class SingleDeviceMuon(torch.optim.Optimizer):
     """
     def __init__(self, params, lr=0.02, weight_decay=0, momentum=0.95):
         defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum)
-        print(defaults)
         super().__init__(params, defaults)
 
     @torch.no_grad()
