@@ -559,8 +559,12 @@ class GPTDataset:
 
     self.indexed_dataset = BinIdxDataset(base_path)
 
-    doc_idx = self._build_doc_idx()
-    sample_idx = self._build_sample_idx()
+    self.doc_idx = self._build_doc_idx()
+    print(self.doc_idx)
+    self.sample_idx = self._build_sample_idx()
+    print(self.sample_idx)
+    self.shuffle_idx = self._build_shuffle_idx()
+    print(self.shuffle_idx)
 
   @functools.cached_property
   def tokens_per_epoch(self) -> int:
@@ -576,9 +580,50 @@ class GPTDataset:
       num_tokens += self.tokens_per_epoch
     return num_epochs
 
+  # https://github.com/NVIDIA/Megatron-LM/blob/94bd476bd840c2fd4c3ebfc7448c2af220f4832b/megatron/core/datasets/gpt_dataset.py#L558
+  # TODO: all this for an arange
   def _build_doc_idx(self):
-    def _build_doc_idx():
-      pass
+    doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.doc_idx.numel()][1]
+    doc_idx[:] =  self.indexed_dataset.doc_idx.numpy()
+    doc_idx = doc_idx.reshape(-1)
+    doc_idx = doc_idx.astype(np.int32)
+    if self.shuffle: np.random.shuffle(doc_idx)
+    return doc_idx
+
+  def _build_sample_idx(self):
+    sample_idx = np.empty((self.samples, 2), dtype=np.int32)
+
+    sample_idx_idx, doc_idx_idx, doc_offset = 0, 0, 0
+    sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
+    sample_idx_idx += 1
+
+    for _ in tqdm(range(1, self.samples)):
+      remaining_seqlen = self.seqlen
+      while remaining_seqlen > 0:
+        doc_idx = int(self.doc_idx[doc_idx_idx])
+        doc_len = self.indexed_dataset.sizes[doc_idx].item() - doc_offset
+        remaining_seqlen -= doc_len
+        if remaining_seqlen <= 0:
+          doc_offset += remaining_seqlen + doc_len
+          remaining_seqlen = 0
+        else:
+          if doc_idx_idx == len(self.doc_idx) - 1:
+            assert sample_idx_idx == self.samples
+            doc_idx = int(self.doc_idx[doc_idx_idx])
+            doc_offset = self.indexed_dataset.sizes[doc_idx].item()
+            break
+          doc_idx_idx += 1
+          doc_offset = 0
+
+      sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
+      sample_idx_idx += 1
+
+    return sample_idx
+
+  def _build_shuffle_idx(self):
+    shuffle_idx = np.arange(self.samples, dtype=np.int32)
+    if self.shuffle: np.random.shuffle(shuffle_idx)
+    return shuffle_idx
 
 class BlendedGPTDataset:
   def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, shuffle:bool):
@@ -643,9 +688,8 @@ if __name__ == "__main__":
 
   def load_llama3(val):
     max_ = 0
-    for x in batch_load_llama3(1, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)):
-      print(x.shape)
-      max_ = max(max_, x.shape[0])
+    for x in batch_load_llama3(1, 5760, 8192, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)):
+      pass
     print(f"max seq length: {max_}")
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
