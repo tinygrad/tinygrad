@@ -196,31 +196,35 @@ class Muon(Optimizer):
     self.nesterov = nesterov
     self.m = self._new_optim_param()
 
-  # ----- Newton–Schulz (always runs in bf16) -------------------------
   def _orthonorm(self, mat: Tensor) -> Tensor:
+    """
+    Newton–Schulz orthonormaliser.
+
+    • works for any tensor with ndim ≥ 2
+    • runs the iteration in bf16 when the device supports it
+    • returns a tensor with the **same shape** as the input
+    """
+    if mat.ndim < 2:  # scalar / vector → nothing to do
+      return mat
+    orig_shape = mat.shape
+    X = mat.reshape(mat.shape[0], -1)  # flatten to (C, N)
+    # --- identical coefficients as upstream -----------------------------
     a, b, c = 3.4445, -4.7750, 2.0315
-    X = mat.cast(dtypes.bfloat16 if is_dtype_supported(dtypes.bfloat16) else dtypes.default_float)
-    if X.shape[0] > X.shape[1]:
-      X, trans = X.T, True
-    else:
-      trans = False
-    X /= X.square().sum().sqrt() + self.eps  # ‖X‖₂ ≤ 1
-    for _ in range(self.k):
+    X = X.cast(dtypes.bfloat16 if is_dtype_supported(dtypes.bfloat16) else dtypes.default_float)
+    X /= X.square().sum().sqrt() + self.eps
+    for _ in range(self.k):  # default k = 5
       A = X @ X.T
       X = a * X + (b * A + c * (A @ A)) @ X
-    if X.dtype != dtypes.default_float:
-      X = X.cast(dtypes.default_float)
-    return X.T if trans else X
+    X = X.cast(dtypes.default_float)  # back to fp32
+    return X.reshape(orig_shape)
 
   def _step(self, params, grads):
     out = []
     for i, (p, g) in enumerate(zip(params, grads)):
       if self.wd:
-        g = g + self.wd * p.detach()  # decoupled WD
+        g = g + self.wd * p.detach()  # decoupled weight decay
       self.m[i].assign(self.beta * self.m[i] + (1.0 - self.beta) * g)
       upd = (1.0 - self.beta) * g + self.beta * self.m[i] if self.nesterov else self.m[i]
-      if upd.ndim == 4:
-        upd = upd.reshape(upd.shape[0], -1)  # conv → 2‑D
-      O = self._orthonorm(upd)
+      O = self._orthonorm(upd)  # same shape as p
       out.append((p.detach() - self.lr * O.cast(p.dtype)).cast(p.dtype))
     return out, self.m
