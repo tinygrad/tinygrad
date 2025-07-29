@@ -178,7 +178,6 @@ if __name__ == "__main__":
 
   ids: list[int] = [bos_id]
   while 1:
-    print(ids)
     start_pos = len(ids) - 1
     try:
       ids += tok.role(b"user") + tok.encode(input('>>> ').encode()) + [eos_id] + tok.role(b"assistant")
