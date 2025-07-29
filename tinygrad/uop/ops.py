@@ -250,7 +250,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
     if shape is not None:
       from tinygrad.shape.shapetracker import ShapeTracker
-      ret = ret.replace(src=(ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),))
+      ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape)),))
     if device is not None:
       ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
     return ret
