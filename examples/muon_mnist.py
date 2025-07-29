@@ -35,7 +35,7 @@ X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
 model = Model()
 try:
   Optim = Muon
-  optim_kw = dict(lr=1e-3, momentum=0.9)
+  optim_kw = dict(lr=3e-3, momentum=0.96)
 except ImportError:
   print(colored("Muon not found – using Adam instead", "yellow"))
   Optim = nn.optim.Adam
