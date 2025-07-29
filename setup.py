@@ -14,7 +14,7 @@ testing_minimal = [
   "pytest-xdist",
   "hypothesis",
   "z3-solver",
-  "ml_dtypes",
+  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
