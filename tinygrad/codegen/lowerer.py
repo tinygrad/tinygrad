@@ -1,4 +1,5 @@
 # the job of the lowerer is to do indexing
+import functools, operator
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite
@@ -30,16 +31,6 @@ def get_index(ast:UOp) -> IndexContext:
   if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
   return IndexContext(axis_types, [], 0)
 
-  """
-  # late indexes (group for reduce)
-  ridxs = idxs[:]
-  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
-    if at == AxisType.GROUP_REDUCE:
-      ridxs[i] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), 1000+i)
-
-  return IndexContext(idxs, ridxs)
-  """
-
 # ***** lowering (given index) *****
 
 def subblock(ctx: IndexContext, full_new_idx: list[UOp], src: UOp):
@@ -64,11 +55,6 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
-def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
-  idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
-  barrier = tuple([y.barrier() if buf.op is Ops.DEFINE_LOCAL else y for y in x.src[1:]])
-  return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
-
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   # TODO: reenable after REDUCE_AXIS is fixed
   #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
@@ -82,16 +68,15 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
     else: real_new_idxs.append(ctx.idxs[i])
 
   stored = subblock(ctx, real_new_idxs, x.src[1])
-  return buf.index(idx, valid).store(stored, *[x for x in used_idxs if x.op is Ops.RANGE])
+  used_ranges = [x for x in used_idxs if x.op is Ops.RANGE]
+  ret = buf.index(idx, valid).store(stored, *used_ranges)
 
-  """
-  idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
-  if cast(PtrDType, buf.dtype).addrspace == AddrSpace.GLOBAL:
-    # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-    for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
-      if oidx is not ridx: valid = valid * oidx.eq(0)
-  return buf.index(idx, valid).store(x.src[1], *[x for x in UOp.sink(idx, valid).toposort() if x.op is Ops.RANGE])
-  """
+  # insert BARRIER if we are ending a LOCAL, IF if we are ending a GROUP_REDUCE
+  if any(ctx.axis_types[x.arg%1000] in {AxisType.GROUP_REDUCE, AxisType.LOCAL} for x in used_ranges):
+    ret = ret.barrier()
+    range_gates = [x.eq(0) for x in used_ranges if ctx.axis_types[x.arg%1000] == AxisType.GROUP_REDUCE]
+    if len(range_gates): ret = UOp(Ops.IF, src=(functools.reduce(operator.and_, range_gates), ret))
+  return ret
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
@@ -122,7 +107,8 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),), name="view"), lower_const),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
-  (UPat(Ops.LOAD, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_load),
+  (UPat(Ops.LOAD, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"),
+   lambda ctx,buf,x: UOp(Ops.LOAD, x.dtype, (buf.index(*x.st_arg.to_indexed_uops(ctx.idxs)),)+x.src[1:])),
   (UPat(Ops.STORE, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_store),
 
   # axis fixups for WMMA
