@@ -78,11 +78,26 @@ def hl_spec_kernel3():
   A_col = A_col.reshape((1, nbIterWaveM, 1, TM, 1, 1, 1, 1, 1, 1)).expand(full_shape)
   B_row = B_row.reshape((1, 1, 1, 1, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape)
 
-  a_permute   = a.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,7,2,3,4,5,6,1,11,9,10,8)).reshape(full_shape)
-  As_permute = As.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,7,2,3,4,5,6,1,11,9,10,8)).reshape(full_shape)
+  #                     U1   L2 L3 L4 L5   U6 U7      U9   L10 L11 L12 L13   U14 U15      U17  U18  U19
+  expanded_shape = (32, 2,   2, 2, 2, 2,   2, 2,  32, 2,   2,  2,  2,  2,    2,  2,  512, 2,   2,   2)
+  assert len(expanded_shape) == 20
+  permute_a = list(range(len(expanded_shape)))
+  permute_b = permute_a[:]
 
-  b_permute   = b.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,1,6,11,4,5,2,7,8,9,10,3)).reshape(full_shape)
-  Bs_permute = Bs.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,1,6,11,4,5,2,7,8,9,10,3)).reshape(full_shape)
+  # this makes all the global loads match
+  permute_a[17:20] = [11,12,13]
+  permute_a[11:14] = [17,18,19]
+  permute_a[7], permute_a[10] = permute_a[10], permute_a[7]
+  permute_a[2:7] = [3,4,5,6,2]
+
+  permute_b[2:16] = [19,9,10,11,17,18,8,2,12,13,14,15,3,4]
+  permute_b[17:20] = [5,6,7]
+
+  a_permute   = a.reshape(expanded_shape).permute(tuple(permute_a)).reshape(full_shape)
+  As_permute = As.reshape(expanded_shape).permute(tuple(permute_a)).reshape(full_shape)
+
+  b_permute   = b.reshape(expanded_shape).permute(tuple(permute_b)).reshape(full_shape)
+  Bs_permute = Bs.reshape(expanded_shape).permute(tuple(permute_b)).reshape(full_shape)
 
   #out = (a.load() * b.load()).r(Ops.ADD, (8, 9))
   out = (As.load(As_permute.store(a_permute.load())) * Bs.load(Bs_permute.store(b_permute.load()))).r(Ops.ADD, (8, 9))
@@ -91,7 +106,7 @@ def hl_spec_kernel3():
   axis_types = (
     AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
     AxisType.GLOBAL, AxisType.UPCAST, AxisType.LOCAL, AxisType.UPCAST,
-    AxisType.REDUCE, AxisType.UNROLL)
+    AxisType.REDUCE, AxisType.REDUCE)
 
   sink = c.store(out).sink(arg=KernelInfo(name="tg_"+to_colored(full_shape, axis_types), axis_types=axis_types))
   sink = graph_rewrite(sink, merge_views)
