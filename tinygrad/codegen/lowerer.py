@@ -1,7 +1,6 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
-from typing import cast
-from tinygrad.dtype import dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite
 from tinygrad.helpers import prod, partition, flatten
 
@@ -20,7 +19,7 @@ def shape_to_idx(s, axis_types, start=0):
   for i, (s, at) in enumerate(zip(s, axis_types)):
     if at in (AxisType.UPCAST, AxisType.UNROLL):
       assert isinstance(s, int), "needs to be int to upcast/unroll"
-      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((start+i,s),)))
+      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((start+i,s),), tag=1))
     else:
       # all others are RANGES
       idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), start+i))
@@ -57,7 +56,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   reduce_range, reduce_expand = partition([full_new_idx[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
-    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
@@ -97,6 +96,19 @@ def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   _, valid = view.arg.to_indexed_uops(ctx.idxs)
   return valid.where(c, c.const_like(0))
 
+def fixup_wmma(ctx:IndexContext, x:UOp):
+  if x.tag is not None: return None
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
+  full_new_idx = list(ctx.idxs)
+  for a in x.arg[-1]: full_new_idx[a] = new_idxs[a]
+
+  lc = IndexContext(ctx.axis_types, tuple(full_new_idx), ctx.start+1000)
+  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
+  srcs = graph_rewrite(UOp.sink(*x.src), pm_lowerer, lc, name="subwmma", bottom_up=True).src
+  ctx.start = lc.start
+
+  return x.replace(src=srcs, tag=1)
+
 pm_lowerer = PatternMatcher([
   # TODO: remove these hacks
   # hack for old style CONST(VIEW) (now it's just VIEW(CONST))
@@ -110,4 +122,9 @@ pm_lowerer = PatternMatcher([
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
   (UPat(Ops.LOAD, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_load),
   (UPat(Ops.STORE, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_store),
+
+  # axis fixups for WMMA
+  (UPat(Ops.WMMA, name="x"), fixup_wmma),
+  (UPat((Ops.CONTRACT, Ops.UNROLL), name="x"),
+   lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0][0], sz) for a,sz in x.arg])) if x.tag is None else None),
 ])
