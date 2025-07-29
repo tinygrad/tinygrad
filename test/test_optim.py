@@ -41,10 +41,8 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     out.backward()
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
-
-def TorchMuonOptim(params, *, lr=0.02, weight_decay=0.0, momentum=0.0, nesterov=True):
-  #internally, TorchMuon auto casts newton into b16, no way to remove
-  return TorchMuon(params, lr, weight_decay, momentum)
+#cant fit nesterov flag
+def TorchMuonOptim(params, *, lr=0.02, weight_decay=0.0, momentum=0.0, nesterov=True): return TorchMuon(params, lr, weight_decay, momentum)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
