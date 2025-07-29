@@ -20,7 +20,7 @@ def shape_to_idx(s, axis_types, start=0):
   for i, (s, at) in enumerate(zip(s, axis_types)):
     if at in (AxisType.UPCAST, AxisType.UNROLL):
       assert isinstance(s, int), "needs to be int to upcast/unroll"
-      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((start+i,s),), tag=1))
+      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),), tag=1))
     else:
       # all others are RANGES
       idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), start+i))
@@ -85,7 +85,7 @@ def fixup_wmma(ctx:IndexContext, x:UOp):
 
   srcs = subblock(ctx, full_new_idx, UOp.sink(*x.src)).src
 
-  # NOTE: this assumes these are expanded
+  # NOTE: this assumes these are expanded. which now shouldn't change anything
   new_x_arg_m2 = tuple([tuple([(full_new_idx[a].arg[0][0], sz) for a,sz in v]) for v in x.arg[-2]])
   new_x_arg_m1 = tuple([full_new_idx[a].arg[0][0] for a in x.arg[-1]])
   return x.replace(src=srcs, arg=x.arg[:-2]+(new_x_arg_m2, new_x_arg_m1), tag=1)
