@@ -10,7 +10,8 @@ __attribute__((device)) inline void __syncthreads() {
 }
 
 #define BLOCK_SIZE 256
-extern "C" __attribute__((global)) void kernel3_registers(float *a, float *b, float *c)
+extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, BLOCK_SIZE)))
+kernel3_registers(float *a, float *b, float *c)
 {
   constexpr int N = 4096;
   constexpr float alpha = 1.0;
