@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import csv, pathlib, re, tempfile, subprocess
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, OSX, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
 from tinygrad.renderer import ProgramSpec
@@ -185,9 +186,35 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
   return ret
 
+def read_csv(fp) -> list:
+  with open(fp) as f: return list(csv.DictReader(f))
+
+RGA_PATH = os.getenv("RGA_PATH", str(pathlib.Path.home() / "RadeonDeveloperToolSuite-2025-07-01-1408" / "rga"))
+RGA_BIN = ["wine", f"{RGA_PATH}.exe"] if OSX else [pathlib.Path(RGA_PATH)]
+
+rga_cache:dict[str, dict] = {}
+def rga_disasm(lib:bytes, prg:ProgramSpec):
+  if (cret:=rga_cache.get(prg.src)) is not None: return cret
+  (out:=pathlib.Path(temp("rga_output"))).mkdir(parents=True, exist_ok=True)
+  with tempfile.NamedTemporaryFile(delete=True) as elf:
+    elf.write(lib)
+    elf.flush()
+    out = subprocess.check_output([*RGA_BIN, "-s", "bin", "--isa", out/"disasm.txt", "--parse-isa", "--livereg", out/"livereg.txt",
+                                   "--line-numbers", "--analysis", out/"analysis.csv", elf.name], text=True)
+
+  dest = pathlib.Path(temp("rga_output"))
+  kernel = f"{Device[prg.device].arch}_{prg.function_name}"
+  analysis = read_csv(dest/f"{kernel}_analysis.csv")
+  disasm = read_csv(dest/f"{kernel}_disasm.csv")
+  with open(dest/f"{kernel}_livereg.txt", "r") as f:
+    live_regs = [[s.strip() for s in l.split("|",3)] for l in f if re.match(r"\s*\d+\s+\|\s+\d+\s+\|", l)]
+  rga_cache[prg.src] = ret = {"fmt":"rga", "analysis":analysis, "disasm":disasm, "live_regs":live_regs}
+  return ret
+
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = Device[prg.device].compiler.compile(prg.src)
+  if prg.device.startswith("AMD"): return json.dumps(rga_disasm(lib, prg)).encode()
   with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
   return json.dumps({"src":buf.getvalue()}).encode()
 
