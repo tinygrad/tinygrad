@@ -22,8 +22,8 @@ if __name__ == "__main__":
   for idx, el in enumerate(tqdm(ds["train"])):
     total += 1
 
-    try: simple_tokens = tuple(simple_tokenizer.encode(el["text"].encode()))
-    except KeyError: simple_tokens = ()
+    try: simple_tokens = tuple(simple_tokenizer.encode(el["text"]))
+    except RuntimeError: simple_tokens = ()
     base_tokens = tuple(base_tokenizer.encode(el["text"], add_special_tokens=False))
 
     if simple_tokens != base_tokens:

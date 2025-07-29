@@ -21,12 +21,12 @@ if __name__ == "__main__":
                '\n'.join([f"{k}) {v}" for k,v in zip(choices['label'], choices['text'])]) +\
                "\n\nReply with the letter of the correct answer only."
     try:
-      ids = [bos_id] + tok.role(b"user") + tok.encode(phrasing.encode()) + [eos_id] + tok.role(b"assistant") + tok.encode(b"Answer: ")
-    except KeyError:
+      ids = [bos_id] + tok.role("user") + tok.encode(phrasing) + [eos_id] + tok.role("assistant") + tok.encode("Answer: ")
+    except RuntimeError:
       # TODO: fix the tokenizer
       pass
     next_id = next(model.generate(ids))
-    correct, given = answer.as_py().strip(), tok.decode([next_id]).decode().strip()
+    correct, given = answer.as_py().strip(), tok.decode([next_id]).strip()
     num_correct += correct == given
     num_answered += 1
     print(f"{num_answered:4d}/{total_questions:4d}  "+\

@@ -5,9 +5,9 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
 class SimpleTokenizer:
   def __init__(self, normal_tokens: dict[bytes, int], special_tokens: dict[bytes, int]):
     self._normal_tokens, self._special_tokens = normal_tokens, special_tokens
-    self._inv_vocab = { tid: tok for tok, tid in (normal_tokens | special_tokens).items() }
+    self._inv_vocab = { tid: tok.decode(errors="ignore") for tok, tid in (normal_tokens | special_tokens).items() }
     self._special_re = re.compile(b"|".join(re.escape(tok) for tok in self._special_tokens.keys()))
-    self._replace_chars = { b" ": "Ġ".encode(), b"\n": "Ċ".encode() }
+    self._replace_chars = { " ": "Ġ", "\n": "Ċ" }
 
   @staticmethod
   def from_gguf_kv(kv: dict):
@@ -15,19 +15,20 @@ class SimpleTokenizer:
     normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
     return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
 
-  def encode(self, text: bytes):
-    text = functools.reduce(lambda s, pair: s.replace(pair[0], pair[1]), self._replace_chars.items(), text)
+  def encode(self, text: str):
+    btext = functools.reduce(lambda s, pair: s.replace(pair[0], pair[1]), self._replace_chars.items(), text).encode()
     tokens: list[int] = []
     pos = 0
-    for match in self._special_re.finditer(text):
-      tokens.extend(self._encode_word(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
+    for match in self._special_re.finditer(btext):
+      tokens.extend(self._encode_word(btext[pos:match.start(0)]) + [self._special_tokens[btext[match.start(0):match.end(0)]]])
       pos = match.end(0)
-    return tokens + self._encode_word(text[pos:])
+    try: return tokens + self._encode_word(btext[pos:])
+    except KeyError: raise RuntimeError(f"token not found in {text}")
 
-  def decode(self, ids: list[int]) -> bytes:
-    return functools.reduce(lambda s, pair: s.replace(pair[1], pair[0]), self._replace_chars.items(), b''.join(self._inv_vocab[tid] for tid in ids))
+  def decode(self, ids: list[int]) -> str:
+    return functools.reduce(lambda s, pair: s.replace(pair[1], pair[0]), self._replace_chars.items(), ''.join(self._inv_vocab[tid] for tid in ids))
 
-  def role(self, role:bytes): return self.encode(b"<|start_header_id|>" + role + b"<|end_header_id|>\n\n")
+  def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
 
   def _encode_word(self, word: bytes):
     parts = [word[i:i+1] for i in range(len(word))]
@@ -184,10 +185,10 @@ if __name__ == "__main__":
   while 1:
     start_pos = len(ids) - 1
     try:
-      ids += tok.role(b"user") + tok.encode(input('>>> ').encode()) + [eos_id] + tok.role(b"assistant")
+      ids += tok.role("user") + tok.encode(input('>>> ')) + [eos_id] + tok.role("assistant")
     except EOFError:
       break
     for next_id in model.generate(ids, start_pos):
-      sys.stdout.buffer.write(tok.decode([next_id]) if next_id != eos_id else b"\n\n")
-      sys.stdout.buffer.flush()
+      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
+      sys.stdout.flush()
       if next_id == eos_id: break
