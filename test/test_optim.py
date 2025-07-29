@@ -42,9 +42,9 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-def TorchMuonOptim(params, *, lr=0.02, weight_decay=0.0, momentum=0.95, nesterov=False):
+def TorchMuonOptim(params, *, lr=0.02, weight_decay=0.0, momentum=0.0, nesterov=True):
   #internally, TorchMuon auto casts newton into b16, no way to remove
-  return TorchMuon(params, lr, momentum, weight_decay)
+  return TorchMuon(params, lr, weight_decay, momentum)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
@@ -90,16 +90,13 @@ class TestOptim(unittest.TestCase):
   def test_multistep_sgd_high_lr_nesterov_momentum_wd(self):
     self._test_sgd(10, {'lr': 9, 'momentum': 0.9, 'nesterov': True, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")#TODO:change to torch.muon when it comes out
-  def test_muon(self): self._test_muon(1, {'lr': 0.01 }, 1e-2, 1e-2)
-  # @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")#horrid lr blowup
-  # def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-2, 1e-2)
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-2, 0)
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9}, 1e-1, 0)
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")#NOTE: muon torch test has nesterov on by default
-  def test_multistep_muon_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': True}, 1e-1, 0)
+  def test_muon(self): self._test_muon(1, {'lr': 0.001 }, 1e-6, 0) #TODO:change to torch.muon when it comes out
+  def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-6, 3e-4)
+  def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
+  def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.5}, 1e-6, 0)#NOTE: nesterov on by default
+  def test_multistep_muon_momentum_wd(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
+  def test_multistep_muon_high_lr_momentum(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)#unstable for high lrs
+  def test_multistep_muon_high_lr_momentum_wd(self): self._test_muon(1, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)
