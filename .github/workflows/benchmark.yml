@@ -681,9 +681,9 @@ jobs:
     - name: Test AMD=1
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     - name: Test driver cold start time
-      run: time AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      run: time AMD=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 AMD=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test DISK copy time
       run: AMD=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Run full CIFAR training w 1 GPU
@@ -737,9 +737,9 @@ jobs:
     - name: Test tensor cores
       run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test driver cold start time
-      run: time NV=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 NV=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      run: time NV=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 NV=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test DISK copy time
       run: NV=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Test LLAMA-3
