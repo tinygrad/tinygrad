@@ -8,6 +8,7 @@ from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 from tinygrad.nn.state import TensorIO
 
+# ***** protobuf definitions ******
 class WireType(enum.IntEnum):
   """
   Protocol Buffer wire types for decoding fields.
@@ -40,6 +41,39 @@ def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
   warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
   assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
   return default_dtype
+
+# ***** onnx spec definitions *****
+class Domain(enum.Enum):
+  """
+  ONNX operator domains.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
+  """
+  ONNX = "ai.onnx"
+  ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_TRAINING = "ai.onnx.training"
+  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
+
+class OpSetId(NamedTuple):
+  domain: Domain
+  version: int
+
+@dataclasses.dataclass(frozen=True)
+class OnnxValue:
+  shape: tuple[str|int, ...]
+  dtype: DType
+  is_optional: bool
+  is_sequence: bool
+
+@dataclasses.dataclass(frozen=True)
+class OnnxNode:
+  op: str
+  opset_id: OpSetId
+  inputs: tuple[str, ...]
+  outputs: tuple[str, ...]
+  opts: dict[str, Any]
 
 # ***** protobuf parsing ******
 class PBBufferedReader(BufferedReader):
@@ -107,21 +141,9 @@ class OnnxPBParser:
     else: self.tensor = inp
     self.reader = PBBufferedReader(self.tensor)
 
-  # ***** parsing helpers *****
-  def _parse_message(self, end_pos: int) -> Generator[tuple[int, WireType], None, None]:
-    while self.reader.tell() < end_pos:
-      tag = self.reader.decode_varint()
-      yield tag >> 3, WireType(tag & 0x07)
-
-  def _decode_end_pos(self) -> int:
-    str_len = self.reader.decode_varint()
-    start_pos = self.reader.tell()
-    return start_pos + str_len
-
-  # ***** protobuf parsing *****
   def parse(self) -> dict:
     """
-    Recursively parses the ONNX model into a nested dictionary.
+    Parses the ONNX model into a nested dictionary.
 
     Usage:
     ```python
@@ -136,12 +158,23 @@ class OnnxPBParser:
     output = MessageToDict(onnx.load("your_model.onnx"), preserving_proto_field_name=True)
     ```
 
-    Some fields are omitted when compared to the official onnx one since they're not used for execution.
-    In addition, this parser adds extra `parsed_*` fields for convenience such as
-    `parsed_node` (an `OnnxNode` object) and `parsed_tensor` (a `Tensor` object), directly
-    into the output dictionary.
+    Some fields are omitted like `doc_string` since they're not used for execution.
+    In addition, extra `parsed_*` fields are added for convenience:
+    - `parsed_node` (an `OnnxNode` object)
+    - `parsed_tensor` (a `Tensor` object)
+    - `parsed_type` (an `OnnxValue` object)
     """
     return self._parse_ModelProto()
+
+  def _parse_message(self, end_pos: int) -> Generator[tuple[int, WireType], None, None]:
+    while self.reader.tell() < end_pos:
+      tag = self.reader.decode_varint()
+      yield tag >> 3, WireType(tag & 0x07)
+
+  def _decode_end_pos(self) -> int:
+    str_len = self.reader.decode_varint()
+    start_pos = self.reader.tell()
+    return start_pos + str_len
 
   def _parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
@@ -240,8 +273,7 @@ class OnnxPBParser:
       obj["parsed_tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
-    # TODO: early realize here is for const folding for non disk tensor models (PYTHON)
-    data = data.bitcast(true_dtype).realize().reshape(shape)
+    data = data.bitcast(true_dtype).reshape(shape)
     data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
     # const folding
     if shape == ():
@@ -355,39 +387,6 @@ class OnnxPBParser:
         case 2: obj["version"] = self.reader.read_int64()
         case _: self.reader.skip_field(wire_type)
     return obj
-
-# ***** onnx spec *****
-@dataclasses.dataclass(frozen=True)
-class OnnxValue:
-  shape: tuple[str|int, ...]
-  dtype: DType
-  is_optional: bool
-  is_sequence: bool
-
-class Domain(enum.Enum):
-  """
-  ONNX operator domains.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
-  """
-  ONNX = "ai.onnx"
-  ONNX_ML = "ai.onnx.ml"
-  AI_ONNX_TRAINING = "ai.onnx.training"
-  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
-  @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
-
-class OpSetId(NamedTuple):
-  domain: Domain
-  version: int
-
-@dataclasses.dataclass(frozen=True)
-class OnnxNode:
-  op: str
-  opset_id: OpSetId
-  inputs: tuple[str, ...]
-  outputs: tuple[str, ...]
-  opts: dict[str, Any]
 
 # ***** python const *****
 required_input_python_consts: dict[str, tuple[int, ...]] = {
