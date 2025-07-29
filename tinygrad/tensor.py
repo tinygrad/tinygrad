@@ -4391,6 +4391,17 @@ class Tensor(MathTrait):
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  def newton_schulz(self, steps: int = 5, params=(2, -1.5, 0.5)) -> Tensor:
+    """
+    Performs the newton-schulz algorithm for a matrix A.
+    """
+    assert self.ndim == 2
+    G = self / (self.square().sum().sqrt() + 1e-7)
+    G = G.T if G.shape[0] > G.shape[1] else G
+    for _ in range(steps):
+      G = sum(p * functools.reduce(lambda x, y: (y @ y.T) @ x, [G] * i, G) for i, p in enumerate(params))
+    return G.T if G.shape[0] > G.shape[1] else G
+
 P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:

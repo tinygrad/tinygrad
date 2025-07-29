@@ -3,7 +3,6 @@ import itertools
 from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
-from tinygrad.device import is_dtype_supported
 
 class Optimizer:
   """
@@ -89,9 +88,10 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM, ns_params=None):
     super().__init__(params, lr, fused)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
+    self.ns_params = ns_params
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -110,6 +110,11 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      if self.ns_params is not None:
+        orig_shape = g.shape
+        g2d = g.reshape(g.shape[0], -1)
+        g2d = g2d.newton_schulz(steps=5, params=self.ns_params)
+        g = g2d.reshape(orig_shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append((t.detach() - g).cast(t.dtype))
@@ -132,6 +137,13 @@ def Adam(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, fused=FUSE_
   - Paper: https://arxiv.org/abs/1412.6980
   """
   return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, fused=fused)
+def Muon(
+  params: list[Tensor], lr=3e-3, momentum=0.96, weight_decay=0.0, nesterov=True, classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315)
+):
+  """
+  Muon optimiser (port of https://github.com/KellerJordan/
+  """
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, 0.0, fused, ns_params)
 
 class LAMB(Optimizer):
   """
@@ -165,66 +177,3 @@ class LAMB(Optimizer):
         r = 1.0
       ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
-
-
-class Muon(Optimizer):
-  """
-  Muon optimiser (faithful port of https://github.com/KellerJordan/muon).
-
-      m ← β·m + (1‑β)·∇θ
-      u ← (1‑β)·∇θ + β·m          # Nesterov update
-      O ← NS₅(u)                  # 5‑step Newton–Schulz in bf16
-      θ ← θ − lr·O
-  """
-
-  def __init__(
-    self,
-    params: list[Tensor],
-    lr: float = 1e-3,
-    momentum: float = 0.90,
-    steps: int = 5,
-    eps: float = 1e-7,
-    weight_decay: float = 0.0,
-    fused=FUSE_OPTIM,
-    nesterov: bool = True,
-  ):
-    super().__init__(params, lr, fused)
-    self.beta = momentum
-    self.k = steps
-    self.eps = eps
-    self.wd = weight_decay
-    self.nesterov = nesterov
-    self.m = self._new_optim_param()
-
-  def _orthonorm(self, mat: Tensor) -> Tensor:
-    """
-    Newton–Schulz orthonormaliser.
-
-    • works for any tensor with ndim ≥ 2
-    • runs the iteration in bf16 when the device supports it
-    • returns a tensor with the **same shape** as the input
-    """
-    if mat.ndim < 2:  # scalar / vector → nothing to do
-      return mat
-    orig_shape = mat.shape
-    X = mat.reshape(mat.shape[0], -1)  # flatten to (C, N)
-    # --- identical coefficients as upstream -----------------------------
-    a, b, c = 3.4445, -4.7750, 2.0315
-    X = X.cast(dtypes.bfloat16 if is_dtype_supported(dtypes.bfloat16) else dtypes.default_float)
-    X /= X.square().sum().sqrt() + self.eps
-    for _ in range(self.k):  # default k = 5
-      A = X @ X.T
-      X = a * X + (b * A + c * (A @ A)) @ X
-    X = X.cast(dtypes.default_float)  # back to fp32
-    return X.reshape(orig_shape)
-
-  def _step(self, params, grads):
-    out = []
-    for i, (p, g) in enumerate(zip(params, grads)):
-      if self.wd:
-        g = g + self.wd * p.detach()  # decoupled weight decay
-      self.m[i].assign(self.beta * self.m[i] + (1.0 - self.beta) * g)
-      upd = (1.0 - self.beta) * g + self.beta * self.m[i] if self.nesterov else self.m[i]
-      O = self._orthonorm(upd)  # same shape as p
-      out.append((p.detach() - self.lr * O.cast(p.dtype)).cast(p.dtype))
-    return out, self.m
