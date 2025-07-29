@@ -3,6 +3,7 @@ import itertools
 from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
+from tinygrad.device import is_dtype_supported
 
 class Optimizer:
   """
@@ -187,7 +188,7 @@ class Muon(Optimizer):
   # ----- Newton–Schulz (always runs in bf16) -------------------------
   def _orthonorm(self, mat: Tensor) -> Tensor:
     a, b, c = 3.4445, -4.7750, 2.0315
-    X = mat.cast(dtypes.bfloat16)  # bf16 work space
+    X = mat.cast(dtypes.bfloat16 if is_dtype_supported(dtypes.bfloat16) else dtypes.default_float)
     if X.shape[0] > X.shape[1]:
       X, trans = X.T, True
     else:
@@ -196,7 +197,7 @@ class Muon(Optimizer):
     for _ in range(self.k):
       A = X @ X.T
       X = a * X + (b * A + c * (A @ A)) @ X
-    X = X.cast(dtypes.default_float)  # back to fp32
+    if X.dtype != dtypes.default_float: X = X.cast(dtypes.default_float)
     return X.T if trans else X
 
   def _step(self, params, grads):

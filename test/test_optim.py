@@ -43,7 +43,7 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
   return net.x.detach().numpy(), net.W.detach().numpy()
 
 def _to_bf16(a: np.ndarray) -> np.ndarray:
-    return torch.tensor(a).bfloat16().float().numpy()
+  return torch.tensor(a).bfloat16().float().numpy()
 
 def TorchMuonFactory(params, *, lr=1e-3, momentum=0.9, weight_decay=0.0, **kw):
   params = [torch.nn.Parameter(p.clone().detach()) for p in params]
