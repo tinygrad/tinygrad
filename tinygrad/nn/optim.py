@@ -166,6 +166,7 @@ class LAMB(Optimizer):
       ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
 
+
 class Muon(Optimizer):
   """
   Muon optimiser (faithful port of https://github.com/KellerJordan/muon).
@@ -176,7 +177,17 @@ class Muon(Optimizer):
       θ ← θ − lr·O
   """
 
-  def __init__(self,params:list[Tensor],lr:float=1e-3, momentum:float=0.90,steps:int=5,eps:float=1e-7,weight_decay:float=0.0,fused=FUSE_OPTIM,nesterov:bool=True):
+  def __init__(
+    self,
+    params: list[Tensor],
+    lr: float = 1e-3,
+    momentum: float = 0.90,
+    steps: int = 5,
+    eps: float = 1e-7,
+    weight_decay: float = 0.0,
+    fused=FUSE_OPTIM,
+    nesterov: bool = True,
+  ):
     super().__init__(params, lr, fused)
     self.beta = momentum
     self.k = steps
@@ -197,7 +208,8 @@ class Muon(Optimizer):
     for _ in range(self.k):
       A = X @ X.T
       X = a * X + (b * A + c * (A @ A)) @ X
-    if X.dtype != dtypes.default_float: X = X.cast(dtypes.default_float)
+    if X.dtype != dtypes.default_float:
+      X = X.cast(dtypes.default_float)
     return X.T if trans else X
 
   def _step(self, params, grads):
