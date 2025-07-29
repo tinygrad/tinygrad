@@ -12,7 +12,6 @@ class IndexContext:
   axis_types: tuple[AxisType, ...]
   idxs: list[UOp]
   start: int = 0
-  #ridxs: list[UOp]
 
 def shape_to_idx(s, axis_types, start=0):
   # indexes
@@ -36,9 +35,7 @@ def get_index(ast:UOp) -> IndexContext:
 def subblock(ctx: IndexContext, full_new_idx: list[UOp], src: UOp):
   lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
   ctx.start = lc.start
-  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
   return graph_rewrite(src, pm_lowerer, lc, name="subblock", bottom_up=True)
-
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
@@ -78,11 +75,6 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
     if len(range_gates): ret = UOp(Ops.IF, src=(functools.reduce(operator.and_, range_gates), ret))
   return ret
 
-def lower_const(ctx:IndexContext, view:UOp, c:UOp):
-  if all(x.mask is None for x in view.arg.views): return c
-  _, valid = view.arg.to_indexed_uops(ctx.idxs)
-  return valid.where(c, c.const_like(0))
-
 def fixup_wmma(ctx:IndexContext, x:UOp):
   if x.tag is not None: return None
   new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
@@ -103,16 +95,18 @@ pm_lowerer = PatternMatcher([
   # hack for old style VALID (now it's just VIEW(CONST))
   (UPat(Ops.VALID, src=(UPat(Ops.VIEW, name="v"),)).where(UPat.cvar("c"), UPat(Ops.CONST, arg=0)), lambda c,v: c.replace(src=()).view(v.arg)),
 
-  # reduce/view_const
-  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),), name="view"), lower_const),
-  # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
+  # consts and loads
+  (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),), name="view"),
+   lambda ctx,view,c: c if all(x.mask is None for x in view.arg.views) else view.arg.to_indexed_uops(ctx.idxs)[1].where(c, c.const_like(0))),
   (UPat(Ops.LOAD, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"),
    lambda ctx,buf,x: UOp(Ops.LOAD, x.dtype, (buf.index(*x.st_arg.to_indexed_uops(ctx.idxs)),)+x.src[1:])),
+
+  # reduce/view_const
+  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
   (UPat(Ops.STORE, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"), lower_store),
+  (UPat(Ops.WMMA, name="x"), fixup_wmma),
 
   # axis fixups for WMMA
-  (UPat(Ops.WMMA, name="x"), fixup_wmma),
   (UPat((Ops.CONTRACT, Ops.UNROLL), name="x"),
    lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0][0], sz) for a,sz in x.arg])) if x.tag is None else None),
 ])
