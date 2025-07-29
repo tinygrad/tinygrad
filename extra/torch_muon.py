@@ -1,5 +1,5 @@
 import torch
-import torch.distributed as dist
+
 #credit to KellerJordan at https://github.com/KellerJordan/Muon/tree/master
 def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
     """
@@ -15,7 +15,7 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
 
     a, b, c = (3.4445, -4.7750,  2.0315)
     # X = G.bfloat16()
-    X=G
+    X = G
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -33,8 +33,6 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
     return X
 
 def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
-    print('GRAD')
-    print(grad.numpy())
 
     momentum.lerp_(grad, beta)
     update = grad.lerp_(momentum, beta) if nesterov else momentum
@@ -42,8 +40,6 @@ def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
         update = update.view(len(update), -1)
     update = zeropower_via_newtonschulz5(update, steps=ns_steps)
     # update *= max(1, grad.size(-2) / grad.size(-1))**0.5
-    print('muon update result')
-    print(update.numpy())
     return update
 
 class SingleDeviceMuon(torch.optim.Optimizer):
@@ -57,7 +53,6 @@ class SingleDeviceMuon(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step(self, closure=None):
-
 
         loss = None
         if closure is not None:
@@ -75,7 +70,5 @@ class SingleDeviceMuon(torch.optim.Optimizer):
                 p.mul_(1 - group["lr"] * group["weight_decay"])
 
                 p.add_(update.reshape(p.shape), alpha=-group["lr"])
-                print('final self param')
-                print(p.numpy())
 
         return loss
