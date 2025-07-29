@@ -75,7 +75,8 @@ setup(name='tinygrad',
             "pycocotools",
             "boto3",
             "pandas",
-            "influxdb3-python"
+            "influxdb3-python",
+            "muon-optimizer @ git+https://github.com/KellerJordan/muon.git@master",
         ],
         'docs': [
             "mkdocs",
