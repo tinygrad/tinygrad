@@ -124,7 +124,7 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      if self.ns_params is not None: 
+      if self.ns_params is not None:
         g = Tensor.newton_schulz(g.detach().reshape(g.shape[0], -1),params=self.ns_params).reshape(g.shape)
         g = g * max(1, g.shape[0] / g.shape[1]) ** 0.5
       # popular momentum does pre learning rate update

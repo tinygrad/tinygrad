@@ -4056,7 +4056,7 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
-  
+
   def newton_schulz(self, steps:int=5, params=(2,-1.5,0.5)) -> Tensor:
     """
     Performs the newton-schulz algorithm for a matrix A. The degree of the odd polynomial depends on the number of params.
