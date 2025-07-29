@@ -91,11 +91,11 @@ def hl_spec_kernel3():
   sink = graph_rewrite(sink, merge_views)
   return sink
 
-def hand_spec_kernel3(kernel4=getenv("K4", 0)):
-  BLOCK_SIZE = 256
+def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
+  BLOCK_SIZE = 128 if kernel5 else 256
 
   nbWaves = BLOCK_SIZE // 32
-  WN = 64
+  WN = 128 if kernel5 else 64
   WM = BN * BM // nbWaves // WN
 
   nbWaveX = BN // WN
@@ -141,7 +141,8 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
   A_col = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveM * TM, AddrSpace.REG), arg=0)
   B_row = UOp(Ops.DEFINE_REG, dtypes.float.ptr(nbIterWaveN * TN, AddrSpace.REG), arg=1)
 
-  As = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BM, AddrSpace.LOCAL), arg=0)
+  BM_As_stride = (BM+4) if kernel5 else BM
+  As = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BM_As_stride, AddrSpace.LOCAL), arg=0)
   Bs = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(BK*BN, AddrSpace.LOCAL), arg=1)
 
   c_regs = UOp(Ops.DEFINE_REG, dtypes.float.ptr(TM * nbIterWaveM * TN * nbIterWaveN), arg=2)
@@ -165,7 +166,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     i = UOp.range(dtypes.int, nbReadsA, 1)
     index_x = rAIdx + kId
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-    As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
+    As_store = As[(index_x % BK) * BM_As_stride + index_y % BM].store(a[N * index_y + index_x].load(), i)
 
     # iterate over the middle chunk
     kId_range = UOp.range(dtypes.int, N//BK-1, 2)
@@ -197,7 +198,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
       iterWave = UOp.range(dtypes.int, nbIterWaveM, first_range+3)
       i = UOp.range(dtypes.int, TM, first_range+4)
       index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
-      A_col_store = A_col[iterWave*TM + i].store(As[k*BM + index].load(*inp_dep), iterWave, i)
+      A_col_store = A_col[iterWave*TM + i].store(As[k*BM_As_stride + index].load(*inp_dep), iterWave, i)
 
       # do the GEMM math
       iterWaveM = UOp.range(dtypes.int, nbIterWaveM, first_range+5)
@@ -223,7 +224,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     i = UOp.range(dtypes.int, nbReadsA, 15)
     index_x = rAIdx + kId + BK
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-    As_store = As[(index_x % BK) * BM + index_y % BM].store(regA[i].load(sink), i, kId_range)
+    As_store = As[(index_x % BK) * BM_As_stride + index_y % BM].store(regA[i].load(sink), i, kId_range)
 
     # final iteration without the copy
     sink = inner_loop(16, (UOp.barrier(Bs_store, As_store),))
@@ -240,7 +241,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     i = UOp.range(dtypes.int, nbReadsA, 2)
     index_x = rAIdx + kId
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-    As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
+    As_store = As[(index_x % BK) * BM_As_stride + index_y % BM].store(a[N * index_y + index_x].load(), i)
 
     barrier = UOp.barrier(As_store, Bs_store)
 
@@ -255,7 +256,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     iterWave = UOp.range(dtypes.int, nbIterWaveM, 6)
     i = UOp.range(dtypes.int, TM, 7)
     index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
-    A_col_store = A_col[iterWave*TM + i].store(As[k*BM + index].load(barrier), iterWave, i)
+    A_col_store = A_col[iterWave*TM + i].store(As[k*BM_As_stride + index].load(barrier), iterWave, i)
 
     # do the GEMM math
     iterWaveM = UOp.range(dtypes.int, nbIterWaveM, 8)

@@ -101,17 +101,17 @@ kernel4_gmem_db(float *a, float *b, float *c)
       for (int i = 0; i < nbReadsB; i++) {
         int index_x = BN * blockIdx.x + rBIdx;
         int index_y = rBIdy + i * strideReadB + kId + BK;
-        regB[i] = b[N * index_y + index_x]; // row
+        regB[i] = b[N * index_y + index_x];
       }
 
       for (int i = 0; i < nbReadsA; i++) {
         int index_x = rAIdx + kId + BK;
         int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;
-        regA[i] = a[N * index_y + index_x]; // column
+        regA[i] = a[N * index_y + index_x];
       }
     }
 
-    for (int k = 0; k < BK; k += 1) {
+    for (int k = 0; k < BK; k++) {
       // we cache A & B for the entire Wave tile
       for (int iterWave = 0; iterWave < nbIterWaveN; iterWave++) {
         for (int i = 0; i < TN; i++) {
