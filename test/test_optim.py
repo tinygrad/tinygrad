@@ -42,7 +42,7 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 #cant fit nesterov flag
-def TorchMuonOptim(params, *, lr=0.02, weight_decay=0.0, momentum=0.0, nesterov=True): return TorchMuon(params, lr, weight_decay, momentum)
+def TorchMuonOptim(params, lr=0.02, weight_decay=0.0, momentum=0.0, nesterov=True): return TorchMuon(params, lr, weight_decay, momentum)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
