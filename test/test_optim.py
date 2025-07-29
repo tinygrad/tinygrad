@@ -97,9 +97,9 @@ class TestOptim(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-2, 0)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_multistep_sgd_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9}, 1e-1, 0)
+  def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9}, 1e-1, 0)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")#NOTE: muon torch test has nesterov on by default
-  def test_multistep_sgd_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': True}, 1e-1, 0)
+  def test_multistep_muon_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': True}, 1e-1, 0)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)
