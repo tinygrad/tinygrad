@@ -11,7 +11,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/x86asm.min.js"></script>
-  <script src="http://127.0.0.1:35729/livereload.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -240,6 +239,7 @@
     padding: 0 8px;
     width: 100%;
     height: 100%;
+    max-height: 100vh;
   }
   .raw-text code {
     max-height: none !important;
@@ -248,8 +248,6 @@
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    border-radius: 8px;
-    overflow: hidden;
     background-color: #1a1b26;
     color: #f0f0f5;
     font-size: 0.95em;
@@ -269,6 +267,29 @@
   }
   tr.main-row > td, tr.sub-row > td {
     padding: 8px 12px;
+  }
+  td.pct-row > div {
+    background: #2c2f40;
+    height: 12px;
+    width: 100%;
+  }
+  td.pct-row > div > div {
+    height: 100%;
+    background: #4fc269;
+  }
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #20222e;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid #3a3d52;
+    font-size: 0.95em;
+    letter-spacing: 0.03em;
   }
   </style>
 </head>

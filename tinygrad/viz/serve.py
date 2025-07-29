@@ -190,7 +190,7 @@ def read_csv(fp) -> list:
   with open(fp) as f: return list(csv.DictReader(f))
 
 RGA_PATH = os.getenv("RGA_PATH", str(pathlib.Path.home() / "RadeonDeveloperToolSuite-2025-07-01-1408" / "rga"))
-RGA_BIN = ["wine", f"{RGA_PATH}.exe"] if OSX else [pathlib.Path(RGA_PATH)]
+RGA_BIN = ["wine", f"{RGA_PATH}.exe"] if OSX else [str(pathlib.Path(RGA_PATH))]
 
 rga_cache:dict[str, dict] = {}
 def rga_disasm(lib:bytes, prg:ProgramSpec):
@@ -199,11 +199,11 @@ def rga_disasm(lib:bytes, prg:ProgramSpec):
   with tempfile.NamedTemporaryFile(delete=True) as elf:
     elf.write(lib)
     elf.flush()
-    out = subprocess.check_output([*RGA_BIN, "-s", "bin", "--isa", out/"disasm.txt", "--parse-isa", "--livereg", out/"livereg.txt",
-                                   "--line-numbers", "--analysis", out/"analysis.csv", elf.name], text=True)
+    subprocess.check_output([*RGA_BIN, "-s", "bin", "--isa", out/"disasm.txt", "--parse-isa", "--livereg", out/"livereg.txt", "--line-numbers",
+                             "--analysis", out/"analysis.csv", elf.name], text=True)
 
   dest = pathlib.Path(temp("rga_output"))
-  kernel = f"{Device[prg.device].arch}_{prg.function_name}"
+  kernel = f"{getattr(Device[prg.device],'arch')}_{prg.function_name}"
   analysis = read_csv(dest/f"{kernel}_analysis.csv")
   disasm = read_csv(dest/f"{kernel}_disasm.csv")
   with open(dest/f"{kernel}_livereg.txt", "r") as f:

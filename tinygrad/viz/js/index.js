@@ -447,6 +447,17 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
+function createRegPressureCell(liveRegs, totalRegs) {
+  const td = document.createElement("td");
+  td.className = "pct-row";
+  const max = td.appendChild(document.createElement("div"));
+  const bar = max.appendChild(document.createElement("div"));
+  const pct = Math.min(100, Math.round((liveRegs / totalRegs) * 100));
+  bar.style.width = pct + "%";
+  bar.title = `${liveRegs} / ${totalRegs} (${pct}%)`;
+  return td;
+}
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -472,13 +483,7 @@ async function main() {
         }
       }
     }
-    return setState(
-    {
-    "currentCtx": 4,
-    "currentStep": 17,
-    "currentRewrite": 0,
-    "expandSteps": true
-});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -502,23 +507,35 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displayGraph("profiler");
     const root = document.createElement("div");
+    root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
     metadata.innerHTML = "";
     // custom rga format
     if (ret.fmt === "rga") {
-      const table = metadata.appendChild(document.createElement("table"));
+      // hw utilization table (sidebar)
+      const utilizationTable = metadata.appendChild(document.createElement("table"));
       const a = ret.analysis[0]; // only one row
       const appendUsageRow = (resource) => {
         const used = a[`USED_${resource}`];
         const total = a[`AVAILABLE_${resource}`];
         const u = parseInt(used), t = parseInt(total);
-        return appendRow(table, `${resource} Utilization`, `${formatUnit(used)}/${formatUnit(total)} (${Math.round((u/t)*100).toFixed(2)}%)`, null, "main-row");
+        return appendRow(utilizationTable, `${resource} Utilization`, `${formatUnit(used)}/${formatUnit(total)} (${Math.round((u/t)*100).toFixed(2)}%)`, null, "main-row");
       }
       ["SGPRs", "VGPRs", "LDS_BYTES"].forEach(appendUsageRow);
-    } else {
-      root.className = "raw-text";
-      root.appendChild(codeBlock(ret.src, "x86asm"));
-    }
+      // register pressure table + ISA (main view)
+      const asmTable = root.appendChild(document.createElement("table"));
+      const thead = asmTable.appendChild(document.createElement("thead"));
+      for (const col of ["Opcode", "Operands", "Register Pressure"]) {
+        const th = thead.appendChild(document.createElement("th"));
+        th.innerText = col;
+      }
+      for (let i=0; i<ret.disasm.length; i++) {
+        const isa = ret.disasm[i];
+        tr = appendRow(asmTable, isa[" Opcode"], isa[" Operands"], null, "main-row");
+        const liveRegs = parseInt(ret.live_regs[i][1]);
+        tr.appendChild(createRegPressureCell(liveRegs, a.AVAILABLE_VGPRs)); // raw: tr.appendChild(document.createElement("td")).innerText = liveRegs;
+      }
+    } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
   }
   // ** UOp view (default)
