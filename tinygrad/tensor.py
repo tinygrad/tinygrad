@@ -1265,8 +1265,22 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    idxs = Tensor(indices, dtype=self.dtype, device=self.device)
-    mask = (Tensor.arange(self.shape[0], dtype=self.dtype, device=self.device) == idxs)
+    def normalize_slice(slc, length):
+      start, stop, step = slc.indices(length)
+      return list(range(start, stop, step))
+    if isinstance(indices, slice): indices = normalize_slice(indices, self.shape[0])
+    if isinstance(indices, (list, tuple)) and all(isinstance(i, int) for i in indices):
+      idxs = list(indices)
+      if v.shape == ():
+        for i in idxs: self.__setitem__(i, v)
+        return
+      if isinstance(v, Tensor):
+        if v.shape != (len(idxs),): raise ValueError(f"cannot broadcast {v.shape} to indices length {len(idxs)}")
+        vals = [v[pos] for pos in range(len(idxs))]
+      for i, val in zip(idxs, vals): self.__setitem__(i, val)
+      return
+    idxs_tensor = Tensor(indices, dtype=self.dtype, device=self.device)
+    mask = (Tensor.arange(self.shape[0], dtype=self.dtype, device=self.device) == idxs_tensor)
     mask = mask.reshape((mask.shape[0],) + (1,) * (self.ndim - 1))
     fill = v._broadcast_to(self.shape)
     self.uop = mask.where(fill, self).uop
