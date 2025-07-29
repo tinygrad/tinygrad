@@ -42,15 +42,19 @@ def get_index(ast:UOp) -> IndexContext:
 
 # ***** lowering (given index) *****
 
+def subblock(ctx: IndexContext, full_new_idx: list[UOp], src: UOp):
+  lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
+  ctx.start = lc.start
+  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
+  return graph_rewrite(src, pm_lowerer, lc, name="subblock", bottom_up=True)
+
+
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
   full_new_idx = list(ctx.idxs)
   for a in x.axis_arg: full_new_idx[a] = new_idxs[a]
 
-  lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
-  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
-  ret = graph_rewrite(x.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
-  ctx.start = lc.start
+  ret = subblock(ctx, full_new_idx, x.src[0])
 
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([full_new_idx[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
@@ -66,6 +70,9 @@ def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
+  # TODO: reenable after REDUCE_AXIS is fixed
+  #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
+
   new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
   idx, valid = x.st_arg.to_indexed_uops(new_idxs)
   used_idxs = [x for x in UOp.sink(idx, valid).toposort() if x in new_idxs]
@@ -74,14 +81,9 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
     if new_idxs[i] in used_idxs or len(ctx.idxs) <= i: real_new_idxs.append(new_idxs[i])
     else: real_new_idxs.append(ctx.idxs[i])
 
-  lc = IndexContext(ctx.axis_types, real_new_idxs, ctx.start+1000)
-  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
-  stored = graph_rewrite(x.src[1], pm_lowerer, lc, name="substore", bottom_up=True)
-  ctx.start = lc.start
+  stored = subblock(ctx, real_new_idxs, x.src[1])
   return buf.index(idx, valid).store(stored, *[x for x in used_idxs if x.op is Ops.RANGE])
 
-  # TODO: reenable after REDUCE_AXIS is fixed
-  #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
   """
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
   if cast(PtrDType, buf.dtype).addrspace == AddrSpace.GLOBAL:
@@ -102,10 +104,7 @@ def fixup_wmma(ctx:IndexContext, x:UOp):
   full_new_idx = list(ctx.idxs)
   for a in x.arg[-1]: full_new_idx[a] = new_idxs[a]
 
-  lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
-  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
-  srcs = graph_rewrite(UOp.sink(*x.src), pm_lowerer, lc, name="subwmma", bottom_up=True).src
-  ctx.start = lc.start
+  srcs = subblock(ctx, full_new_idx, UOp.sink(*x.src)).src
 
   # NOTE: this assumes these are expanded
   new_x_arg_m2 = tuple([tuple([(full_new_idx[a].arg[0][0], sz) for a,sz in v]) for v in x.arg[-2]])
