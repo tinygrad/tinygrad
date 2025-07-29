@@ -82,11 +82,12 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on b. also can include momentum, nesterov, and weight decay
-def Muon(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False, fused=FUSE_OPTIM, ns_params=(2.0,-1.5,0.5)):
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
+         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315)):
   """
   SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
 
-  You may pass in params to set the coefficients for the NS iterations. The choice of parameters can be tuned in the below papers.
+  You may pass in ns_params to set the coefficients for the NS iterations. The choice of parameters can be tuned.
 
   - Described: https://kellerjordan.github.io/posts/muon/
   - Paper: https://arxiv.org/pdf/2505.02222
@@ -123,8 +124,9 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      if self.ns_params: self.b[i].assign(Tensor.newton_schulz( \
-        self.b[i].reshape(self.b[i].shape[0], -1), params=self.ns_params).reshape(self.b[i].shape))
+      if self.ns_params is not None: 
+        g = Tensor.newton_schulz(g.detach().reshape(g.shape[0], -1),params=self.ns_params).reshape(g.shape)
+        g = g * max(1, g.shape[0] / g.shape[1]) ** 0.5
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append((t.detach() - g).cast(t.dtype))
