@@ -381,7 +381,7 @@ function appendRow(table, name, value, unit, cls) {
   const tr = table.appendChild(document.createElement("tr"));
   tr.className = cls;
   tr.appendChild(document.createElement("td")).innerText = name;
-  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : value.toFixed(2)+(unit != null ? " "+unit : "%");
+  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : typeof value === "string" ? value : value.toFixed(2)+(unit != null ? " "+unit : "%");
   return tr;
 }
 
@@ -472,7 +472,13 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState(
+    {
+    "currentCtx": 4,
+    "currentStep": 17,
+    "currentRewrite": 0,
+    "expandSteps": true
+});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -495,10 +501,24 @@ async function main() {
   if (ckey.startsWith("/disasm")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displayGraph("profiler");
-    document.querySelector(".metadata").innerHTML = "";
     const root = document.createElement("div");
-    root.className = "raw-text";
-    root.appendChild(codeBlock(ret.src, "x86asm"));
+    const metadata = document.querySelector(".metadata");
+    metadata.innerHTML = "";
+    // custom rga format
+    if (ret.fmt === "rga") {
+      const table = metadata.appendChild(document.createElement("table"));
+      const a = ret.analysis[0]; // only one row
+      const appendUsageRow = (resource) => {
+        const used = a[`USED_${resource}`];
+        const total = a[`AVAILABLE_${resource}`];
+        const u = parseInt(used), t = parseInt(total);
+        return appendRow(table, `${resource} Utilization`, `${formatUnit(used)}/${formatUnit(total)} (${Math.round((u/t)*100).toFixed(2)}%)`, null, "main-row");
+      }
+      ["SGPRs", "VGPRs", "LDS_BYTES"].forEach(appendUsageRow);
+    } else {
+      root.className = "raw-text";
+      root.appendChild(codeBlock(ret.src, "x86asm"));
+    }
     return document.querySelector(".profiler").replaceChildren(root);
   }
   // ** UOp view (default)
