@@ -15,7 +15,6 @@ testing_minimal = [
   "hypothesis",
   "z3-solver",
   "ml_dtypes",
-  "muon-optimizer @ git+https://github.com/KellerJordan/muon.git@master",
 ]
 
 setup(name='tinygrad',
