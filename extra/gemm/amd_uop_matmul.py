@@ -172,7 +172,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
     kId_range = UOp.range(dtypes.int, N//BK-1, 2)
     kId = kId_range*BK
 
-    barrier = UOp(Ops.BARRIER, src=(As_store, Bs_store, kId))
+    barrier = UOp.barrier(As_store, Bs_store)
 
     # load from globals into registers (next round)
     i = UOp.range(dtypes.int, nbReadsB, 3)
@@ -210,10 +210,11 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
       c_regs_idx = c_regs[y * TN * nbIterWaveN + x]
       # sketchy, this should end the kId_range but it doesn't
       sink = c_regs_idx.store(c_regs_idx.load(init_store) + A_col[y].load(A_col_store) * B_row[x].load(B_row_store),
-                              iterWaveM, iterWaveN, yt, xt, k).barrier()
+                              iterWaveM, iterWaveN, yt, xt, k)
       return sink
 
-    sink = inner_loop(5, (barrier, regB_store, regA_store))
+    # TODO: kId_range should endrange after a barrier
+    sink = inner_loop(5, (barrier, regB_store, regA_store)).barrier()
 
     # load from registers into locals
     i = UOp.range(dtypes.int, nbReadsB, 14)
