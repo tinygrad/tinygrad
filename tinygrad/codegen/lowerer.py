@@ -2,30 +2,36 @@
 from dataclasses import dataclass
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite
 from tinygrad.helpers import prod, partition, flatten
 
 # ***** indexing *****
 
 @dataclass
 class IndexContext:
+  axis_types: list[AxisType]
   idxs: list[UOp]
-  ridxs: list[UOp]
+  start: int = 0
+  #ridxs: list[UOp]
+
+def shape_to_idx(s, axis_types, start=0):
+  # indexes
+  idxs = []
+  for i, (s, at) in enumerate(zip(s, axis_types)):
+    if at in (AxisType.UPCAST, AxisType.UNROLL):
+      assert isinstance(s, int), "needs to be int to upcast/unroll"
+      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((start+i,s),)))
+    else:
+      # all others are RANGES
+      idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), start+i))
+  return idxs
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
   if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
+  return IndexContext(axis_types, [], 0)
 
-  # indexes
-  idxs = []
-  for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
-    if at in (AxisType.UPCAST, AxisType.UNROLL):
-      assert isinstance(s, int), "needs to be int to upcast/unroll"
-      idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),)))
-    else:
-      # all others are RANGES
-      idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), i))
-
+  """
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for i, (s, at) in enumerate(zip(ast.full_shape, axis_types)):
@@ -33,33 +39,58 @@ def get_index(ast:UOp) -> IndexContext:
       ridxs[i] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), 1000+i)
 
   return IndexContext(idxs, ridxs)
+  """
 
 # ***** lowering (given index) *****
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
+  full_new_idx = list(ctx.idxs)
+  for a in x.axis_arg: full_new_idx[a] = new_idxs[a]
+
+  lc = IndexContext(ctx.axis_types, tuple(full_new_idx), ctx.start+1000)
+  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
+  ret = graph_rewrite(x.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
+  ctx.start = lc.start
+
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
+  reduce_range, reduce_expand = partition([full_new_idx[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
-  ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return UOp(Ops.REDUCE, x.dtype, (ret,)+tuple(reduce_range), x.arg[0])
 
 def lower_load(ctx: IndexContext, x: UOp, buf: UOp):
-  idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if buf.op is Ops.DEFINE_LOCAL else ctx.idxs)
+  idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
   barrier = tuple([y.barrier() if buf.op is Ops.DEFINE_LOCAL else y for y in x.src[1:]])
   return UOp(Ops.LOAD, x.dtype, (buf.index(idx, valid),) + barrier)
 
 def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
+  idx, valid = x.st_arg.to_indexed_uops(new_idxs)
+  used_idxs = [x for x in UOp.sink(idx, valid).toposort() if x in new_idxs]
+  real_new_idxs = []
+  for i in range(len(x.src[0].shape)):
+    if new_idxs[i] in used_idxs or len(ctx.idxs) <= i: real_new_idxs.append(new_idxs[i])
+    else: real_new_idxs.append(ctx.idxs[i])
+
+  lc = IndexContext(ctx.axis_types, tuple(real_new_idxs), ctx.start+1000)
+  from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
+  stored = graph_rewrite(x.src[1], pm_lowerer, lc, name="substore", bottom_up=True)
+  ctx.start = lc.start
+  return buf.index(idx, valid).store(stored, *[x for x in used_idxs if x.op is Ops.RANGE])
+
   # TODO: reenable after REDUCE_AXIS is fixed
   #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
+  """
   idx, valid = x.st_arg.to_indexed_uops(ctx.idxs)
   if cast(PtrDType, buf.dtype).addrspace == AddrSpace.GLOBAL:
     # NOTE: only store the local reduceop in the threads that are actually doing the reduce
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
   return buf.index(idx, valid).store(x.src[1], *[x for x in UOp.sink(idx, valid).toposort() if x.op is Ops.RANGE])
+  """
 
 def lower_const(ctx:IndexContext, view:UOp, c:UOp):
   if all(x.mask is None for x in view.arg.views): return c
