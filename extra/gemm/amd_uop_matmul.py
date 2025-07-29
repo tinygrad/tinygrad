@@ -167,7 +167,6 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
     As_store = As[(index_x % BK) * BM + index_y % BM].store(a[N * index_y + index_x].load(), i)
 
-
     # iterate over the middle chunk
     kId_range = UOp.range(dtypes.int, N//BK-1, 2)
     kId = kId_range*BK
@@ -185,7 +184,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
     regA_store = regA[i].store(a[N * index_y + index_x].load(), i)
 
-    def inner_loop(first_range, inp_dep=(), ext_loop=()):
+    def inner_loop(first_range, inp_dep=()):
       # inner unroll
       k = UOp.range(dtypes.int, BK, first_range+0)
 
@@ -208,25 +207,26 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0)):
       x = iterWaveN * TN + xt
       y = iterWaveM * TM + yt
       c_regs_idx = c_regs[y * TN * nbIterWaveN + x]
+      # sketchy, this should end the kId_range but it doesn't
       sink = c_regs_idx.store(c_regs_idx.load(init_store) + A_col[y].load(A_col_store) * B_row[x].load(B_row_store),
-                              iterWaveM, iterWaveN, yt, xt, k, *ext_loop)
+                              iterWaveM, iterWaveN, yt, xt, k).barrier()
       return sink
 
-    sink = inner_loop(5, (barrier, regB_store, regA_store), (kId_range,))
+    sink = inner_loop(5, (barrier, regB_store, regA_store))
 
     # load from registers into locals
     i = UOp.range(dtypes.int, nbReadsB, 14)
     index_x = BN * blockIdx_x + rBIdx
     index_y = rBIdy + i * strideReadB + kId + BK
-    Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(regB[i].load(sink, regB_store), i, kId_range)
+    Bs_store = Bs[(index_y % BK) * BN + index_x % BN].store(regB[i].load(sink), i, kId_range)
 
     i = UOp.range(dtypes.int, nbReadsA, 15)
     index_x = rAIdx + kId + BK
     index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-    As_store = As[(index_x % BK) * BM + index_y % BM].store(regA[i].load(sink, Bs_store, regA_store), i, kId_range)
+    As_store = As[(index_x % BK) * BM + index_y % BM].store(regA[i].load(sink), i, kId_range)
 
     # final iteration without the copy
-    sink = inner_loop(16, (As_store,), ())
+    sink = inner_loop(16, (UOp.barrier(Bs_store, As_store),))
   else:
     kId_range = UOp.range(dtypes.int, N//BK, 0)
     kId = kId_range*BK
