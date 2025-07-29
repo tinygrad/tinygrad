@@ -78,8 +78,14 @@ def hl_spec_kernel3():
   A_col = A_col.reshape((1, nbIterWaveM, 1, TM, 1, 1, 1, 1, 1, 1)).expand(full_shape)
   B_row = B_row.reshape((1, 1, 1, 1, 1, nbIterWaveN, 1, TN, 1, 1)).expand(full_shape)
 
+  a_permute   = a.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,7,2,3,4,5,6,1,11,9,10,8)).reshape(full_shape)
+  As_permute = As.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,7,2,3,4,5,6,1,11,9,10,8)).reshape(full_shape)
+
+  b_permute   = b.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,1,6,11,4,5,2,7,8,9,10,3)).reshape(full_shape)
+  Bs_permute = Bs.reshape((32, 2, 2, 8, 4, 32, 2, 2, 8, 4, 512, 8)).permute((0,1,6,11,4,5,2,7,8,9,10,3)).reshape(full_shape)
+
   #out = (a.load() * b.load()).r(Ops.ADD, (8, 9))
-  out = (As.load(As.store(a.load())) * Bs.load(Bs.store(b.load()))).r(Ops.ADD, (8, 9))
+  out = (As.load(As_permute.store(a_permute.load())) * Bs.load(Bs_permute.store(b_permute.load()))).r(Ops.ADD, (8, 9))
   #out = (A_col.load(A_col.store(As.load(As.store(a.load())))) * B_row.load(B_row.store(Bs.load(Bs.store(b.load()))))).r(Ops.ADD, (8, 9))
 
   axis_types = (
