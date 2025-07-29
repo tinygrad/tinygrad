@@ -165,7 +165,7 @@ class LAMB(Optimizer):
       ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
 
-def Muon(params: list[Tensor], lr=1e-3, momentum=0.90, steps=5, eps=1e-7, weight_decay=0.0, fused=FUSE_OPTIM, nesterov=True):
+class Muon(Optimizer):
   """
   Muon optimiser (faithful port of https://github.com/KellerJordan/muon).
 
@@ -174,14 +174,15 @@ def Muon(params: list[Tensor], lr=1e-3, momentum=0.90, steps=5, eps=1e-7, weight
       O ← NS₅(u)                  # 5‑step Newton–Schulz in bf16
       θ ← θ − lr·O
   """
-  return _Muon(params, lr, momentum, steps, eps, weight_decay, nesterov, fused)
 
-class _Muon(Optimizer):
-  def __init__(self, params, lr, beta, k, eps, wd, nesterov, fused):
+  def __init__(self,params:list[Tensor],lr:float=1e-3, momentum:float=0.90,steps:int=5,eps:float=1e-7,weight_decay:float=0.0,fused=FUSE_OPTIM,nesterov:bool=True):
     super().__init__(params, lr, fused)
-    self.beta, self.k, self.eps = beta, k, eps
-    self.wd, self.nesterov = wd, nesterov
-    self.m = self._new_optim_param()  # momentum buffer
+    self.beta = momentum
+    self.k = steps
+    self.eps = eps
+    self.wd = weight_decay
+    self.nesterov = nesterov
+    self.m = self._new_optim_param()
 
   # ----- Newton–Schulz (always runs in bf16) -------------------------
   def _orthonorm(self, mat: Tensor) -> Tensor:
