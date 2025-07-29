@@ -1,6 +1,6 @@
 import torch
 import torch.distributed as dist
-
+#credit to KellerJordan at https://github.com/KellerJordan/Muon/tree/master
 def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
