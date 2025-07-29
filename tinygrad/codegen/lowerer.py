@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, partition, flatten
 
 @dataclass
 class IndexContext:
-  axis_types: list[AxisType]
+  axis_types: tuple[AxisType, ...]
   idxs: list[UOp]
   start: int = 0
   #ridxs: list[UOp]
@@ -47,7 +47,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   full_new_idx = list(ctx.idxs)
   for a in x.axis_arg: full_new_idx[a] = new_idxs[a]
 
-  lc = IndexContext(ctx.axis_types, tuple(full_new_idx), ctx.start+1000)
+  lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
   from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
   ret = graph_rewrite(x.src[0], pm_lowerer, lc, name="subreduce", bottom_up=True)
   ctx.start = lc.start
@@ -74,7 +74,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
     if new_idxs[i] in used_idxs or len(ctx.idxs) <= i: real_new_idxs.append(new_idxs[i])
     else: real_new_idxs.append(ctx.idxs[i])
 
-  lc = IndexContext(ctx.axis_types, tuple(real_new_idxs), ctx.start+1000)
+  lc = IndexContext(ctx.axis_types, real_new_idxs, ctx.start+1000)
   from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
   stored = graph_rewrite(x.src[1], pm_lowerer, lc, name="substore", bottom_up=True)
   ctx.start = lc.start
@@ -102,12 +102,15 @@ def fixup_wmma(ctx:IndexContext, x:UOp):
   full_new_idx = list(ctx.idxs)
   for a in x.arg[-1]: full_new_idx[a] = new_idxs[a]
 
-  lc = IndexContext(ctx.axis_types, tuple(full_new_idx), ctx.start+1000)
+  lc = IndexContext(ctx.axis_types, full_new_idx, ctx.start+1000)
   from tinygrad.codegen.lowerer import pm_lowerer  # TODO: better way to do this?
   srcs = graph_rewrite(UOp.sink(*x.src), pm_lowerer, lc, name="subwmma", bottom_up=True).src
   ctx.start = lc.start
 
-  return x.replace(src=srcs, tag=1)
+  # NOTE: this assumes these are expanded
+  new_x_arg_m2 = tuple([tuple([(full_new_idx[a].arg[0][0], sz) for a,sz in v]) for v in x.arg[-2]])
+  new_x_arg_m1 = tuple([full_new_idx[a].arg[0][0] for a in x.arg[-1]])
+  return x.replace(src=srcs, arg=x.arg[:-2]+(new_x_arg_m2, new_x_arg_m1), tag=1)
 
 pm_lowerer = PatternMatcher([
   # TODO: remove these hacks
