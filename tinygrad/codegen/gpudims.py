@@ -61,7 +61,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get global and local shape
   all_ranges = {x.arg%1000:x for x in s_topo if x.op is Ops.RANGE}
-  ranges = [all_ranges[r] for r in global_dims+local_dims]
+  ranges = [all_ranges[r] for r in global_dims+local_dims if r in all_ranges]
   global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in global_dims])
   local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in local_dims])
 
