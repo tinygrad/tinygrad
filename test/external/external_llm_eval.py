@@ -10,7 +10,7 @@ if __name__ == "__main__":
 
   model, kv = Transformer.from_gguf(Tensor.from_url(models["1B"]), max_context=4096)
 
-  tok = SimpleTokenizer(kv["tokenizer.ggml.tokens"])
+  tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
@@ -21,12 +21,12 @@ if __name__ == "__main__":
                '\n'.join([f"{k}) {v}" for k,v in zip(choices['label'], choices['text'])]) +\
                "\n\nReply with the letter of the correct answer only."
     try:
-      ids = [bos_id] + tok.role("user") + tok.encode(phrasing) + [eos_id] + tok.role("assistant") + tok.encode("Answer: ")
-    except RuntimeError:
+      ids = [bos_id] + tok.role(b"user") + tok.encode(phrasing.encode()) + [eos_id] + tok.role(b"assistant") + tok.encode(b"Answer: ")
+    except KeyError:
       # TODO: fix the tokenizer
       pass
     next_id = next(model.generate(ids))
-    correct, given = answer.as_py().strip(), tok.decode([next_id]).strip()
+    correct, given = answer.as_py().strip(), tok.decode([next_id]).decode().strip()
     num_correct += correct == given
     num_answered += 1
     print(f"{num_answered:4d}/{total_questions:4d}  "+\

@@ -9,6 +9,12 @@ class SimpleTokenizer:
     self._special_re = re.compile(b"|".join(re.escape(tok) for tok in self._special_tokens.keys()))
     self._replace_chars = { b" ": "Ġ".encode(), b"\n": "Ċ".encode() }
 
+  @staticmethod
+  def from_gguf_kv(kv: dict):
+    vocab: typing.Iterable[tuple[bytes, int]] = ((tok.encode(), idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
+    normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
+
   def encode(self, text: bytes):
     text = functools.reduce(lambda s, pair: s.replace(pair[0], pair[1]), self._replace_chars.items(), text)
     tokens: list[int] = []
@@ -170,9 +176,7 @@ if __name__ == "__main__":
   model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
 
   # extract some metadata
-  vocab: typing.Iterable[tuple[bytes, int]] = ((tok.encode(), idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-  normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-  tok = SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
+  tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
