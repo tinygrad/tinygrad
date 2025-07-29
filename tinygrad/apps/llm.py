@@ -22,8 +22,7 @@ class SimpleTokenizer:
     for match in self._special_re.finditer(btext):
       tokens.extend(self._encode_word(btext[pos:match.start(0)]) + [self._special_tokens[btext[match.start(0):match.end(0)]]])
       pos = match.end(0)
-    try: return tokens + self._encode_word(btext[pos:])
-    except KeyError: raise RuntimeError(f"token not found in {text}")
+    return tokens + self._encode_word(btext[pos:])
 
   def decode(self, ids: list[int]) -> str:
     return functools.reduce(lambda s, pair: s.replace(pair[1], pair[0]), self._replace_chars.items(), ''.join(self._inv_vocab[tid] for tid in ids))
@@ -39,7 +38,8 @@ class SimpleTokenizer:
         if tid < min_tid: min_tid, min_idx = tid, idx
       if min_idx == -1: break
       parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
-    return [ self._normal_tokens[p] for p in parts ]
+    try: return [ self._normal_tokens[p] for p in parts ]
+    except KeyError: raise RuntimeError("token not found")
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
