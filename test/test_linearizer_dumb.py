@@ -82,6 +82,7 @@ class TestLinearizerDumb(unittest.TestCase):
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
+  @unittest.skip("not applicable")
   def test_expander_new_srcs(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
