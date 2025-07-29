@@ -33,9 +33,10 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
   return X
 
 def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
-
-  momentum.lerp_(grad, beta)
-  update = grad.lerp_(momentum, beta) if nesterov else momentum
+  if beta:
+    momentum.lerp_(grad, beta)
+    update = grad.lerp_(momentum, beta) if nesterov else momentum
+  else: update = grad
   if update.ndim == 4: # for the case of conv filters
     update = update.view(len(update), -1)
   update = zeropower_via_newtonschulz5(update, steps=ns_steps)
@@ -66,7 +67,7 @@ class SingleDeviceMuon(torch.optim.Optimizer):
         if len(state) == 0:
           state["momentum_buffer"] = torch.zeros_like(p)
         update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"])
-        p.mul_(1 - group["lr"] * group["weight_decay"])
+        p.mul_(1.0 - group["lr"] * group["weight_decay"])
 
         p.add_(update.reshape(p.shape), alpha=-group["lr"])
 
