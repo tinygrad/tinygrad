@@ -695,7 +695,7 @@ jobs:
       run: BENCHMARK_LOG=bert_10steps AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee am_train_bert_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
-        name: Speed (AMD)
+        name: Speed (AM Driver)
         path: |
           am_matmul_amd.txt
           am_train_cifar_one_gpu.txt
@@ -753,7 +753,7 @@ jobs:
       run: BENCHMARK_LOG=bert_10steps NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 FUSE_ARANGE=1 FUSE_ARANGE_UINT=0 MODEL=bert python3 examples/mlperf/model_train.py | tee nv_train_bert_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
-        name: Speed (NV)
+        name: Speed (NV Driver)
         path: |
           nv_llama3_beam.txt
           nv_train_cifar_one_gpu.txt
