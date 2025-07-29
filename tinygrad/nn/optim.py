@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 import itertools
-from tinygrad.helpers import dedup, flatten, getenv, unwrap, prod, FUSE_OPTIM
+from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
 
