@@ -551,7 +551,7 @@ class BinIdxDataset:
     ptr, size = self._index(idx)
     if length is None: length = size - offset
     ptr += offset * self.dtype.itemsize
-    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].bitcast(self.dtype)
+    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].bitcast(self.dtype).to(None)
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
@@ -562,11 +562,8 @@ class GPTDataset:
     self.indexed_dataset = BinIdxDataset(base_path)
 
     self.doc_idx = self._build_doc_idx()
-    print(self.doc_idx)
     self.sample_idx = self._build_sample_idx()
-    print(self.sample_idx)
     self.shuffle_idx = self._build_shuffle_idx()
-    print(self.shuffle_idx)
 
   def __getitem__(self, idx):
     if idx is None:
@@ -574,10 +571,7 @@ class GPTDataset:
     else:
       text = self._get(idx)
 
-    tokens = text[:-1]
-    labels = text[1:]
-
-    return tokens, labels
+    return text
 
   def _get(self, idx):
     idx = self.shuffle_idx[idx]
@@ -621,24 +615,21 @@ class GPTDataset:
     return num_epochs
 
   # https://github.com/NVIDIA/Megatron-LM/blob/94bd476bd840c2fd4c3ebfc7448c2af220f4832b/megatron/core/datasets/gpt_dataset.py#L558
-  # TODO: all this for an arange
   def _build_doc_idx(self):
-    doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.doc_idx.numel()][1]
-    doc_idx[:] =  self.indexed_dataset.doc_idx.numpy()
+    doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.count][1]
     doc_idx = doc_idx.reshape(-1)
     doc_idx = doc_idx.astype(np.int32)
     if self.shuffle: np.random.shuffle(doc_idx)
     return doc_idx
 
   def _build_sample_idx(self):
-    num_samples = (self.num_epochs * self.tokens_per_epoch - 1) // self.seqlen
-    sample_idx = np.empty((num_samples + 1, 2), dtype=np.int32)
+    sample_idx = np.empty((self.samples + 1, 2), dtype=np.int32)
 
     sample_idx_idx, doc_idx_idx, doc_offset = 0, 0, 0
     sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
     sample_idx_idx += 1
 
-    for _ in tqdm(range(1, num_samples + 1)):
+    for _ in tqdm(range(1, self.samples + 1)):
       remaining_seqlen = self.seqlen + 1
       while remaining_seqlen > 0:
         doc_idx = int(self.doc_idx[doc_idx_idx])
@@ -649,7 +640,7 @@ class GPTDataset:
           remaining_seqlen = 0
         else:
           if doc_idx_idx == len(self.doc_idx) - 1:
-            assert sample_idx_idx == num_samples
+            assert sample_idx_idx == self.samples
             doc_idx = int(self.doc_idx[doc_idx_idx])
             doc_offset = self.indexed_dataset.sizes[doc_idx].item() - 1
             break
@@ -673,14 +664,14 @@ class BlendedGPTDataset:
     self.weights = [w / total_weight for w in weights]
 
     self.samples = samples
-    surplus = 0.0
+    surplus = 0.005
     samples_per_blend = [math.ceil(math.ceil(self.samples * w) * (1 + surplus)) for w in self.weights]
 
     self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, shuffle) for i,path in enumerate(paths)]
 
   def get(self, idx:int):
-    tokens, labels = self.datasets[0][idx]
-    return tokens, labels
+    tokens = self.datasets[0][idx]
+    return tokens
 
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, val:bool=True):
   if val:
@@ -699,13 +690,11 @@ def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, val:bool=T
     ], samples, seqlen, True)
 
   for b in range(math.ceil(samples / bs)):
-    tokens, labels = [], []
+    batch = []
     for i in range(bs):
-      token, label = dataset.get(b * bs + i)
-      tokens.append(token)
-      labels.append(label)
-
-    yield Tensor.stack(tokens, dim=0), Tensor.stack(labels, dim=0)
+      tokens = dataset.get(b * bs + i)
+      batch.append(tokens)
+    yield Tensor.stack(tokens, dim=0)
 
 if __name__ == "__main__":
   def load_unet3d(val):
@@ -736,11 +725,15 @@ if __name__ == "__main__":
         pbar.update(x[0].shape[0])
 
   def load_llama3(val):
-    max_ = 0
-    for t,l in batch_load_llama3(1, 5760, 8192, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)):
-      print(t.numpy())
-      max_ = max(max_, t.shape[1])
+    bs = 24
+    samples = 5760 if val else 12000000
+
+    max_, min_ = 0, math.inf
+    for tokens in tqdm(batch_load_llama3(bs, samples, 8192, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)), total=samples//bs):
+      max_ = max(max_, tokens.shape[1])
+      min_ = min(min_, tokens.shape[1])
     print(f"max seq length: {max_}")
+    print(f"min seq length: {min_}")
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
