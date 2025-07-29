@@ -1558,7 +1558,8 @@ def train_stable_diffusion():
     print(f"step {i} started")
     t1 = time.perf_counter()
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-    mean, logvar = Tensor.chunk(batch['npy'].cast(dtypes.half), 2, dim=1)
+    mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
+    mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
     latent = (mean + std * Tensor.randn(mean.shape)).cast(dtypes.half) * 0.18215
 

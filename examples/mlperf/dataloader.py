@@ -518,8 +518,8 @@ def collate(batch:list[dict], device:str|None=None):
   for sample in batch:
     for k,v in sample.items():
       ret[k].append(v)
-  ret['npy'] = Tensor.cat(*[Tensor(x, device=device) for x in ret['npy']], dim=0)
   return ret
+def collate_fn(batch): return batch
 
 # Reference (code): https://github.com/mlcommons/training/blob/2f4a93fb4888180755a8ef55f4b977ef8f60a89e/stable_diffusion/ldm/data/webdatasets.py, Line 55
 # Reference (params): https://github.com/mlcommons/training/blob/ab4ae1ca718d7fe62c369710a316dff18768d04b/stable_diffusion/configs/train_01x08x08.yaml, Line 107
@@ -534,7 +534,7 @@ def batch_load_train_stable_diffusion(BS:int, device:str|None=None):
   dataset = dataset.decode()
   dataset = dataset.map(filter_dataset)
   dataset = dataset.batched(BS, partial=False, collation_fn=functools.partial(collate, device=device))
-  dataset = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=1, persistent_workers=True)
+  dataset = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=1, persistent_workers=True, collate_fn=collate_fn)
 
   for x in dataset:
     yield x
