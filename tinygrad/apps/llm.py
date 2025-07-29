@@ -1,53 +1,38 @@
 from __future__ import annotations
-import sys, argparse, itertools, typing
+import sys, argparse, typing, functools, re
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
 
 class SimpleTokenizer:
-  replace_chars = { b" ": "Ġ".encode(), b"\n": "Ċ".encode() }
-  def __init__(self, mergeable_ranks: dict[bytes, int], special_tokens: dict[bytes, int]):
-    self._mergeable_ranks, self._special_tokens = mergeable_ranks, special_tokens
-    self._vocab = { tid: tok for tok, tid in itertools.chain(mergeable_ranks.items(), special_tokens.items()) }
+  def __init__(self, normal_tokens: dict[bytes, int], special_tokens: dict[bytes, int]):
+    self._normal_tokens, self._special_tokens = normal_tokens, special_tokens
+    self._inv_vocab = { tid: tok for tok, tid in (normal_tokens | special_tokens).items() }
+    self._special_re = re.compile(b"|".join(re.escape(tok) for tok in self._special_tokens.keys()))
+    self._replace_chars = { b" ": "Ġ".encode(), b"\n": "Ċ".encode() }
 
-  def encode(self, text: bytes, allowed_special: set[bytes] | None = None):
-    allowed_special = set(self._special_tokens.keys()) if allowed_special is None else allowed_special
+  def encode(self, text: bytes):
+    text = functools.reduce(lambda s, pair: s.replace(pair[0], pair[1]), self._replace_chars.items(), text)
     tokens: list[int] = []
     pos = 0
-    for old_c, new_c in SimpleTokenizer.replace_chars.items(): text = text.replace(old_c, new_c)
-    while pos < len(text):
-      min_special = min(((st, stpos) for st in allowed_special if (stpos:=text.find(st, pos)) != -1), key=lambda e: e[1], default=None)
-      word = text[pos:] if min_special is None else text[pos:min_special[1]]
-      tokens.extend(self._encode_word(word))
-      if min_special is not None:
-        tokens.append(self._special_tokens[min_special[0]])
-        pos = min_special[1] + len(min_special[0])
-      else: break
-
-    return tokens
+    for match in self._special_re.finditer(text):
+      tokens.extend(self._encode_word(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
+      pos = match.end(0)
+    return tokens + self._encode_word(text[pos:])
 
   def decode(self, ids: list[int]) -> bytes:
-    text = b''.join(self._vocab[tid] for tid in ids)
-    for new_c, old_c in SimpleTokenizer.replace_chars.items(): text = text.replace(old_c, new_c)
-    return text
+    return functools.reduce(lambda s, pair: s.replace(pair[1], pair[0]), self._replace_chars.items(), b''.join(self._inv_vocab[tid] for tid in ids))
 
   def role(self, role:bytes): return self.encode(b"<|start_header_id|>" + role + b"<|end_header_id|>\n\n")
 
   def _encode_word(self, word: bytes):
-    parts = [bytes([b]) for b in word]
+    parts = [word[i:i+1] for i in range(len(word))]
     while True:
-      min_idx: int | None = None
-      min_rank: int | None = None
-      for i, pair in enumerate(zip(parts[:-1], parts[1:])):
-        rank = self._mergeable_ranks.get(pair[0] + pair[1])
-        if rank is not None and (min_rank is None or rank < min_rank):
-          min_idx = i
-          min_rank = rank
-
-      if min_rank is None: break
-      assert min_idx is not None
+      min_tid, min_idx = 2**32, -1
+      for idx, (p1, p2) in enumerate(zip(parts[:-1], parts[1:])):
+        tid = self._normal_tokens.get(p1 + p2, min_tid)
+        if tid < min_tid: min_tid, min_idx = tid, idx
+      if min_idx == -1: break
       parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
-
-    tokens = [self._mergeable_ranks[part] for part in parts]
-    return tokens
+    return [ self._normal_tokens[p] for p in parts ]
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
@@ -185,7 +170,7 @@ if __name__ == "__main__":
   model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
 
   # extract some metadata
-  vocab: typing.Iterable[tuple[bytes, int]] = ((tid.encode("utf-8"), idx) for idx, tid in enumerate(kv["tokenizer.ggml.tokens"]))
+  vocab: typing.Iterable[tuple[bytes, int]] = ((tok.encode(), idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
   normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
   tok = SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
@@ -193,9 +178,10 @@ if __name__ == "__main__":
 
   ids: list[int] = [bos_id]
   while 1:
+    print(ids)
     start_pos = len(ids) - 1
     try:
-      ids += tok.role(b"user") + tok.encode(input('>>> ').encode("utf-8")) + [eos_id] + tok.role(b"assistant")
+      ids += tok.role(b"user") + tok.encode(input('>>> ').encode()) + [eos_id] + tok.role(b"assistant")
     except EOFError:
       break
     for next_id in model.generate(ids, start_pos):
