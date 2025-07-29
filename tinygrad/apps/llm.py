@@ -1,33 +1,53 @@
 from __future__ import annotations
-import sys, argparse
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv
+import sys, argparse, itertools, typing
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
 
 class SimpleTokenizer:
-  def __init__(self, vocab: list[str]):
-    self.vocab: list[str] = vocab
-    self.biggest_token: int = max(map(len, vocab))
-    self.token_to_id: dict[str, int] = {tok: i for i, tok in enumerate(vocab)}
-    self.replace_space = "Ġ"
-    self.replace_newline = "Ċ"
+  replace_chars = { b" ": "Ġ".encode(), b"\n": "Ċ".encode() }
+  def __init__(self, mergeable_ranks: dict[bytes, int], special_tokens: dict[bytes, int]):
+    self._mergeable_ranks, self._special_tokens = mergeable_ranks, special_tokens
+    self._vocab = { tid: tok for tok, tid in itertools.chain(mergeable_ranks.items(), special_tokens.items()) }
 
-  def encode(self, text:str) -> list[int]:
-    s = text.replace(" ", self.replace_space).replace("\n", self.replace_newline)
-    out: list[int] = []
-    i = 0
-    while i < len(s):
-      j = min(i+self.biggest_token, len(s))
-      while i < j and (tid:=self.token_to_id.get(s[i:j])) is None: j -= 1
-      if tid is None: raise RuntimeError(f"token not found in {s}")
-      assert tid is not None, f"token not found in {s}"
-      out.append(tid)
-      i = j
-    return out
+  def encode(self, text: bytes, allowed_special: set[bytes] | None = None):
+    allowed_special = set(self._special_tokens.keys()) if allowed_special is None else allowed_special
+    tokens: list[int] = []
+    pos = 0
+    for old_c, new_c in SimpleTokenizer.replace_chars.items(): text = text.replace(old_c, new_c)
+    while pos < len(text):
+      min_special = min(((st, stpos) for st in allowed_special if (stpos:=text.find(st, pos)) != -1), key=lambda e: e[1], default=None)
+      word = text[pos:] if min_special is None else text[pos:min_special[1]]
+      tokens.extend(self._encode_word(word))
+      if min_special is not None:
+        tokens.append(self._special_tokens[min_special[0]])
+        pos = min_special[1] + len(min_special[0])
+      else: break
 
-  def decode(self, ids: list[int]) -> str:
-    return ''.join(self.vocab[tid] for tid in ids).replace(self.replace_space, " ").replace(self.replace_newline, "\n")
+    return tokens
 
-  def role(self, role:str):
-    return [t for x in ["<|start_header_id|>", role, "<|end_header_id|>\n\n"] for t in self.encode(x)]  # llama style
+  def decode(self, ids: list[int]) -> bytes:
+    text = b''.join(self._vocab[tid] for tid in ids)
+    for new_c, old_c in SimpleTokenizer.replace_chars.items(): text = text.replace(old_c, new_c)
+    return text
+
+  def role(self, role:bytes): return self.encode(b"<|start_header_id|>" + role + b"<|end_header_id|>\n\n")
+
+  def _encode_word(self, word: bytes):
+    parts = [bytes([b]) for b in word]
+    while True:
+      min_idx: int | None = None
+      min_rank: int | None = None
+      for i, pair in enumerate(zip(parts[:-1], parts[1:])):
+        rank = self._mergeable_ranks.get(pair[0] + pair[1])
+        if rank is not None and (min_rank is None or rank < min_rank):
+          min_idx = i
+          min_rank = rank
+
+      if min_rank is None: break
+      assert min_idx is not None
+      parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
+
+    tokens = [self._mergeable_ranks[part] for part in parts]
+    return tokens
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
   B, H, T, Hd = x.shape
@@ -165,7 +185,9 @@ if __name__ == "__main__":
   model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
 
   # extract some metadata
-  tok = SimpleTokenizer(kv["tokenizer.ggml.tokens"])
+  vocab: typing.Iterable[tuple[bytes, int]] = ((tid.encode("utf-8"), idx) for idx, tid in enumerate(kv["tokenizer.ggml.tokens"]))
+  normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
+  tok = SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
@@ -173,10 +195,10 @@ if __name__ == "__main__":
   while 1:
     start_pos = len(ids) - 1
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + [eos_id] + tok.role("assistant")
+      ids += tok.role(b"user") + tok.encode(input('>>> ').encode("utf-8")) + [eos_id] + tok.role(b"assistant")
     except EOFError:
       break
     for next_id in model.generate(ids, start_pos):
-      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
-      sys.stdout.flush()
+      sys.stdout.buffer.write(tok.decode([next_id]) if next_id != eos_id else b"\n\n")
+      sys.stdout.buffer.flush()
       if next_id == eos_id: break
