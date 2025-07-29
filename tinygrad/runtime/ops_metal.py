@@ -1,4 +1,4 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal, os
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, signal, os, shutil
 from typing import Any, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, fetch
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
@@ -72,7 +72,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
-    self.start_xctrace()
+    if PROFILE.value >= 2 or MetalDevice.xctrace_proc is None: self.start_xctrace()
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
@@ -90,16 +90,14 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight.clear()
 
   xctrace_proc = None
-  @classmethod
-  def start_xctrace(cls):
-    if PROFILE.value < 2 or cls.xctrace_proc is not None: return
+  def start_xctrace(self):
     # fetch xctrace config
     cfg = "https://gist.githubusercontent.com/qazalin/96680d79e12ab18f19403ac696ced8d2/raw/12268d24c738e4d1272b29a2d26ee6e5b831a6bd/GPUCounter.xml"
-    cfg_loc = os.path.expanduser("~/Library/Application Support/Instruments/Templates/GPUCounter.tracetemplate")
-    os.system(f"plutil -convert xml1 -o '{cfg_loc}' {fetch(cfg)}")
+    (cfg_dir:=pathlib.Path.home()/"Library/Application Support/Instruments/Templates").mkdir(exist_ok=True)
+    os.system(f"plutil -convert xml1 -o '{cfg_dir}/GPUCounter.tracetemplate' {fetch(cfg)}")
     # start recording hardware counters
-    os.system("rm -rf "+(output:="/tmp/metal.trace"))
-    cls.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
+    if (output:=pathlib.Path("/tmp/metal.trace")).exists(): shutil.rmtree(output)
+    MetalDevice.xctrace_proc = subprocess.Popen(["xctrace", "record", "--template", "GPUCounter", "--output", output, "--attach", str(os.getpid()),
                                          "--notify-tracing-started", NOTIFY_KEY:="com.tinygrad.xctrace.started"])
     subprocess.check_output(["notifyutil", "-1", NOTIFY_KEY])
 
