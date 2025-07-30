@@ -10,6 +10,7 @@ from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
+from tinygrad.runtime.ops_llvm import LLVMCompiler
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -194,9 +195,13 @@ def llvm_mca(prg:ProgramSpec):
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
-  if prg.device == "AMD": return json.dumps(llvm_mca(prg)).encode()
-  lib = Device[prg.device].compiler.compile(prg.src)
+  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
+  if isinstance(compiler, LLVMCompiler):
+    # NOTE: llvm-objdump may contain headers/extra information, skip if llvm-mca can't parse a line
+    opts = ["-skip-unsupported-instructions=parse-failure", "--all-views", "--all-stats", "--json"]
+    if compiler.target_arch == "AMDGPU": opts += [f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn"]
+    return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
   return json.dumps({"src":buf.getvalue()}).encode()
 
 # ** HTTP server

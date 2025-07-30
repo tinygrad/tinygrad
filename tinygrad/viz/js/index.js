@@ -454,17 +454,6 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
-function createRegPressureCell(liveRegs, totalRegs) {
-  const td = document.createElement("td");
-  td.className = "pct-row";
-  const max = td.appendChild(document.createElement("div"));
-  const bar = max.appendChild(document.createElement("div"));
-  const pct = Math.min(100, Math.round((liveRegs / totalRegs) * 100));
-  bar.style.width = pct + "%";
-  bar.title = `${liveRegs} / ${totalRegs} (${pct}%)`;
-  return td;
-}
-
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -518,21 +507,20 @@ async function main() {
     const metadata = document.querySelector(".metadata");
     metadata.innerHTML = "";
     // custom mca format
-    // custom mca format
-    if (ret.fmt === "mca") {
+    if (ret.CodeRegions != null) {
       // NOTE: we always display one kernel
-      const cr = ret.src.CodeRegions[0];
+      const cr = ret.CodeRegions[0];
       // group resource usage stats by instruction
       const usage = {};
       for (const d of cr.ResourcePressureView.ResourcePressureInfo) {
         if (!(d.InstructionIndex in usage)) {
           usage[d.InstructionIndex] = {}
-          for (let i=0; i<ret.src.TargetInfo.Resources.length; i++) usage[d.InstructionIndex][i] = 0;
+          for (let i=0; i<ret.TargetInfo.Resources.length; i++) usage[d.InstructionIndex][i] = 0;
         }
         usage[d.InstructionIndex][d.ResourceIndex] += d.ResourceUsage;
       }
       const totalUsage = {};
-      for (let i=0; i<ret.src.TargetInfo.Resources.length; i++) totalUsage[res=ret.src.TargetInfo.Resources[i]] = 0;
+      for (let i=0; i<ret.TargetInfo.Resources.length; i++) totalUsage[res=ret.TargetInfo.Resources[i]] = 0;
       // InstructionView in the center
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
@@ -542,8 +530,8 @@ async function main() {
         const tr = appendRow(asm, cr.Instructions[i], info.Latency, null, "main-row code-row");
         const usageSum = {};
         let sum = 0;
-        for (let j=0; j<ret.src.TargetInfo.Resources.length; j++) {
-          const resource = ret.src.TargetInfo.Resources[j];
+        for (let j=0; j<ret.TargetInfo.Resources.length; j++) {
+          const resource = ret.TargetInfo.Resources[j];
           if (!(resource in usageSum)) usageSum[resource] = 0;
           usageSum[resource] += usage[i][j];
           totalUsage[resource] += usage[i][j];
