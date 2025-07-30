@@ -1343,7 +1343,6 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  # overfitting this example should give cross_entropy log(BS)
   from examples.mlperf.dataloader import batch_load_llama3
   iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
 
