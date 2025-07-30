@@ -203,6 +203,7 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # if there's a reduce child, shapes match with ones removed
   # arg[2] = True is fuse marker
   if unwrap(view.st).contiguous and view.shape == r.full_shape and (not (len(r.arg) == 3 and r.arg[2])): return None
+  if isinstance(r.dtype, ImageDType): return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
