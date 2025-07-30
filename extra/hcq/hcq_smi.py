@@ -71,14 +71,17 @@ def cmd_kill_pids(args):
   devs = scan_devs_based_on_lock(prefix:={"amd":"am", "nv":"nv"}[args.backend], args)
 
   for dev in devs:
-    try:
-      pid = subprocess.check_output(['sudo', 'lsof', f'/tmp/{prefix}_{dev}.lock']).decode('utf-8').strip().split('\n')[1].split()[1]
-      print(f"Killing process {pid} (which uses {dev})")
-      subprocess.run(['sudo', 'kill', '-9', pid], check=True)
-      if stopped_pids[pid] > 0: time.sleep(0.2)
-      if stopped_pids[pid] == 64:
-    except subprocess.CalledProcessError as e:
-      print(f"Failed to kill process for device {dev}: {e}", file=sys.stderr)
+    for i in range(128):
+      if i > 0: time.sleep(0.2)
+
+      try:
+        try: pid = subprocess.check_output(['sudo', 'lsof', f'/tmp/{prefix}_{dev}.lock']).decode('utf-8').strip().split('\n')[1].split()[1]
+        except subprocess.CalledProcessError: break
+
+        print(f"Killing process {pid} (which uses {dev})")
+        subprocess.run(['sudo', 'kill', '-9', pid], check=True)
+      except subprocess.CalledProcessError as e:
+        print(f"Failed to kill process for device {dev}: {e}", file=sys.stderr)
 
 def add_common_commands(parent_subparsers):
   p_insmod = parent_subparsers.add_parser("insmod", help="Insert a kernel module")
