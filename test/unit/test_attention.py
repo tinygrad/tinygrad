@@ -9,8 +9,7 @@ class TestAttention(unittest.TestCase):
     attn = q.scaled_dot_product_attention(k, v)
     sched = attn.schedule()
     return attn, sched
-
-
+    
   def test_half_qkv_buffers(self):
     _, sched = self._get_attn_and_scheduler()
     # attention has 5 kernels now
@@ -33,6 +32,5 @@ class TestAttention(unittest.TestCase):
     )
     assert found_cast_uint_to_float, f"no cast found from uint to float in scheduler buffers {sched=}"
 
-    
 if __name__ == '__main__':
   unittest.main()
