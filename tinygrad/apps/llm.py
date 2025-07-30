@@ -1,22 +1,26 @@
 from __future__ import annotations
-import sys, argparse, typing, functools, re
+import sys, argparse, typing, re, itertools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
+
+def gpt2_decode_vocab(voc: dict[str, int]): # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
+  c2b = { chr(cp): cp for cp in itertools.chain(range(ord("!"), ord("~")+1), range(ord("¡"), ord("¬")+1), range(ord("®"), ord("ÿ")+1)) }
+  c2b.update({ chr(256+off): cp for off, cp in enumerate([ cp for cp in range(256) if chr(cp) not in c2b ]) })
+  return { bytes(c2b[c] for c in tok): tid for tok, tid in voc.items() }
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens: dict[bytes, int], special_tokens: dict[bytes, int]):
     self._normal_tokens, self._special_tokens = normal_tokens, special_tokens
     self._inv_vocab = { tid: tok.decode(errors="ignore") for tok, tid in (normal_tokens | special_tokens).items() }
     self._special_re = re.compile(b"|".join(re.escape(tok) for tok in self._special_tokens.keys()))
-    self._replace_chars = { " ": "Ġ", "\n": "Ċ" }
 
   @staticmethod
   def from_gguf_kv(kv: dict):
-    vocab: typing.Iterable[tuple[bytes, int]] = ((tok.encode(), idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
+    vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
+    return SimpleTokenizer(gpt2_decode_vocab(dict(normal_tokens)), gpt2_decode_vocab(dict(special_tokens)))
 
   def encode(self, text: str):
-    btext = functools.reduce(lambda s, pair: s.replace(pair[0], pair[1]), self._replace_chars.items(), text).encode()
+    btext = text.encode()
     tokens: list[int] = []
     pos = 0
     for match in self._special_re.finditer(btext):
@@ -24,9 +28,7 @@ class SimpleTokenizer:
       pos = match.end(0)
     return tokens + self._encode_word(btext[pos:])
 
-  def decode(self, ids: list[int]) -> str:
-    return functools.reduce(lambda s, pair: s.replace(pair[1], pair[0]), self._replace_chars.items(), ''.join(self._inv_vocab[tid] for tid in ids))
-
+  def decode(self, ids: list[int]) -> str: return ''.join(self._inv_vocab[tid] for tid in ids)
   def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
 
   def _encode_word(self, word: bytes):
