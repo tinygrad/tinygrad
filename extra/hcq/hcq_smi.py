@@ -5,7 +5,7 @@ import argparse, glob, os, re, time, subprocess, sys
 
 def scan_devs_based_on_lock(prefix:str, args) -> list[str]:
   target_dev = args.pci_bus if 'pci_bus' in args.__dir__() else ""
-  
+
   devs = []
   for dev in glob.glob(f'/tmp/{prefix}_*.lock'):
     dev_id = dev[8:-5]
