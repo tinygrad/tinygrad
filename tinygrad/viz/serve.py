@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, subprocess
+import tinygrad.runtime.autogen.llvm as llvm, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -189,14 +190,14 @@ def get_runtime_stats(key) -> list[dict]:
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
+  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   if isinstance(compiler, LLVMCompiler):
     # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
     opts = ["-skip-unsupported-instructions=parse-failure", "--json"]
-    # TODO: properly get the required flags
-    # ops_llvm defines mtriples, but that doesn't seem to be enough for llvm-mca
-    if compiler.target_arch == "AMDGPU": opts += [f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn"]
-    if compiler.target_arch == "X86": opts += ["-mtriple=x86_64", "-x86-asm-syntax=intel"]
+    tm = compiler.target_machine
+    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm)).decode()
+    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
+    opts += [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
     return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
   return json.dumps({"src":buf.getvalue()}).encode()
 
