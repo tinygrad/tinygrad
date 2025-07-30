@@ -641,7 +641,7 @@ jobs:
   testreddriverbenchmark:
     name: AM Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -707,7 +707,7 @@ jobs:
   testgreendriverbenchmark:
     name: NV Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
