@@ -116,23 +116,23 @@ class LARS(Optimizer):
         r2 = g.square().sum().sqrt()
         r:Tensor|float = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
-      if self.wd > 0 and self.ns_params is not None: g = g + self.wd * t.detach()
+      if self.wd > 0 and self.ns_params is None: g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
         # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
-        if self.ns_params is not None:
+        if self.ns_params is None:
           self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
           g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
         else:
           self.b[i].assign(((1 - self.momentum) * self.b[i]).contiguous() + g * self.momentum)
           g = (g * (1 - self.momentum) + self.momentum * self.b[i]) if self.nesterov else self.b[i]
 
-      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(self.ns_params).reshape(g.shape)
+      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is not None else (t.detach() * (1.0 - self.wd * self.lr) - g))
+      ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is None else (t.detach() * (1.0 - self.wd * self.lr) - g))
     return ret, self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 it's just Adam/W.
