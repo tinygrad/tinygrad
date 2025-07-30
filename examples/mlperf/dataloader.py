@@ -1,4 +1,5 @@
 import functools
+import hashlib
 import os, random, pickle, queue, struct, math
 from typing import List
 from pathlib import Path
@@ -555,15 +556,26 @@ class BinIdxDataset:
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
-  def __init__(self, base_path:Path, samples:int, seqlen:int, shuffle:bool):
+  def __init__(self, base_path:Path, samples:int, seqlen:int, seed:int, shuffle:bool):
     self.samples, self.seqlen = samples, seqlen
     self.shuffle = shuffle
+    self.rng = np.random.RandomState(seed)
 
     self.indexed_dataset = BinIdxDataset(base_path)
 
-    self.doc_idx = self._build_doc_idx()
-    self.sample_idx = self._build_sample_idx()
-    self.shuffle_idx = self._build_shuffle_idx()
+    # check for cache
+    cache_hash = hashlib.sha256(f"{samples}:{seqlen}:{seed}:{shuffle}".encode()).hexdigest()
+    cache_path = base_path.with_name(f"{base_path.name}.{cache_hash}.index_cache")
+    if cache_path.exists():
+      with open(cache_path, "rb") as f:
+        self.doc_idx, self.sample_idx, self.shuffle_idx = pickle.load(f)
+    else:
+      self.doc_idx = self._build_doc_idx()
+      self.sample_idx = self._build_sample_idx()
+      self.shuffle_idx = self._build_shuffle_idx()
+      # save cache
+      with open(cache_path, "wb") as f:
+        pickle.dump((self.doc_idx, self.sample_idx, self.shuffle_idx), f)
 
   def __getitem__(self, idx):
     if idx is None:
@@ -619,7 +631,7 @@ class GPTDataset:
     doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.count][1]
     doc_idx = doc_idx.reshape(-1)
     doc_idx = doc_idx.astype(np.int32)
-    if self.shuffle: np.random.shuffle(doc_idx)
+    if self.shuffle: self.rng.shuffle(doc_idx)
     return doc_idx
 
   def _build_sample_idx(self):
@@ -654,11 +666,13 @@ class GPTDataset:
 
   def _build_shuffle_idx(self):
     shuffle_idx = np.arange(self.samples, dtype=np.int32)
-    if self.shuffle: np.random.shuffle(shuffle_idx)
+    if self.shuffle: self.rng.shuffle(shuffle_idx)
     return shuffle_idx
 
 class BlendedGPTDataset:
-  def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, shuffle:bool):
+  def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, seed:int, shuffle:bool):
+    self.seed = seed
+
     # normalize weights
     total_weight = sum(weights)
     self.weights = [w / total_weight for w in weights]
@@ -667,34 +681,33 @@ class BlendedGPTDataset:
     surplus = 0.005
     samples_per_blend = [math.ceil(math.ceil(self.samples * w) * (1 + surplus)) for w in self.weights]
 
-    self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, shuffle) for i,path in enumerate(paths)]
+    self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, seed + i, shuffle) for i,path in enumerate(paths)]
 
   def get(self, idx:int):
     tokens = self.datasets[0][idx]
     return tokens
 
-def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, val:bool=True):
+def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
   if val:
     dataset = BlendedGPTDataset([
       base_dir / "validation" / "c4-validationn-91205-samples.en_text_document",
     ], [
       1.0
-    ], samples, seqlen, False)
+    ], samples, seqlen, seed, False)
   else:
     dataset = BlendedGPTDataset([
-      base_dir / "c4-train.en_5_text_document",
       base_dir / "c4-train.en_6_text_document",
       base_dir / "c4-train.en_7_text_document",
     ], [
-      1.0, 1.0, 1.0
-    ], samples, seqlen, True)
+      1.0, 1.0
+    ], samples, seqlen, seed, True)
 
   for b in range(math.ceil(samples / bs)):
     batch = []
     for i in range(bs):
       tokens = dataset.get(b * bs + i)
       batch.append(tokens)
-    yield Tensor.stack(tokens, dim=0)
+    yield Tensor.stack(batch, dim=0)
 
 if __name__ == "__main__":
   def load_unet3d(val):
@@ -726,10 +739,11 @@ if __name__ == "__main__":
 
   def load_llama3(val):
     bs = 24
-    samples = 5760 if val else 12000000
+    samples = 5760 if val else 1_200_000
+    seqlen = 512
 
     max_, min_ = 0, math.inf
-    for tokens in tqdm(batch_load_llama3(bs, samples, 8192, Path(getenv("BASEDIR", "/raid/datasets/c4/")), bool(val)), total=samples//bs):
+    for tokens in tqdm(batch_load_llama3(bs, samples, seqlen, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=5760, val=bool(val)), total=samples//bs):
       max_ = max(max_, tokens.shape[1])
       min_ = min(min_, tokens.shape[1])
     print(f"max seq length: {max_}")
