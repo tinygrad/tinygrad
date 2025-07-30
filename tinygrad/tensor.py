@@ -301,8 +301,8 @@ class Tensor(MathTrait):
 
   def _buffer(self) -> Buffer:
     x = self.cast(self.dtype.base).contiguous()
-    if isinstance(self.device, tuple) or self.device.startswith("DISK"): x = x.to("CPU")
-    return cast(Buffer, x.realize().uop.base.buffer)
+    if isinstance(self.device, tuple): x = x.to("CPU")
+    return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
