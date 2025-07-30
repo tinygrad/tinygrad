@@ -670,6 +670,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
+    - name: Test driver cold start time
+      run: time DEBUG=3 AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
+    - name: Test driver warm start time
+      run: time DEBUG=3 AMD=1 python3 test/test_tiny.py TestTiny.test_plus
     # Fails on 9070
     # - name: Test tensor cores
     #   run: |
@@ -680,10 +684,6 @@ jobs:
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee am_matmul_amd.txt
     - name: Test AMD=1
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
-    - name: Test driver cold start time
-      run: time DEBUG=3 AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
-    - name: Test driver warm start time
-      run: time DEBUG=3 AMD=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test DISK copy time
       run: AMD=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Run full CIFAR training w 1 GPU
@@ -734,10 +734,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Test tensor cores
-      run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test driver start time
       run: time DEBUG=3 NV=1 python3 test/test_tiny.py TestTiny.test_plus
+    - name: Test tensor cores
+      run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test DISK copy time
       run: NV=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Test LLAMA-3
