@@ -381,7 +381,7 @@ class FrozenOpenClipEmbedder(Embedder):
     self.ln_penultimate = ln_penultimate
 
   def tokenize(self, text:str, device:Optional[str]=None) -> Tensor:
-    return Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int64, device=device).reshape(1,-1)
+    return Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int32, device=device).reshape(1,-1)
 
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
