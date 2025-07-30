@@ -65,6 +65,7 @@ class TestOptim(unittest.TestCase):
 
   def test_multistep_sgd_high_lr_teeny(self): self._test_sgd(2, {'lr': 1.1, 'teeny': True}, 1e-6, 1e-5)
   def test_multistep_adam_high_lr_teeny(self): self._test_adam(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)
+  def test_multistep_adam_high_lr_muon(self): self._test_muon(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)
 
   def test_sgd(self): self._test_sgd(1, {'lr': 0.001}, 1e-6, 0)
   def test_sgd_high_lr(self): self._test_sgd(1, {'lr': 10}, 1e-6, 1e-5)
