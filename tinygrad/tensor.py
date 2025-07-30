@@ -1266,6 +1266,20 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
+    # --- fast functional path for 1D scalar indexing (enables fusion) ---
+    if isinstance(indices, (int, get_args(ConstType))) and len(self.shape) == 1 and unwrap(self.uop.st).contiguous:
+      N = self.shape[0]
+      idx = int(indices)
+      if idx < 0: idx += N  # normalize negative indices
+      idx_t = Tensor([idx], device=self.device, dtype=dtypes.int32).reshape(())
+      ar = Tensor.arange(N, device=self.device, dtype=dtypes.int32)
+      maskb = ar == idx_t  # boolean mask
+      v = v.to(self.device)
+      v_t = v.cast(self.dtype).reshape(())._broadcast_to((N,))
+      updated = Tensor.where(maskb, v_t, self)
+      self.replace(updated)
+      return
+
     res = self.realize()._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
