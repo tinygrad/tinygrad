@@ -299,7 +299,7 @@ class Tensor(MathTrait):
     """
     return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().uop.base.buffer)
+  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().realize().uop.base.buffer)
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
