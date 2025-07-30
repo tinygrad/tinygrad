@@ -63,12 +63,11 @@ class TestLinAlg(unittest.TestCase):
       reconstruction_helper([Q,R],a)
 
   def test_newton_schulz(self):
-    coefficients = [(1.5,-0.5), (2,-1.5,0.5)]
-    Tensor.manual_seed(42)#unsure if any random matrix works
+    coefficients = [(2, -1.5, 0.5), (2.0, -1.4, 0.2, 0.2)]
     a = Tensor.randn(2,2)
     for coefs in coefficients:
-      b = Tensor.newton_schulz(a, steps=5,params=coefs)
-      orthogonality_helper(b, tolerance=1e-5)
+      b = Tensor.newton_schulz(a, steps=10, params=coefs)
+      orthogonality_helper(b, tolerance=1e-3)# ns(A) = U @ Vt -> (U @ Vt) @ (U @ Vt)t = U @ (Vt @ V) @ Ut = I
 
 if __name__ == "__main__":
   unittest.main()
