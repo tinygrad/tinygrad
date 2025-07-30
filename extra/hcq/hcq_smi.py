@@ -46,7 +46,7 @@ def cmd_reset_devices(args):
 
   for dev in devs:
     print(f"Resetting device {dev}")
-    _do_reset_device(dev)
+    if args.backend != "amd": _do_reset_device(dev)
     time.sleep(0.2)
 
 def cmd_show_pids(args):
