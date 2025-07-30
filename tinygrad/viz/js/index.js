@@ -114,6 +114,8 @@ const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "r
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
+const resourceColors = {HWVALU:"#ffffc0", HWTransVALU:"#ffffa2", HWSALU:"#F4A261", HWBranch:"#ff8080",
+                        HWRC:"#8D99AE", HWVMEM:"#87CEEB", HWLGKM:"#C8F9D4", DEFAULT: "#4D69E3"};
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -382,7 +384,7 @@ function appendTd(tr, value, unit=null) {
   tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
 }
 
-function appendRow(table, name, value, unit, cls) {
+function appendRow(table, name, value, unit=null, cls="main-row") {
   const tr = table.appendChild(document.createElement("tr"));
   tr.className = cls;
   tr.appendChild(document.createElement("td")).innerText = name;
@@ -516,22 +518,11 @@ async function main() {
     const metadata = document.querySelector(".metadata");
     metadata.innerHTML = "";
     // custom mca format
+    // custom mca format
     if (ret.fmt === "mca") {
-      // TODO: are these baisc blocks?
+      // NOTE: we always display one kernel
       const cr = ret.src.CodeRegions[0];
-      // summary view (sidebar)
-      const summaryTable = metadata.appendChild(document.createElement("table"));
-      for (const [k, v] of Object.entries(cr.SummaryView)) {
-        appendRow(summaryTable, k, v, null, "main-row");
-      }
-      // disasm view (center)
-      const asmTable = root.appendChild(document.createElement("table"));
-      const thead = asmTable.appendChild(document.createElement("thead"));
-      const addColumn = (col) => thead.appendChild(document.createElement("th")).innerText = col;
-      for (const col of ["", "Op"]) addColumn(col);
-      for (const col of ret.src.TargetInfo.Resources) addColumn(col);
-      for (const col of Object.keys(cr.InstructionInfoView.InstructionList[0])) addColumn(col);
-      // index resource usage stats by instruction
+      // group resource usage stats by instruction
       const usage = {};
       for (const d of cr.ResourcePressureView.ResourcePressureInfo) {
         if (!(d.InstructionIndex in usage)) {
@@ -540,13 +531,54 @@ async function main() {
         }
         usage[d.InstructionIndex][d.ResourceIndex] += d.ResourceUsage;
       }
+      const totalUsage = {};
+      for (let i=0; i<ret.src.TargetInfo.Resources.length; i++) totalUsage[res=ret.src.TargetInfo.Resources[i]] = 0;
+      // InstructionView in the center
+      const asm = root.appendChild(document.createElement("table"));
+      const thead = asm.appendChild(document.createElement("thead"));
+      for (const col of ["Opcode", "Latency", "HW Resources"]) thead.appendChild(document.createElement("th")).innerText = col;
       for (let i=0; i<cr.Instructions.length; i++) {
-        const isa = cr.Instructions[i];
-        tr = appendRow(asmTable, i, isa, null, "main-row code-row");
-        const amt = usage[i];
-        for (let j=0; j<ret.src.TargetInfo.Resources.length; j++) appendTd(tr, amt[j] ?? 0);
         const info = cr.InstructionInfoView.InstructionList[i];
-        for (const v of Object.values(info)) appendTd(tr, v);
+        const tr = appendRow(asm, cr.Instructions[i], info.Latency, null, "main-row code-row");
+        const usageSum = {};
+        let sum = 0;
+        for (let j=0; j<ret.src.TargetInfo.Resources.length; j++) {
+          const resource = ret.src.TargetInfo.Resources[j];
+          if (!(resource in usageSum)) usageSum[resource] = 0;
+          usageSum[resource] += usage[i][j];
+          totalUsage[resource] += usage[i][j];
+          sum += usage[i][j];
+        }
+        const usageTd = tr.appendChild(document.createElement("td"));
+        usageTd.className = "pct-row";
+        const usageBar = usageTd.appendChild(document.createElement("div"));
+        for (const [k,v] of Object.entries(usageSum)) {
+          if (v === 0) continue;
+          const seg = usageBar.appendChild(document.createElement("div"));
+          seg.style.width = (v/sum)*100+"%";
+          seg.title = k;
+          seg.style.background = resourceColors[k] ?? resourceColors.DEFAULT;
+        }
+      }
+      // SummaryView in sidebar
+      const summary = metadata.appendChild(document.createElement("table"));
+      for (const [k, v] of Object.entries(cr.SummaryView)) {
+        // normalize Instructions value by number of iterations
+        if (k === "Instructions") {
+          appendRow(summary, "Instructions", v / cr.SummaryView.Iterations);
+          appendRow(summary, "uOps", cr.SummaryView.TotaluOps / cr.SummaryView.Iterations);
+        }
+        else appendRow(summary, k, v);
+      }
+      for (const [k, v] of Object.entries(totalUsage)) {
+        const tr = summary.appendChild(document.createElement("tr"));
+        tr.className = "main-row";
+        const td = tr.appendChild(document.createElement("td"));
+        const div = td.appendChild(document.createElement("div"));
+        div.className = "legend";
+        div.appendChild(document.createElement("div")).style.background = resourceColors[k] ?? resourceColors.DEFAULT;
+        div.appendChild(document.createElement("p")).textContent = k;
+        appendTd(tr, v);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
