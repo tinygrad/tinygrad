@@ -244,28 +244,27 @@ def eval_mrcnn():
 def eval_llama3():
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
-  from examples.mlperf.metrics import log_perplexity
   from tinygrad.helpers import tqdm
 
-  bs = 1
-  sequence_length = 8192
+  bs = 4
+  sequence_length = 512
 
   model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=sequence_length, jit=False, disable_kv_cache=True)
 
   @TinyJit
   def eval_step(model, tokens):
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    print(logits.shape, tokens.shape)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    # loss = log_perplexity(logits, l)
     return loss.flatten()
 
   from examples.mlperf.dataloader import batch_load_llama3
-  iter = batch_load_llama3(bs, 5760, 8192, Path(getenv("BASEDIR", "/raid/datasets/c4/")), True)
+  iter = batch_load_llama3(bs, 5760, sequence_length, Path(getenv("BASEDIR", "/raid/datasets/c4/")), True)
 
   losses = []
   for tokens in tqdm(iter, total=5760//bs):
+    GlobalCounters.reset()
     losses += eval_step(model, tokens).tolist()
+    tqdm.write(f"loss: {np.mean(losses)}")
 
   log_perplexity = Tensor(losses).mean()
   print(f"Log Perplexity: {log_perplexity.item()}")
