@@ -3,7 +3,7 @@ import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
-from tinygrad.helpers import dedup, partition, all_same, flatten, getenv
+from tinygrad.helpers import dedup, all_same, flatten, getenv
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -207,12 +207,15 @@ def remove_blockend(x:UOp):
     assert all_same(parent_blocks), f"should never have two parent blocks (has {len(parent_blocks)})"
     parent_block = parent_blocks[0]
     assert len(parent_blocks) == parent_block.arg.cnt
-    # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
-    early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_REG and x.arg.end in y.src)
+    # NOTE: DEFINE_ACC doesn't have to be handled in any special way
+    late_ops = list(x.arg.lst)
     # NOTE: we have to add a barrier at the start if barrier is used in the range
     if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
-    arg = BasicBlock(tuple(early_ops)+parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
+    # peephole opt, remove any BARRIERs next to each other
+    for i in range(len(late_ops)-1):
+      if late_ops[i].op is Ops.BARRIER and late_ops[i+1].op is Ops.BARRIER: late_ops[i+1] = UOp(Ops.NOOP)
+    arg = BasicBlock(parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
 
 block_merge = PatternMatcher([
