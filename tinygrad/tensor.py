@@ -4059,7 +4059,7 @@ class Tensor(MathTrait):
 
   def newton_schulz(self, steps:int=5, params=(2,-1.5,0.5)) -> Tensor:
     """
-    Performs the newton-schulz algorithm for a matrix A for odd polynomials. The degree of the odd polynomial depends on the number of params.
+    Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
     """
     assert self.ndim == 2
     G = self / (self.square().sum().sqrt() + 1.0e-7)
