@@ -240,6 +240,7 @@
     width: 100%;
     height: 100%;
     max-height: 100vh;
+    overflow-w: auto;
   }
   .raw-text code {
     max-height: none !important;
@@ -267,6 +268,9 @@
   }
   tr.main-row > td, tr.sub-row > td {
     padding: 8px 12px;
+  }
+  tr.code-row > td:nth-child(2) {
+    font-family: monospace;
   }
   td.pct-row > div {
     background: #2c2f40;

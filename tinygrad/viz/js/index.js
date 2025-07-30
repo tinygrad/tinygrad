@@ -377,11 +377,16 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
+function appendTd(tr, value, unit=null) {
+  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
+  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
+}
+
 function appendRow(table, name, value, unit, cls) {
   const tr = table.appendChild(document.createElement("tr"));
   tr.className = cls;
   tr.appendChild(document.createElement("td")).innerText = name;
-  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : typeof value === "string" ? value : value.toFixed(2)+(unit != null ? " "+unit : "%");
+  appendTd(tr, value, unit);
   return tr;
 }
 
@@ -510,30 +515,38 @@ async function main() {
     root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
     metadata.innerHTML = "";
-    // custom rga format
-    if (ret.fmt === "rga") {
-      // hw utilization table (sidebar)
-      const utilizationTable = metadata.appendChild(document.createElement("table"));
-      const a = ret.analysis[0]; // only one row
-      const appendUsageRow = (resource) => {
-        const used = a[`USED_${resource}`];
-        const total = a[`AVAILABLE_${resource}`];
-        const u = parseInt(used), t = parseInt(total);
-        return appendRow(utilizationTable, `${resource} Utilization`, `${formatUnit(used)}/${formatUnit(total)} (${Math.round((u/t)*100).toFixed(2)}%)`, null, "main-row");
+    // custom mca format
+    if (ret.fmt === "mca") {
+      // TODO: are these baisc blocks?
+      const cr = ret.src.CodeRegions[0];
+      // summary view (sidebar)
+      const summaryTable = metadata.appendChild(document.createElement("table"));
+      for (const [k, v] of Object.entries(cr.SummaryView)) {
+        appendRow(summaryTable, k, v, null, "main-row");
       }
-      ["SGPRs", "VGPRs", "LDS_BYTES"].forEach(appendUsageRow);
-      // register pressure table + ISA (main view)
+      // disasm view (center)
       const asmTable = root.appendChild(document.createElement("table"));
       const thead = asmTable.appendChild(document.createElement("thead"));
-      for (const col of ["Opcode", "Operands", "Register Pressure"]) {
-        const th = thead.appendChild(document.createElement("th"));
-        th.innerText = col;
+      const addColumn = (col) => thead.appendChild(document.createElement("th")).innerText = col;
+      for (const col of ["", "Op"]) addColumn(col);
+      for (const col of ret.src.TargetInfo.Resources) addColumn(col);
+      for (const col of Object.keys(cr.InstructionInfoView.InstructionList[0])) addColumn(col);
+      // index resource usage stats by instruction
+      const usage = {};
+      for (const d of cr.ResourcePressureView.ResourcePressureInfo) {
+        if (!(d.InstructionIndex in usage)) {
+          usage[d.InstructionIndex] = {}
+          for (let i=0; i<ret.src.TargetInfo.Resources.length; i++) usage[d.InstructionIndex][i] = 0;
+        }
+        usage[d.InstructionIndex][d.ResourceIndex] += d.ResourceUsage;
       }
-      for (let i=0; i<ret.disasm.length; i++) {
-        const isa = ret.disasm[i];
-        tr = appendRow(asmTable, isa[" Opcode"], isa[" Operands"], null, "main-row");
-        const liveRegs = parseInt(ret.live_regs[i][1]);
-        tr.appendChild(createRegPressureCell(liveRegs, a.AVAILABLE_VGPRs)); // raw: tr.appendChild(document.createElement("td")).innerText = liveRegs;
+      for (let i=0; i<cr.Instructions.length; i++) {
+        const isa = cr.Instructions[i];
+        tr = appendRow(asmTable, i, isa, null, "main-row code-row");
+        const amt = usage[i];
+        for (let j=0; j<ret.src.TargetInfo.Resources.length; j++) appendTd(tr, amt[j] ?? 0);
+        const info = cr.InstructionInfoView.InstructionList[i];
+        for (const v of Object.values(info)) appendTd(tr, v);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);

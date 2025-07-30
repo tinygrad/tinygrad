@@ -189,7 +189,7 @@ def llvm_mca(prg:ProgramSpec):
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   mca = subprocess.check_output(["llvm-mca", f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn", "-skip-unsupported-instructions=parse-failure",
-                           "--json", "-"], input=buf.getvalue().encode())
+                           "--json", "-", "--all-stats", "--all-views"], input=buf.getvalue().encode())
   return {"fmt":"mca", "src":json.loads(mca)}
 
 def get_disassembly(ctx:list[str]):

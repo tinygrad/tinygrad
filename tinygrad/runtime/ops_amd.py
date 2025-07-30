@@ -222,6 +222,7 @@ class AMDComputeQueue(HWQueue):
     prg.dev.cmd_id += 1
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
+    if getenv("FAKE_AMD", 0): return
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
