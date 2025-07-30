@@ -933,7 +933,7 @@ def train_step_bert(model, optimizer, scheduler, loss_scaler:float, GPUS, grad_a
     # TODO: OOM without this realize with large grad_acc
     Tensor.realize(*[p.grad for p in optimizer.params])
 
-  global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer[0].device)
+  global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer.params[0].device)
   for p in optimizer.params:
     p.grad = p.grad / loss_scaler
     global_norm += p.grad.float().square().sum()
@@ -1069,8 +1069,8 @@ def train_bert():
   # ** Optimizer **
   parameters_no_wd = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
   parameters = [x for x in parameters if x not in set(parameters_no_wd)]
-  optimizer_wd = LAMB(parameters, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=decay, adam=False)
-  optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False)
+  optimizer_wd = LAMB(parameters, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=decay, adam=False, device="CPU")
+  optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False, device="CPU")
   optimizer_group = OptimizerGroup(optimizer_wd, optimizer_no_wd)
 
   # ** LR scheduler **

@@ -8,14 +8,15 @@ class Optimizer:
   """
   Base class for all optimizers.
   """
-  def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM):
+  def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM, device=None):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
     assert len(self.params) != 0, "optimizer must have at least one param"
-    self.device = self.params[0].device
+    self.device = device or self.params[0].device
+    # self.opt_device = "CPU"
     self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.fused = fused
     # store lr in at least float32 precision
@@ -26,7 +27,7 @@ class Optimizer:
   def _new_optim_param(self) -> list[Tensor]:
     param_dtype = getenv("OPTIM_DTYPE", "float32")
     if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
-    return [Tensor.zeros(*t.shape, dtype=param_dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    return [Tensor.zeros(*t.shape, dtype=param_dtype, device=self.device, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
     """
@@ -54,7 +55,7 @@ class Optimizer:
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updated_params, extra = self._step(self.params, [unwrap(t.grad) for t in self.params])
-    for i, tt in enumerate(self.params): tt.assign(updated_params[i])
+    for i, tt in enumerate(self.params): tt.assign(updated_params[i].to(tt.device))
     return extra+self.params+self.buffers
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]: raise NotImplementedError
@@ -139,8 +140,8 @@ class LAMB(Optimizer):
   - Described: https://paperswithcode.com/method/lamb
   - Paper: https://arxiv.org/abs/1904.00962
   """
-  def __init__(self, params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, fused=FUSE_OPTIM):
-    super().__init__(params, lr, fused)
+  def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, fused=FUSE_OPTIM, device=None):
+    super().__init__(params, lr, fused, device=device)
     self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, weight_decay, adam
     self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous() for _ in [b1, b2])
     self.m = self._new_optim_param()
@@ -151,16 +152,17 @@ class LAMB(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, (t, g) in enumerate(zip(params, grads)):
-      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
-      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
+      tdev, gdev = t.to(self.device), g.to(self.device)
+      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * gdev).cast(self.m[i].dtype))
+      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (gdev * gdev)).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
-      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * tdev.detach()
       if not self.adam:
-        r1 = t.detach().square().sum().sqrt()
+        r1 = tdev.detach().square().sum().sqrt()
         r2 = up.square().sum().sqrt()
         r: Tensor|float = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      ret.append((t.detach() - self.lr * r * up).cast(t.dtype))
+      ret.append((tdev.detach() - self.lr * r * up).cast(tdev.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v

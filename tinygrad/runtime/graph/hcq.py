@@ -29,7 +29,7 @@ class HCQGraph(MultiGraphRunner):
     for ji in jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
-    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(sz, BufferSpec(cpu_access=True)) for dev,sz in kernargs_size.items()}
+    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(max(1, sz), BufferSpec(cpu_access=True)) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_args: dict[int, HCQArgsState] = {}
@@ -111,7 +111,8 @@ class HCQGraph(MultiGraphRunner):
       # For compute, in case of NV, optimize when only 1 same-queue dependency exists, since NV chains 2+ executions in this case,
       # eliminating dependency need.
       dname = enqueue_dev.device.split(":", 1)[0]
-      can_opt = dname in {"AMD", "QCOM"} or (dname == "NV" and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
+      # can_opt = dname in {"AMD", "QCOM"} or (dname == "NV" and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
+      can_opt = False
       if can_opt or isinstance(ji.prg, BufferXfer): opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
 
       # Enable necessary signals in the schedule by setting the signal value.
