@@ -1295,6 +1295,7 @@ def train_llama3():
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 1_200_000)
+  SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
 
   opt_adamw_beta_1 = 0.9
   opt_adamw_beta_2 = 0.95
@@ -1302,7 +1303,6 @@ def train_llama3():
   opt_adamw_weight_decay = 0.1
 
   opt_gradient_clip_norm = 1.0
-  sequence_length = 512
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
   opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
@@ -1310,7 +1310,7 @@ def train_llama3():
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=sequence_length, jit=False, disable_kv_cache=True)
+  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
@@ -1344,7 +1344,7 @@ def train_llama3():
 
   # overfitting this example should give cross_entropy log(BS)
   from examples.mlperf.dataloader import batch_load_llama3
-  iter = batch_load_llama3(GBS, SAMPLES, sequence_length, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=False)
+  iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=False)
 
   i = 0
   for tokens in tqdm(iter, total=SAMPLES//BS):
