@@ -186,13 +186,6 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
   return ret
 
-def llvm_mca(prg:ProgramSpec):
-  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
-  mca = subprocess.check_output(["llvm-mca", f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn", "-skip-unsupported-instructions=parse-failure",
-                           "--json", "-", "--all-stats", "--all-views"], input=buf.getvalue().encode())
-  return {"fmt":"mca", "src":json.loads(mca)}
-
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
@@ -201,6 +194,7 @@ def get_disassembly(ctx:list[str]):
     # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
     opts = ["-skip-unsupported-instructions=parse-failure", "--json"]
     if compiler.target_arch == "AMDGPU": opts += [f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn"]
+    # TODO: don't hardcode llvm-mca here
     return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
   return json.dumps({"src":buf.getvalue()}).encode()
 
