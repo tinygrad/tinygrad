@@ -6,6 +6,12 @@ from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 
+# NOTE: key differences for mlperf training v5.0 Stable Diffusion UNet:
+# - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
+# - uses epsilon of 1e-6 for GroupNorm in SpatialTransformer, instead of 1e-5
+# - following torch automatic mixed precision: upcasts norm and softmax input to f32, everything else is autocast to fp16
+# - uses erf for gelu instead of the default tanh approximation
+
 class AutocastLinear(Linear):
   def __call__(self, x:Tensor, dtype=dtypes.float16) -> Tensor:
     return x.cast(dtype).linear(self.weight.cast(dtype).transpose(), self.bias.cast(dtype) if self.bias is not None else None)
