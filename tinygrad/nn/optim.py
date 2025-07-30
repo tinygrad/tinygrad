@@ -132,7 +132,7 @@ class LARS(Optimizer):
       if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is None else (t.detach() * (1.0 - self.wd * self.lr) - g))
+      ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is None else (t.detach() * (1.0 - self.wd * self.lr) - g).cast(t.dtype))
     return ret, self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 it's just Adam/W.
