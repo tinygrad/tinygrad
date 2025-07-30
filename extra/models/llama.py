@@ -185,10 +185,10 @@ class Transformer:
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h)).float()[:, -1, :]
+    logits = self.output(self.norm(h)).float()
     if math.isnan(temperature): return logits
 
-    return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
+    return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
