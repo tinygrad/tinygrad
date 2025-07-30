@@ -87,6 +87,7 @@ def hl_spec_kernel3():
 
   # this makes all the global loads match
   # this can also be more simply done by rebinding the RANGEs
+  # but sadly, rebinding the RANGEs doesn't work to change the order of the local axes
   permute_a[17:20] = [11,12,13]
   permute_a[11:14] = [17,18,19]
   permute_a[7], permute_a[10] = permute_a[10], permute_a[7]
