@@ -527,6 +527,10 @@ async function main() {
       for (let i=0; i<cr.Instructions.length; i++) {
         const info = cr.InstructionInfoView.InstructionList[i];
         const tr = appendRow(asm, cr.Instructions[i], info.Latency, null, "main-row code-row");
+        const usageTd = tr.appendChild(document.createElement("td"));
+        usageTd.className = "pct-row";
+        const usageBar = usageTd.appendChild(document.createElement("div"));
+        if (usage[i] == null) continue;
         const usageSum = {};
         let sum = 0;
         for (let r=0; r<ret.TargetInfo.Resources.length; r++) {
@@ -535,9 +539,6 @@ async function main() {
           totalUsage[r] += usage[i][r];
           sum += usage[i][r];
         }
-        const usageTd = tr.appendChild(document.createElement("td"));
-        usageTd.className = "pct-row";
-        const usageBar = usageTd.appendChild(document.createElement("div"));
         for (const [k,v] of Object.entries(usageSum)) {
           if (v === 0) continue;
           const seg = usageBar.appendChild(document.createElement("div"));
@@ -548,6 +549,7 @@ async function main() {
       }
       // SummaryView in sidebar
       const summary = metadata.appendChild(document.createElement("table"));
+      appendRow(summary, "Target", ret.TargetInfo.CPUName);
       for (const [k, v] of Object.entries(cr.SummaryView)) {
         // normalize Instructions value by number of iterations
         if (k === "Instructions") {

@@ -193,8 +193,10 @@ def get_disassembly(ctx:list[str]):
   if isinstance(compiler, LLVMCompiler):
     # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
     opts = ["-skip-unsupported-instructions=parse-failure", "--json"]
+    # TODO: properly get the required flags
+    # ops_llvm defines mtriples, but that doesn't seem to be enough for llvm-mca
     if compiler.target_arch == "AMDGPU": opts += [f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn"]
-    # TODO: don't hardcode llvm-mca here
+    if compiler.target_arch == "X86": opts += ["-mtriple=x86_64", "-x86-asm-syntax=intel"]
     return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
   return json.dumps({"src":buf.getvalue()}).encode()
 
