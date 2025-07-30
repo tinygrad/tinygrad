@@ -449,17 +449,21 @@ class Kernel:
       if op.op in GroupOp.Buffer and op in self.bufs:
         st = self.sts[self.bufs.index(op)]
         # replace the VIEW source
-        ret = ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
         if op.op is Ops.LOAD:
           global_buf = ret.src[0].src[0]
           # add locals cache
           local_shape = [s if self.axis_types[i] not in (AxisType.GLOBAL, AxisType.REDUCE)
                          and ss != 0 else 1 for i,(s,ss) in enumerate(zip(st.shape, st.real_strides()))]
-          lst = ShapeTracker.from_shape(tuple(local_shape)).expand(st.shape)
+          # NOTE: this can have any permutation here
+          lst = lst_store = ShapeTracker.from_shape(tuple(local_shape)).expand(st.shape)
           lbuf = UOp(Ops.DEFINE_LOCAL, dtype=global_buf.dtype.base.ptr(prod(local_shape), AddrSpace.LOCAL), arg=1000+global_buf.arg)
-          lbufv = lbuf.view(lst)
           # TODO: permute to place any UPCASTs in 0 stride LOCALs
-          ret = lbufv.load(lbufv.store(ret))
+          # any permutes of st + lst_store together are fine
+          print(list(zip(self.shape_str(), st.shape, st.real_strides())))
+          ret = ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
+          ret = lbuf.view(lst).load(lbuf.view(lst_store).store(ret))
+        else:
+          ret = ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
         return ret
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
