@@ -108,9 +108,9 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
+def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
-  kernel_actions = actions.copy()
+  kernel_actions = (actions if candidates is None else candidates).copy()
 
   if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
     for i, action in enumerate(kernel_actions):
@@ -123,7 +123,7 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
     if a.axis is not None and a.op is not OptOps.TC:
       try: ax = lin.real_axis(a.op, a.axis)
       except KernelOptError: continue
-      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
+      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, a.axis, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
