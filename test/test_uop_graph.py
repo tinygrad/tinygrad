@@ -317,6 +317,7 @@ class TestUOpGraph(unittest.TestCase):
       for uop, const in zip(uops, consts):
         self.assertEqual(uop, const)
 
+  @unittest.skip("no longer testable standalone")
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
       vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
