@@ -198,8 +198,8 @@ def get_disassembly(ctx:list[str]):
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
   if isinstance(compiler, LLVMCompiler):
-    # NOTE: llvm-objdump may contain headers/extra information, skip if llvm-mca can't parse a line
-    opts = ["-skip-unsupported-instructions=parse-failure", "--all-views", "--all-stats", "--json"]
+    # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
+    opts = ["-skip-unsupported-instructions=parse-failure", "--json"]
     if compiler.target_arch == "AMDGPU": opts += [f"-mcpu={getattr(compiler, 'arch')}", "-march=amdgcn"]
     return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
   return json.dumps({"src":buf.getvalue()}).encode()

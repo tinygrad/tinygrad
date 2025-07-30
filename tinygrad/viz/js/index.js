@@ -114,8 +114,7 @@ const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "r
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
-const resourceColors = {HWVALU:"#ffffc0", HWTransVALU:"#ffffa2", HWSALU:"#F4A261", HWBranch:"#ff8080",
-                        HWRC:"#8D99AE", HWVMEM:"#87CEEB", HWLGKM:"#C8F9D4", DEFAULT: "#4D69E3"};
+const resourceColors = ["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -520,7 +519,7 @@ async function main() {
         usage[d.InstructionIndex][d.ResourceIndex] += d.ResourceUsage;
       }
       const totalUsage = {};
-      for (let i=0; i<ret.TargetInfo.Resources.length; i++) totalUsage[res=ret.TargetInfo.Resources[i]] = 0;
+      for (let i=0; i<ret.TargetInfo.Resources.length; i++) totalUsage[i] = 0;
       // InstructionView in the center
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
@@ -530,12 +529,11 @@ async function main() {
         const tr = appendRow(asm, cr.Instructions[i], info.Latency, null, "main-row code-row");
         const usageSum = {};
         let sum = 0;
-        for (let j=0; j<ret.TargetInfo.Resources.length; j++) {
-          const resource = ret.TargetInfo.Resources[j];
-          if (!(resource in usageSum)) usageSum[resource] = 0;
-          usageSum[resource] += usage[i][j];
-          totalUsage[resource] += usage[i][j];
-          sum += usage[i][j];
+        for (let r=0; r<ret.TargetInfo.Resources.length; r++) {
+          if (!(r in usageSum)) usageSum[r] = 0;
+          usageSum[r] += usage[i][r];
+          totalUsage[r] += usage[i][r];
+          sum += usage[i][r];
         }
         const usageTd = tr.appendChild(document.createElement("td"));
         usageTd.className = "pct-row";
@@ -544,8 +542,8 @@ async function main() {
           if (v === 0) continue;
           const seg = usageBar.appendChild(document.createElement("div"));
           seg.style.width = (v/sum)*100+"%";
-          seg.title = k;
-          seg.style.background = resourceColors[k] ?? resourceColors.DEFAULT;
+          seg.title = ret.TargetInfo.Resources[k];
+          seg.style.background = resourceColors[k%resourceColors.length];
         }
       }
       // SummaryView in sidebar
@@ -564,8 +562,8 @@ async function main() {
         const td = tr.appendChild(document.createElement("td"));
         const div = td.appendChild(document.createElement("div"));
         div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = resourceColors[k] ?? resourceColors.DEFAULT;
-        div.appendChild(document.createElement("p")).textContent = k;
+        div.appendChild(document.createElement("div")).style.background = resourceColors[k%resourceColors.length];
+        div.appendChild(document.createElement("p")).textContent = ret.TargetInfo.Resources[k];
         appendTd(tr, v);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
