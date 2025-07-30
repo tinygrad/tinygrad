@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP, argsort
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -417,6 +417,76 @@ finalize_contiguous = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+def contiguous_create_ranges(ctx:list[int], x:UOp):
+  if len(x.src) != 1: return None
+  ranges = [UOp.range(dtypes.int, s, ctx[0]+i) if resolve(s!=1) else UOp.const(dtypes.int, 0) for i,s in enumerate(x.shape)]
+  ctx[0] += len(ranges)
+  mm = UOp(Ops.MAP, dtype=x.src[0].dtype, src=(x.src[0],)+tuple(ranges))
+  return x.replace(src=(mm,)+tuple(ranges))
+
+def map_reshape(x:UOp):
+  acc = 1
+  to_sum = []
+  for s,src in list(zip(x.shape, x.src[1:]))[::-1]:
+    to_sum.append(acc*src)
+    acc *= s
+  mish = sum(to_sum)
+  ret = []
+  for s in x.src[0].src[0].shape[::-1]:
+    if resolve(s!=1):
+      ret.append(mish % s)
+      mish //= s
+    else:
+      ret.append(UOp.const(dtypes.int, 0))
+  ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
+  # generic
+  return x.src[0].replace(src=tuple([UOp(Ops.MAP, dtype=s.dtype, src=(s,)+ret) for s in x.src[0].src]))
+
+def map_reduce(ctx:list[int], x:UOp):
+  rngs = list(x.src[1:])
+  r = x.src[0]
+  new_ranges = []
+  for i,s in enumerate(r.src[0].shape):
+    if i in r.arg[1]:
+      assert rngs[i].op == Ops.CONST
+      rngs[i] = UOp.range(dtypes.int, s, ctx[0])
+      new_ranges.append(rngs[i])
+      ctx[0] += 1
+  mm = UOp(Ops.MAP, r.src[0].dtype, src=(r.src[0],)+tuple(rngs))
+  return UOp(Ops.REDUCE_AXIS, r.dtype, src=(mm,)+tuple(new_ranges), arg=r.arg)
+
+def map_permute(x:UOp):
+  ret = x.src[1:]
+  # argsort or not?
+  perm = argsort(x.src[0].arg)
+  print(perm, x.src[0].arg)
+  ret = tuple([ret[p] for p in perm])
+  print(x.src[0].src[0].shape, ret)
+  return x.src[0].replace(src=tuple([UOp(Ops.MAP, dtype=s.dtype, src=(s,)+ret) for s in x.src[0].src]))
+
+def map_expand(x:UOp):
+  r = x.src[0]
+  inp_shape, exp_shape = x.src[0].src[0].shape, x.src[0].shape
+  ret = list(x.src[1:])
+  exp_ranges = []
+  for i,(x,y) in enumerate(zip(inp_shape, exp_shape)):
+    if x != y:
+      exp_ranges.append(ret[i])
+      ret[i] = UOp.const(dtypes.int, 0)
+  mm = UOp(Ops.MAP, r.dtype, src=(r.src[0],)+tuple(ret))
+  return UOp(Ops.EXPAND, r.dtype, src=(mm,)+tuple(exp_ranges), arg=r.arg)
+
+index_pushing = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, name="x"), contiguous_create_ranges),
+  (UPat(Ops.MAP, src=(UPat(Ops.RESHAPE),), allow_any_len=True, name="x"), map_reshape),
+  (UPat(Ops.MAP, src=(UPat(Ops.PERMUTE),), allow_any_len=True, name="x"), map_permute),
+  (UPat(Ops.MAP, src=(UPat(Ops.EXPAND),), allow_any_len=True, name="x"), map_expand),
+  (UPat(Ops.MAP, src=(UPat(Ops.REDUCE_AXIS),), allow_any_len=True, name="x"), map_reduce),
+  # move MAP through elementwise ALU
+  (UPat(Ops.MAP, src=(UPat(GroupOp.Elementwise),), allow_any_len=True, name="x"),
+   lambda x: x.src[0].replace(src=tuple([UOp(Ops.MAP, dtype=s.dtype, src=(s,)+x.src[1:]) for s in x.src[0].src]))),
+])
+
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
@@ -428,6 +498,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   Returns:
     Map transforming each UOp in the sink to the Ops.KERNEL graph.
   """
+  graph_rewrite(sink, index_pushing, ctx=[0], name="index pushing", bottom_up=True)
 
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
