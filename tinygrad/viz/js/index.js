@@ -164,7 +164,7 @@ async function renderProfiler() {
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { tooltipText:formatTime(e.dur), ...ref };
+      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
       // offset y by depth
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
