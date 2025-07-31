@@ -207,7 +207,7 @@ def get_disassembly(ctx:list[str]):
       instrs[i]["segs"][r] = instrs[i]["segs"].get(r, 0)+d["ResourceUsage"]
     # rescale segment width to 0-100
     if instrs:
-      hi = max([v for ins in instrs for v in ins["segs"].values()])
+      hi = max([sum(ins["segs"].values()) for ins in instrs])
       for n in instrs: n["segs"] = {k:v/hi*100 for k,v in n["segs"].items()}
     return json.dumps({"rows":instrs, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}).encode()
   return json.dumps({"src":disasm_str}).encode()
