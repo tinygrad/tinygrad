@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
-from typing import cast, TypeVar, Any
+from typing import cast, Any
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
 from tinygrad.runtime.support.system import System
