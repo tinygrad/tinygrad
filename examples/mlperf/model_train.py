@@ -1378,6 +1378,7 @@ def train_stable_diffusion():
 
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
+  print(f"BS = {BS}")
   #EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
   #assert 30_000 % EVAL_BS == 0, "Eval (which generates 30,000 images) is currently implemented without padding"
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
@@ -1398,15 +1399,21 @@ def train_stable_diffusion():
 
   class StableDiffusion:
     def __init__(self):
+      dtypes.default_float=dtypes.float16
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
+      dtypes.default_float=dtypes.float32
+
       #self.first_stage_model = AutoencoderKL()
       self.model=None
 
 
   model = StableDiffusion()
-  weights = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
+  weights: dict[str,Tensor] = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+  for k,v in weights.items():
+    if v.dtype is dtypes.float32:
+      weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
   load_state_dict(model, weights)
   unet_module.linear = unet_module.AutocastLinear
   unet_module.conv2d = unet_module.AutocastConv2d
@@ -1452,15 +1459,10 @@ def train_stable_diffusion():
                  lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
     optimizer.zero_grad()
     timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
-    #context = model.cond_stage_model.embed_tokens(tokens)
 
     for i, t in enumerate((mean_logvar, tokens, timestep)):
-    #for i, t in enumerate((mean_logvar, context, timestep)):
-      print(f"sharding: {i}")
       if len(GPUS) > 1: t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
-
-    #noise = Tensor.randn(BS, mean_logvar.shape[1]/2, *mean_logvar.shape[2:], dtype=dtypes.half, device=optimizer.device)
 
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
@@ -1475,8 +1477,10 @@ def train_stable_diffusion():
 
     context = model.cond_stage_model.embed_tokens(tokens).realize()
 
+    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
+    del out, v_true
     loss.backward()
     for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
 

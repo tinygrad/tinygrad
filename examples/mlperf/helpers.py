@@ -385,7 +385,6 @@ class GradScaler:
       r = 1.0
       stepped_t = (t.detach() - opt.lr * r * up).cast(t.dtype)
       t.assign(grads_all_finite.where(stepped_t, t))
-    Tensor.realize(*[opt.b1_t, opt.b2_t] + opt.m + opt.v + opt.params + opt.buffers)
 
     # grow the scale if we haven't been generating non-finite grads, otherwise shrink it
     at_interval = (self.growth_tracker == self.growth_interval)
@@ -394,7 +393,10 @@ class GradScaler:
     self.growth_tracker.assign(
       grads_all_finite.where(at_interval.where(Tensor(0, device=opt.device), self.growth_tracker + 1), Tensor(0, device=opt.device))
     )
-    Tensor.realize(self.scale, self.growth_tracker)
+    for t in opt.params:
+      t.grad = None
+    del g, grads_all_finite, stepped_m, stepped_v, m_hat, v_hat, up, stepped_t
+    Tensor.realize(*[opt.b1_t, opt.b2_t, self.scale, self.growth_tracker] + opt.m + opt.v + opt.params + opt.buffers)
 
 # Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
 def gelu_erf(x:Tensor) -> Tensor:
