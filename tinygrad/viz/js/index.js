@@ -518,13 +518,13 @@ async function main() {
         const segmentsTd = tr.appendChild(document.createElement("td"));
         segmentsTd.className = "pct-row";
         const usageBar = segmentsTd.appendChild(document.createElement("div"));
-        for (const [k,v] of Object.entries(r.segs)) {
+        for (const [k, {width, value}] of Object.entries(r.segs)) {
           const seg = usageBar.appendChild(document.createElement("div"));
-          seg.style.width = v+"%";
-          seg.title = ret.segments[k];
+          seg.style.width = width+"%";
+          seg.title = `${ret.segments[k]} ${value}`;
           seg.style.background = segmentColors[parseInt(k)%segmentColors.length];
           if (!(k in usage)) usage[k] = 0;
-          usage[k] += v;
+          usage[k] += value;
         }
       }
       const summary = metadata.appendChild(document.createElement("table"));
