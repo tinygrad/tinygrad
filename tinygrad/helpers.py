@@ -84,7 +84,7 @@ def word_wrap(x, wrap=80):
 @contextlib.contextmanager
 def suppress_finalizing(*exceptions:tuple[type[Exception], ...]) -> Generator[None, None, None]:
   try: yield
-  except exceptions as e:
+  except exceptions:
     if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
