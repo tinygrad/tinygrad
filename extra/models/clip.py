@@ -275,10 +275,8 @@ class Open:
       q,k,v = [y.reshape(T, B*self.n_heads, self.d_head).transpose(0, 1).reshape(B, self.n_heads, T, self.d_head) for y in proj.chunk(3)]
 
       attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-      attn_output = attn_output.permute(2, 0, 1, 3).reshape(T*B, C)
-
+      attn_output = attn_output.permute(2, 0, 1, 3).reshape(T, B, C)
       attn_output = self.out_proj(attn_output)
-      attn_output = attn_output.reshape(T, B, C)
 
       return attn_output
 
