@@ -114,7 +114,7 @@ const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "r
 const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
 
 const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
-const resourceColors = ["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"];
+const segmentColors = ["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -509,6 +509,7 @@ async function main() {
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
+      const usage = {};
       for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
@@ -521,8 +522,21 @@ async function main() {
           const seg = usageBar.appendChild(document.createElement("div"));
           seg.style.width = v+"%";
           seg.title = ret.segments[k];
-          seg.style.background = resourceColors[parseInt(k)%resourceColors.length];
+          seg.style.background = segmentColors[parseInt(k)%segmentColors.length];
+          if (!(k in usage)) usage[k] = 0;
+          usage[k] += v;
         }
+      }
+      const summary = metadata.appendChild(document.createElement("table"));
+      for (const [i,s] of ret.segments.entries()) {
+        const tr = summary.appendChild(document.createElement("tr"));
+        tr.className = "main-row";
+        const td = tr.appendChild(document.createElement("td"));
+        const div = td.appendChild(document.createElement("div"));
+        div.className = "legend";
+        div.appendChild(document.createElement("div")).style.background = segmentColors[i%segmentColors.length];
+        div.appendChild(document.createElement("p")).textContent = s;
+        appendTd(tr, usage[i] ?? 0);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
