@@ -478,12 +478,7 @@ async function main() {
         }
       }
     }
-    return setState({
-    "currentCtx": 2,
-    "currentStep": 19,
-    "currentRewrite": 0,
-    "expandSteps": true
-});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

@@ -211,12 +211,16 @@ def get_disassembly(ctx:list[str]):
     data = json.loads(mca_ret)
     # NOTE: we always only pass one kernel
     cr = data["CodeRegions"][0]
-    instrs = [{"data":[rep], "segs":{}} for rep in cr["Instructions"]]
+    instrs:list = [{"data":[rep], "segs":{}} for rep in cr["Instructions"]]
     for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): instrs[i]["data"].append(info["Latency"])
     for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
       i, r = d["InstructionIndex"], d["ResourceIndex"]
       if i>len(instrs)-1: continue
       instrs[i]["segs"][r] = instrs[i]["segs"].get(r, 0)+d["ResourceUsage"]
+    # rescale segment widths to 0-100
+    if instrs:
+      hi = max([v for ins in instrs for v in ins["segs"].values()])
+      for n in instrs: n["segs"] = {k:v/hi*100 for k,v in n["segs"].items()}
     return json.dumps({"rows":instrs, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}).encode()
   return json.dumps({"src":disasm_str}).encode()
 
