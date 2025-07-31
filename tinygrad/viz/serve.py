@@ -187,16 +187,6 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
   return ret
 
-class InstructionInfo(TypedDict):
-  rep: str
-  data: dict[int, Any]
-  segs: dict[int, int]
-
-class AnnotatedDisassembly(TypedDict):
-  instructions: list[InstructionInfo]
-  metrics: list[str]
-  segments: list[str]
-
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
