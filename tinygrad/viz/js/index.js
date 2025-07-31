@@ -478,7 +478,12 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({
+    "currentCtx": 2,
+    "currentStep": 19,
+    "currentRewrite": 0,
+    "expandSteps": true
+});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -505,68 +510,24 @@ async function main() {
     root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
     metadata.innerHTML = "";
-    // custom mca format
-    if (ret.CodeRegions != null) {
-      // NOTE: we always display one kernel
-      const cr = ret.CodeRegions[0];
-      // group resource usage stats by instruction
-      const usage = {};
-      for (const d of cr.ResourcePressureView.ResourcePressureInfo) {
-        if (!(d.InstructionIndex in usage)) {
-          usage[d.InstructionIndex] = {}
-          for (let i=0; i<ret.TargetInfo.Resources.length; i++) usage[d.InstructionIndex][i] = 0;
-        }
-        usage[d.InstructionIndex][d.ResourceIndex] += d.ResourceUsage;
-      }
-      const totalUsage = {};
-      for (let i=0; i<ret.TargetInfo.Resources.length; i++) totalUsage[i] = 0;
-      // InstructionView in the center
+    // detailed assembly view
+    if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
-      for (const col of ["Opcode", "Latency", "HW Resources"]) thead.appendChild(document.createElement("th")).innerText = col;
-      for (let i=0; i<cr.Instructions.length; i++) {
-        const info = cr.InstructionInfoView.InstructionList[i];
-        const tr = appendRow(asm, cr.Instructions[i], info.Latency, null, "main-row code-row");
-        const usageTd = tr.appendChild(document.createElement("td"));
-        usageTd.className = "pct-row";
-        const usageBar = usageTd.appendChild(document.createElement("div"));
-        if (usage[i] == null) continue;
-        const usageSum = {};
-        let sum = 0;
-        for (let r=0; r<ret.TargetInfo.Resources.length; r++) {
-          if (!(r in usageSum)) usageSum[r] = 0;
-          usageSum[r] += usage[i][r];
-          totalUsage[r] += usage[i][r];
-          sum += usage[i][r];
-        }
-        for (const [k,v] of Object.entries(usageSum)) {
-          if (v === 0) continue;
-          const seg = usageBar.appendChild(document.createElement("div"));
-          seg.style.width = (v/sum)*100+"%";
-          seg.title = ret.TargetInfo.Resources[k];
-          seg.style.background = resourceColors[k%resourceColors.length];
-        }
-      }
-      // SummaryView in sidebar
-      const summary = metadata.appendChild(document.createElement("table"));
-      appendRow(summary, "Target", ret.TargetInfo.CPUName);
-      for (const [k, v] of Object.entries(cr.SummaryView)) {
-        // normalize Instructions value by number of iterations
-        if (k === "Instructions") {
-          appendRow(summary, "Instructions", v / cr.SummaryView.Iterations);
-          appendRow(summary, "uOps", cr.SummaryView.TotaluOps / cr.SummaryView.Iterations);
-        }
-        else appendRow(summary, k, v);
-      }
-      for (const [k, v] of Object.entries(totalUsage)) {
-        const tr = summary.appendChild(document.createElement("tr"));
+      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
+      for (const r of ret.rows) {
+        const tr = asm.appendChild(document.createElement("tr"));
         tr.className = "main-row";
-        const td = tr.appendChild(document.createElement("td"));
-        const div = td.appendChild(document.createElement("div"));
-        div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = resourceColors[k%resourceColors.length];
-        div.appendChild(document.createElement("p")).textContent = ret.TargetInfo.Resources[k];
-        appendTd(tr, v);
+        for (const d of Object.values(r.data)) appendTd(tr, d);
+        const segmentsTd = tr.appendChild(document.createElement("td"));
+        segmentsTd.className = "pct-row";
+        const usageBar = segmentsTd.appendChild(document.createElement("div"));
+        for (const [k,v] of Object.entries(r.segs)) {
+          const seg = usageBar.appendChild(document.createElement("div"));
+          seg.style.width = v+"%";
+          seg.title = ret.segments[k];
+          seg.style.background = resourceColors[parseInt(k)%resourceColors.length];
+        }
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);

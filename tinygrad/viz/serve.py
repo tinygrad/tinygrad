@@ -187,6 +187,16 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
   return ret
 
+class InstructionInfo(TypedDict):
+  rep: str
+  data: dict[int, Any]
+  segs: dict[int, int]
+
+class AnnotatedDisassembly(TypedDict):
+  instructions: list[InstructionInfo]
+  metrics: list[str]
+  segments: list[str]
+
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
@@ -197,7 +207,17 @@ def get_disassembly(ctx:list[str]):
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
     opts = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
     # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
-    return subprocess.check_output(["llvm-mca", *opts, "-skip-unsupported-instructions=parse-failure", "--json", "-"], input=disasm_str.encode())
+    mca_ret = subprocess.check_output(["llvm-mca", *opts, "-skip-unsupported-instructions=parse-failure", "--json", "-"], input=disasm_str.encode())
+    data = json.loads(mca_ret)
+    # NOTE: we always only pass one kernel
+    cr = data["CodeRegions"][0]
+    instrs = [{"data":[rep], "segs":{}} for rep in cr["Instructions"]]
+    for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): instrs[i]["data"].append(info["Latency"])
+    for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
+      i, r = d["InstructionIndex"], d["ResourceIndex"]
+      if i>len(instrs)-1: continue
+      instrs[i]["segs"][r] = instrs[i]["segs"].get(r, 0)+d["ResourceUsage"]
+    return json.dumps({"rows":instrs, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}).encode()
   return json.dumps({"src":disasm_str}).encode()
 
 # ** HTTP server
