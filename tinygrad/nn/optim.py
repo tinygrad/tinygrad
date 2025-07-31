@@ -83,7 +83,7 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
 def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
-         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=3):
+         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
   """
   SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
 
