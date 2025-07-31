@@ -476,11 +476,29 @@ def map_expand(x:UOp):
   mm = UOp(Ops.MAP, r.dtype, src=(r.src[0],)+tuple(ret))
   return UOp(Ops.EXPAND, r.dtype, src=(mm,)+tuple(exp_ranges), arg=r.arg)
 
+def map_shrink(ctx:list[int], x:UOp):
+  r = x.src[0]
+  ret = list(x.src[1:])
+  for i,(s,(ss,se)) in enumerate(zip(r.src[0].shape, r.arg)):
+    if se-ss != s:
+      new_ret_i = [ret[i]]
+      if ss != 0:
+        new_ret_i = [UOp.range(dtypes.int, ss, ctx[0])] + new_ret_i
+        ctx[0] += 1
+      if se != s:
+        new_ret_i = new_ret_i + [UOp.range(dtypes.int, s-se, ctx[0])]
+        ctx[0] += 1
+      ret[i] = UOp(Ops.CATRANGE, src=tuple(new_ret_i))
+  mm = UOp(Ops.MAP, r.dtype, src=(r.src[0],)+tuple(ret))
+  # TODO: put the ranges on the shrink?
+  return UOp(Ops.SHRINK, r.dtype, src=(mm,), arg=r.arg)
+
 index_pushing = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), contiguous_create_ranges),
   (UPat(Ops.MAP, src=(UPat(Ops.RESHAPE),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.MAP, src=(UPat(Ops.PERMUTE),), allow_any_len=True, name="x"), map_permute),
   (UPat(Ops.MAP, src=(UPat(Ops.EXPAND),), allow_any_len=True, name="x"), map_expand),
+  (UPat(Ops.MAP, src=(UPat(Ops.SHRINK),), allow_any_len=True, name="x"), map_shrink),
   (UPat(Ops.MAP, src=(UPat(Ops.REDUCE_AXIS),), allow_any_len=True, name="x"), map_reduce),
   # move MAP through elementwise ALU
   (UPat(Ops.MAP, src=(UPat(GroupOp.Elementwise),), allow_any_len=True, name="x"),

@@ -10,7 +10,7 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto()  # noqa: E702
-  MAP = auto()
+  MAP = auto(); CATRANGE = auto()
 
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
