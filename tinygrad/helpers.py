@@ -81,6 +81,12 @@ def word_wrap(x, wrap=80):
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 
+@contextlib.contextmanager
+def suppress_finalizing(*exceptions:tuple[type[Exception], ...]) -> Generator[None, None, None]:
+  try: yield
+  except exceptions as e:
+    if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
+
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
