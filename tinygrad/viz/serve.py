@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import xml.etree.ElementTree as ET, subprocess
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, Generator
+from typing import Any, TypedDict, Generator, IO
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
@@ -178,11 +179,60 @@ def get_profile(profile:list[ProfileEvent]):
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
+# ** GPU counter parsers
+
+# Metal XCtrace
+
+def parse_xml(stream:IO[bytes]) -> Generator[dict, None, None]:
+  cols:list[str] = []
+  id_cache:dict = {}
+  for _,e in ET.iterparse(stream, events=("end",)):
+    if (eid:=e.attrib.get("id")) is not None: id_cache[eid] = e.text
+    if e.tag == "col": cols.append(unwrap(next(iter(e)).text))
+    if e.tag == "row": yield {k:id_cache.get(v.attrib.get("ref"), v.text or v) for k,v in zip(cols, e)}
+
+xctrace_cache:dict[str, list[dict]] = {}
+def xctrace_export(schema:str) -> list[dict]:
+  if (cret:=xctrace_cache.get(schema)) is not None: return cret
+  proc = subprocess.Popen(["xctrace", "export", "--input", "/tmp/metal.trace", "--xpath",
+                           f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'], stdout=subprocess.PIPE)
+  xctrace_cache[schema] = ret = list(tqdm(parse_xml(unwrap(proc.stdout)), desc=f"parsing {schema}"))
+  return ret
+
+def get_metal_counters(st:Decimal, et:Decimal):
+  # start by getting monotonic time at the start of trace
+  time_info = list(xctrace_export("time-info"))[0]
+  num, denom = [int(f.text) for f in time_info["timebase-info"].findall("mach-timebase-info-field")]
+  start_time = Decimal(time_info["mabs-epoch"])*Decimal(num/denom)
+  # aggregate counter values in this time range
+  counter_info = {int(r["counter-id"]):r for r in xctrace_export("gpu-counter-info")}
+  acc:dict[int, float] = {}
+  samples:dict[int, int] = {}
+  for r in xctrace_export("gpu-counter-value"):
+    sample_ts = (start_time+Decimal(r["timestamp"]))/Decimal(1e3)
+    if sample_ts < st: continue
+    if sample_ts > et: break
+    if (i:=int(r["counter-id"])) not in acc: acc[i], samples[i] = 0, 0
+    acc[i] += float(r["value"])
+    samples[i] += 1
+  # group counters into subunits
+  MTL_SUBUNITS = {"ALU":[*range(10, 24)], "DRAM":[*range(61, 64)], "SRAM":[6, *range(24, 48)], "Bandwidth": [*range(58, 61)],
+                  "Occupancy":[*range(1, 6), *range(7, 10)]}
+  # measurements are either in % of peak or Value, xctrace output does not provide Value units, hardcode them here.
+  MTL_UNITS = {"Bandwidth":"GB/s"}
+  ret:list[dict] = []
+  for k,lst in MTL_SUBUNITS.items():
+    subunits = [{"value":acc[i]/samples[i] if i in acc else 0, **counter_info[i]} for i in lst]
+    value = max([v["value"] for v in subunits if v])
+    ret.append({"name":k, "value":value, "unit":MTL_UNITS.get(k), "subunits":subunits})
+  return ret
+
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
   for e in profile:
     if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
+      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]+
+                 {"METAL":get_metal_counters}.get(e.device, lambda *_:{})(e.st, e.en)})
   return ret
 
 def get_disassembly(ctx:list[str]):
