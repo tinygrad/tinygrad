@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
-import tinygrad.runtime.autogen.llvm as llvm, ctypes, subprocess
+import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -11,7 +11,6 @@ from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
-from tinygrad.runtime.ops_llvm import LLVMCompiler
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -192,14 +191,13 @@ def get_disassembly(ctx:list[str]):
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
+  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
-    opts = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
     # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
-    mca_ret = subprocess.check_output(["llvm-mca", *opts, "-skip-unsupported-instructions=parse-failure", "--json", "-"], input=disasm_str.encode())
-    data = json.loads(mca_ret)
-    # NOTE: we always only pass one kernel
+    data = json.loads(subprocess.check_output(["llvm-mca", f"-mtriple={mtriple}", f"-mcpu={mcpu}", "-skip-unsupported-instructions=parse-failure",
+                                               "--json", "-"], input=disasm_str.encode()))
     cr = data["CodeRegions"][0]
     instrs:list = [{"data":[rep], "segs":{}} for rep in cr["Instructions"]]
     for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): instrs[i]["data"].append(info["Latency"])
@@ -207,7 +205,7 @@ def get_disassembly(ctx:list[str]):
       i, r = d["InstructionIndex"], d["ResourceIndex"]
       if i>len(instrs)-1: continue
       instrs[i]["segs"][r] = instrs[i]["segs"].get(r, 0)+d["ResourceUsage"]
-    # rescale segment widths to 0-100
+    # rescale segment width to 0-100
     if instrs:
       hi = max([v for ins in instrs for v in ins["segs"].values()])
       for n in instrs: n["segs"] = {k:v/hi*100 for k,v in n["segs"].items()}
