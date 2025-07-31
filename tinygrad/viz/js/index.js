@@ -109,12 +109,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
-                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
-const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
-
-const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
-const segmentColors = ["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"];
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62"],
+  DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
+const cycleColors = (lst, i) => lst[i%lst.length];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -154,10 +153,10 @@ async function renderProfiler() {
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
-        const colors = devColors[k] ?? devColors.DEFAULT;
+        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
-      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
       else if (ref != null) {
@@ -185,7 +184,7 @@ async function renderProfiler() {
       const y0 = e.y.map(yscale);
       const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -522,7 +521,7 @@ async function main() {
           const seg = usageBar.appendChild(document.createElement("div"));
           seg.style.width = width+"%";
           seg.title = `${ret.segments[k]} ${value}`;
-          seg.style.background = segmentColors[parseInt(k)%segmentColors.length];
+          seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
           if (!(k in usage)) usage[k] = 0;
           usage[k] += value;
         }
@@ -534,7 +533,7 @@ async function main() {
         const td = tr.appendChild(document.createElement("td"));
         const div = td.appendChild(document.createElement("div"));
         div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = segmentColors[i%segmentColors.length];
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
         div.appendChild(document.createElement("p")).textContent = s;
         appendTd(tr, usage[i] ?? 0);
       }
