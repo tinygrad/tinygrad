@@ -9,9 +9,9 @@ __attribute__((device)) inline void __syncthreads() {
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 }
 
-#define BLOCK_SIZE 128
+#define BLOCK_SIZE 256
 extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, BLOCK_SIZE)))
-kernel5_lds_optim(float *a, float *b, float *c)
+kernel4_gmem_db(float *a, float *b, float *c)
 {
   constexpr int N = 4096;
   constexpr float alpha = 1.0;
@@ -32,7 +32,7 @@ kernel5_lds_optim(float *a, float *b, float *c)
 
   constexpr int nbWaves = BLOCK_SIZE / 32;
   // Wave Tile size
-  constexpr int WN = 128;
+  constexpr int WN = 64;
   constexpr int WM = BN * BM / nbWaves / WN;
 
   // Number of wave on X & Y axis in the Block tile
@@ -74,17 +74,17 @@ kernel5_lds_optim(float *a, float *b, float *c)
   float A_col[nbIterWaveM * TM];
   float B_row[nbIterWaveN * TN];
 
-  __shared__ float As[BK][BM+4]; // 4 padding to avoid bank conflicts
+  __shared__ float As[BK][BM];
   __shared__ float Bs[BK][BN];
 
   float c_regs[TM * nbIterWaveM * TN * nbIterWaveN] = {0.0f};
 
-  // initial copy into shared memory
   for (int i = 0; i < nbReadsB; i++) {
     int index_x = BN * blockIdx.x + rBIdx;
     int index_y = rBIdy + i * strideReadB;
     Bs[index_y % BK][index_x % BN] = b[N * index_y + index_x];
   }
+
   for (int i = 0; i < nbReadsA; i++) {
     int index_x = rAIdx;
     int index_y = BM * blockIdx.y + rAIdy + i * strideReadA;

@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
 from tinygrad.helpers import all_int
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
@@ -53,21 +53,36 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
   ki: KernelInfo = s.arg
-  if not ki.global_dims and not ki.local_dims: return None
+  global_dims = [i for i,x in enumerate(ki.axis_types) if x is AxisType.GLOBAL]
+  local_dims = [i for i,x in enumerate(ki.axis_types) if x in (AxisType.LOCAL, AxisType.GROUP_REDUCE)]
+  if not global_dims and not local_dims: return None
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
-  all_ranges = {x.arg:x for x in s_topo if x.op is Ops.RANGE}
-  # NOTE: this supports globals/locals in any position
-  ranges = [all_ranges[r] for r in ki.global_dims+ki.local_dims]
-  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg in ki.global_dims])
-  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg in ki.local_dims])
+
+  # get global and local shape
+  all_ranges = {x.arg%1000:x for x in s_topo if x.op is Ops.RANGE}
+  ranges = [all_ranges[r] for r in global_dims+local_dims if r in all_ranges]
+  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in global_dims])
+  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in local_dims])
+
+  # get the idxs
   if ki.dont_use_locals:
-    assert not ki.local_dims, "can't use locals if there's no local dims"
+    assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
     # define indexes for GPU-like execution
     idxs = get_grouped_dims("gidx", global_shape, ctx.global_max, reverse=True) + get_grouped_dims("lidx", local_shape, ctx.local_max)
-  return s.substitute(dict(zip(ranges, idxs)))
+
+  # apply to multiple ranges
+  subs = {}
+  for r in s_topo:
+    if r.op is not Ops.RANGE: continue
+    try:
+      ii = (global_dims+local_dims).index(r.arg%1000)
+      if r.arg < 2000 and ki.axis_types[r.arg%1000] == AxisType.GROUP_REDUCE: continue
+      subs[r] = idxs[ii]
+    except ValueError: continue
+  return s.substitute(subs)
 
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
