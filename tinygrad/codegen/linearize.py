@@ -150,7 +150,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
     srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
   lst = lst[::-1]
-  if getenv("BLOCK_REORDER", 1): lst = block_reorder(lst)
+  if getenv("BLOCK_REORDER", 0): lst = block_reorder(lst)
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
