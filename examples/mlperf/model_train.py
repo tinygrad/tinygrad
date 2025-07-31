@@ -1349,7 +1349,7 @@ def train_llama3():
   if getenv("FAKEDATA", 0):
     def fake_data():
       for _ in range(SAMPLES // GBS):
-        yield Tensor.randint(GBS, SEQLEN, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
     iter = fake_data()
   else:
     from examples.mlperf.dataloader import batch_load_llama3
