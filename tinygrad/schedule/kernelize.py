@@ -425,6 +425,8 @@ def contiguous_create_ranges(ctx:list[int], x:UOp):
   return x.replace(src=(mm,)+tuple(ranges))
 
 def map_reshape(x:UOp):
+  # don't push on the final buffer reshape for readable graph
+  if x.src[0].src[0].op is Ops.BUFFER: return None
   acc = 1
   to_sum = []
   for s,src in list(zip(x.shape, x.src[1:]))[::-1]:
@@ -480,7 +482,8 @@ def map_shrink(ctx:list[int], x:UOp):
   r = x.src[0]
   ret = list(x.src[1:])
   for i,(s,(ss,se)) in enumerate(zip(r.src[0].shape, r.arg)):
-    if se-ss != s:
+    assert ss == 0, "add to range?"
+    if se-ss != s and False:
       new_ret_i = [ret[i]]
       if ss != 0:
         new_ret_i = [UOp.range(dtypes.int, ss, ctx[0])] + new_ret_i

@@ -41,6 +41,20 @@ class TestTiny(unittest.TestCase):
     out = (((a@b).relu()@c).relu()@d).contiguous().realize()
     self.assertListEqual(out.flatten().tolist(), [1.0]*(N*N))
 
+  def test_conv2d(self):
+    N = 64
+    a = Tensor.ones(1,4,N,N).contiguous().realize()
+    w1 = Tensor.ones(16,4,3,3).contiguous().realize()
+    out = a.conv2d(w1).contiguous().realize()
+
+  def test_double_conv2d(self):
+    N = 64
+    a = Tensor.ones(1,4,N,N).contiguous().realize()
+    w1 = Tensor.ones(16,4,3,3).contiguous().realize()
+    w2 = Tensor.ones(24,16,3,3).contiguous().realize()
+    w3 = Tensor.ones(32,24,3,3).contiguous().realize()
+    out = a.conv2d(w1).conv2d(w2).conv2d(w3).contiguous().realize()
+
   # *** randomness ***
 
   def test_random(self):
