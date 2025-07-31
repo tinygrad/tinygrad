@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -187,9 +188,29 @@ def get_runtime_stats(key) -> list[dict]:
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
-  lib = Device[prg.device].compiler.compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
-  return json.dumps({"src":buf.getvalue()}).encode()
+  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
+  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
+  disasm_str = buf.getvalue()
+  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
+  if isinstance(compiler, LLVMCompiler):
+    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
+    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
+    # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
+    data = json.loads(subprocess.check_output(["llvm-mca", f"-mtriple={mtriple}", f"-mcpu={mcpu}", "-skip-unsupported-instructions=parse-failure",
+                                               "--json", "-"], input=disasm_str.encode()))
+    cr = data["CodeRegions"][0]
+    instrs:list = [{"data":[rep], "segs":{}} for rep in cr["Instructions"]]
+    for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): instrs[i]["data"].append(info["Latency"])
+    for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
+      i, r = d["InstructionIndex"], d["ResourceIndex"]
+      if i>len(instrs)-1: continue
+      instrs[i]["segs"][r] = instrs[i]["segs"].get(r, 0)+d["ResourceUsage"]
+    # rescale segment width to 0-100
+    if instrs:
+      hi = max([sum(ins["segs"].values()) for ins in instrs])
+      for n in instrs: n["segs"] = {k:{"width":v/hi*100, "value":v} for k,v in n["segs"].items()}
+    return json.dumps({"rows":instrs, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}).encode()
+  return json.dumps({"src":disasm_str}).encode()
 
 # ** HTTP server
 
