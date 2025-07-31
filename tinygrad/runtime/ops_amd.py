@@ -473,10 +473,10 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
+  @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
-    with suppress_finalizing(AttributeError, TypeError):
-      self.dev.synchronize()
-      self.dev.iface.free(opaque)
+    self.dev.synchronize()
+    self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 

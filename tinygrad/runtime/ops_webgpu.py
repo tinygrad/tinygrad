@@ -188,8 +188,8 @@ class WebGpuAllocator(Allocator['WGPUDevPtr']):
   def _copyout(self, dest:memoryview, src:WGPUBufPtr):
     buffer_data = read_buffer(self.dev, src)
     dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
-  def _free(self, opaque:WGPUBufPtr, options:BufferSpec):
-    with suppress_finalizing(AttributeError, TypeError): webgpu.wgpuBufferDestroy(opaque)
+  @suppress_finalizing
+  def _free(self, opaque:WGPUBufPtr, options:BufferSpec): webgpu.wgpuBufferDestroy(opaque)
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
