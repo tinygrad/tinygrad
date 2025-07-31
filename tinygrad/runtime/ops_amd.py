@@ -474,7 +474,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
   def _free(self, opaque, options:BufferSpec):
-    with suppress_finalizing(AttributeError):
+    with suppress_finalizing(AttributeError, TypeError):
       self.dev.synchronize()
       self.dev.iface.free(opaque)
 

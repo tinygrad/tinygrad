@@ -277,7 +277,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
   def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    with suppress_finalizing(AttributeError):
+    with suppress_finalizing(AttributeError, TypeError):
       self.dev.synchronize()
       self.dev.iface.free(opaque)
 
