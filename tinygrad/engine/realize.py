@@ -110,10 +110,20 @@ class BufferCopy(Runner):
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+
+    # wait for cross-backend or cross-virtual transfers so readers don't race the copy
+    src_backend = src.device.split(':', 1)[0]
+    dst_backend = dest.device.split(':', 1)[0]
+    cross_backend = src_backend != dst_backend
+    cross_virtual = (src_backend == dst_backend) and (src.device != dest.device)
+    must_wait = (cross_backend or cross_virtual) or wait
+
     st = time.perf_counter()
     self.copy(dest, src)
-    if wait:
+    if must_wait:
       Device[dest.device].synchronize()
+    # preserve public behavior: only return a duration when wait=True
+    if wait:
       return time.perf_counter() - st
 
 class BufferXfer(BufferCopy):
