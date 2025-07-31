@@ -10,6 +10,7 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
+  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/x86asm.min.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -102,6 +103,17 @@
   }
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
+  }
+  .stats-list > * + * {
+    margin-top: 8px;
+  }
+  .stats-list > p > * + * {
+    margin-top: 12px;
+  }
+  .stats-list {
+    width: 100%;
+    max-height: 240px;
+    overflow: auto;
   }
   .ctx-list > ul > * + * {
     margin-top: 4px;
@@ -222,6 +234,40 @@
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  .raw-text {
+    padding: 0 8px;
+    width: 100%;
+    height: 100%;
+  }
+  .raw-text code {
+    max-height: none !important;
+  }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #1a1b26;
+    color: #f0f0f5;
+    font-size: 0.95em;
+  }
+  table td {
+    border-bottom: 1px solid #2c2f40;
+    vertical-align: top;
+  }
+  table tr:last-child > td {
+     border-bottom: none;
+  }
+  tr.main-row:hover {
+    background-color: #2a2d3a;
+  }
+  tr.sub-row {
+    max-width: 150px;
+  }
+  tr.main-row > td, tr.sub-row > td {
+    padding: 8px 12px;
   }
   </style>
 </head>

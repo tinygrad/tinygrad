@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.view import View, strides_for_shape, unravel
+from tinygrad.shape.view import View, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
 from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
@@ -76,9 +76,6 @@ class ShapeTracker:
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   @property
-  def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
-
-  @property
   def shape(self) -> tuple[sint, ...]: return self.views[-1].shape
 
   @property
@@ -86,7 +83,6 @@ class ShapeTracker:
 
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
-  def to_uop(self) -> UOp: return UOp(Ops.VIEW, dtypes.void, (), self)
   def to_indexed_uops(self, _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
 
