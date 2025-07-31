@@ -82,7 +82,7 @@ def word_wrap(x, wrap=80):
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 
 @contextlib.contextmanager
-def suppress_finalizing(*exceptions:tuple[type[Exception], ...]) -> Generator[None, None, None]:
+def suppress_finalizing(*exceptions:type[Exception]) -> Generator[None, None, None]:
   try: yield
   except exceptions:
     if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
