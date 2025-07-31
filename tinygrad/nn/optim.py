@@ -129,7 +129,7 @@ class LARS(Optimizer):
           self.b[i].assign(((1 - self.momentum) * self.b[i]).contiguous() + g * self.momentum)
           g = (g * (1 - self.momentum) + self.momentum * self.b[i]) if self.nesterov else self.b[i]
 
-      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(params=self.ns_params).reshape(g.shape)
+      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(steps=3, params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is None else (t.detach() * (1.0 - self.wd * self.lr) - g).cast(t.dtype))
