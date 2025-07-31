@@ -1290,9 +1290,16 @@ def train_llama3():
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
 
   config = {}
-  BS                 = config["BS"]                     = getenv("BS", 4)
+  BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
+  SEED               = config["SEED"]                   = getenv("SEED", 5760)
+  SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
+  TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
+  SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000)
+
+  # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
+  # trains to 7
 
   opt_adamw_beta_1 = 0.9
   opt_adamw_beta_2 = 0.95
@@ -1300,7 +1307,6 @@ def train_llama3():
   opt_adamw_weight_decay = 0.1
 
   opt_gradient_clip_norm = 1.0
-  sequence_length = 8192
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
   opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
@@ -1308,7 +1314,7 @@ def train_llama3():
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=sequence_length, jit=False, disable_kv_cache=True)
+  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
@@ -1316,10 +1322,10 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, x, y):
+  def train_step(model, tokens):
     optim.zero_grad()
-    logits:Tensor = model(x, start_pos=0, temperature=math.nan)
-    loss = logits.cross_entropy(y)
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
 
     # L2 norm grad clip
@@ -1340,19 +1346,31 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  # overfitting this example should give cross_entropy log(BS)
-  fake_input = Tensor([list(range(getenv("SEQLEN", 10)))], dtype="int16").expand(BS, -1)
-  fake_label = Tensor(list(range(BS)), dtype="int16")
+  if getenv("FAKEDATA", 0):
+    def fake_data():
+      for _ in range(SAMPLES // GBS):
+        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+    iter = fake_data()
+  else:
+    from examples.mlperf.dataloader import batch_load_llama3
+    iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
 
-  for _ in range(100):
+  i = 0
+  for tokens in tqdm(iter, total=SAMPLES//BS):
     GlobalCounters.reset()
-    loss, lr = train_step(model, fake_input, fake_label)
-    # BS=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
-    # uses 43% ~= 83GB
-    # 8B bf16 = 16GB. model + grad + optim m and v = 64GB
-    # TODO: this OOM
-    # BS=1 SEQLEN=4000 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
-    print(loss.item(), lr.item(), f"{GlobalCounters.global_mem//10**9=}")
+    loss, lr = train_step(model, tokens)
+    # above as tqdm.write f-string
+    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+    if (fname:=getenv("LOSS_FILE", "")):
+      with open(fname, "a") as f:
+        f.write(f"{i} {loss.item():.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+
+    if getenv("CKPT") and (i % 200 == 0 or i == 10):
+      tqdm.write("saving checkpoint")
+      if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
+      fn = f"{ckpt_dir}/{i}.safe"
+      safe_save(get_state_dict(model), fn)
+    i += 1
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
