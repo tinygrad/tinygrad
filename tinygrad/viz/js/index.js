@@ -513,7 +513,7 @@ async function main() {
       for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
+        tr.className = "main-row code-row";
         for (const d of Object.values(r.data)) appendTd(tr, d);
         const segmentsTd = tr.appendChild(document.createElement("td"));
         segmentsTd.className = "pct-row";
