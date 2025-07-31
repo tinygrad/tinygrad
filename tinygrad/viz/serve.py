@@ -130,7 +130,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=contexts[0][ref].ret, ProgramSpec):
-        info = f"{p.estimates.ops/(t:=dur*1e3):9.2f} GFLOPS {p.estimates.mem/t:6.1f}|{p.estimates.lds/t:<7.1f} GB/s"
+        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
