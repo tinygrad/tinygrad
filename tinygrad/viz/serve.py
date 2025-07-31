@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, subprocess
-import tinygrad.runtime.autogen.llvm as llvm, ctypes
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import tinygrad.runtime.autogen.llvm as llvm, ctypes, subprocess
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -191,15 +191,14 @@ def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
+  disasm_str = buf.getvalue()
   if isinstance(compiler, LLVMCompiler):
-    # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
-    opts = ["-skip-unsupported-instructions=parse-failure", "--json"]
-    tm = compiler.target_machine
-    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm)).decode()
+    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
-    opts += [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
-    return subprocess.check_output(["llvm-mca", *opts, "-"], input=buf.getvalue().encode())
-  return json.dumps({"src":buf.getvalue()}).encode()
+    opts = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
+    # NOTE: llvm-objdump may contain headers, skip if llvm-mca can't parse those lines
+    return subprocess.check_output(["llvm-mca", *opts, "-skip-unsupported-instructions=parse-failure", "--json", "-"], input=disasm_str.encode())
+  return json.dumps({"src":disasm_str}).encode()
 
 # ** HTTP server
 
