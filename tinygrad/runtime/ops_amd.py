@@ -592,7 +592,7 @@ class KFDIface:
 
   def free(self, mem):
     if len(mem.mapped_devs) > 0:
-      gpus = (ctypes.c_int32 * 1)(*[x.iface.gpu_id for x in mem.mapped_devs])
+      gpus = (ctypes.c_int32 * len(mem.mapped_devs))(*[x.iface.gpu_id for x in mem.mapped_devs])
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
