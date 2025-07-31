@@ -1,7 +1,7 @@
 import functools, struct
 from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec
 from tinygrad.renderer.wgsl import WGSLRenderer
-from tinygrad.helpers import round_up, suppress_fini as _supp_fini
+from tinygrad.helpers import round_up, suppress_finalizing
 from tinygrad.runtime.autogen import webgpu
 from typing import List, Any, TypeAlias
 import ctypes
@@ -189,7 +189,7 @@ class WebGpuAllocator(Allocator['WGPUDevPtr']):
     buffer_data = read_buffer(self.dev, src)
     dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec):
-    with _supp_fini(AttributeError, TypeError): webgpu.wgpuBufferDestroy(opaque)
+    with suppress_finalizing(AttributeError, TypeError): webgpu.wgpuBufferDestroy(opaque)
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

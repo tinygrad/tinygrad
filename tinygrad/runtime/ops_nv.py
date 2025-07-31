@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_fini as _supp_fini
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
@@ -277,7 +277,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
   def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    with _supp_fini(AttributeError, TypeError):
+    with suppress_finalizing(AttributeError, TypeError):
       self.dev.synchronize()
       self.dev.iface.free(opaque)
 
