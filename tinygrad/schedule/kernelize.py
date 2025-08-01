@@ -517,6 +517,8 @@ index_pushing = PatternMatcher([
   # move MAP through elementwise ALU
   (UPat(Ops.MAP, src=(UPat(GroupOp.Elementwise),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([UOp(Ops.MAP, dtype=s.dtype, src=(s,)+x.src[1:]) for s in x.src[0].src]))),
+  # MAP on STORE is NOOP
+  (UPat(Ops.MAP, src=(UPat(Ops.STORE),), allow_any_len=True, name="x"), lambda x: x.src[0]),
 ])
 
 fix_buffers = PatternMatcher([
@@ -524,7 +526,9 @@ fix_buffers = PatternMatcher([
   (UPat(Ops.MAP, name="x"), lambda x: x.replace(op=Ops.INDEX, dtype=x.src[0].dtype).load()),
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), name="x", allow_any_len=True), lambda x: x.replace(src=(x.src[0].src[0],)+x.src[1:])),
   (UPat((Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE), name="x"), lambda x: x.src[0]),
-  (UPat(Ops.EXPAND, name="x"), lambda x: x.replace(arg=None, op=Ops.NOOP)),
+  # do EXPANDs need to track the ranges they end?
+  (UPat(Ops.EXPAND, name="x"), lambda x: x.src[0]),
+  #(UPat(Ops.EXPAND, name="x"), lambda x: x.replace(arg=None, op=Ops.NOOP)),
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: x.replace(op=Ops.REDUCE, arg=x.arg[0])),
 ])
 

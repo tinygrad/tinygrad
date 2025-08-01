@@ -33,16 +33,18 @@ class TestTiny(unittest.TestCase):
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
-  def test_double_gemm(self, N=64, out_dtype=dtypes.float):
-    a = Tensor.ones(N,N).contiguous().realize()
+  def test_double_gemm(self, N=64, BS=1):
+    a = Tensor.ones(BS,N,N).contiguous().realize()
     b = Tensor.eye(N).contiguous().realize()
     c = Tensor.eye(N).contiguous().realize()
     d = Tensor.eye(N).contiguous().realize()
     e = Tensor.eye(N).contiguous().realize()
     f = Tensor.eye(N).contiguous().realize()
     g = Tensor.eye(N).contiguous().realize()
-    out = (a@b@c@d@e@f@g).contiguous().realize()
-    self.assertListEqual(out.flatten().tolist(), [1.0]*(N*N))
+    out = ((a@b@c@d).contiguous()@e@f@g).contiguous().realize()
+    self.assertListEqual(out.flatten().tolist(), [1.0]*(BS*N*N))
+
+  def test_double_gemm_bs(self, N=64, BS=1): self.test_double_gemm(BS=4)
 
   def test_conv2d(self):
     N = 64
