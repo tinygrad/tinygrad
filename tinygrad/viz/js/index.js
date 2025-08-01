@@ -109,11 +109,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
-                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
-const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
-
-const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62"],
+  DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
+const cycleColors = (lst, i) => lst[i%lst.length];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -153,10 +153,10 @@ async function renderProfiler() {
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
-        const colors = devColors[k] ?? devColors.DEFAULT;
+        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
-      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
       else if (ref != null) {
@@ -164,7 +164,7 @@ async function renderProfiler() {
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { tooltipText:formatTime(e.dur), ...ref };
+      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
       // offset y by depth
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
@@ -184,7 +184,7 @@ async function renderProfiler() {
       const y0 = e.y.map(yscale);
       const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -377,11 +377,16 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function appendRow(table, name, value, unit, cls) {
+function appendTd(tr, value, unit=null) {
+  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
+  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
+}
+
+function appendRow(table, name, value, unit=null, cls="main-row") {
   const tr = table.appendChild(document.createElement("tr"));
   tr.className = cls;
   tr.appendChild(document.createElement("td")).innerText = name;
-  tr.appendChild(document.createElement("td")).innerText = unit === "us" ? formatTime(value) : value.toFixed(2)+(unit != null ? " "+unit : "%");
+  appendTd(tr, value, unit);
   return tr;
 }
 
@@ -495,10 +500,44 @@ async function main() {
   if (ckey.startsWith("/disasm")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displayGraph("profiler");
-    document.querySelector(".metadata").innerHTML = "";
     const root = document.createElement("div");
     root.className = "raw-text";
-    root.appendChild(codeBlock(ret.src, "x86asm"));
+    const metadata = document.querySelector(".metadata");
+    metadata.innerHTML = "";
+    // detailed assembly view
+    if (ret.cols != null) {
+      const asm = root.appendChild(document.createElement("table"));
+      const thead = asm.appendChild(document.createElement("thead"));
+      const usage = {};
+      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
+      for (const r of ret.rows) {
+        const tr = asm.appendChild(document.createElement("tr"));
+        tr.className = "main-row code-row";
+        for (const d of Object.values(r.data)) appendTd(tr, d);
+        const segmentsTd = tr.appendChild(document.createElement("td"));
+        segmentsTd.className = "pct-row";
+        const usageBar = segmentsTd.appendChild(document.createElement("div"));
+        for (const [k, {width, value}] of Object.entries(r.segs)) {
+          const seg = usageBar.appendChild(document.createElement("div"));
+          seg.style.width = width+"%";
+          seg.title = `${ret.segments[k]} ${value}`;
+          seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+          if (!(k in usage)) usage[k] = 0;
+          usage[k] += value;
+        }
+      }
+      const summary = metadata.appendChild(document.createElement("table"));
+      for (const [i,s] of ret.segments.entries()) {
+        const tr = summary.appendChild(document.createElement("tr"));
+        tr.className = "main-row";
+        const td = tr.appendChild(document.createElement("td"));
+        const div = td.appendChild(document.createElement("div"));
+        div.className = "legend";
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
+        div.appendChild(document.createElement("p")).textContent = s;
+        appendTd(tr, usage[i] ?? 0);
+      }
+    } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
   }
   // ** UOp view (default)

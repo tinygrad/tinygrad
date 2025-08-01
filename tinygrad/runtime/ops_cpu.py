@@ -26,18 +26,17 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUWorker(threading.Thread):
-  def __init__(self, dev:CPUDevice):
+  def __init__(self, dev):
     super().__init__()
-    self.dev, self.daemon = dev, True
+    self.dev, self.tasks, self.daemon = dev, dev.tasks, True
 
   def run(self):
-    x = self.dev.tasks
     while True:
-      blk, off = x.get(), 0
-      while off < len(blk):
-        blk[off](*blk[off + 2:off + 2 + blk[off + 1]])
-        off += blk[off + 1] + 2
-      x.task_done()
+      cmd_iter = iter(self.tasks.get())
+      for cmd in cmd_iter:
+        args_cnt = next(cmd_iter)
+        cmd(*[next(cmd_iter) for _ in range(args_cnt)])
+      self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, prg, bufs, *args):
@@ -55,7 +54,6 @@ class CPUComputeQueue(HWQueue):
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
-
   def _submit(self, dev): dev.tasks.put(self._q[:])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
@@ -110,6 +108,7 @@ class CPUAllocator(HCQAllocatorBase):
     self.dev.synchronize()
     return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview):
+    self.dev.synchronize()
     with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src):
     self.dev.synchronize()
@@ -119,6 +118,7 @@ class CPUAllocator(HCQAllocatorBase):
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    self.tasks = queue.Queue()
+    self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self).start()
-    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue,
+                     supports_graph=False)
