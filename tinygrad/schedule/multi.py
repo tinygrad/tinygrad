@@ -153,9 +153,9 @@ def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
-    return multi.src[0].r(op, axis).allreduce(op, multi.device)
+    return multi.src[0].r(op, axis).reshape(tuple([s if i not in axis else 1 for i,s in enumerate(multi.src[0].shape)])).allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return multi.src[0].r(op, axis).multi(axis=multi.axis)
+  return multi.src[0].r(op, axis).reshape(tuple([s if i not in axis else 1 for i,s in enumerate(multi.src[0].shape)])).multi(axis=multi.axis)
 
 def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))

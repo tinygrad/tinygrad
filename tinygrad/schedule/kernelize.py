@@ -43,7 +43,8 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  ret = splitted.r(*reduce.arg).reshape(tuple([s if i not in reduce.arg[1] else 1 for i,s in enumerate(splitted.shape)]))
+  return ret.r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
