@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
 if TYPE_CHECKING:
@@ -138,6 +138,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def st(self) -> ShapeTracker|None:
     if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
     from tinygrad.shape.shapetracker import ShapeTracker
+    if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
+      return ShapeTracker.from_shape((cast(PtrDType, self.dtype).size,))
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
