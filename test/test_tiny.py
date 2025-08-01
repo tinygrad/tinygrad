@@ -33,6 +33,10 @@ class TestTiny(unittest.TestCase):
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
+  def test_eye(self):
+    a = Tensor.eye(4, dtype=dtypes.int)
+    self.assertListEqual(a.tolist(), [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
   # *** randomness ***
 
   def test_random(self):
