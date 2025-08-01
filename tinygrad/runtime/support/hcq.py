@@ -383,7 +383,13 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
+    if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
+
   def synchronize(self):
+    # If we have any work on CPU devices, need to synchronize them. This is just an optimization to release GIL allowing to finish faster.
+    if not self._is_cpu():
+      for dev in HCQCompiled.cpu_devices: dev.synchronize()
+
     try: self.timeline_signal.wait(self.timeline_value - 1)
     except RuntimeError as e:
       if hasattr(self, 'on_device_hang'): self.on_device_hang()

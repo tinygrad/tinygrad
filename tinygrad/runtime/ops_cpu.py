@@ -55,7 +55,6 @@ class CPUComputeQueue(HWQueue):
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
-
   def _submit(self, dev): dev.tasks.put(self._q[:])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
@@ -119,7 +118,10 @@ class CPUAllocator(HCQAllocatorBase):
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    self.tasks = queue.Queue()
-    CPUWorker(self).start()
+    self._init_workers()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue,
                      supports_graph=False)
+
+    def _init_workers():
+      self.tasks = queue.Queue()
+      CPUWorker(self).start()

@@ -73,7 +73,6 @@ class HostLLVMCompiler(LLVMCompiler):
 
 class LLVMDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    self.tasks = queue.Queue()
-    CPUWorker(self).start()
+    self._init_workers()
     super().__init__(device, CPUAllocator(self), LLVMRenderer(), HostLLVMCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue,
                      supports_graph=False)
