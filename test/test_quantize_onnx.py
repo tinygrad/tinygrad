@@ -245,7 +245,7 @@ class TestDSPCache(unittest.TestCase):
     # string becuase this breaks Python language server for syntax highlight for some reason
     ast = eval("""UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.uchar.ptr(25088), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 896, 32, 1, 0), offset=0, mask=None, contiguous=True),)), src=(
+        UOp(Ops.VIEW, dtypes.uchar.ptr(25088), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32), strides=(0, 896, 32, 1), offset=0, mask=None, contiguous=True),)), src=(
           UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(25088), arg=0, src=()),)),
         UOp(Ops.CAST, dtypes.uchar, arg=None, src=(
           UOp(Ops.XOR, dtypes.int, arg=None, src=(
@@ -278,10 +278,10 @@ class TestDSPCache(unittest.TestCase):
                             UOp(Ops.MUL, dtypes.float, arg=None, src=(
                               UOp(Ops.CAST, dtypes.float, arg=None, src=(
                                 UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-                                  UOp(Ops.VIEW, dtypes.int.ptr(32), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=(
+                                  UOp(Ops.VIEW, dtypes.int.ptr(32), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32), strides=(0, 0, 0, 1), offset=0, mask=None, contiguous=False),)), src=(
                                     UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(32), arg=3, src=()),)),)),)),
                               UOp(Ops.CONST, dtypes.float, arg=9.203465015161783e-05, src=(
-                                x36:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
+                                x36:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32), strides=(0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
                           UOp(Ops.CONST, dtypes.float, arg=33.812857328652136, src=(
                             x36,)),)),
                         UOp(Ops.CONST, dtypes.float, arg=0.4999999, src=(

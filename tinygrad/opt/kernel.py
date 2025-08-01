@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType, smax
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
@@ -73,8 +73,9 @@ class Kernel:
       self.sts.append(unwrap(x.src[0].st))
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
-    full_shape = ast.full_shape
-    self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
+    max_ndim = max(len(x.shape) for x in self.sts)
+    self.sts.append(ShapeTracker.from_shape(tuple([smax(*s) for s in zip(*[x.shape + \
+    (1,)*(max_ndim-len(x.shape)) for x in self.sts])]), (0,)*max_ndim))
 
     # parameters for optimization
     self.tensor_core: TensorCore|None = None
@@ -86,11 +87,11 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
 
-    # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+    self.axis_types: list[AxisType] = [global_loops] * len(self.output_shape) + [AxisType.REDUCE] * (len(self.full_shape) - len(self.output_shape))
+
+    self.simplify_merge_adjacent()
 
     # confirm all reduce axes are at the end
     final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
@@ -123,8 +124,7 @@ class Kernel:
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
   @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
-
+  def shape_len(self) -> int: return len(self.sts[-1].shape)
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
@@ -169,8 +169,8 @@ class Kernel:
   # apply reshape and permute to all shapetrackers
   def reshape(self, new_shape_fxn:Callable[[tuple[sint, ...]], Sequence[sint]]):
     self.sts = [st.reshape(tuple(new_shape_fxn(st.shape))) for st in self.sts]
-  def permute(self, new_axes:Sequence[int]): self.sts = [st.permute(tuple(new_axes)) for st in self.sts]
-
+  def permute(self, new_perm_fxn:Callable[[list[int]], Sequence[int]]):
+    self.sts = [st.permute(tuple(new_perm_fxn(list(range(len(st.shape)))))) for st in self.sts]
   # axis : the axis to pull from
   # amount : the amount to take
   # top : if you want to pull that amount from the top
@@ -180,10 +180,15 @@ class Kernel:
     self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
-    def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
-    new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
+    def new_shape_fxn(x):
+      return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if axis < len(x) else ()) + x[axis+1:]
+    def new_perm_fxn(x):
+      max_insert = min(insert_at,len(x))
+      return [i for i in range(max_insert) if i != move_axis]+[move_axis]+[i for i in range(max_insert, len(x)) if i != move_axis] \
+      if move_axis < len(x) else x
+
     self.reshape(new_shape_fxn)
-    self.permute(new_axes)
+    self.permute(new_perm_fxn)
 
   # ******************** complex simplifiers ********************
 
@@ -192,16 +197,15 @@ class Kernel:
     if any(all_ones:=[s==1 for s in self.full_shape]):
       if hasattr(self, 'axis_types'):
         self.axis_types = [x for i,x in enumerate(self.axis_types) if not all_ones[i]]
-      self.reshape(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]])
+      self.reshape(lambda shape: [x for x in shape if resolve(x != 1)])
       return True
     return False
 
   def simplify_merge_adjacent(self):
-    assert not hasattr(self, 'axis_types'), "don't call this after init"
-    if self.shape_len == 0: return
+    if self.axis_types == []: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
-    # NOTE: we can't use self.first_reduce yet
-    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape+(0,), self.full_shape+(1,))].index(True)
+    first_reduce = self.shape_len if not len(self.axes_of(AxisType.REDUCE)) else self.axes_of(AxisType.REDUCE)[0]
+    axis_types = self.axis_types.copy()
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
@@ -222,21 +226,23 @@ class Kernel:
     # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     # TODO: how does this work with multi-reduce?
-    rets = [[(s[0], st[0])] for s,st in zip(shapes, strides)]
-    for i in range(1, len(shapes[0])):
+    rets = [[(s[0], st[0])] if s != () else [(0, 0)] for s,st in zip(shapes, strides)]
+    for i in range(1, len(self.full_shape)):
       can_merge = []
       for s,st,ret in zip(shapes, strides, rets):
         # TODO: added the always mergeability of 1s, is this right? if so, add to shapetracker in the 1 case
-        si, sti, last_st = s[i], st[i], ret[-1][1]
+        si, sti, last_st = (s[i],st[i],ret[-1][1]) if i < len(s) else (1, 0, ret[-1][1])
         can_merge.append((sti is not None) and ((sti != 0 and last_st == si*sti) or (sti == 0 and last_st == 0)))
       # more can merge than this
-      mergeable = all(can_merge) and i != first_reduce
+      if (mergeable := all(can_merge) and i != first_reduce): self.axis_types.pop(0 if i < first_reduce else -1)
       for j,(s,st) in enumerate(zip(shapes, strides)):
+        if (axis_types[i] is AxisType.REDUCE and len(s) < i+1): continue
         if mergeable: rets[j][-1] = (rets[j][-1][0] * s[i], st[i])
         else: rets[j].append((s[i], st[i]))
 
     # do the reshapes
-    for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
+    for i,x in enumerate(rets[:len(self.sts)]):
+      if shapes[i] != (): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** apply optimizations ********************
 
@@ -298,7 +304,7 @@ class Kernel:
     elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
-      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
+      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)[-1]+1)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       # NOTE: assume the first get_local_axes() LOCAL are for TC
@@ -312,9 +318,10 @@ class Kernel:
     elif opt.op is OptOps.SWAP:
       check(axis < amt, f"swap is only for axis < amt, getting {amt=}, {axis=}")
       check(self.axis_types[axis]==self.axis_types[amt]==AxisType.GLOBAL, f"swap is for globals {self.axis_types[axis]=}, {self.axis_types[amt]=}")
-      permute = list(range(self.shape_len))
-      permute[axis], permute[amt] = permute[amt], permute[axis]
-      self.permute(tuple(permute))
+      def perm_swap(permute):
+        permute[axis], permute[amt] = permute[amt], permute[axis]
+        return permute
+      self.permute(perm_swap)
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "cannot pad upcasted")
@@ -323,7 +330,8 @@ class Kernel:
         check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
-        if (s:=st.shape[axis]) == 1: continue  # reduced
+        if self.axis_types[axis] in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} and len(st.shape) <= axis: continue
+        s = st.shape[axis]
         check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
         if (ru := round_up(cast(int, s), amt) - s):
           # pad right seems to be faster
@@ -456,9 +464,10 @@ class Kernel:
         return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
-        changed = tuple(i for i in range(self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if i in changed)
-        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if i in changed)
+        axes = tuple(x for x in range(len(self.sts[reduce_idx].shape),len(self.sts[reduce_idx+1].shape)) if \
+        x in self.axes_of(AxisType.REDUCE, AxisType.UNROLL))
+        grouped_axes = tuple(x for x in range(len(self.sts[reduce_idx].shape),len(self.sts[reduce_idx+1].shape)) if \
+        x in self.axes_of(AxisType.GROUP_REDUCE))
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
@@ -467,9 +476,11 @@ class Kernel:
 
           # permute the srcs
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+          unroll_offset = self.shape_len - len(self.axes_of(AxisType.UNROLL))
           for i, (src, permaxis) in enumerate(zip(srcs, tc.permutes_for_shape_str(self.shape_str()))):
             src_st = (src if src.op is Ops.LOAD else src.src[0]).st_arg
-            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(permaxis))
+            n_permaxis = [(list(range(unroll_offset)) + list(reversed(range(unroll_offset, self.shape_len))))[i] for i in permaxis]
+            srcs[i] = src.view(ShapeTracker.from_shape(src_st.shape).permute(tuple(n_permaxis)))
 
           # construct the op
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
@@ -497,7 +508,7 @@ class Kernel:
           local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
           if op is self.reduceops[-1]: return grouped_reduce
-          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else s for i,s in enumerate(local_shape)]))
+          st = ShapeTracker.from_shape(tuple([s for i,s in enumerate(local_shape) if i not in grouped_axes]))
           return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
 
       return ret

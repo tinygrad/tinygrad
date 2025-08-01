@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, 
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
+from tinygrad.shape.view import View, strides_for_shape, get_contraction
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 
 # creation can recurse a lot
@@ -22,7 +22,7 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   # must have all stride 0 in the relevant axis (NOTE: can do partial)
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
-  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
+  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape))).reshape(reduce.shape)
   match reduce.arg[0]:
     case Ops.ADD: return ret*prshape
     case Ops.MUL: return ret.pow(prshape)
@@ -163,14 +163,15 @@ merge_views = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
    lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
 ])
-
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
   if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and \
       tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
+    #get the reduced numbers
+    #
+    if (contraction:=get_contraction(view.shape, r.shape)) is None: return None
     for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
@@ -185,13 +186,11 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
     assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
   return None
-
 view_left = merge_views+PatternMatcher([
   # view before elementwise and buffer ops
   (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.BIND, Ops.LOAD, Ops.STORE, Ops.VALID, Ops.SINK}, name="e"),), name="view"),
    lambda e,view: e.replace(src=tuple(s.view(view.st) for s in e.src))),
-  # if there's ones added after reduce, put this before the reduce
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
+# (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r"),), name="view"), reduce_push_add_ones),
 ])
 
 def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub View Left")
@@ -200,9 +199,8 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  if unwrap(view.st).contiguous and view.size == r.size and \
-      (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
-       tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
+  if unwrap(view.st).contiguous and view.size == (r.size + len(r.axis_arg)) and \
+      (not (len(r.arg) == 3 and r.arg[2]) or r.shape == view.shape) or isinstance(r.dtype, ImageDType):
     return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
