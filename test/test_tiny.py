@@ -38,7 +38,10 @@ class TestTiny(unittest.TestCase):
     b = Tensor.eye(N).contiguous().realize()
     c = Tensor.eye(N).contiguous().realize()
     d = Tensor.eye(N).contiguous().realize()
-    out = (((a@b).relu()@c).relu()@d).contiguous().realize()
+    e = Tensor.eye(N).contiguous().realize()
+    f = Tensor.eye(N).contiguous().realize()
+    g = Tensor.eye(N).contiguous().realize()
+    out = (a@b@c@d@e@f@g).contiguous().realize()
     self.assertListEqual(out.flatten().tolist(), [1.0]*(N*N))
 
   def test_conv2d(self):
@@ -50,10 +53,12 @@ class TestTiny(unittest.TestCase):
   def test_double_conv2d(self):
     N = 64
     a = Tensor.ones(1,4,N,N).contiguous().realize()
-    w1 = Tensor.ones(16,4,3,3).contiguous().realize()
-    w2 = Tensor.ones(24,16,3,3).contiguous().realize()
-    w3 = Tensor.ones(32,24,3,3).contiguous().realize()
-    out = a.conv2d(w1).conv2d(w2).conv2d(w3).contiguous().realize()
+    w1 = Tensor.ones(4,4,3,3).contiguous().realize()
+    w2 = Tensor.ones(4,4,3,3).contiguous().realize()
+    w3 = Tensor.ones(4,4,3,3).contiguous().realize()
+    w4 = Tensor.ones(4,4,3,3).contiguous().realize()
+    w5 = Tensor.ones(4,4,3,3).contiguous().realize()
+    out = a.conv2d(w1).conv2d(w2).conv2d(w3).conv2d(w4).conv2d(w5).contiguous().realize()
 
   # *** randomness ***
 

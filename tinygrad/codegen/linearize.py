@@ -90,9 +90,9 @@ class BlockContext:
       ctx.block_ctxs[u] = _sort_ctx(this_block_ctx) if u.op is not Ops.SINK else ()
 
       # RANGE/IF add to the next ctx
-      # STORE/ASSIGN subtract from the next ctx
+      # STORE/REDUCE_AXIS subtract from the next ctx
       if u.op in {Ops.RANGE, Ops.IF}: ctx.child_ctxs[u] = _sort_ctx(ctx.block_ctxs[u] + (u,))
-      elif u.op is Ops.STORE: ctx.child_ctxs[u] = tuple([y for y in ctx.block_ctxs[u] if y not in u.src])
+      elif u.op in {Ops.STORE, Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ctx.child_ctxs[u] = tuple([y for y in ctx.block_ctxs[u] if y not in u.src])
     return ctx
 
 # ***** make blocks *****
