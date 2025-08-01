@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, AMD_LLVM, PROFILE, ProfileEvent
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, AMD_LLVM, PROFILE, ProfileEvent, suppress_finalizing
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -473,11 +473,10 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
+  @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
-    try:
-      self.dev.synchronize()
-      self.dev.iface.free(opaque)
-    except AttributeError: pass
+    self.dev.synchronize()
+    self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
@@ -593,7 +592,7 @@ class KFDIface:
 
   def free(self, mem):
     if len(mem.mapped_devs) > 0:
-      gpus = (ctypes.c_int32 * len(mem.mapped_devs))(*[x.gpu_id for x in mem.mapped_devs])
+      gpus = (ctypes.c_int32 * len(mem.mapped_devs))(*[x.iface.gpu_id for x in mem.mapped_devs])
       stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
