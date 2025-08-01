@@ -3,7 +3,7 @@ from tinygrad.apps.llm import SimpleTokenizer
 
 class TestLLMTokenizer(unittest.TestCase):
   def _test_basic(self, text: str, expected_tokens: list[int]):
-    tok = SimpleTokenizer({ b"a": 0, b"b": 1, b"c": 2, b"ab": 3, b"bc": 4 }, { b"<x>": 5, b"<y>": 6, b"<z>": 7 })
+    tok = SimpleTokenizer(".*", { b"a": 0, b"b": 1, b"c": 2, b"ab": 3, b"bc": 4 }, { "<x>": 5, "<y>": 6, "<z>": 7 })
     self.assertEqual(tok.encode(text), expected_tokens)
     self.assertEqual(tok.decode(expected_tokens), text)
 

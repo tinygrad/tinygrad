@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer
 from datasets import load_dataset
-from tinygrad.apps.llm import SimpleTokenizer, gpt2_decode_vocab
+from tinygrad.apps.llm import SimpleTokenizer, gpt2_decode_vocab, get_llama_re
 from tinygrad.helpers import tqdm, getenv, partition
 
 # use ALLOW_FAILED=-1 to go over the entire dataset without printing.
@@ -9,7 +9,7 @@ if __name__ == "__main__":
   special_tokens, normal_tokens = partition(((t, tid) for t, tid in base_tokenizer.vocab.items()),
     lambda e: e[1] in base_tokenizer.all_special_ids)
   inv_vocab = { tid: word for word, tid in base_tokenizer.get_vocab().items() }
-  simple_tokenizer = SimpleTokenizer(gpt2_decode_vocab(dict(normal_tokens)), gpt2_decode_vocab(dict(special_tokens)))
+  simple_tokenizer = SimpleTokenizer(get_llama_re(), gpt2_decode_vocab(dict(normal_tokens)), dict(special_tokens))
 
   color_codes = [ 91, 92, 94, 93, 95 ]
   def color_tokens(tids):

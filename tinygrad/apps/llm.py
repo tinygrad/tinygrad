@@ -1,36 +1,45 @@
 from __future__ import annotations
-import sys, argparse, typing, re, itertools
+import sys, argparse, typing, re, itertools, unicodedata
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
 
 def gpt2_decode_vocab(voc: dict[str, int]): # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
   c2b = { chr(cp): cp for cp in itertools.chain(range(ord("!"), ord("~")+1), range(ord("¡"), ord("¬")+1), range(ord("®"), ord("ÿ")+1)) }
-  c2b.update({ chr(256+off): cp for off, cp in enumerate([ cp for cp in range(256) if chr(cp) not in c2b ]) })
+  c2b.update({ chr(256+off): cp for off, cp in enumerate(cp for cp in range(256) if chr(cp) not in c2b) })
   return { bytes(c2b[c] for c in tok): tid for tok, tid in voc.items() }
 
+def get_llama_re():
+  def ucat_range(prefix: str): return "".join(chr(cp) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(prefix))
+  r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
+  # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
+  return "(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
+    f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
+
 class SimpleTokenizer:
-  def __init__(self, normal_tokens: dict[bytes, int], special_tokens: dict[bytes, int]):
-    self._normal_tokens, self._special_tokens = normal_tokens, special_tokens
-    self._inv_vocab = { tid: tok.decode(errors="ignore") for tok, tid in (normal_tokens | special_tokens).items() }
-    self._special_re = re.compile(b"|".join(re.escape(tok) for tok in self._special_tokens.keys()))
+  def __init__(self, pat: str, normal_tokens: dict[bytes, int], special_tokens: dict[str, int]):
+    self._normal_tokens, self._special_tokens, self._pat = normal_tokens, special_tokens, re.compile(pat)
+    self._tok2str = { tid: tok for tok, tid in special_tokens.items() } | { tid: tok.decode(errors="ignore") for tok, tid in normal_tokens.items()  }
+    self._special_re = re.compile("|".join(re.escape(tok) for tok in self._special_tokens.keys()))
 
   @staticmethod
   def from_gguf_kv(kv: dict):
+    # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
+    if kv["tokenizer.ggml.pre"] not in ("llama3","llama-v3","llama-bpe"): raise ValueError(f"Invalid tokenizer preset '{kv['tokenizer.ggml.pre']}'")
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(gpt2_decode_vocab(dict(normal_tokens)), gpt2_decode_vocab(dict(special_tokens)))
+    return SimpleTokenizer(get_llama_re(), gpt2_decode_vocab(dict(normal_tokens)), dict(special_tokens))
 
   def encode(self, text: str):
-    btext = text.encode()
     tokens: list[int] = []
     pos = 0
-    for match in self._special_re.finditer(btext):
-      tokens.extend(self._encode_word(btext[pos:match.start(0)]) + [self._special_tokens[btext[match.start(0):match.end(0)]]])
+    for match in self._special_re.finditer(text):
+      tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
       pos = match.end(0)
-    return tokens + self._encode_word(btext[pos:])
+    return tokens + self._encode_sentence(text[pos:])
 
-  def decode(self, ids: list[int]) -> str: return ''.join(self._inv_vocab[tid] for tid in ids)
+  def decode(self, ids: list[int]) -> str: return ''.join(self._tok2str[tid] for tid in ids)
   def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
 
+  def _encode_sentence(self, chunk: str): return [ tok for word in self._pat.findall(chunk) for tok in self._encode_word(word.encode()) ]
   def _encode_word(self, word: bytes):
     parts = [word[i:i+1] for i in range(len(word))]
     while True:
