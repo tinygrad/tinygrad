@@ -148,6 +148,96 @@
             return res.arrayBuffer();
         };
 
+        function initDb() {
+            return new Promise((resolve, reject) => {
+                let db;
+                const request = indexedDB.open('tinywhisperdb', 1);
+                request.onerror = (event) => {
+                    console.error('Database error:', event.target.error);
+                    resolve(null);
+                };
+
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    console.log("Db initialized.");
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+                    if (!db.objectStoreNames.contains('tensors')) {
+                        db.createObjectStore('tensors', { keyPath: 'id' });
+                    }
+                };
+            });
+        }
+
+        function readTensorFromDb(db, id) {
+            return new Promise((resolve, reject) => {
+                if (db == null) {
+                    resolve(null);
+                }
+
+                const transaction = db.transaction(['tensors'], 'readonly');
+                const store = transaction.objectStore('tensors');
+                const request = store.get(id);
+
+                transaction.onabort = (event) => {
+                    console.log("Transaction error while reading tensor: " + event.target.error);
+                    resolve(null);
+                };
+
+                request.onsuccess = (event) => {
+                    const result = event.target.result;
+                    if (result) {
+                        resolve(result);
+                    } else {
+                        resolve(null);
+                    }
+                };
+
+                request.onerror = (event) => {
+                    console.error('Tensor retrieve failed: ', event.target.error);
+                    resolve(null);
+                };
+            });
+        }
+
+        function saveTensorToDb(db, id, tensor) {
+            return readTensorFromDb(db, id).then((result) => {
+                if (!result) {
+                    new Promise((resolve, reject) => {
+                        if (db == null) {
+                            resolve(null);
+                        }
+
+                        const transaction = db.transaction(['tensors'], 'readwrite');
+                        const store = transaction.objectStore('tensors');
+                        const request = store.put({ id: id, content: tensor });
+
+                        transaction.onabort = (event) => {
+                            console.log("Transaction error while saving tensor: " + event.target.error);
+                            resolve(null);
+                        };
+
+                        request.onsuccess = () => {
+                            console.log('Tensor saved successfully.');
+                            resolve();
+                        };
+
+                        request.onerror = (event) => {
+                            console.error('Tensor save failed:', event.target.error);
+                            resolve(null);
+                        };
+                    });
+                } else {
+                    return null;
+                }
+            }).catch(()=> null);
+        }
+
+        var db;
+
         let totalLoaded = 0, totalSize = 0, partSize = {};
         const loadingText = document.querySelector("#div-loading > p");
         const progressCallback = (part, loaded, total) => {
@@ -155,6 +245,18 @@
             if (!partSize[part]) { totalSize += total; partSize[part] = true; }
             loadingText.innerHTML = `Loading model ${part.split('/').pop().split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
         };
+
+        const getPart = async(key) => {
+            let part = await readTensorFromDb(db, key);
+
+            if (part) {
+                console.log(`Cache hit: ${key}`);
+                return Promise.resolve(part.content);
+            } else {
+                console.log(`Cache miss: ${key}`);
+                return getProgressDlForPart(`${BASE_URL}/${key}.safetensors`, progressCallback);
+            }
+        }
 
         async function transcribeAudio(audioFetcher) {
             if (!net_encoder) {
@@ -165,10 +267,25 @@
                     loadingContainer.style.display = "none";
                     return;
                 }
-                net_silero = await silero.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/vad.safetensors`, progressCallback)));
-                net_mel = await mel.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/mel.safetensors`, progressCallback)));
-                net_encoder = await encoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/encoder.safetensors`, progressCallback)));
-                net_decoder = await decoder.setupNet(device, new Uint8Array(await getProgressDlForPart(`${BASE_URL}/decoder.safetensors`, progressCallback)));
+                if (!db) {
+                    db = await initDb();
+                }
+                let vad_buf = await getPart("vad");
+                saveTensorToDb(db, "vad", new Uint8Array(vad_buf));
+                net_silero = await silero.setupNet(device, new Uint8Array(vad_buf));
+
+                let mel_buf = await getPart("mel");
+                saveTensorToDb(db, "mel", new Uint8Array(mel_buf));
+                net_mel = await mel.setupNet(device, new Uint8Array(mel_buf));
+
+                let encoder_buf = await getPart("encoder");
+                saveTensorToDb(db, "encoder", new Uint8Array(encoder_buf));
+                net_encoder = await encoder.setupNet(device, new Uint8Array(encoder_buf));
+
+                let decoder_buf = await getPart("decoder");
+                saveTensorToDb(db, "decoder", new Uint8Array(decoder_buf));
+                net_decoder = await decoder.setupNet(device, new Uint8Array(decoder_buf));
+
                 loadingContainer.style.display = "none";
             }
 
