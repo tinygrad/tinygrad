@@ -28,16 +28,15 @@ class ClangJITCompiler(Compiler):
 class CPUWorker(threading.Thread):
   def __init__(self, dev):
     super().__init__()
-    self.dev, self.daemon = dev, True
+    self.dev, self.tasks, self.daemon = dev, dev.tasks, True
 
   def run(self):
-    x = self.dev.tasks
     while True:
-      blk, off = x.get(), 0
+      blk, off = self.tasks.get(), 0
       while off < len(blk):
         blk[off](*blk[off + 2:off + 2 + blk[off + 1]])
         off += blk[off + 1] + 2
-      x.task_done()
+      self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, prg, bufs, *args):
