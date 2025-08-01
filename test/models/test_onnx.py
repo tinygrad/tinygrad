@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
-from tinygrad.helpers import CI, fetch, temp
+from tinygrad.helpers import CI, fetch, temp, getenv
 
 try:
   import huggingface_hub
@@ -152,13 +152,13 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "METAL", "only run metal")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def setUp(self):
-    self.original_max_buffer_size = os.getenv("MAX_BUFFER_SIZE")
-    os.environ["MAX_BUFFER_SIZE"] = 0
+    self.original_max_buffer_size = getenv("MAX_BUFFER_SIZE", "0")
+    os.environ["MAX_BUFFER_SIZE"] = "0"
 
   def tearDown(self):
     os.environ["MAX_BUFFER_SIZE"] = self.original_max_buffer_size
 
-  def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
+  def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
@@ -166,7 +166,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     ))
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
-    print(f"Running model: {repo_id}/{model_file} ({file_size / (1024**2):.2f} MB)")
+    print(f"Validating model: {repo_id}/{model_file} ({file_size / (1024**2):.2f} MB)")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
 
   def test_xlm_roberta_large(self):
@@ -176,7 +176,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "input_ids": np.array([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]], dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
-    self._run(repo_id, model_file, custom_inputs)
+    self._validate(repo_id, model_file, custom_inputs)
 
   def test_fashion_clip(self):
     repo_id = "patrickjohncyh/fashion-clip"
@@ -186,7 +186,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
       "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
-    self._run(repo_id, model_file, custom_inputs)
+    self._validate(repo_id, model_file, custom_inputs)
 
 if __name__ == "__main__":
   unittest.main()
