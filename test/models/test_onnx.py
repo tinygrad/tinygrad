@@ -3,6 +3,7 @@ import os
 import time
 import unittest
 import numpy as np
+from pathlib import Path
 try:
   import onnx
 except ModuleNotFoundError:
@@ -10,6 +11,18 @@ except ModuleNotFoundError:
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
+from extra.onnx_helpers import validate
+
+try:
+  import huggingface_hub
+  from extra.huggingface_onnx.run_models import (
+    download_and_test_model,
+  )
+  HUGGINGFACE_AVAILABLE = True
+  MODEL_FOLDER = Path(__file__).parent.parent.parent / "extra" / "huggingface_onnx" / "models"
+except ImportError:
+  HUGGINGFACE_AVAILABLE = False
+  MODEL_FOLDER = None
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -136,6 +149,55 @@ class TestOnnxModel(unittest.TestCase):
     cls = run(car_img)
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
+
+
+@unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
+class TestHuggingFaceOnnxModels(unittest.TestCase):
+  def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
+    onnx_model_path = Path(huggingface_hub.snapshot_download(
+      repo_id=repo_id,
+      allow_patterns=[model_file],
+      cache_dir=MODEL_FOLDER
+    ))
+    onnx_model_path = onnx_model_path / model_file
+    validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
+
+  def test_gpt2(self):
+    repo_id = "openai-community/gpt2"
+    model_file = "onnx/decoder_model.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[15496, 11, 314, 1101]], dtype=np.int64),  # "Hello, I am"
+      "attention_mask": np.ones((1, 4), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_huggingface_sentence_transformer(self):
+    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.random.randint(0, 30522, (1, 128), dtype=np.int64),
+      "attention_mask": np.ones((1, 128), dtype=np.int64),
+      "token_type_ids": np.zeros((1, 128), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_huggingface_with_custom_inputs(self):
+    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.random.randint(0, 30522, (1, 128), dtype=np.int64),
+      "attention_mask": np.ones((1, 128), dtype=np.int64),
+      "token_type_ids": np.zeros((1, 128), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_huggingface_vision_model(self):
+    repo_id = "trpakov/vit-face-expression"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32)
+    }
+    self._run(repo_id, model_file, custom_inputs)
 
 if __name__ == "__main__":
   unittest.main()
