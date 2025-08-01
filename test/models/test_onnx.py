@@ -171,31 +171,72 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     }
     self._run(repo_id, model_file, custom_inputs)
 
-  def test_huggingface_sentence_transformer(self):
-    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input_ids": np.random.randint(0, 30522, (1, 128), dtype=np.int64),
-      "attention_mask": np.ones((1, 128), dtype=np.int64),
-      "token_type_ids": np.zeros((1, 128), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_huggingface_with_custom_inputs(self):
-    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input_ids": np.random.randint(0, 30522, (1, 128), dtype=np.int64),
-      "attention_mask": np.ones((1, 128), dtype=np.int64),
-      "token_type_ids": np.zeros((1, 128), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_huggingface_vision_model(self):
+  def test_vision_model(self):
     repo_id = "trpakov/vit-face-expression"
     model_file = "onnx/model.onnx"
     custom_inputs = {
       "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32)
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_long_t5_tglobal_base_sci_simplify(self):
+    repo_id = "pszemraj/long-t5-tglobal-base-sci-simplify"
+    model_file = "model.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[1, 2, 3, 4, 5]], dtype=np.int64),
+      "attention_mask": np.ones((1, 5), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_fashion_clip(self):
+    repo_id = "patrickjohncyh/fashion-clip"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32)
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_ms_marco_minilm_l6_v2(self):
+    repo_id = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    model_file = "onnx/model_O2.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
+      "attention_mask": np.ones((1, 6), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_mxbai_rerank_base_v1(self):
+    repo_id = "mixedbread-ai/mxbai-rerank-base-v1"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
+      "attention_mask": np.ones((1, 6), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_smollm_135m(self):
+    repo_id = "HuggingFaceTB/SmolLM-135M"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[1, 2, 3, 4]], dtype=np.int64),
+      "attention_mask": np.ones((1, 4), dtype=np.int64),
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_rmbg_1_4(self):
+    repo_id = "briaai/RMBG-1.4"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input": np.random.randn(1, 3, 1024, 1024).astype(np.float32)
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_all_minilm_l6_v2_o3(self):
+    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
+    model_file = "onnx/model_O3.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
+      "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 

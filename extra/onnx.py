@@ -85,10 +85,6 @@ class OnnxValue:
   is_sequence: bool
 
 class Domain(enum.Enum):
-  """
-  ONNX operator domains.
-  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
-  """
   ONNX = "ai.onnx"
   ONNX_ML = "ai.onnx.ml"
   AI_ONNX_TRAINING = "ai.onnx.training"
