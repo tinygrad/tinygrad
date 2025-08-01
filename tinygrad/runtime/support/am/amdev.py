@@ -223,7 +223,7 @@ class AMDev(PCIDevImplBase):
 
     self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(tmr_offset, tmr_size)[:]))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
-    assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE and not ihdr.base_addr_64_bit, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
+    assert ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, f"0x{ihdr.signature:X} != 0x{am.DISCOVERY_TABLE_SIGNATURE:X}"
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
@@ -246,6 +246,8 @@ class AMDev(PCIDevImplBase):
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
+    # print(self.gc_info, self.ip_ver)
+    # exit(0)
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 

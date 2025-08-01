@@ -646,7 +646,7 @@ class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550], bars=[0, 2, 5], vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x74a1, 0x744c, 0x7480, 0x7550], bars=[0, 2, 5], vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
     self._setup_adev(self.pci_dev.pcibus, self.pci_dev.map_bar(0), dbell:=self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I'))
     self.doorbell_cpu_addr = dbell.addr

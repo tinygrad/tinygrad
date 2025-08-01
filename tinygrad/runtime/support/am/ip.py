@@ -12,8 +12,7 @@ class AM_IP:
 
 class AM_SOC(AM_IP):
   def init_sw(self):
-    self.soc_ver = 24 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 21
-    self.module = importlib.import_module(f"tinygrad.runtime.autogen.am.soc{self.soc_ver}")
+    self.module = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 11: 'soc21', 12: 'soc24'}[self.adev.ip_ver[am.GC_HWIP][0]])}")
 
   def init_hw(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
