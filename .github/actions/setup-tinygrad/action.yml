@@ -74,6 +74,21 @@ runs:
         path: ~/Library/Caches/tinygrad/downloads/
         key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
 
+    # **** HuggingFace Models Cache ****
+
+    - name: Cache HuggingFace ONNX models (Linux)
+      if: inputs.key != '' && runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/extra/huggingface_onnx/models/
+        key: huggingface-models-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Cache HuggingFace ONNX models (macOS)
+      if: inputs.key != '' && runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/extra/huggingface_onnx/models/
+        key: osx-huggingface-models-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
