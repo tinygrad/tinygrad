@@ -425,10 +425,10 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
     img_ids, img_sizes = [None] * (batch_size * batch_count), [None] * (batch_size * batch_count)
   else:
     img_ids, img_sizes = None, None
-    shm_boxes, boxes = _setup_shared_mem("retinanet_boxes_flata", (batch_size * batch_count, 120087, 4), dtypes.float32)
-    shm_labels, labels = _setup_shared_mem("retinanet_labels_flata", (batch_size * batch_count, 120087), dtypes.int64)
-    shm_matches, matches = _setup_shared_mem("retinanet_matches_flata", (batch_size * batch_count, 120087), dtypes.int64)
-    shm_anchors, anchors = _setup_shared_mem("retinanet_anchors_flata", (batch_size * batch_count, 120087, 4), dtypes.float64)
+    shm_boxes, boxes = _setup_shared_mem("retinanet_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
+    shm_labels, labels = _setup_shared_mem("retinanet_labels", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_anchors, anchors = _setup_shared_mem("retinanet_anchors", (batch_size * batch_count, 120087, 4), dtypes.float64)
 
   shutdown = False
   class Cookie:
