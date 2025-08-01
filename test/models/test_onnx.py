@@ -149,15 +149,8 @@ class TestOnnxModel(unittest.TestCase):
 
 
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
-@unittest.skipUnless(Device.DEFAULT == "METAL", "only run metal")
+@unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "only run CPU and GPU")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
-  def setUp(self):
-    self.original_max_buffer_size = getenv("MAX_BUFFER_SIZE", "0")
-    os.environ["MAX_BUFFER_SIZE"] = "0"
-
-  def tearDown(self):
-    os.environ["MAX_BUFFER_SIZE"] = self.original_max_buffer_size
-
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
