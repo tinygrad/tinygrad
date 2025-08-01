@@ -149,7 +149,7 @@ class TestOnnxModel(unittest.TestCase):
 
 
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
-@unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "only run CPU and GPU")
+@unittest.skipUnless(Device.DEFAULT in ["CPU", "GPU"], "only run CPU and GPU to avoid 200MB buffer size limit")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
