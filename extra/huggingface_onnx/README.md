@@ -2,6 +2,12 @@
 
 Tool for discovering, downloading, and validating ONNX models from HuggingFace.
 
+## Extra Dependencies
+
+```bash
+pip install huggingface_hub pyyaml requests onnx onnxruntime numpy
+```
+
 ## Huggingface Manager (discovering and downloading)
 
 The `huggingface_manager.py` script discovers top ONNX models from HuggingFace, collects metadata, and optionally downloads them.
@@ -77,9 +83,3 @@ python run_models.py --debug "sentence-transformers/all-MiniLM-L6-v2" --truncate
 | `--debug REPO_ID` | Debug specific repository (downloads and validates all ONNX models in repo) |
 | `--debug REPO_ID/path/to/model.onnx` | Debug specific model file |
 | `--truncate N` | Truncate ONNX model to first N nodes for debugging (use with --debug) |
-
-## Extra Dependencies
-
-```bash
-pip install huggingface_hub pyyaml requests onnx onnxruntime numpy
-```
