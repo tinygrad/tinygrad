@@ -173,7 +173,7 @@
     background-color: #1a1b26;
     border: 1px solid #4a4b56;
     color: #f0f0f5;
-    border-radius: 8px;
+    border-radius: 4px;
     padding: 6px;
     cursor: pointer;
     height: 32px;
@@ -184,7 +184,6 @@
   }
   .btn:hover {
     background-color: #2a2b36;
-    border-color: #5a5b66;
   }
   .collapsed .container {
     display: none;
@@ -203,7 +202,6 @@
   pre code.hljs {
     overflow-y: auto;
     max-height: 30vh;
-    border-radius: 8px;
     padding: 8px;
   }
   .progress-message {
@@ -223,6 +221,7 @@
     pointer-events: none;
     display: none;
     font-size: 10px;
+    white-space: pre;
   }
   #device-list > div {
     min-height: 32px;
@@ -239,6 +238,8 @@
     padding: 0 8px;
     width: 100%;
     height: 100%;
+    max-height: 100vh;
+    overflow-x: auto;
   }
   .raw-text code {
     max-height: none !important;
@@ -247,14 +248,12 @@
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    border-radius: 8px;
-    overflow: hidden;
     background-color: #1a1b26;
     color: #f0f0f5;
     font-size: 0.95em;
   }
   table td {
-    border-bottom: 1px solid #2c2f40;
+    border-bottom: 1px solid #4a4b56;
     vertical-align: top;
   }
   table tr:last-child > td {
@@ -268,6 +267,40 @@
   }
   tr.main-row > td, tr.sub-row > td {
     padding: 8px 12px;
+  }
+  tr.code-row > td:first-child {
+    font-family: monospace;
+  }
+  td.pct-row > div {
+    height: 12px;
+    width: 100%;
+    display: flex;
+  }
+  td.pct-row > div > div {
+    height: 100%;
+  }
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #20222e;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid #4a4b56;
+    font-size: 0.95em;
+    letter-spacing: 0.03em;
+  }
+  .legend {
+    display: flex;
+    align-items: center;
+  }
+  .legend > div {
+    width: 0.95em;
+    height: 0.95em;
+    margin-right: 4px;
   }
   </style>
 </head>
