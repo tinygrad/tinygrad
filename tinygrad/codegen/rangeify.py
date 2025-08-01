@@ -15,8 +15,7 @@ def rangify_store(ctx:list[int], x:UOp):
   mm2 = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[1],)+tuple(ranges))
   return UOp(Ops.STORE, src=(mm, mm2)+tuple([x for x in ranges if x.op is not Ops.CONST]), tag=1)
 
-def map_reshape(x:UOp):
-  r = x.src[0]
+def map_reshape(x:UOp, r:UOp):
   acc = 1
   to_sum = []
   for s,src in list(zip(x.shape, x.src[1:]))[::-1]:
@@ -33,8 +32,7 @@ def map_reshape(x:UOp):
   ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
-def map_expand(x:UOp):
-  r = x.src[0]
+def map_expand(x:UOp, r:UOp):
   inp_shape, exp_shape = x.src[0].src[0].shape, x.src[0].shape
   ret = list(x.src[1:])
   exp_ranges = []
@@ -44,23 +42,20 @@ def map_expand(x:UOp):
       ret[i] = UOp.const(dtypes.int, 0)
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
-def map_permute(x:UOp):
-  r = x.src[0]
+def map_permute(x:UOp, r:UOp):
   ret = x.src[1:]
   # argsort or not?
   perm = argsort(x.src[0].arg)
   ret = tuple([ret[p] for p in perm])
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
-def map_shrink(ctx:list[int], x:UOp):
-  r = x.src[0]
+def map_shrink(x:UOp, r:UOp):
   ret = list(x.src[1:])
   for i,(s,(ss,se)) in enumerate(zip(r.src[0].shape, r.arg)):
     if ss != 0: ret[i] = ret[i] + ss
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
-def map_pad(x:UOp):
-  r = x.src[0]
+def map_pad(x:UOp, r:UOp):
   ret = list(x.src[1:])
   bigwhere = UOp.const(dtypes.bool, True)
   for i,(sh,(s,e)) in enumerate(zip(r.shape, r.arg)):
@@ -74,9 +69,8 @@ def map_pad(x:UOp):
   # PAD is with 0
   return bigwhere.where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), r.const_like(0))
 
-def map_reduce(ctx:list[int], x:UOp):
+def map_reduce(ctx:list[int], x:UOp, r:UOp):
   rngs = list(x.src[1:])
-  r = x.src[0]
   new_ranges = []
   for i,s in enumerate(r.src[0].shape):
     if i in r.arg[1]:
@@ -90,12 +84,12 @@ def map_reduce(ctx:list[int], x:UOp):
 pm_rangeify = PatternMatcher([
   # TODO: handle MAP on STORE
   (UPat(Ops.STORE, name="x"), rangify_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE),), allow_any_len=True, name="x"), map_permute),
-  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE),), allow_any_len=True, name="x"), map_reshape),
-  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND),), allow_any_len=True, name="x"), map_expand),
-  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK),), allow_any_len=True, name="x"), map_shrink),
-  (UPat(Ops.INDEX, src=(UPat(Ops.PAD),), allow_any_len=True, name="x"), map_pad),
-  (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS),), allow_any_len=True, name="x"), map_reduce),
+  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"), map_permute),
+  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
+  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"), map_shrink),
+  (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
+  (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="r"),), allow_any_len=True, name="x"), map_reduce),
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c),
 
   # move MAP through elementwise ALU
