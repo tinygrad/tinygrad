@@ -583,7 +583,7 @@ jobs:
       - name: Test models (gpu)
         run: GPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (cpu)
-        run: CPU=1 python -m pytest -n=auto test/models --durations=20
+        run: MAX_BUFFER_SIZE=0 CPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

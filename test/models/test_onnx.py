@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
-from tinygrad.helpers import CI, fetch, temp, getenv
+from tinygrad.helpers import CI, fetch, temp
 
 try:
   import huggingface_hub
