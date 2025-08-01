@@ -1388,10 +1388,11 @@ def train_llama3():
 
   i = 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
+    t = time.perf_counter()
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens, grad_acc)
     # above as tqdm.write f-string
-    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
         f.write(f"{i} {loss.item():.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
