@@ -10,16 +10,16 @@ except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.helpers import CI, fetch, temp
 
 try:
   import huggingface_hub
   from extra.onnx_helpers import validate
+  from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR
   HUGGINGFACE_AVAILABLE = True
-  MODEL_FOLDER = Path(__file__).parent.parent.parent / "extra" / "huggingface_onnx" / "models"
 except ImportError:
   HUGGINGFACE_AVAILABLE = False
-  MODEL_FOLDER = None
 
 # override MAX_BUFFER_SIZE=300000000
 os.environ["MAX_BUFFER_SIZE"] = "0"
@@ -152,12 +152,13 @@ class TestOnnxModel(unittest.TestCase):
 
 
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
+@unittest.skipUnless(Device.DEFAULT == "METAL", "only run metal")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
-      allow_patterns=[model_file],
-      cache_dir=MODEL_FOLDER
+      allow_patterns=["*.onnx", "*.onnx_data"],
+      cache_dir=str(DOWNLOADS_DIR)
     ))
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
@@ -188,6 +189,15 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     model_file = "onnx/model.onnx"
     custom_inputs = {
       "input": np.random.randn(1, 3, 1024, 1024).astype(np.float32)
+    }
+    self._run(repo_id, model_file, custom_inputs)
+
+  def test_xlm_roberta_large(self):
+    repo_id = "FacebookAI/xlm-roberta-large"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.array([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]], dtype=np.int64),
+      "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
