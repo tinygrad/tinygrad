@@ -3,7 +3,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import argsort
 
 def rangify_store(ctx:list[int], x:UOp):
-  if len(x.src) != 2: return None
+  if x.tag == 1: return None
   ranges = []
   for s in x.shape:
     if resolve(s!=1):
@@ -13,7 +13,7 @@ def rangify_store(ctx:list[int], x:UOp):
       ranges.append(UOp.const(dtypes.int, 0))
   mm = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[0],)+tuple(ranges))
   mm2 = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[1],)+tuple(ranges))
-  return UOp(Ops.STORE, src=(mm, mm2)+tuple(ranges))
+  return UOp(Ops.STORE, src=(mm, mm2)+tuple([x for x in ranges if x.op is not Ops.CONST]), tag=1)
 
 def map_reshape(x:UOp):
   r = x.src[0]
@@ -52,21 +52,11 @@ def map_permute(x:UOp):
   ret = tuple([ret[p] for p in perm])
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
-
 def map_shrink(ctx:list[int], x:UOp):
   r = x.src[0]
   ret = list(x.src[1:])
   for i,(s,(ss,se)) in enumerate(zip(r.src[0].shape, r.arg)):
-    assert ss == 0, "add to range?"
-    if se-ss != s and False:
-      new_ret_i = [ret[i]]
-      if ss != 0:
-        new_ret_i = [UOp.range(dtypes.int, ss, ctx[0])] + new_ret_i
-        ctx[0] += 1
-      if se != s:
-        new_ret_i = new_ret_i + [UOp.range(dtypes.int, s-se, ctx[0])]
-        ctx[0] += 1
-      ret[i] = UOp(Ops.CATRANGE, src=tuple(new_ret_i))
+    if ss != 0: ret[i] = ret[i] + ss
   return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
 
 def map_pad(x:UOp):
@@ -80,7 +70,7 @@ def map_pad(x:UOp):
     if s > 0: where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
     # mask the load
-    ret[i] = where.where(ret[i], ret[i].const_like(-100000))
+    #ret[i] = where.where(ret[i], ret[i].const_like(-100000))
   # PAD is with 0
   return bigwhere.where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), r.const_like(0))
 

@@ -218,7 +218,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
+    try:
+      st = self.st
+    except AssertionError:
+      st = None
+    return UOp.const(self.dtype, b, device=self._device, shape=st.shape if st is not None else None)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
