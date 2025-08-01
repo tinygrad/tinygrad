@@ -19,7 +19,7 @@ if __name__ == '__main__':
   def todevice(sd, device):
     return {k: v.replace(v.to(device=device).realize()) for k,v in sd.items()}
 
-  model, enc = init_whisper("tiny.en")
+  model, enc = init_whisper("small.en")
 
   dirname = Path(__file__).parent
   # NOTE(irwin): force export as f32 as it's a little easier to validate
