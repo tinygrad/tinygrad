@@ -136,7 +136,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
-    if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
+    if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
       return ShapeTracker.from_shape((cast(PtrDType, self.dtype).size,))
