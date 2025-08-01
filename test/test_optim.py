@@ -41,8 +41,6 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     out.backward()
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
-#cant fit nesterov flag
-def TorchMuonOptim(params, lr=0.02, weight_decay=0.0, momentum=0.95, nesterov=True): return TorchMuon(params, lr, weight_decay, momentum)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestOptim(unittest.TestCase):
@@ -61,7 +59,7 @@ class TestOptim(unittest.TestCase):
   def _test_adam(self, steps, opts, atol, rtol): self._test_optim(Adam, torch.optim.Adam, steps, opts, atol, rtol)
   def _test_adamw(self, steps, opts, atol, rtol): self._test_optim(AdamW, torch.optim.AdamW, steps, opts, atol, rtol)
   #TODO: use torch.muon when it comes out
-  def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, TorchMuonOptim, steps, opts, atol, rtol)
+  def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, TorchMuon, steps, opts, atol, rtol)
 
   def test_multistep_sgd_high_lr_teeny(self): self._test_sgd(2, {'lr': 1.1, 'teeny': True}, 1e-6, 1e-5)
   def test_multistep_adam_high_lr_teeny(self): self._test_adam(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)

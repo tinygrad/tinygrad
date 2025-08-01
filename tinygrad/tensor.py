@@ -4060,7 +4060,7 @@ class Tensor(MathTrait):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
-  def newton_schulz(self, steps:int=5, params=(2,-1.5,0.5)) -> Tensor:
+  def newton_schulz(self, steps:int, params:tuple[int, ...]) -> Tensor:
     """
     Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
 
@@ -4068,7 +4068,6 @@ class Tensor(MathTrait):
     t = Tensor.randn(4, 4)
     print(t.newton_schulz().numpy())
     ```
-
     """
     assert self.ndim == 2
     G = self / (self.square().sum().sqrt() + 1.0e-7)

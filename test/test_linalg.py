@@ -63,7 +63,7 @@ class TestLinAlg(unittest.TestCase):
       reconstruction_helper([Q,R],a)
 
   def test_newton_schulz(self):
-    coefficients = [(2, -1.5, 0.5), (2.0, -1.4, 0.2, 0.2)]
+    coefficients = [(2, -1.5, 0.5), (2.0, -1.4, 0.2, 0.2)]#these params map to the sign function
     a = Tensor.randn(2,2)
     for coefs in coefficients:
       b = Tensor.newton_schulz(a, steps=10, params=coefs)
