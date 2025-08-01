@@ -358,6 +358,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   peer_groups: dict[str, list[HCQCompiled]] = collections.defaultdict(list)
   signal_pages: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
+  cpu_devices: list[HCQCompiled] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000,

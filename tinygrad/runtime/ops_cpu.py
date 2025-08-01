@@ -122,6 +122,6 @@ class CPUDevice(HCQCompiled):
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue,
                      supports_graph=False)
 
-    def _init_workers():
-      self.tasks = queue.Queue()
-      CPUWorker(self).start()
+  def _init_workers(self):
+    self.tasks = queue.Queue()
+    CPUWorker(self).start()
