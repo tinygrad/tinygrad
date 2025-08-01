@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import argsort
 
@@ -61,4 +61,7 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND),), allow_any_len=True, name="x"), map_expand),
   # TODO: CONST shouldn't have src
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
+  # move MAP through elementwise ALU
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.LOAD})),), allow_any_len=True, name="x"),
+   lambda x: x.src[0].replace(src=tuple([UOp(Ops.INDEX, dtype=s.dtype, src=(s,)+x.src[1:]) for s in x.src[0].src]))),
 ])
