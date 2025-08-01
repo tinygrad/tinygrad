@@ -1,13 +1,14 @@
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType
+from tinygrad.opt.kernel import axis_colors
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import argsort
+from tinygrad.helpers import argsort, colored
 
 def rangify_store(ctx:list[int], x:UOp):
   if x.tag == 1: return None
   ranges = []
   for s in x.shape:
     if resolve(s!=1):
-      ranges.append(UOp.range(dtypes.int, s, ctx[0]))
+      ranges.append(UOp.range(dtypes.int, s, (ctx[0], AxisType.LOOP)))
       ctx[0] += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
@@ -21,7 +22,7 @@ def map_reduce(ctx:list[int], x:UOp, r:UOp):
   for i,s in enumerate(r.src[0].shape):
     if i in r.arg[1]:
       assert rngs[i].op == Ops.CONST
-      rngs[i] = UOp.range(dtypes.int, s, ctx[0])
+      rngs[i] = UOp.range(dtypes.int, s, (ctx[0], AxisType.REDUCE))
       new_ranges.append(rngs[i])
       ctx[0] += 1
   mm = UOp(Ops.INDEX, r.src[0].dtype, src=(r.src[0],)+tuple(rngs))
@@ -105,7 +106,7 @@ pm_rangeify = PatternMatcher([
 def name_the_sink(x:UOp):
   if x.arg is not None: return None
   ranges = sorted([u for u in x.toposort() if u.op is Ops.RANGE], key=lambda y: y.arg)
-  return x.replace(arg=KernelInfo(name='k_'+'_'.join([str(u.src[0].arg) for u in ranges])))
+  return x.replace(arg=KernelInfo(name='k_'+'_'.join([colored(str(u.src[0].arg), axis_colors[u.arg[1]]) for u in ranges])))
 
 pm_name = PatternMatcher([
   (UPat(Ops.SINK, name="x"), name_the_sink),
