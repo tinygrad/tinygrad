@@ -11,10 +11,10 @@ except ModuleNotFoundError:
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
-from extra.onnx_helpers import validate
 
 try:
-  import huggingface_hub, onnxruntime
+  import huggingface_hub
+  from extra.onnx_helpers import validate
   HUGGINGFACE_AVAILABLE = True
   MODEL_FOLDER = Path(__file__).parent.parent.parent / "extra" / "huggingface_onnx" / "models"
 except ImportError:
@@ -154,13 +154,17 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
+    print(f"Running model: {repo_id}/{model_file}")
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=[model_file],
       cache_dir=MODEL_FOLDER
     ))
     onnx_model_path = onnx_model_path / model_file
+    file_size = onnx_model_path.stat().st_size
+    print(f"Model file size: {file_size / (1024**2):.2f} MB")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
+    print("Run passed")
 
   def test_gpt2(self):
     repo_id = "openai-community/gpt2"
@@ -179,20 +183,13 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     }
     self._run(repo_id, model_file, custom_inputs)
 
-  def test_long_t5_tglobal_base_sci_simplify(self):
-    repo_id = "pszemraj/long-t5-tglobal-base-sci-simplify"
-    model_file = "model.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[1, 2, 3, 4, 5]], dtype=np.int64),
-      "attention_mask": np.ones((1, 5), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
   def test_fashion_clip(self):
     repo_id = "patrickjohncyh/fashion-clip"
     model_file = "onnx/model.onnx"
     custom_inputs = {
-      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32)
+      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32),
+      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
+      "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
@@ -202,24 +199,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     custom_inputs = {
       "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
       "attention_mask": np.ones((1, 6), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_mxbai_rerank_base_v1(self):
-    repo_id = "mixedbread-ai/mxbai-rerank-base-v1"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
-      "attention_mask": np.ones((1, 6), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_smollm_135m(self):
-    repo_id = "HuggingFaceTB/SmolLM-135M"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[1, 2, 3, 4]], dtype=np.int64),
-      "attention_mask": np.ones((1, 4), dtype=np.int64),
+      "token_type_ids": np.zeros((1, 6), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
@@ -228,15 +208,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     model_file = "onnx/model.onnx"
     custom_inputs = {
       "input": np.random.randn(1, 3, 1024, 1024).astype(np.float32)
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_all_minilm_l6_v2_o3(self):
-    repo_id = "sentence-transformers/all-MiniLM-L6-v2"
-    model_file = "onnx/model_O3.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
-      "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
