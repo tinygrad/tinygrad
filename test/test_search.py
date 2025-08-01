@@ -34,25 +34,29 @@ class TestBEAM(unittest.TestCase):
     capturing.clear()
     self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
-  def test_get_kernel_actions(self):
+  def test_get_kernel_actions_dedup(self):
     from test.test_linearizer import helper_realized_ast
-    a = Tensor.rand(4, 3)
-    b = Tensor.rand(3)
-    realized_ast, _ = helper_realized_ast(a @ b)
     from tinygrad.opt.search import get_kernel_actions
-    lins = get_kernel_actions(Kernel(realized_ast), False).values()
+    a = Tensor.empty(4, 3)
+    b = Tensor.empty(3)
+    realized_ast, _ = helper_realized_ast(a @ b)
+    candidates = [
+      Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=4),
+      Opt(op=OptOps.LOCAL, axis=0, arg=0), Opt(op=OptOps.LOCAL, axis=0, arg=4),
+      Opt(op=OptOps.UNROLL, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=3),
+      Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=3),
+      Opt(op=OptOps.GROUPTOP, axis=0, arg=0), Opt(op=OptOps.GROUPTOP, axis=0, arg=3),
+    ]
+    lins = get_kernel_actions(Kernel(realized_ast), include_0=False, candidates=candidates).values()
 
     # ensure amt=0 are not duplicated
-    if Opt(OptOps.UPCAST, 0, 0) in actions:
-      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.UPCAST, axis=0, arg=4)]) == 0, "did not de-dup UPCAST"
-    if Opt(OptOps.LOCAL, 0, 0) in actions:
-      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.LOCAL, axis=0, arg=4)]) == 0, "did not de-dup LOCAL"
-    if Opt(OptOps.UNROLL, 0, 0) in actions:
-      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.UNROLL, axis=0, arg=3)]) == 0, "did not de-dup UNROLL"
-    if Opt(OptOps.GROUP, 0, 0) in actions:
-      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUP, axis=0, arg=3)]) == 0, "did not de-dup GROUP"
-    if Opt(OptOps.GROUPTOP, 0, 0) in actions:
-      assert len([x for x in lins if x.applied_opts[0] == Opt(OptOps.GROUPTOP, axis=0, arg=3)]) == 0, "did not de-dup GROUPTOP"
+    assert all(len(x.applied_opts) == 1 for x in lins)
+    kernel_actions = [x.applied_opts[0] for x in lins]
+    assert Opt(OptOps.UPCAST, axis=0, arg=4) not in kernel_actions, "did not de-dup UPCAST"
+    assert Opt(OptOps.LOCAL, axis=0, arg=4) not in kernel_actions, "did not de-dup LOCAL"
+    assert Opt(OptOps.UNROLL, axis=0, arg=3) not in kernel_actions, "did not de-dup UNROLL"
+    assert Opt(OptOps.GROUP, axis=0, arg=3) not in kernel_actions, "did not de-dup GROUP"
+    assert Opt(OptOps.GROUPTOP, axis=0, arg=3) not in kernel_actions, "did not de-dup GROUPTOP"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_search_over_shape(self):
