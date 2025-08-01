@@ -46,12 +46,9 @@ created_at: "2024-01-15T10:30:00Z"
 
 ## Run Models (running)
 
-Use `run_models.py` to validate and analyze downloaded models:
+Use `run_models.py` to validate downloaded models:
 
 ```bash
-# Check ONNX operation support in all models
-python run_models.py huggingface_repos.yaml --check_ops
-
 # Validate model correctness against ONNX Runtime
 python run_models.py huggingface_repos.yaml --validate
 
@@ -67,7 +64,6 @@ python run_models.py --debug "openai-community/gpt2/onnx/decoder_model.onnx"
 | Option | Description |
 |--------|-------------|
 | `input` | **Required.** Path to YAML file from huggingface_manager.py |
-| `--check_ops` | Check support for ONNX operations in models from YAML file |
 | `--validate` | Validate correctness of models from YAML file |
 | `--debug REPO/MODEL` | Debug specific repo or model without YAML file |
 | `--truncate N` | Truncate ONNX model for debugging (use with --debug) |

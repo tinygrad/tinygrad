@@ -152,20 +152,13 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipUnless(Device.DEFAULT == "METAL", "only run metal")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def setUp(self):
-    self.original_max_buffer_size = os.environ.get("MAX_BUFFER_SIZE")
-    os.environ["MAX_BUFFER_SIZE"] = "0"
-    from tinygrad.helpers import getenv
-    print(getenv("MAX_BUFFER_SIZE", 0))
+    self.original_max_buffer_size = os.getenv("MAX_BUFFER_SIZE")
+    os.environ["MAX_BUFFER_SIZE"] = 0
 
   def tearDown(self):
-    if self.original_max_buffer_size is not None:
-      os.environ["MAX_BUFFER_SIZE"] = self.original_max_buffer_size
-    else:
-      os.environ.pop("MAX_BUFFER_SIZE", None)
+    os.environ["MAX_BUFFER_SIZE"] = self.original_max_buffer_size
 
   def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
-    from tinygrad.helpers import getenv
-    print(getenv("MAX_BUFFER_SIZE", 0))
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],

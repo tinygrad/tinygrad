@@ -1,10 +1,9 @@
-import onnx, yaml, tempfile, time, collections, pprint, argparse, json
+import onnx, yaml, tempfile, time, argparse, json
 from huggingface_hub import snapshot_download
 from pathlib import Path
 from typing import Any
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
-from extra.onnx import get_onnx_ops
 from extra.onnx_helpers import validate, get_example_inputs
 
 def get_config(root_path: Path) -> dict[str, Any]:
@@ -120,25 +119,6 @@ def validate_repos(models:dict[str, tuple[Path, Path]]):
     et = time.time() - st
     print(f"passed, took {et:.2f}s")
 
-def retrieve_op_stats(models:dict[str, tuple[Path, Path]]) -> dict:
-  ret = {}
-  op_counter = collections.Counter()
-  unsupported_ops = collections.defaultdict(set)
-  supported_ops = get_onnx_ops()
-  print(f"** Retrieving stats from {len(models)} models **")
-  for model_id, (root_path, relative_path) in models.items():
-    print(f"examining {model_id}")
-    model_path = root_path / relative_path
-    onnx_runner = OnnxRunner(model_path)
-    for node in onnx_runner.graph_nodes:
-      op_counter[node.op] += 1
-      if node.op not in supported_ops:
-        unsupported_ops[node.op].add(model_id)
-    del onnx_runner
-  ret["unsupported_ops"] = {k:list(v) for k, v in unsupported_ops.items()}
-  ret["op_counter"] = op_counter.most_common()
-  return ret
-
 def debug_run(model_path, truncate, config, rtol, atol):
   if truncate != -1:
     model = onnx.load(model_path)
@@ -155,10 +135,8 @@ def debug_run(model_path, truncate, config, rtol, atol):
     run_huggingface_validate(model_path, config, rtol, atol)
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator and Ops Checker")
+  parser = argparse.ArgumentParser(description="Huggingface ONNX Model Validator")
   parser.add_argument("input", type=str, help="Path to the input YAML configuration file containing model information.")
-  parser.add_argument("--check_ops", action="store_true", default=False,
-                      help="Check support for ONNX operations in models from the YAML file")
   parser.add_argument("--validate", action="store_true", default=False,
                       help="Validate correctness of models from the YAML file")
   parser.add_argument("--debug", type=str, default="",
@@ -169,12 +147,12 @@ if __name__ == "__main__":
   parser.add_argument("--truncate", type=int, default=-1, help="Truncate the ONNX model so intermediate results can be validated")
   args = parser.parse_args()
 
-  if not (args.check_ops or args.validate or args.debug):
-    parser.error("Please provide either --validate, --check_ops, or --debug.")
+  if not (args.validate or args.debug):
+    parser.error("Please provide either --validate or --debug.")
   if args.truncate != -1 and not args.debug:
     parser.error("--truncate and --debug should be used together for debugging")
 
-  if args.check_ops or args.validate:
+  if args.validate:
     with open(args.input, 'r') as f:
       data = yaml.safe_load(f)
       assert all(repo["download_path"] is not None for repo in data["repositories"].values()), "please run `download_models.py` for this yaml"
@@ -185,11 +163,7 @@ if __name__ == "__main__":
         if model["file"].endswith(".onnx")
       }
 
-    if args.check_ops:
-      pprint.pprint(retrieve_op_stats(model_paths))
-
-    if args.validate:
-      validate_repos(model_paths)
+    validate_repos(model_paths)
 
   if args.debug:
     from huggingface_hub import snapshot_download
