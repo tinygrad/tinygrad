@@ -84,8 +84,8 @@ if __name__ == '__main__':
       x += self.positional_embedding.shrink(((0, seqlen), None, None))
       for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
       logits = self.output_tok(x)[:, ctx-1]
-      return logits.log_softmax(axis=-1).reshape(-1, 1)
-      # return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[:128, :]
+      # return logits.log_softmax(axis=-1).reshape(-1, 1)
+      return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[0, :]
     model.decoder.forward = forward.__get__(model.decoder, TextDecoder)
 
     embedding_dims = model.decoder.positional_embedding.shape[1]

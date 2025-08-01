@@ -327,19 +327,20 @@
                 return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
             }
 
-            const DECODER_OUTPUTS_TOKENS = false;
+            const DECODER_OUTPUTS_TOKENS = true;
             const NO_TIMESTAMPS = true;
             const NO_CONTEXT = true;
             let previous_context = [];
             for (let seek = 0; seek < log_specs_full.length;) {
                 let next_speech_seek = next_speech(speech_segments, seek);
                 if (next_speech_seek > seek + 80) {
-                    seek = next_speech_seek;
+                    // seek = next_speech_seek;
                     // continue;
                 }
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
+                    console.log("must pad");
                     let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
                     padded.set(log_specs_full.slice(seek));
                     log_spec = padded;
@@ -411,7 +412,7 @@
                     let [decoder_output] = await net_decoder(context, audio_features, [i]);
                     let nextLogits = decoder_output;
                     if (!DECODER_OUTPUTS_TOKENS) decoder_output = argsort(decoder_output);
-                    decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
+                    // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
                     decoder_output = handle_timestamp_tokens(decoder_output, context, token_count, last_token_index, one_before_last_token_index);
 
                     context.push(decoder_output[0]);
