@@ -63,10 +63,10 @@ class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
-    if (lib:=precompiled) is None:
+    if precompiled is not None: self.lib = precompiled
+    else:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,), cat="compiler"), "TINY"):
-        lib = Device[p.device].compiler.compile_cached(p.src)
-    self.lib:bytes = lib
+        self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
