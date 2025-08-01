@@ -2,7 +2,7 @@ from typing import cast, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
@@ -128,9 +128,9 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
     try:
       lin2.apply_opt(a)
       up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
-      for s,c in zip(lin2.full_shape, lin2.colors()):
-        if c in {"magenta", "yellow"}: up *= s
-        elif c in {"cyan", "green", "white"}: lcl *= s
+      for s,c in zip(lin2.full_shape, lin2.axis_types):
+        if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
+        elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s
       if up//tc_up > max_up or lcl > max_lcl:
         if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
         continue

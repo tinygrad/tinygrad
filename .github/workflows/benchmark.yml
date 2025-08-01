@@ -617,6 +617,10 @@ jobs:
       run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
     - name: openpilot dmonitoring compile3 0.9.7
       run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: openpilot compile3 Space Lab policy + vision
+      run: |
+        PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
+        PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/c824f68646a3b94f117f01c70dc8316fb466e05fbd42ccdba440b8a8dc86914b
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
