@@ -15,8 +15,6 @@ python huggingface_manager.py --limit 100
 python huggingface_manager.py --limit 20 --sort likes --download
 ```
 
-**Note**: Models are downloaded to the `models/` directory by default.
-
 ### Options
 
 | Option | Description |

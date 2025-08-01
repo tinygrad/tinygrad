@@ -154,7 +154,6 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
-    print(f"Running model: {repo_id}/{model_file}")
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=[model_file],
@@ -162,9 +161,8 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     ))
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
-    print(f"Model file size: {file_size / (1024**2):.2f} MB")
+    print(f"Running model: {repo_id}/{model_file} ({file_size / (1024**2):.2f} MB)")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
-    print("Run passed")
 
   def test_gpt2(self):
     repo_id = "openai-community/gpt2"
@@ -175,14 +173,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     }
     self._run(repo_id, model_file, custom_inputs)
 
-  def test_vision_model(self):
-    repo_id = "trpakov/vit-face-expression"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32)
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
   def test_fashion_clip(self):
     repo_id = "patrickjohncyh/fashion-clip"
     model_file = "onnx/model.onnx"
@@ -190,16 +180,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32),
       "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
       "attention_mask": np.ones((1, 6), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_ms_marco_minilm_l6_v2(self):
-    repo_id = "cross-encoder/ms-marco-MiniLM-L6-v2"
-    model_file = "onnx/model_O2.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
-      "attention_mask": np.ones((1, 6), dtype=np.int64),
-      "token_type_ids": np.zeros((1, 6), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 

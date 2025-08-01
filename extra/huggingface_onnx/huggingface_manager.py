@@ -5,6 +5,8 @@ import argparse
 from dataclasses import asdict
 from pathlib import Path
 from huggingface_hub import list_models, HfApi, snapshot_download
+from tinygrad.helpers import _ensure_downloads_dir
+DOWNLOADS_DIR = _ensure_downloads_dir()
 from tinygrad.helpers import tqdm
 from extra.onnx import OnnxRunner
 
@@ -41,8 +43,7 @@ class HuggingFaceONNXManager:
 
   def __init__(self, base_dir: Path = None):
     self.base_dir = base_dir or Path(__file__).parent
-    self.models_dir = self.base_dir / "models"
-    print(self.models_dir)
+    self.models_dir = DOWNLOADS_DIR / "models"
     self.api = HfApi()
 
   def discover_models(self, limit: int, sort: str = "downloads") -> list[str]:
@@ -116,14 +117,13 @@ class HuggingFaceONNXManager:
 
     return metadata
 
-  def download_models(self, metadata: dict, download_to_models_dir: bool = True) -> dict:
-    download_dir = self.models_dir if download_to_models_dir else self.base_dir
-    download_dir.mkdir(parents=True, exist_ok=True)
+  def download_models(self, metadata: dict) -> dict:
+    self.models_dir.mkdir(parents=True, exist_ok=True)
 
     repos = metadata["repositories"]
     n = len(repos)
 
-    print(f"Downloading {n} repositories to {download_dir}...")
+    print(f"Downloading {n} repositories to {self.models_dir}...")
 
     for i, (model_id, model_data) in enumerate(repos.items()):
       print(f"  Downloading {i+1}/{n}: {model_id}...")
@@ -134,14 +134,14 @@ class HuggingFaceONNXManager:
         root_path = Path(snapshot_download(
           repo_id=model_id,
           allow_patterns=allow_patterns,
-          cache_dir=str(download_dir)
+          cache_dir=str(self.models_dir)
         ))
 
         # Download config files (usually small)
         snapshot_download(
           repo_id=model_id,
           allow_patterns=["*config.json"],
-          cache_dir=str(download_dir)
+          cache_dir=str(self.models_dir)
         )
 
         model_data["download_path"] = str(root_path)
