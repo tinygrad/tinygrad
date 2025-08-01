@@ -225,9 +225,14 @@ class Handler(BaseHTTPRequestHandler):
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif self.path.startswith(("/assets/", "/js/")) and '/..' not in self.path:
       try:
-        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
-        if url.path.endswith(".js"): content_type = "application/javascript"
-        if url.path.endswith(".css"): content_type = "text/css"
+        static_dir = os.path.abspath(os.path.dirname(__file__))
+        requested_path = os.path.normpath(os.path.join(static_dir, self.path.lstrip('/')))
+        if not requested_path.startswith(static_dir + os.sep):
+          status_code = 403
+        else:
+          with open(requested_path, "rb") as f: ret = f.read()
+          if url.path.endswith(".js"): content_type = "application/javascript"
+          if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
