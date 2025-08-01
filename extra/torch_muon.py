@@ -32,7 +32,7 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
 
   return X
 
-def muon_update(grad, momentum, beta=0.95, ns_steps=2, nesterov=False):
+def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=False):
   if beta:
     momentum.lerp_(grad, beta)
     update = grad.lerp_(momentum, beta) if nesterov else momentum
