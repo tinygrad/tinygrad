@@ -32,10 +32,10 @@ class CPUWorker(threading.Thread):
 
   def run(self):
     while True:
-      blk, off = self.tasks.get(), 0
-      while off < len(blk):
-        blk[off](*blk[off + 2:off + 2 + blk[off + 1]])
-        off += blk[off + 1] + 2
+      cmd_iter, off = iter(self.tasks.get()), 0
+      for cmd in cmd_iter:
+        args_cnt = next(cmd_iter)
+        cmd(*[next(cmd_iter) for _ in range(args_cnt)])
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
