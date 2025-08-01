@@ -47,12 +47,6 @@ repositories:
     files:
       - file: "model.onnx"
         size: "90.91MB"
-        graph_inputs:  # when --download used
-          input_ids:
-            shape: [1, "sequence"]
-            dtype: "int64"
-            is_optional: false
-            is_sequence: false
 total_size: "2.45GB"
 created_at: "2024-01-15T10:30:00Z"
 ```

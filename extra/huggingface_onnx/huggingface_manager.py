@@ -2,13 +2,11 @@ import yaml
 import time
 import requests
 import argparse
-from dataclasses import asdict
 from pathlib import Path
 from huggingface_hub import list_models, HfApi, snapshot_download
 from tinygrad.helpers import _ensure_downloads_dir
-DOWNLOADS_DIR = _ensure_downloads_dir()
+DOWNLOADS_DIR = _ensure_downloads_dir() / "models"
 from tinygrad.helpers import tqdm
-from extra.onnx import OnnxRunner
 
 # Constants for filtering models
 HUGGINGFACE_URL = "https://huggingface.co"
@@ -39,9 +37,9 @@ SKIPPED_REPO_PATHS = [
 
 
 class HuggingFaceONNXManager:
-  def __init__(self, base_dir: Path = None):
-    self.base_dir = base_dir or Path(__file__).parent
-    self.models_dir = DOWNLOADS_DIR / "models"
+  def __init__(self):
+    self.base_dir = Path(__file__).parent
+    self.models_dir = DOWNLOADS_DIR
     self.api = HfApi()
 
   def discover_models(self, limit: int, sort: str = "downloads") -> list[str]:
@@ -144,22 +142,6 @@ class HuggingFaceONNXManager:
 
         model_data["download_path"] = str(root_path)
         print(f"    Downloaded to: {root_path}")
-
-        # Extract graph inputs for each ONNX file
-        for file_info in model_data["files"]:
-          if file_info["file"].endswith(".onnx"):
-            onnx_path = root_path / file_info["file"]
-            if onnx_path.exists():
-              runner = OnnxRunner(str(onnx_path))
-              # Convert graph_inputs to serializable format
-              graph_inputs = {}
-              for name, spec in runner.graph_inputs.items():
-                spec_dict = asdict(spec)
-                spec_dict["shape"] = list(spec_dict["shape"])
-                spec_dict["dtype"] = spec_dict["dtype"]['name']
-                graph_inputs[name] = spec_dict
-              file_info["graph_inputs"] = graph_inputs
-              print(f"      Extracted graph inputs for {file_info['file']}: {list(graph_inputs.keys())}")
 
       except Exception as e:
         print(f"    ERROR: Failed to download {model_id}: {e}")
