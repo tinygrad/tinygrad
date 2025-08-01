@@ -1384,6 +1384,7 @@ def train_stable_diffusion():
   from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
+  from tinygrad.helpers import Context
   import csv, PIL
   import numpy as np
 
@@ -1408,6 +1409,13 @@ def train_stable_diffusion():
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-Stable-Diffusion")
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
@@ -1458,7 +1466,8 @@ def train_stable_diffusion():
   if len(GPUS) > 1:
     for p in get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]:
       p.to_(GPUS)
-    Tensor.realize(*get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod])
+    with Context(BEAM=0):
+      Tensor.realize(*get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod])
 
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
@@ -1474,7 +1483,7 @@ def train_stable_diffusion():
 
   @TinyJit
   def train_step(mean_logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
-                 lr_scheduler:LambdaLR) -> tuple[Tensor, UNetModel]:
+                 lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
     timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
 
@@ -1501,6 +1510,7 @@ def train_stable_diffusion():
     del out, v_true
     loss.backward()
     for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
+    loss = loss / grad_scaler.scale
 
     # skip the optimizer step if non-finite grads are detected
     grad_scaler.step()
@@ -1591,20 +1601,31 @@ def train_stable_diffusion():
   num_seen_images = 0
   dl = batch_load_train_stable_diffusion(BS)
   for i, batch in enumerate(dl):
-    print(f"step {i} started")
-    t1 = time.perf_counter()
+    t0 = time.perf_counter()
+    GlobalCounters.reset()
 
     mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
     tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
-
     loss = train_step(mean_logvar, tokens, unet, optimizer, grad_scaler, lr_scheduler)
-    print(f"step {i}: loss: {loss.item():.9f}, elapsed:{(time.perf_counter()-t1):0.3f}")
+
+    elapsed = time.perf_counter() - t0
+    print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
+  loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS""")
+
+    if WANDB:
+      wandb.log({"train/loss": loss, "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
+                 "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed})
 
     num_seen_images += BS
     if num_seen_images % CKPT_IMAGE_INTERVAL == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
-      safe_save(get_state_dict(unet), UNET_CKPTDIR)
+      if WANDB and wandb.run is not None:
+        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safetensors"
+      else:
+        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}.safetensors"
+      print(f"saving unet ckpt to {fn}")
+      safe_save(get_state_dict(unet), fn)
 
       # Only checkpoint collection is required here; eval can be done offline
       # TODO: move eval call to not block training loop
