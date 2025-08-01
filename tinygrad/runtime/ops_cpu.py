@@ -26,7 +26,7 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUWorker(threading.Thread):
-  def __init__(self, dev:CPUDevice):
+  def __init__(self, dev):
     super().__init__()
     self.dev, self.daemon = dev, True
 
@@ -118,10 +118,7 @@ class CPUAllocator(HCQAllocatorBase):
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    self._init_workers()
+    self.tasks:queue.Queue = queue.Queue()
+    CPUWorker(self).start()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue,
                      supports_graph=False)
-
-  def _init_workers(self):
-    self.tasks = queue.Queue()
-    CPUWorker(self).start()
