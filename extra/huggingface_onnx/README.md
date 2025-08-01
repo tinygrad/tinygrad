@@ -1,11 +1,13 @@
 # HuggingFace ONNX
 
-Tool for discovering, downloading, and running ONNX models from HuggingFace.
+Tool for discovering, downloading, and validating ONNX models from HuggingFace.
 
 ## Huggingface Manager (discovering and downloading)
 
+The `huggingface_manager.py` script discovers top ONNX models from HuggingFace, collects metadata, and optionally downloads them.
+
 ```bash
-# Download top 50 models
+# Download top 50 models sorted by downloads
 python huggingface_manager.py --limit 50 --download
 
 # Just collect metadata (no download)
@@ -13,6 +15,9 @@ python huggingface_manager.py --limit 100
 
 # Sort by likes instead of downloads
 python huggingface_manager.py --limit 20 --sort likes --download
+
+# Custom output file
+python huggingface_manager.py --limit 10 --output my_models.yaml
 ```
 
 ### Options
@@ -25,6 +30,8 @@ python huggingface_manager.py --limit 20 --sort likes --download
 | `--output FILE` | Output YAML filename (default: `huggingface_repos.yaml`) |
 
 ### Output Format
+
+The tool generates a YAML file with the following structure:
 
 ```yaml
 repositories:
@@ -44,32 +51,35 @@ total_size: "2.45GB"
 created_at: "2024-01-15T10:30:00Z"
 ```
 
-## Run Models (running)
+## Run Models (validation)
 
-Use `run_models.py` to validate downloaded models:
+The `run_models.py` script validates ONNX models against ONNX Runtime for correctness.
 
 ```bash
-# Validate model correctness against ONNX Runtime
-python run_models.py huggingface_repos.yaml --validate
+# Validate models from a YAML configuration file
+python run_models.py --validate huggingface_repos.yaml
 
 # Debug specific repository (downloads and validates all ONNX models)
 python run_models.py --debug "sentence-transformers/all-MiniLM-L6-v2"
 
 # Debug specific model file
 python run_models.py --debug "openai-community/gpt2/onnx/decoder_model.onnx"
+
+# Debug with model truncation for debugging intermediate results
+python run_models.py --debug "sentence-transformers/all-MiniLM-L6-v2" --truncate 10
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `input` | **Required.** Path to YAML file from huggingface_manager.py |
-| `--validate` | Validate correctness of models from YAML file |
-| `--debug REPO/MODEL` | Debug specific repo or model without YAML file |
-| `--truncate N` | Truncate ONNX model for debugging (use with --debug) |
+| `--validate YAML_FILE` | Validate correctness of models from the specified YAML configuration file |
+| `--debug REPO_ID` | Debug specific repository (downloads and validates all ONNX models in repo) |
+| `--debug REPO_ID/path/to/model.onnx` | Debug specific model file |
+| `--truncate N` | Truncate ONNX model to first N nodes for debugging (use with --debug) |
 
 ## Extra Dependencies
 
 ```bash
-pip install huggingface_hub pyyaml requests onnx onnxruntime
+pip install huggingface_hub pyyaml requests onnx onnxruntime numpy
 ```

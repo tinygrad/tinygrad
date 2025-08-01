@@ -39,8 +39,6 @@ SKIPPED_REPO_PATHS = [
 
 
 class HuggingFaceONNXManager:
-  """Manages HuggingFace ONNX model discovery, metadata collection, and downloading."""
-
   def __init__(self, base_dir: Path = None):
     self.base_dir = base_dir or Path(__file__).parent
     self.models_dir = DOWNLOADS_DIR / "models"
@@ -148,27 +146,20 @@ class HuggingFaceONNXManager:
         print(f"    Downloaded to: {root_path}")
 
         # Extract graph inputs for each ONNX file
-        try:
-          for file_info in model_data["files"]:
-            if file_info["file"].endswith(".onnx"):
-              onnx_path = root_path / file_info["file"]
-              if onnx_path.exists():
-                try:
-                  runner = OnnxRunner(str(onnx_path))
-                  # Convert graph_inputs to serializable format
-                  graph_inputs = {}
-                  for name, spec in runner.graph_inputs.items():
-                    spec_dict = asdict(spec)
-                    spec_dict["shape"] = list(spec_dict["shape"])
-                    spec_dict["dtype"] = spec_dict["dtype"]['name']
-                    graph_inputs[name] = spec_dict
-                  file_info["graph_inputs"] = graph_inputs
-                  print(f"      Extracted graph inputs for {file_info['file']}: {list(graph_inputs.keys())}")
-                except Exception as input_error:
-                  print(f"      WARNING: Failed to extract graph inputs for {file_info['file']}: {input_error}")
-                  file_info["graph_inputs"] = None
-        except Exception as graph_error:
-          print(f"    WARNING: Error processing graph inputs for {model_id}: {graph_error}")
+        for file_info in model_data["files"]:
+          if file_info["file"].endswith(".onnx"):
+            onnx_path = root_path / file_info["file"]
+            if onnx_path.exists():
+              runner = OnnxRunner(str(onnx_path))
+              # Convert graph_inputs to serializable format
+              graph_inputs = {}
+              for name, spec in runner.graph_inputs.items():
+                spec_dict = asdict(spec)
+                spec_dict["shape"] = list(spec_dict["shape"])
+                spec_dict["dtype"] = spec_dict["dtype"]['name']
+                graph_inputs[name] = spec_dict
+              file_info["graph_inputs"] = graph_inputs
+              print(f"      Extracted graph inputs for {file_info['file']}: {list(graph_inputs.keys())}")
 
       except Exception as e:
         print(f"    ERROR: Failed to download {model_id}: {e}")
@@ -177,6 +168,7 @@ class HuggingFaceONNXManager:
 
     successful_downloads = sum(1 for repo in repos.values() if repo["download_path"] is not None)
     print(f"Successfully downloaded {successful_downloads}/{n} repositories")
+    print(f"All models saved to: {self.models_dir}")
 
     return metadata
 
@@ -185,11 +177,6 @@ class HuggingFaceONNXManager:
     with open(yaml_path, 'w') as f:
       yaml.dump(metadata, f, sort_keys=False)
     print(f"Metadata saved to: {yaml_path}")
-
-  def load_metadata(self, yaml_file: str) -> dict:
-    yaml_path = self.base_dir / yaml_file
-    with open(yaml_path, 'r') as f:
-      return yaml.safe_load(f)
 
   def discover_and_download(self, limit: int, output_file: str = "huggingface_repos.yaml",
                           sort: str = "downloads", download: bool = True):
@@ -222,18 +209,6 @@ class HuggingFaceONNXManager:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(
     description="HuggingFace ONNX Model Manager - Discover, collect metadata, and download ONNX models",
-    formatter_class=argparse.RawDescriptionHelpFormatter,
-    epilog="""
-Examples:
-  # Discover and download top 50 models
-  python huggingface_manager.py --limit 50 --download
-
-  # Just collect metadata for top 100 models (no download)
-  python huggingface_manager.py --limit 100
-
-  # Sort by likes instead of downloads
-  python huggingface_manager.py --limit 20 --sort likes --download
-        """
   )
 
   parser.add_argument("--limit", type=int, help="Number of top repositories to process")
@@ -251,19 +226,9 @@ Examples:
   if not args.limit: parser.error("--limit is required")
 
   manager = HuggingFaceONNXManager()
-
-  try:
-    # Full workflow: discover and optionally download
-    should_download = args.download
-    manager.discover_and_download(
-      limit=args.limit,
-      output_file=args.output,
-      sort=args.sort,
-      download=should_download
-    )
-
-  except KeyboardInterrupt:
-    print("\nProcess interrupted by user")
-  except Exception as e:
-    print(f"ERROR: {e}")
-    exit(1)
+  manager.discover_and_download(
+    limit=args.limit,
+    output_file=args.output,
+    sort=args.sort,
+    download=args.download
+  )
