@@ -14,15 +14,15 @@ from tinygrad.helpers import CI, fetch, temp
 from extra.onnx_helpers import validate
 
 try:
-  import huggingface_hub
-  from extra.huggingface_onnx.run_models import (
-    download_and_test_model,
-  )
+  import huggingface_hub, onnxruntime
   HUGGINGFACE_AVAILABLE = True
   MODEL_FOLDER = Path(__file__).parent.parent.parent / "extra" / "huggingface_onnx" / "models"
 except ImportError:
   HUGGINGFACE_AVAILABLE = False
   MODEL_FOLDER = None
+
+# override MAX_BUFFER_SIZE=300000000
+os.environ["MAX_BUFFER_SIZE"] = "0"
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
