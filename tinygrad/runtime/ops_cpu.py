@@ -1,11 +1,15 @@
 from __future__ import annotations
-import platform, subprocess, sys, ctypes, functools, time, mmap
+import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import sint
+
+class CPUSignal(HCQSignal):
+  def _sleep(self, time_spent_waiting_ms:int):
+    if self.is_timeline and self.owner is not None: self.owner.tasks.join()
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
@@ -20,6 +24,19 @@ class ClangJITCompiler(Compiler):
     return jit_loader(obj)
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
+
+class CPUWorker(threading.Thread):
+  def __init__(self, dev):
+    super().__init__()
+    self.dev, self.tasks, self.daemon = dev, dev.tasks, True
+
+  def run(self):
+    while True:
+      cmd_iter = iter(self.tasks.get())
+      for cmd in cmd_iter:
+        args_cnt = next(cmd_iter)
+        cmd(*[next(cmd_iter) for _ in range(args_cnt)])
+      self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, prg, bufs, *args):
@@ -37,13 +54,7 @@ class CPUComputeQueue(HWQueue):
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
-
-  def _submit(self, dev):
-    # Execute the commands in the queue: fn, argc, args...
-    off = 0
-    while off < len(self._q):
-      self._q[off](*self._q[off + 2:off + 2 + self._q[off + 1]])
-      off += self._q[off + 1] + 2
+  def _submit(self, dev): dev.tasks.put(self._q[:])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -90,16 +101,24 @@ class CPUAllocator(HCQAllocatorBase):
     elif sys.platform == "win32": addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
-  def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
-  def _as_dmaref(self, buf): return DMACPURef(buf.va_addr, buf.size)
+  def _as_buffer(self, src) -> memoryview:
+   self.dev.synchronize()
+   return to_mv(src.va_addr, src.size)
+  def _as_dmaref(self, buf):
+    self.dev.synchronize()
+    return DMACPURef(buf.va_addr, buf.size)
   def _copyin(self, dest, src:memoryview):
+    self.dev.synchronize()
     with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src):
+    self.dev.synchronize()
     with cpu_profile('CPU -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue,
+    self.tasks:queue.Queue = queue.Queue()
+    CPUWorker(self).start()
+    super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue,
                      supports_graph=False)
