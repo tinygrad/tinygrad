@@ -282,7 +282,7 @@ class Tensor(MathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      cast(Buffer, self.contiguous().realize().uop.base.buffer).ensure_allocated().copyin(x._data())
+      self._buffer().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
@@ -299,7 +299,10 @@ class Tensor(MathTrait):
     """
     return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().uop.base.buffer)
+  def _buffer(self) -> Buffer:
+    x = self.cast(self.dtype.base).contiguous()
+    if isinstance(self.device, tuple): x = x.to("CPU")
+    return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
@@ -1976,7 +1979,9 @@ class Tensor(MathTrait):
 
     # https://keccak.team/keccak_specs_summary.html
 
-    def ctensor(l: Sequence[ConstType], dtype: DType = dtypes.uint64): return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l))
+    def ctensor(l: Sequence[ConstType], dtype: DType = dtypes.uint64):
+      # TODO: contiguous is here for compile speed
+      return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l)).contiguous()
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_v0, rot_offsets_v1 =  ctensor([0] + [1 << v for v in rot_offsets]), ctensor([1] + [1 << (64 - v) for v in rot_offsets])
 
@@ -2013,7 +2018,41 @@ class Tensor(MathTrait):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
+      # NOTE: kernelize here to prevent internal stack from growing propotional to data size
+      state = state.kernelize()
     return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
+
+  def _hash_1mb(self) -> Tensor:
+    assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
+    assert self.ndim == 2, "only support batched 1d tensors"
+    assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
+
+    blocks = self.shape[0] * self.shape[1] // 4096
+    data = self.reshape(blocks, 4096)
+    block_hashes = data.keccak("shake_128").reshape(self.shape[0], 4096)
+    return block_hashes.keccak("shake_128").reshape(self.shape[0], 16)
+
+  def hash(self) -> Tensor:
+    """
+    Calculates a 16-byte hash of the tensor.
+    ```python exec="false source="above" session="tensor" result="python"
+    t = Tensor(b"Hello World!").hash()
+    print(t.data().hex())
+    ```
+    """
+
+    data = self.flatten().bitcast(dtypes.uint8)
+    if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+    base_chunks = ceildiv(data.shape[0], 2**20)
+    tree_depth = math.ceil(math.log(base_chunks, 65536)) if base_chunks > 1 else 0
+
+    level_chunks = base_chunks
+    for _ in range(tree_depth + 1):
+      data = data.reshape(level_chunks, 2**20)._hash_1mb().flatten()
+      if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
+      level_chunks = ceildiv(data.shape[0], 2**20)
+
+    return data[:16]
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
     m = self - self.max(axis=axis, keepdim=True).detach()
