@@ -47,8 +47,8 @@ class SingleDeviceMuon(torch.optim.Optimizer):
   """
   Muon variant for usage in non-distributed settings.
   """
-  def __init__(self, params, lr=0.001, weight_decay=0.0, momentum=0.0, nesterov=True, steps=5):#nesterov, ns_params, steps
-    defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov, steps=steps)
+  def __init__(self, params, lr=0.001, weight_decay=0.0, momentum=0.0, nesterov=True):
+    defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov)
     super().__init__(params, defaults)
 
   @torch.no_grad()
@@ -66,7 +66,7 @@ class SingleDeviceMuon(torch.optim.Optimizer):
         state = self.state[p]
         if len(state) == 0:
           state["momentum_buffer"] = torch.zeros_like(p)
-        update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"], ns_steps=group["steps"], nesterov=group["nesterov"])
+        update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"], nesterov=group["nesterov"])
         p.mul_(1.0 - group["lr"] * group["weight_decay"])
 
         p.add_(update.reshape(p.shape), alpha=-group["lr"])
