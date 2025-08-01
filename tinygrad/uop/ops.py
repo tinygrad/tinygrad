@@ -156,7 +156,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
-    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    if not all_same([x.shape for x in src_sts]): raise RuntimeError(f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}")
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
@@ -220,7 +220,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # constants can optionally have a DEVICE source
     try:
       st = self.st
-    except AssertionError:
+    except RuntimeError:
       st = None
     return UOp.const(self.dtype, b, device=self._device, shape=st.shape if st is not None else None)
   def broadcast(self, count:int):

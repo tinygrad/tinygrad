@@ -37,6 +37,12 @@ class TestTiny(unittest.TestCase):
     a = Tensor.eye(4, dtype=dtypes.int)
     self.assertListEqual(a.tolist(), [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
+  def test_conv(self, N=32):
+    a = Tensor.ones(1,4,N,N).contiguous()
+    w1 = Tensor.ones(16,4,3,3).contiguous()
+    out = a.conv2d(w1)
+    self.assertTrue(all([x == 36.0 for x in out.contiguous().flatten().tolist()]))
+
   # *** randomness ***
 
   def test_random(self):
