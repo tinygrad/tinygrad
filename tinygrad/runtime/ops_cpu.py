@@ -32,7 +32,7 @@ class CPUWorker(threading.Thread):
 
   def run(self):
     while True:
-      cmd_iter, off = iter(self.tasks.get()), 0
+      cmd_iter = iter(self.tasks.get())
       for cmd in cmd_iter:
         args_cnt = next(cmd_iter)
         cmd(*[next(cmd_iter) for _ in range(args_cnt)])
