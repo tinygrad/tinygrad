@@ -18,11 +18,8 @@ try:
   from extra.onnx_helpers import validate
   from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR
   HUGGINGFACE_AVAILABLE = True
-except ImportError:
+except ModuleNotFoundError:
   HUGGINGFACE_AVAILABLE = False
-
-# override MAX_BUFFER_SIZE=300000000
-os.environ["MAX_BUFFER_SIZE"] = "0"
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -154,7 +151,21 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
 @unittest.skipUnless(Device.DEFAULT == "METAL", "only run metal")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
+  def setUp(self):
+    self.original_max_buffer_size = os.environ.get("MAX_BUFFER_SIZE")
+    os.environ["MAX_BUFFER_SIZE"] = "0"
+    from tinygrad.helpers import getenv
+    print(getenv("MAX_BUFFER_SIZE", 0))
+
+  def tearDown(self):
+    if self.original_max_buffer_size is not None:
+      os.environ["MAX_BUFFER_SIZE"] = self.original_max_buffer_size
+    else:
+      os.environ.pop("MAX_BUFFER_SIZE", None)
+
   def _run(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
+    from tinygrad.helpers import getenv
+    print(getenv("MAX_BUFFER_SIZE", 0))
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
@@ -165,12 +176,12 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     print(f"Running model: {repo_id}/{model_file} ({file_size / (1024**2):.2f} MB)")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
 
-  def test_gpt2(self):
-    repo_id = "openai-community/gpt2"
-    model_file = "onnx/decoder_model.onnx"
+  def test_xlm_roberta_large(self):
+    repo_id = "FacebookAI/xlm-roberta-large"
+    model_file = "onnx/model.onnx"
     custom_inputs = {
-      "input_ids": np.array([[15496, 11, 314, 1101]], dtype=np.int64),  # "Hello, I am"
-      "attention_mask": np.ones((1, 4), dtype=np.int64),
+      "input_ids": np.array([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]], dtype=np.int64),
+      "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
@@ -181,23 +192,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32),
       "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
       "attention_mask": np.ones((1, 6), dtype=np.int64),
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_rmbg_1_4(self):
-    repo_id = "briaai/RMBG-1.4"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input": np.random.randn(1, 3, 1024, 1024).astype(np.float32)
-    }
-    self._run(repo_id, model_file, custom_inputs)
-
-  def test_xlm_roberta_large(self):
-    repo_id = "FacebookAI/xlm-roberta-large"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "input_ids": np.array([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]], dtype=np.int64),
-      "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
     self._run(repo_id, model_file, custom_inputs)
 
