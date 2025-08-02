@@ -91,10 +91,10 @@ def capture_sink(ctx:RangeifyContext, x: UOp):
           if all_same(idx):
             new_idxs.append(idx[0])
             save_shape.append(1)
-            full_shape.append(idx[0].src[0].arg)
+            full_shape.append(idx[0].vmax+1)
           else:
             ll = [z.vmax+1 for z in idx]
-            assert all_same(ll)
+            assert all_same(ll), f"mismatch shapes {ll}"
             save_shape.append(ll[0])
             full_shape.append(ll[0])
             new_idxs.append(UOp.range(dtypes.int, ll[0], (ctx.idx, AxisType.LOOP)))
