@@ -673,8 +673,8 @@ class PCIIface(PCIIfaceBase):
       self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
-    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt='I'), read_ptrs=[MMIOInterface(gart.va_addr, 8, fmt='Q')],
-      write_ptrs=[MMIOInterface(gart.va_addr+0x10, 8, fmt='Q')], doorbells=[MMIOInterface(self.doorbell_cpu_addr + doorbell_index * 8, 8, fmt='Q')])
+    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
+      read_ptrs=[gart.cpu_view().view(size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=0x10, size=8, fmt='Q')])
 
   def sleep(self, timeout):
     if self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -717,16 +717,8 @@ class USBIface(PCIIface):
       view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None, owner=self.dev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-                                    doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
-    else:
-      self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
-        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
-      self.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
-
-    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
-      read_ptrs=[gart.cpu_view().view(size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=0x10, size=8, fmt='Q')])
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
+    return super().create_queue(queue_type, ring, gart, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id)
 
   def sleep(self, timeout): pass
 
