@@ -159,7 +159,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     ))
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
-    print(f"Validating model: {repo_id}/{model_file} ({file_size / (1024**2):.2f} MB)")
+    print(f"Validating model: {repo_id}/{model_file} ({file_size/1e6:.2f}M)")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
 
   def test_xlm_roberta_large(self):
