@@ -1,6 +1,6 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv
+from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv, dedup
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -225,7 +225,9 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(dev, ei:ExecItem) -> bool:
+  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
     # MOCKGPU is not supported, since it can't execute commands in parallel
-    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
-    return all(issubclass(type(Device[b.device]), HCQCompiled) for b in ei.bufs if b) and (isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy)
+    all_devs = cast(list[HCQCompiled], dedup(devs + [Device[b.device] for b in ei.bufs if b]))
+    all_hcq = all(issubclass(type(d), HCQCompiled) for d in all_devs)
+    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, devs[0]).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
+    return all_hcq and len(set(d.peer_group for d in all_devs if not d._is_cpu())) <= 1 and (isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy)
