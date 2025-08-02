@@ -1,13 +1,14 @@
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType, TRACK_MATCH_STATS
 from tinygrad.opt.kernel import axis_colors, Opt, OptOps
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import argsort, colored, prod
+from tinygrad.helpers import argsort, colored, prod, all_same
 
 @dataclass
 class RangeifyContext:
   idx: int = 0
   opts: tuple[Opt, ...] = ()
+  child_count: dict[UOp, int]|None = None
 
 def rangify_store(ctx:RangeifyContext, x:UOp):
   if x.tag == 1: return None
@@ -78,9 +79,27 @@ def map_pad(x:UOp, r:UOp):
   return bigwhere.simplify().where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), UOp.const(r.dtype, 0))
 
 def capture_sink(ctx:RangeifyContext, x: UOp):
-  if x.arg is None: return None
-  if x.arg.opts_to_apply is not None: ctx.opts = x.arg.opts_to_apply
-  return x.replace(arg=None)
+  if x.tag == 1:
+    late_subs = {}
+    for k,v in x.get_children_map().items():
+      if k.op is Ops.CHILDREN and all([vi.op is Ops.INDEX for vi in v]):
+        idxs = list(zip(*[vi.src[1:] for vi in v]))
+        new_idxs = []
+        for idx in idxs:
+          if all_same(idx):
+            new_idxs.append(idx)
+          else:
+            ll = [z.vmax+1 for z in idx]
+            assert all_same(ll)
+            new_idxs.append(UOp.range(dtypes.int, ll[0], (ctx.idx, AxisType.LOOP)))
+    return None
+  if x.arg is not None and x.arg.opts_to_apply is not None: ctx.opts = x.arg.opts_to_apply
+  replace_children = {}
+  for k,v in x.get_children_map().items():
+    if k.op not in {Ops.CHILDREN, Ops.DEVICE} and len(v) > 1:
+      replace_children[k] = UOp(Ops.CHILDREN, dtype=k.dtype, src=(k.replace(tag=len(v)),))
+  #if TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
+  return x.replace(arg=None, tag=1)
 
 pm_rangeify = PatternMatcher([
   (UPat(Ops.SINK, name="x"), capture_sink),
