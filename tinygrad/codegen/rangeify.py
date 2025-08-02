@@ -8,7 +8,6 @@ from tinygrad.helpers import argsort, colored, prod, all_same
 class RangeifyContext:
   idx: int = 0
   opts: tuple[Opt, ...] = ()
-  child_count: dict[UOp, int]|None = None
 
 def rangify_store(ctx:RangeifyContext, x:UOp):
   if x.tag == 1: return None
