@@ -1,7 +1,7 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType, TRACK_MATCH_STATS
 from tinygrad.opt.kernel import axis_colors, Opt, OptOps
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import argsort, colored, prod, all_same
 
 @dataclass
@@ -84,20 +84,44 @@ def capture_sink(ctx:RangeifyContext, x: UOp):
       if k.op is Ops.CHILDREN and all([vi.op is Ops.INDEX for vi in v]):
         idxs = list(zip(*[vi.src[1:] for vi in v]))
         new_idxs = []
+        only_new_idxs = []
+        save_shape = []
+        full_shape = []
         for idx in idxs:
           if all_same(idx):
-            new_idxs.append(idx)
+            new_idxs.append(idx[0])
+            save_shape.append(1)
+            full_shape.append(idx[0].src[0].arg)
           else:
             ll = [z.vmax+1 for z in idx]
             assert all_same(ll)
+            save_shape.append(ll[0])
+            full_shape.append(ll[0])
             new_idxs.append(UOp.range(dtypes.int, ll[0], (ctx.idx, AxisType.LOOP)))
-    return None
+            only_new_idxs.append(new_idxs[-1])
+            ctx.idx += 1
+        new_idxs = tuple(new_idxs)
+        inp = k.src[0]
+        print(save_shape, full_shape)
+        if len(save_shape):
+          buf = UOp(Ops.DEFINE_REG, inp.dtype.ptr(size=prod(save_shape), addrspace=AddrSpace.REG), arg=(ctx.idx,))
+          buf = buf.reshape(tuple(save_shape)).expand(tuple(full_shape))
+          store = UOp(Ops.INDEX, buf.dtype, (buf,)+new_idxs).store(UOp(Ops.INDEX, inp.dtype, (inp,)+new_idxs), *only_new_idxs, tag=1)
+          for vi in v:
+            late_subs[vi] = UOp(Ops.INDEX, buf.dtype, (buf,)+vi.src[1:]).load(store)
+        else:
+          print("no replace")
+          for vi in v:
+            assert new_idxs == vi.src[1:]
+            late_subs[vi] = UOp(Ops.INDEX, inp.dtype, (inp,)+new_idxs)
+    if not len(late_subs): return None
+    return x.substitute(late_subs)
   if x.arg is not None and x.arg.opts_to_apply is not None: ctx.opts = x.arg.opts_to_apply
   replace_children = {}
   for k,v in x.get_children_map().items():
     if k.op not in {Ops.CHILDREN, Ops.DEVICE} and len(v) > 1:
       replace_children[k] = UOp(Ops.CHILDREN, dtype=k.dtype, src=(k.replace(tag=len(v)),))
-  #if TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
+  if TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
   return x.replace(arg=None, tag=1)
 
 pm_rangeify = PatternMatcher([
