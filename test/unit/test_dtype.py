@@ -1,4 +1,5 @@
 import unittest
+from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, DType, ImageDType, PtrDType, to_dtype
 
 class TestImageDType(unittest.TestCase):
@@ -37,6 +38,20 @@ class TestToDtype(unittest.TestCase):
     res = to_dtype(dtype)
     self.assertIsInstance(res, DType)
     self.assertEqual(res, dtypes.int32)
+
+class TestCastConvenienceMethod(unittest.TestCase):
+  def test_method(self):
+    for input_dtype in (dtypes.float, dtypes.int):
+      t = Tensor([1, 2], dtype=input_dtype)
+      self.assertEqual(t.dtype, input_dtype)
+      self.assertEqual(t.bool().dtype, dtypes.bool)
+      self.assertEqual(t.short().dtype, dtypes.short)
+      self.assertEqual(t.int().dtype, dtypes.int)
+      self.assertEqual(t.long().dtype, dtypes.long)
+      self.assertEqual(t.half().dtype, dtypes.half)
+      self.assertEqual(t.bfloat16().dtype, dtypes.bfloat16)
+      self.assertEqual(t.float().dtype, dtypes.float)
+      self.assertEqual(t.double().dtype, dtypes.double)
 
 if __name__ == "__main__":
   unittest.main()
