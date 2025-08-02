@@ -93,8 +93,7 @@ class Kernel:
     self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.output_shape, self.full_shape)]
 
     # confirm all reduce axes are at the end
-    final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
-    if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
+    if (final_reduces := [x for x in self.axis_types if x == AxisType.REDUCE]) and final_reduces != self.axis_types[-len(final_reduces):]:
       raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
 
   def copy(self):
