@@ -1425,10 +1425,10 @@ def train_stable_diffusion():
 
   class StableDiffusion:
     def __init__(self):
-      dtypes.default_float=dtypes.float16
+      #dtypes.default_float=dtypes.float16
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
-      dtypes.default_float=dtypes.float32
+      #dtypes.default_float=dtypes.float32
 
       #self.first_stage_model = AutoencoderKL()
       self.model=None
@@ -1437,9 +1437,9 @@ def train_stable_diffusion():
   model = StableDiffusion()
   weights: dict[str,Tensor] = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  for k,v in weights.items():
-    if v.dtype is dtypes.float32:
-      weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
+  #for k,v in weights.items():
+    #if v.dtype is dtypes.float32:
+      #weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
   load_state_dict(model, weights)
   unet_module.linear = unet_module.AutocastLinear
   unet_module.conv2d = unet_module.AutocastConv2d
@@ -1502,15 +1502,15 @@ def train_stable_diffusion():
     latent_with_noise = sqrt_alphas_cumprod_t * latent + sqrt_one_minus_alphas_cumprod_t * noise
     v_true = sqrt_alphas_cumprod_t * noise - sqrt_one_minus_alphas_cumprod_t * latent
 
-    context = model.cond_stage_model.embed_tokens(tokens).realize()
+    context = model.cond_stage_model.embed_tokens(tokens)
 
     del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
-    del out, v_true
+    del out, v_true, context
     loss.backward()
     for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
-    loss = loss / grad_scaler.scale
+    loss = loss.detach() / grad_scaler.scale
 
     # skip the optimizer step if non-finite grads are detected
     grad_scaler.step()
@@ -1610,10 +1610,11 @@ def train_stable_diffusion():
 
     elapsed = time.perf_counter() - t0
     print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
-  loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS""")
+  loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS,
+  mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
 
     if WANDB:
-      wandb.log({"train/loss": loss, "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
+      wandb.log({"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed})
 
     num_seen_images += BS
