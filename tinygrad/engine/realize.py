@@ -2,7 +2,7 @@ from typing import cast, Generator
 import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -63,7 +63,10 @@ class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
-    self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
+    if precompiled is not None: self.lib = precompiled
+    else:
+      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,), cat="compiler"), "TINY"):
+        self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
