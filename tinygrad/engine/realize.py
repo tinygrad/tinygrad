@@ -85,7 +85,19 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
-    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+    try:
+      return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+    except Exception as e:
+      print(f"exception when running kernel: {str(e)}")
+      print("\nself.p.src:")
+      print(self.p.src)
+      print("\nrawbufs:")
+      print(rawbufs)
+      print("\nlra:")
+      print(lra)
+      print("\nself.p.vars:")
+      print(self.p.vars)
+      raise e
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)

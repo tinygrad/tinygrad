@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling, flatten
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1404,6 +1404,267 @@ def train_llama3():
       safe_save(get_state_dict(model), fn)
     i += 1
 
+def train_stable_diffusion():
+  from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
+  from extra.models import unet as unet_module
+  from extra.models.clip import FrozenOpenClipEmbedder
+  from extra.models.clip import OpenClipEncoder
+  from extra.models.inception import FidInceptionV3
+  from examples.mlperf.dataloader import batch_load_train_stable_diffusion
+  from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  from examples.mlperf.helpers import GradScaler
+  from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
+  from tinygrad.nn.state import load_state_dict, torch_load
+  from collections import namedtuple
+  from tinygrad.helpers import Context
+  import csv, PIL
+  import numpy as np
+
+  config = {}
+
+  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  print(f"training on {GPUS}")
+  for x in GPUS: Device[x]
+  seed = config["seed"] = getenv("SEED", 12345)
+
+  # ** hyperparameters **
+  BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
+  print(f"BS = {BS}")
+  #EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
+  #assert 30_000 % EVAL_BS == 0, "Eval (which generates 30,000 images) is currently implemented without padding"
+  lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
+
+  # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+  # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
+  CKPT_IMAGE_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
+  #assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
+
+  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
+  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-Stable-Diffusion")
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
+
+  unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+                 "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                 "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
+
+  class StableDiffusion:
+    def __init__(self):
+      #dtypes.default_float=dtypes.float16
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
+                                                        "clip_tokenizer_version": "sd_mlperf_v5_0"})
+      #dtypes.default_float=dtypes.float32
+
+      #self.first_stage_model = AutoencoderKL()
+      self.model=None
+
+
+  model = StableDiffusion()
+  weights: dict[str,Tensor] = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
+  weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+  #for k,v in weights.items():
+    #if v.dtype is dtypes.float32:
+      #weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
+  load_state_dict(model, weights)
+  unet_module.linear = unet_module.AutocastLinear
+  unet_module.conv2d = unet_module.AutocastConv2d
+  model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+
+  unet:UNetModel = model.model.diffusion_model
+
+  def zero_module(module):
+    for p in get_parameters(module):
+      p.assign(Tensor.zeros_like(p))
+
+  # the mlperf reference inits certain weights as zeroes
+  for bb in flatten(unet.input_blocks) + unet.middle_block + flatten(unet.output_blocks):
+    if isinstance(bb, ResBlock):
+      zero_module(bb.out_layers[3])
+    elif isinstance(bb, SpatialTransformer):
+      zero_module(bb.proj_out)
+  zero_module(unet.out[2])
+
+  alphas_cumprod = get_alphas_cumprod()
+  sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
+  sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
+
+  if len(GPUS) > 1:
+    for p in get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]:
+      p.to_(GPUS)
+    with Context(BEAM=0):
+      Tensor.realize(*get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod])
+
+  optimizer = AdamW(get_parameters(unet))
+  lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
+  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
+  # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
+  lr_scheduler.step()
+
+  init_scale = 2.0**16
+  grad_scaler = GradScaler(optimizer, init_scale)
+
+  # TODO: if BS and EVAL_BS don't match, need to modify the jit setup and/or pad
+  #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
+
+  @TinyJit
+  def train_step(mean_logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
+                 lr_scheduler:LambdaLR) -> Tensor:
+    optimizer.zero_grad()
+    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
+
+    for i, t in enumerate((mean_logvar, tokens, timestep)):
+      if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+      else: t.to_(GPUS[0])
+
+    # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
+    mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
+    std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+    latent = (mean + std * Tensor.randn(mean.shape, device=std.device)).cast(dtypes.half) * 0.18215
+    noise = Tensor.randn_like(latent)
+
+    sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    latent_with_noise = sqrt_alphas_cumprod_t * latent + sqrt_one_minus_alphas_cumprod_t * noise
+    v_true = sqrt_alphas_cumprod_t * noise - sqrt_one_minus_alphas_cumprod_t * latent
+
+    context = model.cond_stage_model.embed_tokens(tokens)
+
+    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
+    out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
+    loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
+    del out, v_true, context
+    loss.backward()
+    for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
+    loss = loss.detach() / grad_scaler.scale
+
+    # skip the optimizer step if non-finite grads are detected
+    grad_scaler.step()
+    # the lr still updates even if we skipped an optimizer step
+    lr_scheduler.step()
+
+    return loss
+
+  """
+  # load prompts for generating images for validation; 2 MB of data total
+  with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
+    reader = csv.DictReader(f, delimiter="\t")
+    eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
+  assert len(eval_inputs) == 30_000
+  #unconditional_context = jit_context_step("")
+  eval_timesteps = list(reversed(range(1, 1000, 20)))
+  """
+
+  # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
+  #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
+  #eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]])
+
+  """
+  @TinyJit
+  def denoise_step(x:Tensor, t:Tensor, uc:Tensor, c:Tensor, alpha_prev:Tensor) -> Tensor:
+    out_uncond, out = unet(x.cat(x), t.cat(t), uc.cat(c)).chunk(2)
+    # unconditional guidance scale = 8.0
+    v_t = out_uncond + 8.0 * (out - out_uncond)
+    e_t = sqrt_alphas_cumprod[t] * v_t + sqrt_one_minus_alphas_cumprod[t] * x
+    pred_x0 = sqrt_alphas_cumprod[t] * x - sqrt_one_minus_alphas_cumprod[t] * v_t
+    dir_xt = (1. - alpha_prev).sqrt() * e_t
+    x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
+    return x_prev
+
+  #inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+  inception = FidInceptionV3()
+  vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
+  text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+  clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
+  loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
+  loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
+  #load_state_dict(clip_encoder, loaded)
+
+  # NOTE: denoise_step is jitted with bufs from the single unet model defined at the beginning
+  @Tensor.train(mode=False)
+  def eval_unet() -> tuple[float, float]:
+    clip_scores = []
+    inception_activations = []
+
+    for batch_idx in range(0, len(eval_inputs), EVAL_BS):
+      batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
+      captions = [row["caption"] for row in batch]
+      c = jit_context_step(captions)
+      uc = unconditional_context.expand(c.shape)
+      x = Tensor.randn(EVAL_BS,4,64,64)
+
+      for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
+        reversed_idx = Tensor([50 - step_idx - 1])
+        t = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.long)
+        alpha_prev = eval_alphas_prev[reversed_idx]
+        x = denoise_step(x, t, uc, c, alpha_prev)
+      
+      x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
+      x = model.first_stage_model.decoder(x)
+      x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+      inception_activation = inception(x)
+      inception_activations.append(inception_activation.squeeze(3).squeeze(2))
+
+      # clip preprocessing
+      y = (x[0].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
+      # Tensor.interpolate does not yet support bicubic
+      r = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
+      r = Tensor(r).permute(2,0,1).cast(dtypes.float) / 255
+      normalized = (r - clip_encoder.mean) / clip_encoder.std
+
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(caption) for caption in captions], dim=0)
+      clip_score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
+      clip_scores.append(clip_score)
+
+    final_clip_score = Tensor.cat(*clip_scores).mean().item()
+    inception_activations = Tensor.cat(*inception_activations)
+    fid_score = inception.compute_score(inception_activations, str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz"))
+
+    return final_clip_score, fid_score
+  """
+
+  # training loop
+  num_seen_images = 0
+  dl = batch_load_train_stable_diffusion(BS)
+  for i, batch in enumerate(dl):
+    t0 = time.perf_counter()
+    GlobalCounters.reset()
+
+    mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
+    tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
+    loss = train_step(mean_logvar, tokens, unet, optimizer, grad_scaler, lr_scheduler)
+
+    elapsed = time.perf_counter() - t0
+    print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
+  loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS,
+  mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
+
+    if WANDB:
+      wandb.log({"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
+                 "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed})
+
+    num_seen_images += BS
+    if num_seen_images % CKPT_IMAGE_INTERVAL == 0:
+      # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+      # "evaluation is done offline, the time is not counted towards the submission time."
+      if WANDB and wandb.run is not None:
+        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safetensors"
+      else:
+        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}.safetensors"
+      print(f"saving unet ckpt to {fn}")
+      safe_save(get_state_dict(unet), fn)
+
+      # Only checkpoint collection is required here; eval can be done offline
+      # TODO: move eval call to not block training loop
+      #clip_score, fid_score = eval_unet()
+      #print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
+
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
 
@@ -1412,7 +1673,7 @@ if __name__ == "__main__":
   else: bench_log_manager = contextlib.nullcontext()
 
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
