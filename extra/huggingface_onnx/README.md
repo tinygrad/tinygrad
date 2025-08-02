@@ -26,15 +26,6 @@ python huggingface_manager.py --limit 20 --sort likes --download
 python huggingface_manager.py --limit 10 --output my_models.yaml
 ```
 
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--limit N` | **Required.** Number of top models to discover |
-| `--download` | Download models and extract graph inputs |
-| `--sort CRITERIA` | Sort by: `downloads`, `likes`, `created`, `modified` (default: `downloads`) |
-| `--output FILE` | Output YAML filename (default: `huggingface_repos.yaml`) |
-
 ### Output Format
 
 The tool generates a YAML file with the following structure:
@@ -60,20 +51,11 @@ The `run_models.py` script validates ONNX models against ONNX Runtime for correc
 python run_models.py --validate huggingface_repos.yaml
 
 # Debug specific repository (downloads and validates all ONNX models)
-python run_models.py --debug "sentence-transformers/all-MiniLM-L6-v2"
+python run_models.py --debug sentence-transformers/all-MiniLM-L6-v2
 
 # Debug specific model file
-python run_models.py --debug "openai-community/gpt2/onnx/decoder_model.onnx"
+python run_models.py --debug sentence-transformers/all-MiniLM-L6-v2/onnx/model.onnx
 
-# Debug with model truncation for debugging intermediate results
-python run_models.py --debug "sentence-transformers/all-MiniLM-L6-v2" --truncate 10
+# Debug with model truncation for debugging and validating intermediate results
+DEBUGONNX=1 python run_models.py --debug sentence-transformers/all-MiniLM-L6-v2/onnx/model.onnx --truncate 10
 ```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--validate YAML_FILE` | Validate correctness of models from the specified YAML configuration file |
-| `--debug REPO_ID` | Debug specific repository (downloads and validates all ONNX models in repo) |
-| `--debug REPO_ID/path/to/model.onnx` | Debug specific model file |
-| `--truncate N` | Truncate ONNX model to first N nodes for debugging (use with --debug) |
