@@ -743,8 +743,9 @@ class TestFloat4(unittest.TestCase):
             len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.half.vec(4)]))
 
   def test_float4_basic(self):
-    a = Tensor.empty(2, 8).realize()
-    b = Tensor.empty(2, 8).realize()
+    # NOTE: this used to fuse from (2, 8)
+    a = Tensor.empty(16).realize()
+    b = Tensor.empty(16).realize()
     c = a + b
 
     s = c.schedule()[0]

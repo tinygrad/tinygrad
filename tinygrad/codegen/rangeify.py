@@ -19,11 +19,12 @@ def rangify_store(ctx:RangeifyContext, x:UOp):
         print(x.shape, upcast_amount)
         assert s%upcast_amount == 0
         rng = UOp.range(dtypes.int, s//upcast_amount, (ctx.idx, AxisType.LOOP)) * upcast_amount
-        rng = rng + UOp.range(dtypes.int, upcast_amount, (ctx.idx, AxisType.UPCAST))
+        rng = rng + UOp.range(dtypes.int, upcast_amount, (ctx.idx+1, AxisType.UPCAST))
         ranges.append(rng)
+        ctx.idx += 2
       else:
         ranges.append(UOp.range(dtypes.int, s, (ctx.idx, AxisType.LOOP)))
-      ctx.idx += 1
+        ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   mm = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[0],)+tuple(ranges))
