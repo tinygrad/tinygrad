@@ -27,8 +27,9 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
-  if __debug__: type_verify(list(modified_ast.toposort()))
+  #modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
+  #if __debug__: type_verify(list(modified_ast.toposort()))
+  modified_ast = ast
 
   # linearize
   try:
@@ -36,7 +37,7 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   except RuntimeError:
     print("***** LINEARIZE FAILURE *****")
     print(f"ast = {ast}")
-    print(f"opts = {modified_ast.arg.applied_opts}")
+    #print(f"opts = {modified_ast.arg.applied_opts}")
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
