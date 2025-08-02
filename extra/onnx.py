@@ -19,9 +19,9 @@ class AttributeType(enum.IntEnum):
   ONNX attribute type identifiers.
   Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/onnx.proto3#L128-L145
   """
-  FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
+  FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; GRAPH = 5; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
 
-  def to_field_name(self) -> str: return {1: "f", 2: "i", 3: "s", 4: "t", 6: "floats", 7: "ints", 8: "strings"}[self.value]
+  def to_field_name(self) -> str: return {1: "f", 2: "i", 3: "s", 4: "t", 5: "g", 6: "floats", 7: "ints", 8: "strings"}[self.value]
 
 class OnnxDataType(enum.IntEnum):
   """
@@ -247,6 +247,7 @@ class OnnxPBParser:
         case 3: obj["i"] = self.reader.read_int64()
         case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
         case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
+        case 6: obj["g"] = self._parse_GraphProto()
         case 7: obj["floats"].append(self.reader.read_float())
         case 8: obj["ints"].append(self.reader.read_int64())
         case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
@@ -402,7 +403,9 @@ class OnnxRunner:
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = OnnxPBParser(model_path, load_external_data=True).parse_ModelProto()
-    graph = model["graph"]
+    self._load_graph(model["graph"])
+
+  def _load_graph(self, graph: dict):
     self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
@@ -462,7 +465,7 @@ class OnnxRunner:
 
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if node.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
+      if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
 
       if debug >= 1: print(f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -477,6 +480,9 @@ class OnnxRunner:
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training = self.old_training
     return {name:self.graph_values[name] for name in self.graph_outputs}
+
+class SubGraphOnnxRunner(OnnxRunner):
+  def __init__(self, graph: dict): self._load_graph(graph)
 
 ####################
 ##### ONNX OPS #####
@@ -544,6 +550,20 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
+  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors:dict[str, Tensor]):
+    else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
+    else_graph.graph_values = intermediate_tensors
+    then_graph.graph_values = intermediate_tensors
+    else_out = else_graph({k:intermediate_tensors[k] for k in else_graph.graph_inputs.keys()})
+    then_out = then_graph({k:intermediate_tensors[k] for k in then_graph.graph_inputs.keys()})
+    assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
+    # can use where op when output shape is the same
+    if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
+      return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
+    # otherwise, use condition to select the output in python
+    condition = condition.item()
+    return tuple(t if condition else e for t,e in zip(then_out.values(), else_out.values()))
+
   def Identity(x:Tensor): return x
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
               value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
@@ -815,8 +835,51 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape[i] = expand[i] = sizes[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
-    if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
-    return X.permute(*argsort(perm)) if perm else X
+    if mode == "cubic":
+      A = cubic_coeff_a
+      expand = list(X.shape)
+      for i in range(-len(sizes), 0):
+        input_dim = X.shape[i]
+        reshape, index = [1] * X.ndim, indexes[i]
+        reshape[i] = expand[i] = sizes[i]
+
+        p = index.floor().cast(dtypes.int32)
+        ratio = index - p.cast(index.dtype)
+
+        # Calculate indices
+        idx0 = p - 1
+        idx1 = p
+        idx2 = p + 1
+        idx3 = p + 2
+
+        # Calculate coefficients
+        ratio_plus_1 = ratio + 1
+        one_minus_ratio = 1.0 - ratio
+        one_minus_ratio_plus_1 = one_minus_ratio + 1.0
+
+        c0 = ((A * ratio_plus_1 - 5 * A) * ratio_plus_1 + 8 * A) * ratio_plus_1 - 4 * A
+        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1.0
+        c2 = ((A + 2) * one_minus_ratio - (A + 3)) * one_minus_ratio * one_minus_ratio + 1.0
+        c3 = ((A * one_minus_ratio_plus_1 - 5 * A) * one_minus_ratio_plus_1 + 8 * A) * one_minus_ratio_plus_1 - 4 * A
+
+        if exclude_outside:
+          c0 = (p - 1 >= 0).where(c0, 0)
+          c2 = (p + 1 < input_dim).where(c2, 0)
+          c3 = (p + 2 < input_dim).where(c3, 0)
+
+          # Normalize coeffs
+          total = c0 + c1 + c2 + c3
+          c0, c1, c2, c3 = c0 / (total + 1e-9), c1 / (total + 1e-9), c2 / (total + 1e-9), c3 / (total + 1e-9)
+
+        # Reshape and expand
+        expanded_indices = [y.clip(0, input_dim - 1).reshape(reshape).expand(expand) for y in [idx0, idx1, idx2, idx3]]
+        expanded_coeffs = [y.reshape(reshape).expand(expand) for y in [c0, c1, c2, c3]]
+
+        # Gather values and apply coefficients
+        gathered_values = [X.gather(i, idx) for idx in expanded_indices]
+        X = sum(v * c for v, c in zip(gathered_values, expanded_coeffs))
+    return X.permute(*argsort(perm))
+
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
