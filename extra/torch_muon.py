@@ -32,7 +32,7 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
 
   return X
 
-def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=False):
+def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
   if beta:
     momentum.lerp_(grad, beta)
     update = grad.lerp_(momentum, beta) if nesterov else momentum
@@ -47,7 +47,7 @@ class SingleDeviceMuon(torch.optim.Optimizer):
   """
   Muon variant for usage in non-distributed settings.
   """
-  def __init__(self, params, lr=0.001, weight_decay=0.0, momentum=0.0, nesterov=True):
+  def __init__(self, params, lr=0.02, weight_decay=0.0, momentum=0.95, nesterov=True):
     defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov)
     super().__init__(params, defaults)
 
