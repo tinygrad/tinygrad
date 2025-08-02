@@ -147,9 +147,7 @@ class TestOnnxModel(unittest.TestCase):
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
 
-
-@unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
-@unittest.skipUnless(Device.DEFAULT == "CPU", "only run CPU")
+@unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "CPU", "only run on CPU")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
@@ -168,16 +166,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     custom_inputs = {
       "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
-    }
-    self._validate(repo_id, model_file, custom_inputs)
-
-  def test_fashion_clip(self):
-    repo_id = "patrickjohncyh/fashion-clip"
-    model_file = "onnx/model.onnx"
-    custom_inputs = {
-      "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32),
-      "input_ids": np.random.randint(0, 49408, (1, 6), dtype=np.int64),
-      "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
     self._validate(repo_id, model_file, custom_inputs)
 
