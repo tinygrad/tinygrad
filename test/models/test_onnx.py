@@ -147,7 +147,7 @@ class TestOnnxModel(unittest.TestCase):
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
 
-@unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "CPU", "only run on CPU")
+@unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "METAL", "only run on CPU")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
