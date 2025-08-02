@@ -106,13 +106,12 @@ class TestViz(BaseTestViz):
 
   # name can also come from a function that returns a TracingKey
   def test_tracing_key(self):
-    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,), fmt=f"input={inp.render()}"))
+    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
     def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
     test(UOp.variable("a", 1, 10)+1)
     lst = get_viz_list()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
-    self.assertEqual(lst[0]["fmt"], "input=(a+1)")
 
   def test_colored_label(self):
     # NOTE: dataclass repr prints literal escape codes instead of unicode chars
