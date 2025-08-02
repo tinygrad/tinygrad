@@ -50,7 +50,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
 
     can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item(ji_graph_dev, ji)
     is_multigraph = can_be_graphed and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
-    can_share_graph = can_be_graphed and (type(ji_graph_dev) is type(current_device) if is_multigraph else ji_graph_dev == current_device)
+    can_share_graph = can_be_graphed and (True if is_multigraph else ji_graph_dev == current_device)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
     (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
