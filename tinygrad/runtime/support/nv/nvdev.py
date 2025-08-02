@@ -71,7 +71,7 @@ class NVMemoryManager(MemoryManager):
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev(PCIDevImplBase):
-  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
+  def __init__(self, devfmt:str, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
     self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
@@ -101,10 +101,10 @@ class NVDev(PCIDevImplBase):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
-  def wreg(self, addr, value):
+  def wreg(self, addr:int, value:int):
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
-  def rreg(self, addr): return self.mmio[addr // 4]
+  def rreg(self, addr:int) -> int: return self.mmio[addr // 4]
 
   def _early_init(self):
     self.reg_names:set[str] = set()
@@ -134,12 +134,12 @@ class NVDev(PCIDevImplBase):
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
-  def _alloc_boot_struct(self, struct):
+  def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return type(struct).from_address(va), paddrs[0]
 
-  def _download(self, file) -> str:
+  def _download(self, file:str) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
     return fetch(url, subdir="defines").read_text()
 

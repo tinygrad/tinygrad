@@ -198,6 +198,11 @@ class TestTorchBackend(unittest.TestCase):
     recon = (v @ torch.diag(w) @ v.T).cpu().numpy()
     np.testing.assert_allclose(recon, a.cpu().numpy(), atol=1e-6)
 
+  def test_linalg_det(self):
+    a = torch.diag(torch.tensor([1,2,3,4,5], dtype = torch.float32, device=device))
+    b = torch.linalg.det(a)
+    np.testing.assert_equal(b.cpu().numpy(), 120.0)
+
   def test_scalar_assign(self):
     a = torch.tensor([1, 2, 3], device=device)
     a[1] = 4
