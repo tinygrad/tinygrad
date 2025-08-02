@@ -4316,6 +4316,11 @@ class Tensor(MathTrait):
     """
     return self.cast(dtypes.bool)
 
+  def bfloat16(self) -> Tensor: return self.cast(dtypes.bfloat16)
+  def double(self) -> Tensor: return self.cast(dtypes.double)
+  def long(self) -> Tensor: return self.cast(dtypes.long)
+  def short(self) -> Tensor: return self.cast(dtypes.short)
+
   # *** image Tensor function replacements ***
 
   def image_dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
