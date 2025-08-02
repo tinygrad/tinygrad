@@ -132,8 +132,7 @@ class GraphRunner(Runner):
     return list({id(x):x for x in wait_nodes}.values())
 
   @staticmethod
-  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
-    return isinstance(ei.prg, CompiledRunner) and len(devs + dedup(Device[b.device] for b in ei.bufs if b)) == 1
+  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool: return isinstance(ei.prg, CompiledRunner) and len(dedup(devs)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
