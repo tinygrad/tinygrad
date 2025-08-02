@@ -51,8 +51,8 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: dict[HCQCompiled, HWQueue] = {} # lazy allocation
 
-    self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if dev.device != "CPU"},
-      **{"KICK": self.devices[0].new_signal(value=0)}, **{dev: self.devices[0].new_signal(value=0) for dev in self.devices if dev.device == "CPU"}}
+    self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
+      **{"KICK": self.devices[0].new_signal(value=0)}, **{dev: self.devices[0].new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
@@ -87,7 +87,7 @@ class HCQGraph(MultiGraphRunner):
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
         enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
 
-      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.new_signal(value=0))
+      out_signal = self.signals.setdefault(enqueue_queue, self.devices[0].new_signal(value=0))
 
       # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
