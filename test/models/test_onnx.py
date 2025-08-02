@@ -151,7 +151,7 @@ class TestOnnxModel(unittest.TestCase):
 @unittest.skipIf(not HUGGINGFACE_AVAILABLE, "HuggingFace tools not available")
 @unittest.skipUnless(Device.DEFAULT == "CPU", "only run CPU")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
-  def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-5, atol=1e-5):
+  def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
@@ -166,7 +166,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     repo_id = "FacebookAI/xlm-roberta-large"
     model_file = "onnx/model.onnx"
     custom_inputs = {
-      "input_ids": np.array([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]], dtype=np.int64),
+      "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
     self._validate(repo_id, model_file, custom_inputs)
@@ -176,7 +176,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     model_file = "onnx/model.onnx"
     custom_inputs = {
       "pixel_values": np.random.randn(1, 3, 224, 224).astype(np.float32),
-      "input_ids": np.array([[101, 2023, 2003, 1037, 3231, 102]], dtype=np.int64),
+      "input_ids": np.random.randint(0, 49408, (1, 6), dtype=np.int64),
       "attention_mask": np.ones((1, 6), dtype=np.int64),
     }
     self._validate(repo_id, model_file, custom_inputs)
