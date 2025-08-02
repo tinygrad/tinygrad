@@ -4060,6 +4060,21 @@ class Tensor(MathTrait):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
+  def newton_schulz(self, steps:int, params:tuple[int, ...]) -> Tensor:
+    """
+    Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(4, 4)
+    print(t.newton_schulz().numpy())
+    ```
+    """
+    assert self.ndim == 2
+    G = self / (self.square().sum().sqrt() + 1.0e-7)
+    G = G.T if G.shape[0] > G.shape[1] else G
+    for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.T) @ x, [G]*i, G) for i,p in enumerate(params))
+    return G.T if G.shape[0] > G.shape[1] else G
+
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     R = self.clone()

@@ -81,6 +81,19 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   """
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
+# Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
+         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
+  """
+  SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
+
+  You may pass in ns_params to set the coefficients for the NS iterations. The choice of parameters can be tuned.
+
+  - Described: https://kellerjordan.github.io/posts/muon/
+  - Paper: https://arxiv.org/pdf/2505.02222
+  """
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused, ns_params=ns_params, steps=steps)
+
 class LARS(Optimizer):
   """
   Layer-wise Adaptive Rate Scaling (LARS) optimizer with optional momentum and weight decay.
@@ -88,9 +101,11 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, \
+             classic=True, tcoef=0.001, fused=FUSE_OPTIM, ns_params=None, steps=3):
     super().__init__(params, lr, fused)
-    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
+    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef, self.ns_params, self.steps = \
+    momentum, weight_decay, nesterov, classic, tcoef, ns_params, steps
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -101,17 +116,23 @@ class LARS(Optimizer):
         r2 = g.square().sum().sqrt()
         r:Tensor|float = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
-      if self.wd > 0: g = g + self.wd * t.detach()
+      if self.wd > 0 and self.ns_params is None: g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
         # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
-        self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
-        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+        if self.ns_params is None:
+          self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
+          g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+        else:
+          self.b[i].assign(((1 - self.momentum) * self.b[i]).contiguous() + g * self.momentum)
+          g = (g * (1 - self.momentum) + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+
+      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(steps=self.steps, params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      ret.append((t.detach() - g).cast(t.dtype))
+      ret.append((t.detach() - g).cast(t.dtype) if self.ns_params is None else (t.detach() * (1.0 - self.wd * self.lr) - g).cast(t.dtype))
     return ret, self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 it's just Adam/W.
