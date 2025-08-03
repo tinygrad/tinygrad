@@ -29,7 +29,7 @@ def rangify_store(ctx:RangeifyContext, x:UOp):
       ranges.append(UOp.const(dtypes.int, 0))
   mm = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[0],)+tuple(ranges))
   mm2 = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[1],)+tuple(ranges))
-  return UOp(Ops.STORE, src=(mm, mm2)+tuple([x for x in ranges if x.op is not Ops.CONST]), tag=1)
+  return UOp(Ops.STORE, src=(mm, mm2)+tuple([x for x in UOp.sink(*ranges).toposort() if x.op is Ops.RANGE]), tag=1)
 
 def map_reduce(ctx:RangeifyContext, x:UOp, r:UOp):
   rngs = list(x.src[1:])
