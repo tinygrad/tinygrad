@@ -122,12 +122,8 @@ class LARS(Optimizer):
       if self.momentum:
         # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
-        if self.ns_params is None:
-          self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
-          g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-        else:
-          self.b[i].assign(((1 - self.momentum) * self.b[i]).contiguous() + g * self.momentum)
-          g = (g * (1 - self.momentum) + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+        self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
 
       if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(steps=self.steps, params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update

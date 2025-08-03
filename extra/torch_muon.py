@@ -1,6 +1,7 @@
 import torch
 
 #credit to KellerJordan at https://github.com/KellerJordan/Muon/tree/master
+#some changes: classic momentum instead of weighting gradient
 def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
   """
   Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -34,8 +35,8 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
 
 def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
   if beta:
-    momentum.lerp_(grad, beta)
-    update = grad.lerp_(momentum, beta) if nesterov else momentum
+    momentum.mul_(beta).add_(grad)
+    update = grad.add(momentum,alpha=beta)
   else: update = grad
   if update.ndim == 4: # for the case of conv filters
     update = update.view(len(update), -1)
