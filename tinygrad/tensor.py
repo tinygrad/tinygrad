@@ -17,6 +17,46 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
+def _expand_basic_indices(indices, shape, device):
+    # Normalize to tuple of length ndim
+    if not isinstance(indices, (list, tuple)):
+        indices = (indices,)
+    # replace Ellipsis
+    if Ellipsis in indices:
+        ell_pos = indices.index(Ellipsis)
+        before = indices[:ell_pos]
+        after = indices[ell_pos+1:]
+        fill = (slice(None),) * (len(shape) - (len(before) + len(after)))
+        indices = tuple(before) + fill + tuple(after)
+    # pad with full slices
+    if len(indices) < len(shape):
+        indices = tuple(indices) + (slice(None),) * (len(shape) - len(indices))
+
+    per_dim = []
+    for idx, dim_size in zip(indices, shape):
+        if isinstance(idx, slice):
+            start, stop, step = idx.start, idx.stop, idx.step
+            step = 1 if step is None else step
+            if start is None:
+                start = 0 if step > 0 else dim_size - 1
+            if stop is None:
+                stop = dim_size if step > 0 else -1
+            per_dim.append(list(range(start, stop, step)))
+        elif isinstance(idx, int):
+            if idx < 0:
+                idx = dim_size + idx
+            per_dim.append([idx])
+        elif idx is None:
+            per_dim.append([0])  # will be handled by reshape semantics upstream
+        else:
+            raise IndexError(f"unsupported basic index {idx!r}")
+
+    import itertools
+    grids = list(itertools.product(*per_dim))
+    if not grids:
+        return tuple(Tensor([], dtype=dtypes.int, device=device) for _ in shape)
+    concrete = list(zip(*grids))  # per-dim lists
+    return tuple(Tensor(list(c), dtype=dtypes.int, device=device) for c in concrete)
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
@@ -285,11 +325,14 @@ class Tensor(MathTrait):
       cast(Buffer, self.contiguous().realize().uop.base.buffer).ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    if self.uop is x.uop: return self  # a self assign is a NOOP
+    if self.uop is x.uop:
+      print("NO OP")
+      return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
+    print("assign uop")
     self.uop = self.uop.assign(x.uop)
     return self
 
@@ -1138,13 +1181,16 @@ class Tensor(MathTrait):
       boundary, stride = [0, size], 1  # defaults
       match index:
         case list() | tuple() | Tensor():
+          print("LIST")
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
         case int() | UOp(): # sint
+          print("INT OR UOP")
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
+          print("SLICE")
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
           start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
           step = 1 if index.step is None else index.step
@@ -1168,6 +1214,7 @@ class Tensor(MathTrait):
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
+      print("MOVEMENT OPS")
       shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
       x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
       # handle stride != 1 or -1
@@ -1185,6 +1232,7 @@ class Tensor(MathTrait):
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
+      print("TOPS")
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
       pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
 
@@ -1208,12 +1256,12 @@ class Tensor(MathTrait):
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
+        print("V is not NONE")
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
         x = _masked_setitem(self, vb, mask, tuple(range(dims[0], dims[0] + len(big_shape))))
-
     return x
 
   def __getitem__(self, indices) -> Tensor:
@@ -1266,13 +1314,29 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+    res = self._getitem(indices, v)
+    if res.shape == self.shape:
+        # advanced case: write already applied, just replace root
+        print("res.shape == self.shape")
+        self.replace(res)
+        return
+    # basic indexing: v was ignored by _getitem, do mask/canvas manually
+    view = self._getitem(indices)  # slice
+    rhs = v.cast(view.dtype)._broadcast_to(view.shape)
+    if rhs.uop is self.uop:
+        print("rhs.uop is self.uop")
+        rhs = rhs.contiguous()
+    concrete_idxs = _expand_basic_indices(indices, self.shape, self.device)
+    mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
+    mask[concrete_idxs] = True
+    num_pts = concrete_idxs[0].shape[0]
+    rhs_flat = v.cast(self.dtype)._broadcast_to((num_pts,))
+    if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
+    canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
+    canvas[concrete_idxs] = rhs_flat
+    new_tensor = mask.where(canvas, self)
+    self.replace(new_tensor)
+    return
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
