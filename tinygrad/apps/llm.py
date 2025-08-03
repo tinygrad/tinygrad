@@ -8,7 +8,7 @@ def gpt2_decode_vocab(voc: dict[str, int]): # https://github.com/openai/gpt-2/bl
   return { bytes(c2b[c] for c in tok): tid for tok, tid in voc.items() }
 
 def get_llama_re():
-  def ucat_range(prefix: str): return "".join(chr(cp) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(prefix))
+  def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(pre))
   r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
   # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
   return "(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
