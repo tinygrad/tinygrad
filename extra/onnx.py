@@ -162,10 +162,7 @@ class OnnxPBParser:
     ```
 
     Some fields are omitted like `doc_string` since they're not used for execution.
-    In addition, extra `parsed_*` fields are added for convenience:
-    - `parsed_node` (an `OnnxNode` object)
-    - `parsed_tensor` (a `Tensor` object)
-    - `parsed_type` (an `OnnxValue` object)
+    In addition, extra `parsed_*` fields are added for convenience: `parsed_node`, `parsed_tensor`, `parsed_type`.
     """
     return self._parse_ModelProto()
 
