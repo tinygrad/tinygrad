@@ -60,7 +60,8 @@ class NVRpcQueue:
 
       # Handling special functions
       if hdr.function == nv.NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER: self.gsp.run_cpu_seq(msg)
-      elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG: print(f"GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
+      elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG:
+        print(f"nv {self.gsp.nvdev.devfmt}: GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
