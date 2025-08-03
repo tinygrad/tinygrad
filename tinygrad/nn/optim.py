@@ -122,8 +122,6 @@ class LARS(Optimizer):
       if self.momentum:
         # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
-        # for x in self.params: print(x.shape)
-        print(g.shape)
         if self.ns_params is None:
           self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
           g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
