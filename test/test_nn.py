@@ -109,7 +109,7 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
   def _test_conv(self, tiny_conv, torch_conv, dim):
-    BS, C1, DIMS = 4, 16, tuple([224//4] * dim)
+    BS, C1, DIMS = 4, 16, [224//4] * dim
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
