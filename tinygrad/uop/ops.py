@@ -214,7 +214,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
-  def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def index(self, *srcs:UOp|None): return UOp(Ops.INDEX, self.dtype, (self,)+tuple([x for x in srcs if x is not None]))
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source

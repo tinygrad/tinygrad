@@ -2,7 +2,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo
 from tinygrad.opt.kernel import axis_colors, Opt, OptOps
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.helpers import argsort, colored, prod, all_same
+from tinygrad.helpers import argsort, colored, prod, all_same, getenv
 
 @dataclass
 class RangeifyContext:
@@ -121,8 +121,27 @@ def capture_sink(ctx:RangeifyContext, x: UOp):
   for k,v in x.get_children_map().items():
     if k.op not in {Ops.CHILDREN, Ops.DEVICE} and len(v) > 1:
       replace_children[k] = UOp(Ops.CHILDREN, dtype=k.dtype, src=(k.replace(tag=len(v)),))
-  if TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
+  if getenv("FUSE") and TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
   return x.replace(arg=None, tag=1)
+
+def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
+  out_ranges = idx.src[1:]
+  idx_sink = UOp.sink(*out_ranges)
+  upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
+  if len(upcast_ranges):
+    replace_ranges = {}
+    reg_size = prod([x.vmax+1 for x in upcast_ranges])
+    buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=reg_size, addrspace=AddrSpace.REG), arg=(ctx.idx,))
+    for r in upcast_ranges:
+      replace_ranges[r] = UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.UPCAST))
+      ctx.idx += 1
+    replace_ranges_v = list(replace_ranges.values())
+    out_ranges = idx_sink.substitute(replace_ranges).src
+    ret = load.src[0].index(*out_ranges).load()
+    ret = buf.index(*upcast_ranges).load(buf.index(*replace_ranges_v).store(ret, *replace_ranges_v, tag=1))
+    return ret
+  else:
+    return UOp(Ops.INDEX, load.src[0].dtype, src=(load.src[0],)+out_ranges).load()
 
 pm_rangeify = PatternMatcher([
   (UPat(Ops.SINK, name="x"), capture_sink),
@@ -156,8 +175,11 @@ pm_rangeify = PatternMatcher([
   # lambda c,x,a,base,inv: c.where(inv, UOp(base.op, base.dtype, (a,x)))),
 
   # move MAP through elementwise ALU
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.LOAD})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([UOp(Ops.INDEX, dtype=s.dtype, src=(s,)+x.src[1:]) for s in x.src[0].src]))),
+
+  # map load
+  (UPat(Ops.INDEX, src=(UPat(Ops.LOAD, name="load"),), allow_any_len=True, name="idx"), map_load),
 
   # CONST can't have axes
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c),
