@@ -282,7 +282,7 @@ class Tensor(MathTrait):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      cast(Buffer, self.contiguous().realize().uop.base.buffer).ensure_allocated().copyin(x._data())
+      self._buffer().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
@@ -299,7 +299,10 @@ class Tensor(MathTrait):
     """
     return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
-  def _buffer(self) -> Buffer: return cast(Buffer, self.cast(self.dtype.base).contiguous().to("CPU").realize().uop.base.buffer)
+  def _buffer(self) -> Buffer:
+    x = self.cast(self.dtype.base).contiguous()
+    if isinstance(self.device, tuple): x = x.to("CPU")
+    return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
   def data(self) -> memoryview:
@@ -3558,7 +3561,8 @@ class Tensor(MathTrait):
     # for each dimension, check either dim is 1, or it does not change
     if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    return self.reshape(shape)._apply_uop(UOp.expand, arg=new_shape)
+    # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
+    return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
 
   def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -4114,8 +4118,8 @@ class Tensor(MathTrait):
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
-    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + 2 * (num,))
-    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num])
+    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (num,)).expand(b_shape + 2 * (num,))
+    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num]).realize()
 
     padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
     padded_u[..., 0:num, 0:num] = U
@@ -4312,6 +4316,11 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(dtypes.bool)
+
+  def bfloat16(self) -> Tensor: return self.cast(dtypes.bfloat16)
+  def double(self) -> Tensor: return self.cast(dtypes.double)
+  def long(self) -> Tensor: return self.cast(dtypes.long)
+  def short(self) -> Tensor: return self.cast(dtypes.short)
 
   # *** image Tensor function replacements ***
 

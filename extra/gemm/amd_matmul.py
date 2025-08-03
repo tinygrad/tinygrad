@@ -19,6 +19,9 @@ if __name__ == "__main__":
   elif getenv("ASM") == -1:
     src = (pathlib.Path(__file__).parent / "amd_seb" / "kernel3_registers.cpp").read_text()
     prgfast = replace(prg, name="kernel3_registers", src=src, global_size=[N//128, N//128, 1], local_size=[256, 1, 1])
+  elif getenv("ASM") == -2:
+    src = (pathlib.Path(__file__).parent / "amd_seb" / "kernel4_gmem_df.cpp").read_text()
+    prgfast = replace(prg, name="kernel4_gmem_db", src=src, global_size=[N//128, N//128, 1], local_size=[256, 1, 1])
   else:
     src = (pathlib.Path(__file__).parent / "amd_seb" / "kernel5_lds_optim.cpp").read_text()
     prgfast = replace(prg, name="kernel5_lds_optim", src=src, global_size=[N//128, N//128, 1], local_size=[128, 1, 1])

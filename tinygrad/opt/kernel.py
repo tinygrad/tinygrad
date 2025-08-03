@@ -90,11 +90,10 @@ class Kernel:
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
-    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.sts[0].shape, self.sts[-1].shape)]
+    self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.output_shape, self.full_shape)]
 
     # confirm all reduce axes are at the end
-    final_reduces = [i for i,(s,n) in enumerate(zip(self.full_shape, self.output_shape)) if resolve(s != n)]
-    if final_reduces != list(range(len(self.full_shape)-len(final_reduces), len(self.full_shape))):
+    if (final_reduces := [x for x in self.axis_types if x == AxisType.REDUCE]) and final_reduces != self.axis_types[-len(final_reduces):]:
       raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
 
   def copy(self):
@@ -201,7 +200,7 @@ class Kernel:
     if self.shape_len == 0: return
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
     # NOTE: we can't use self.first_reduce yet
-    first_reduce = [resolve(x!=y) for x,y in zip(self.sts[0].shape+(0,), self.full_shape+(1,))].index(True)
+    first_reduce = [resolve(x!=y) for x,y in zip(self.output_shape+(0,), self.full_shape+(1,))].index(True)
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
     # TODO: remove membufs
@@ -448,9 +447,7 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
       if op.op in GroupOp.Buffer and op in self.bufs:
         st = self.sts[self.bufs.index(op)]
-        # NOTE: if CONST got masked after applying opts, we create a new VALID
-        if op.op is Ops.CONST and any(v.mask is not None for v in st.views): return op.view(st).valid()
-        # otherwise we just replace the VIEW source
+        # replace the VIEW source
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
@@ -464,8 +461,7 @@ class Kernel:
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
-          base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))] + \
-                                                                          [f"u{i}" for i in range(len(tc.get_upcast_axes()))])])[::-1]
+          base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
           tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
 
           # permute the srcs

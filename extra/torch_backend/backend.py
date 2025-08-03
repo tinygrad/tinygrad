@@ -128,6 +128,12 @@ def _linalg_eigh(self, UPLO: str = 'U'):
   w, v = torch.linalg.eigh(self.cpu(), UPLO=UPLO)
   return w.tiny(), v.tiny()
 
+@torch.library.impl("aten::_linalg_det", "privateuseone")
+# TODO: move to tinygrad
+def _linalg_det(self: torch.Tensor):
+  result = aten._linalg_det(self.cpu())
+  return result[0].tiny(), result[1].tiny(), result[2].tiny()
+
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
 for i in [
