@@ -1317,21 +1317,21 @@ class Tensor(MathTrait):
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self._getitem(indices, v)
-    print('res', res.numpy())
-    print('v', v.numpy())
+    # print('res', res.numpy())
+    # print('v', v.numpy())
     if res.shape == self.shape:
         # advanced case: write already applied, just replace root
         print("res.shape == self.shape")
         self.replace(res)
         return
     # basic indexing: v was ignored by _getitem, do mask/canvas manually
-    view = self._getitem(indices)  # slice
+    view = self._getitem(indices).contiguous()  # slice
     rhs = v.cast(view.dtype)._broadcast_to(view.shape)
     if rhs.uop is self.uop:
         print("rhs.uop is self.uop")
         rhs = rhs.contiguous()
     normal_idxs = _expand_basic_indices(indices, self.shape, self.device)
-    print("concrete_idxs", [c.numpy() for c in normal_idxs])
+    # print("concrete_idxs", [c.numpy() for c in normal_idxs])
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
     mask[normal_idxs] = True
     rhs_flat = rhs.flatten()
