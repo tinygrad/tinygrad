@@ -92,6 +92,7 @@ class TestOptim(unittest.TestCase):
   def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
   def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.5}, 1e-6, 0)
   def test_multistep_muon_momentum_wd(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
+  def test_multistep_muon_no_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': False}, 1e-5, 0)
   def test_multistep_muon_high_lr_momentum(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)
   def test_multistep_muon_high_lr_momentum_wd(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
