@@ -83,7 +83,7 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
 def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
-         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
+         classic=False, fused=0, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
   """
   SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
 
@@ -122,6 +122,8 @@ class LARS(Optimizer):
       if self.momentum:
         # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
         # the scheduler should detect this and just insert contiguous
+        # for x in self.params: print(x.shape)
+        print(g.shape)
         if self.ns_params is None:
           self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
           g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
