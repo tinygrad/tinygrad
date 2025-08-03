@@ -108,45 +108,29 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim), in_dim, out_dim)
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
-  def test_conv1d(self):
-    BS, C1, W = 4, 16, 224//4
+  def _test_conv(self, tiny_conv, torch_conv, dim):
+    BS, C1, DIMS = 4, 16, tuple([224//4] * dim)
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
-    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
+    layer = tiny_conv(C1, C2, kernel_size=K, stride=S, padding=P)
 
     # create in torch
     with torch.no_grad():
-      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer = torch_conv(C1, C2, kernel_size=K, stride=S, padding=P).eval()
       torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
       torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
 
     # test
-    x = Tensor.uniform(BS, C1, W)
+    x = Tensor.uniform(BS, C1, *DIMS)
     z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  def test_conv2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
-    C2, K, S, P = 64, 7, 2, 1
+  def test_conv1d(self): self._test_conv(Conv1d, torch.nn.Conv1d, 1)
 
-    # create in tinygrad
-    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+  def test_conv2d(self): self._test_conv(Conv2d, torch.nn.Conv2d, 2)
 
   def test_conv1d_same_padding(self):
     BS, C1, W = 8, 3, 32
@@ -244,45 +228,9 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
-  def test_conv_transpose1d(self):
-    BS, C1, W = 4, 16, 224//4
-    C2, K, S, P = 64, 7, 2, 1
+  def test_conv_transpose1d(self): self._test_conv(ConvTranspose1d, torch.nn.ConvTranspose1d, 1)
 
-    # create in tinygrad
-    layer = ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
-  def test_conv_transpose2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
-    C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+  def test_conv_transpose2d(self): self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose2d, 2)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_groupnorm(self):
