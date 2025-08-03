@@ -193,6 +193,21 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void"}
 
+@functools.cache
+def can_safe_cast(dt0:DType, dt1:DType) -> bool:
+  # return if dt1 preserves value of dt0
+  # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
+  if dt0 == dt1 or dt0 == dtypes.bool: return True
+  match dt1:
+    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16)
+    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16)
+    case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
+    case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
+    case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
+    case dtypes.int32: return dt0 in (dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
+    case dtypes.int16: return dt0 in (dtypes.uint8, dtypes.int8)
+    case _: return False
+
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)

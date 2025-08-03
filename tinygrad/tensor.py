@@ -4132,8 +4132,8 @@ class Tensor(MathTrait):
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
-    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (U.shape[0],)).expand(b_shape + 2 * (num,))
-    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num])
+    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (num,)).expand(b_shape + 2 * (num,))
+    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num]).realize()
 
     padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
     padded_u[..., 0:num, 0:num] = U
@@ -4330,6 +4330,11 @@ class Tensor(MathTrait):
     ```
     """
     return self.cast(dtypes.bool)
+
+  def bfloat16(self) -> Tensor: return self.cast(dtypes.bfloat16)
+  def double(self) -> Tensor: return self.cast(dtypes.double)
+  def long(self) -> Tensor: return self.cast(dtypes.long)
+  def short(self) -> Tensor: return self.cast(dtypes.short)
 
   # *** image Tensor function replacements ***
 
