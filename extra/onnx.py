@@ -552,8 +552,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Property/Graph Ops *****
   def If(condition:Tensor, else_branch, then_branch, intermediate_tensors):
     else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
-    else_graph.graph_values = intermediate_tensors
-    then_graph.graph_values = intermediate_tensors
+    else_graph.graph_values.update(intermediate_tensors)
+    then_graph.graph_values.update(intermediate_tensors)
     else_out = else_graph({k:intermediate_tensors[k] for k in else_graph.graph_inputs.keys()})
     then_out = then_graph({k:intermediate_tensors[k] for k in then_graph.graph_inputs.keys()})
     assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"

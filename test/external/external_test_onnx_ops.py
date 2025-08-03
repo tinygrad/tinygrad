@@ -86,11 +86,8 @@ class TestMainOnnxOps(TestOnnxOps):
     then_body = onnx.helper.make_graph([then_const_node], "then_body", [], [then_out])
     else_body = onnx.helper.make_graph([else_const_node], "else_body", [], [else_out])
 
-    cond = np.array(False).astype(bool)
-    self.helper_test_single_op("If", {"cond": cond}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
-
-    cond = np.array(True).astype(bool)
-    self.helper_test_single_op("If", {"cond": cond}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
+    self.helper_test_single_op("If", {"cond": np.array(False).astype(bool)}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
+    self.helper_test_single_op("If", {"cond": np.array(True).astype(bool)}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
 
   def test_if_different_shapes_broadcastable(self):
     self._test_if(np.array([[1], [2]]).astype(np.float32), np.array([[6, 5, 4, 3, 2, 1]]).astype(np.float32))
