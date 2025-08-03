@@ -172,7 +172,7 @@ class OnnxPBParser:
   def _parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
     obj: dict[str, Any] = {"opset_import": []}
-    for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
+    for fid, wire_type in self._parse_message(self.reader.len):
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
         case 5: obj["model_version"] = self.reader.read_int64()
@@ -214,7 +214,7 @@ class OnnxPBParser:
 
     # parse node
     attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
-    opset_id = OpSetId(Domain.from_onnx(obj.get('domain')), 1)  # default version, to be updated later
+    opset_id = OpSetId(Domain.from_onnx(obj.get('domain')), 1)  # default version, to be updated later in _parse_ModelProto
     obj["parsed_node"] = OnnxNode(obj["op_type"], opset_id, tuple(obj["input"]), tuple(obj["output"]), attributes)
     return obj
 
