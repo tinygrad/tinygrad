@@ -550,7 +550,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
-  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors:dict[str, Tensor]):
+  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors):
     else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
     else_graph.graph_values = intermediate_tensors
     then_graph.graph_values = intermediate_tensors
@@ -561,8 +561,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
       return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
     # otherwise, use condition to select the output in python
-    condition = condition.item()
-    return tuple(t if condition else e for t,e in zip(then_out.values(), else_out.values()))
+    return tuple(t if condition.item() else e for t,e in zip(then_out.values(), else_out.values()))
 
   def Identity(x:Tensor): return x
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,

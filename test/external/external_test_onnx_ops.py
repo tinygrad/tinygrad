@@ -4,6 +4,7 @@
 
 from typing import Any
 import unittest, onnx, tempfile
+from onnx import numpy_helper
 from tinygrad import dtypes, Tensor
 from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
@@ -74,6 +75,28 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {'axis': 1}
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
+
+  def _test_if(self, then_value, else_value):
+    then_out = onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, then_value.shape)
+    else_out = onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, else_value.shape)
+
+    then_const_node = onnx.helper.make_node("Constant", inputs=[], outputs=["res"], value=numpy_helper.from_array(then_value))
+    else_const_node = onnx.helper.make_node("Constant", inputs=[], outputs=["res"], value=numpy_helper.from_array(else_value))
+
+    then_body = onnx.helper.make_graph([then_const_node], "then_body", [], [then_out])
+    else_body = onnx.helper.make_graph([else_const_node], "else_body", [], [else_out])
+
+    cond = np.array(False).astype(bool)
+    self.helper_test_single_op("If", {"cond": cond}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
+
+    cond = np.array(True).astype(bool)
+    self.helper_test_single_op("If", {"cond": cond}, {"then_branch": then_body, "else_branch": else_body}, ["res"])
+
+  def test_if_different_shapes_broadcastable(self):
+    self._test_if(np.array([[1], [2]]).astype(np.float32), np.array([[6, 5, 4, 3, 2, 1]]).astype(np.float32))
+
+  def test_if_different_shapes_not_broadcastable(self):
+    self._test_if(np.array([[1, 2, 3], [4, 5, 6]]).astype(np.float32), np.array([[6, 5, 4, 3, 2, 1]]).astype(np.float32))
 
   def test_maxunpool_export_with_output_shape(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-91
