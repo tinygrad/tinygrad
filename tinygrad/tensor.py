@@ -32,6 +32,7 @@ def _expand_basic_indices(indices, shape, device):
         after = indices[ell_pos+1:]
         fill = (slice(None),) * (len(shape) - (len(before) + len(after)))
         indices = tuple(before) + fill + tuple(after)
+        print("ELLIPSE, indices", indices)
     # pad with full slices
     if len(indices) < len(shape):
         print('idx , shape')
@@ -40,12 +41,7 @@ def _expand_basic_indices(indices, shape, device):
     per_dim = []
     for idx, dim_size in zip(indices, shape):
         if isinstance(idx, slice):
-            start, stop, step = idx.start, idx.stop, idx.step
-            step = 1 if step is None else step
-            if start is None:
-                start = 0 if step > 0 else dim_size - 1
-            if stop is None:
-                stop = dim_size if step > 0 else -1
+            start, stop, step = idx.indices(dim_size)
             per_dim.append(list(range(start, stop, step)))
         elif isinstance(idx, int):
             if idx < 0:
