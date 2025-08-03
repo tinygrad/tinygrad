@@ -17,12 +17,16 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
+
+
 def _expand_basic_indices(indices, shape, device):
     # Normalize to tuple of length ndim
     if not isinstance(indices, (list, tuple)):
+        print("indices")
         indices = (indices,)
     # replace Ellipsis
     if Ellipsis in indices:
+        print("Ellipsis")
         ell_pos = indices.index(Ellipsis)
         before = indices[:ell_pos]
         after = indices[ell_pos+1:]
@@ -30,6 +34,7 @@ def _expand_basic_indices(indices, shape, device):
         indices = tuple(before) + fill + tuple(after)
     # pad with full slices
     if len(indices) < len(shape):
+        print('idx , shape')
         indices = tuple(indices) + (slice(None),) * (len(shape) - len(indices))
 
     per_dim = []
@@ -1305,6 +1310,7 @@ class Tensor(MathTrait):
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
+    print("__INSIDE SETITEM__")
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
@@ -1315,6 +1321,8 @@ class Tensor(MathTrait):
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
     res = self._getitem(indices, v)
+    print('res', res.numpy())
+    print('v', v.numpy())
     if res.shape == self.shape:
         # advanced case: write already applied, just replace root
         print("res.shape == self.shape")
@@ -1326,14 +1334,14 @@ class Tensor(MathTrait):
     if rhs.uop is self.uop:
         print("rhs.uop is self.uop")
         rhs = rhs.contiguous()
-    concrete_idxs = _expand_basic_indices(indices, self.shape, self.device)
+    normal_idxs = _expand_basic_indices(indices, self.shape, self.device)
+    print("concrete_idxs", [c.numpy() for c in normal_idxs])
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
-    mask[concrete_idxs] = True
-    num_pts = concrete_idxs[0].shape[0]
-    rhs_flat = v.cast(self.dtype)._broadcast_to((num_pts,))
+    mask[normal_idxs] = True
+    rhs_flat = rhs.flatten()
     if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
     canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
-    canvas[concrete_idxs] = rhs_flat
+    canvas[normal_idxs] = rhs_flat
     new_tensor = mask.where(canvas, self)
     self.replace(new_tensor)
     return
