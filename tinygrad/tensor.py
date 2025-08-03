@@ -1315,23 +1315,22 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
+    if not isinstance(indices, tuple):
+      indices = (indices,)
+    indices = tuple(i for i in indices if i is not None)
     res = self._getitem(indices, v)
-    # print('res', res.numpy())
-    # print('v', v.numpy())
-    if res.shape == self.shape:
+    if res.shape == self.shape and res.uop is not self.uop:
         # advanced case: write already applied, just replace root
         print("res.shape == self.shape")
         self.replace(res)
         return
     # basic indexing: v was ignored by _getitem, do mask/canvas manually
-    view = self._getitem(indices).contiguous()  # slice
+    view = self._getitem(indices) # slice
     rhs = v.cast(view.dtype)._broadcast_to(view.shape)
     if rhs.uop is self.uop:
         print("rhs.uop is self.uop")
         rhs = rhs.contiguous()
     normal_idxs = _expand_basic_indices(indices, self.shape, self.device)
-    # print("concrete_idxs", [c.numpy() for c in normal_idxs])
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
     mask[normal_idxs] = True
     rhs_flat = rhs.flatten()
