@@ -4066,7 +4066,7 @@ class Tensor(MathTrait):
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.randn(4, 4)
-    print(t.newton_schulz().numpy())
+    print(t.newton_schulz(steps=5, params=(2,-1.5,0.5)).numpy())
     ```
     """
     assert self.ndim == 2
