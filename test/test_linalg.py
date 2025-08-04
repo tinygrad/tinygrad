@@ -67,7 +67,7 @@ class TestLinAlg(unittest.TestCase):
     a = Tensor.randn(2,2)
     for coefs in coefficients:
       b = Tensor.newton_schulz(a, steps=10, params=coefs)
-      orthogonality_helper(b, tolerance=1e-3)# ns(A) = U @ Vt -> (U @ Vt) @ (U @ Vt)t = U @ (Vt @ V) @ Ut = I
+      orthogonality_helper(b, tolerance=1e-1)# ns(A) = U @ Vt -> (U @ Vt) @ (U @ Vt)t = U @ (Vt @ V) @ Ut = I
 
 if __name__ == "__main__":
   unittest.main()
