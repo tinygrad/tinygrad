@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import GlobalCounters, CI, Context, OSX
+from tinygrad.helpers import GlobalCounters, CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
@@ -197,7 +197,6 @@ class TestNN(unittest.TestCase):
     C2, K, S, P = 64, 7, 2, 1
     self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose2d, BS, C1, DIMS, C2, K, S, P)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3
 
@@ -224,7 +223,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_layernorm(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -251,7 +249,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_layernorm_2d(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -278,7 +275,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 10, 10, 10
 
@@ -305,7 +301,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_instancenorm_3d(self):
     N, C, D, H, W = 20, 10, 10, 10, 10
 
@@ -332,7 +327,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_rmsnorm(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
