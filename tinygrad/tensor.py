@@ -315,8 +315,7 @@ class Tensor(MathTrait):
       cast(Buffer, self.contiguous().realize().uop.base.buffer).ensure_allocated().copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    if self.uop is x.uop:
-      return self  # a self assign is a NOOP
+    if self.uop is x.uop: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
@@ -1299,7 +1298,7 @@ class Tensor(MathTrait):
     indices = tuple(i for i in indices if i is not None)
     res = self._getitem(indices, v)
     if res.shape == self.shape and res.uop is not self.uop:
-      self.replace(res)
+      self.assign(res)
       return
     # basic indexing: v was ignored by _getitem, do mask/canvas manually
     view = self._getitem(indices)  # slice
