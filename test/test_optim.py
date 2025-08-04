@@ -3,7 +3,7 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon
-from tinygrad.helpers import Context, CI
+from tinygrad.helpers import CI
 from tinygrad.device import is_dtype_supported
 from extra.torch_muon import SingleDeviceMuon as TorchMuon
 
