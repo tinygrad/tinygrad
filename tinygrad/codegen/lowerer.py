@@ -39,9 +39,14 @@ def subblock(ctx: IndexContext, full_new_idx: list[UOp], src: UOp):
   return graph_rewrite(src, pm_lowerer, lc, name="subblock", bottom_up=True)
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
-  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
+  src_shape = x.src[0].shape1
+  new_idxs = shape_to_idx(src_shape, ctx.axis_types, ctx.start)
   full_new_idx = list(ctx.idxs)
-  for a in x.axis_arg: full_new_idx[a] = new_idxs[a]
+  # TODO: hack TestIdxUpcast.test_symfold
+  for a in x.axis_arg:
+    if a >= len(full_new_idx)-1:
+      full_new_idx.extend([new_idxs[a]]*(a-len(full_new_idx)+1))
+    full_new_idx[a] = new_idxs[a]
 
   ret = subblock(ctx, full_new_idx, x.src[0])
 
@@ -79,7 +84,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
 
 def fixup_wmma(ctx:IndexContext, x:UOp):
   if x.tag is not None: return None
-  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
+  new_idxs = shape_to_idx(x.src[0].shape1, ctx.axis_types, ctx.start)
   full_new_idx = list(ctx.idxs)
   for a in x.arg[-1]: full_new_idx[a] = new_idxs[a]
 
