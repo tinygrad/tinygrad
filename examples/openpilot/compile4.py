@@ -2,7 +2,7 @@ import sys
 from tinygrad import Tensor, fetch, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.frontend.onnx import OnnxRunner
-from tinygrad.kernelize.kernelize import get_kernelize_map
+from tinygrad.schedule.kernelize import get_kernelize_map
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import run_schedule
 

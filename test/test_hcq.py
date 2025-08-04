@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, CI, mv_address
+from tinygrad.helpers import getenv, CI, mv_address, DEBUG
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -75,7 +75,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(MOCKGPU, "Can't handle async update on MOCKGPU for now")
+  @unittest.skipIf(MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"}, "Can't handle async update on MOCKGPU for now")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -137,6 +137,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
     assert val == 200.0, f"got val {val}"
 
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
   def test_exec_update(self):
     sint_global = (Variable("sint_global", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.global_size[1:])
     sint_local = (Variable("sint_local", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.local_size[1:])
@@ -154,6 +155,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
+  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
   def test_exec_update_fuzz(self):
     virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
     virt_local = [Variable(f"local_{i}", 0, 0xffffffff, dtypes.uint32) for i in range(3)]
@@ -336,7 +338,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (15000 if MOCKGPU else 100)
+    assert 0.1 <= et <= (15000 if MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -510,6 +512,31 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       assert buf2.as_buffer()[0] == i
+
+  def test_map_cpu_buffer_to_device(self):
+    if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")
+
+    sz = 0x2000
+    cpu_buffer = Buffer("CPU", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+    cpu_buffer._buf.cpu_view().view(fmt='B')[:] = bytes([x & 0xff for x in range(sz)])
+
+    for devid in range(6):
+      if DEBUG >= 2: print(f"Testing map to device {Device.DEFAULT}:{devid}")
+
+      try: d = Device[f"{Device.DEFAULT}:{devid}"]
+      except Exception: break
+
+      local_buf = Buffer(f"{Device.DEFAULT}:{devid}", sz, dtypes.uint8, options=BufferSpec(cpu_access=True)).ensure_allocated()
+
+      d.allocator.map(cpu_buffer._buf)
+
+      d.hw_copy_queue_t().wait(d.timeline_signal, d.timeline_value - 1) \
+                         .copy(local_buf._buf.va_addr, cpu_buffer._buf.va_addr, sz) \
+                         .signal(d.timeline_signal, d.timeline_value).submit(d)
+      d.timeline_signal.wait(d.timeline_value)
+      d.timeline_value += 1
+
+      np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
 
   @unittest.skipUnless(MOCKGPU, "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):

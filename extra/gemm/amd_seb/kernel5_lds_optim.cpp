@@ -26,7 +26,7 @@ kernel5_lds_optim(float *a, float *b, float *c)
   // Number of Row or column we read per batch
   constexpr int BK = 8;
 
-  // Thread Tile size . 4x4
+  // Thread Tile size
   constexpr int TN = 4;
   constexpr int TM = 4;
 

@@ -1,5 +1,5 @@
-import os, sys, mmap, io, ctypes, ctypes.util, contextlib
-from typing import Optional, Generator, Callable
+import os, sys, mmap, io, ctypes, contextlib, pathlib
+from typing import Generator, Callable
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 with contextlib.suppress(ImportError):
@@ -12,8 +12,8 @@ class DiskDevice(Compiled):
   def __init__(self, device:str):
     if not DiskDevice._tried_io_uring_init: self._iouring_setup()
 
-    self.size: Optional[int] = None
-    self.fd: Optional[int] = None
+    self.size: int|None = None
+    self.fd: int|None = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
   def _might_open(self, size:int):
@@ -31,7 +31,7 @@ class DiskDevice(Compiled):
     else:
       try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
-      if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
+      if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
       self.mem = mmap.mmap(self.fd, self.size)
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled

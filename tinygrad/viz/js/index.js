@@ -25,6 +25,10 @@ function intersectRect(r1, r2) {
 let [workerUrl, worker, timeout] = [null, null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
+  const progressMessage = document.querySelector(".progress-message");
+  progressMessage.innerText = "Rendering new graph...";
+  if (timeout != null) clearTimeout(timeout);
+  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -33,9 +37,6 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  if (timeout != null) clearTimeout(timeout);
-  const progressMessage = document.querySelector(".progress-message");
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
@@ -108,11 +109,11 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const devColors = {"TINY":["rgb(27 87 69)", "rgb(53 79 82)", "rgb(53 79 82)", "rgb(70 172 194)", "rgb(29, 46, 98)"],
-                   "DEFAULT":["rgb(29,31,42)","rgb(42,45,61)","rgb(55,59,79)","rgb(68,72,98)","rgb(18,19,26)","rgb(47,50,68)","rgb(59,63,84)","rgb(74,78,101)","rgb(24,26,35)","rgb(35,37,50)","rgb(49,53,72)","rgb(64,68,89)"],}
-const bufColors = ["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"];
-
-const lighten = (rgb, depth, step=0.08) => rgb.replace(/\d+/g, n => Math.round(parseInt(n)+(255-parseInt(n)) * Math.min(1, depth*step)));
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62", "#63b0cd"],
+  DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
+const cycleColors = (lst, i) => lst[i%lst.length];
 
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
@@ -152,18 +153,18 @@ async function renderProfiler() {
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
-        const colors = devColors[k] ?? devColors.DEFAULT;
+        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
-      const fillColor = lighten(colorMap.get(colorKey), e.depth);
+      const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-        if (stepIdx !== -1) ref = {ctx:ref.ctx, step:stepIdx};
+        ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { tooltipText:formatTime(e.dur), ...ref };
+      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
       // offset y by depth
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
@@ -171,6 +172,7 @@ async function renderProfiler() {
     const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
     if (k === focusedDevice) {
       // expand memory graph for the focused device
       area = maxArea*4;
@@ -182,7 +184,7 @@ async function renderProfiler() {
       const y0 = e.y.map(yscale);
       const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
       const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:bufColors[i%bufColors.length] });
+      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -228,6 +230,7 @@ async function renderProfiler() {
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
+      if (e.label == null) continue;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       let [labelX, labelWidth] = [x+2, 0];
@@ -359,7 +362,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
-function codeBlock(st, language, { loc, wrap }) {
+function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
@@ -372,6 +375,19 @@ function codeBlock(st, language, { loc, wrap }) {
   }
   ret.appendChild(code);
   return ret;
+}
+
+function appendTd(tr, value, unit=null) {
+  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
+  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
+}
+
+function appendRow(table, name, value, unit=null, cls="main-row") {
+  const tr = table.appendChild(document.createElement("tr"));
+  tr.className = cls;
+  tr.appendChild(document.createElement("td")).innerText = name;
+  appendTd(tr, value, unit);
+  return tr;
 }
 
 function setActive(e) {
@@ -453,7 +469,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]} - ${u.match_count}`;
+        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
@@ -467,23 +483,69 @@ async function main() {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
   const ctx = ctxs[currentCtx];
-  if (ctx.name === "Profiler") return renderProfiler();
   const step = ctx.steps[currentStep];
-  const ckey = `ctx=${currentCtx-1}&idx=${currentStep}`;
+  const ckey = step?.query;
   // close any pending event sources
   let activeSrc = null;
   for (const e of evtSources) {
-    if (e.url.split("?")[1] !== ckey) e.close();
+    const url = new URL(e.url);
+    if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
+  if (ctx.name === "Profiler") return renderProfiler();
   if (ckey in cache) {
     ret = cache[ckey];
   }
+  // ** Disassembly view
+  if (ckey.startsWith("/disasm")) {
+    if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    displayGraph("profiler");
+    const root = document.createElement("div");
+    root.className = "raw-text";
+    const metadata = document.querySelector(".metadata");
+    metadata.innerHTML = "";
+    // detailed assembly view
+    if (ret.cols != null) {
+      const asm = root.appendChild(document.createElement("table"));
+      const thead = asm.appendChild(document.createElement("thead"));
+      const usage = {};
+      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
+      for (const r of ret.rows) {
+        const tr = asm.appendChild(document.createElement("tr"));
+        tr.className = "main-row code-row";
+        for (const d of Object.values(r.data)) appendTd(tr, d);
+        const segmentsTd = tr.appendChild(document.createElement("td"));
+        segmentsTd.className = "pct-row";
+        const usageBar = segmentsTd.appendChild(document.createElement("div"));
+        for (const [k, {width, value}] of Object.entries(r.segs)) {
+          const seg = usageBar.appendChild(document.createElement("div"));
+          seg.style.width = width+"%";
+          seg.title = `${ret.segments[k]} ${value}`;
+          seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+          if (!(k in usage)) usage[k] = 0;
+          usage[k] += value;
+        }
+      }
+      const summary = metadata.appendChild(document.createElement("table"));
+      for (const [i,s] of ret.segments.entries()) {
+        const tr = summary.appendChild(document.createElement("tr"));
+        tr.className = "main-row";
+        const td = tr.appendChild(document.createElement("td"));
+        const div = td.appendChild(document.createElement("div"));
+        div.className = "legend";
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
+        div.appendChild(document.createElement("p")).textContent = s;
+        appendTd(tr, usage[i] ?? 0);
+      }
+    } else root.appendChild(codeBlock(ret.src, "x86asm"));
+    return document.querySelector(".profiler").replaceChildren(root);
+  }
+  // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
-    const eventSource = new EventSource(`/ctxs?${ckey}`);
+    const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
       if (e.data === "END") return eventSource.close();
@@ -502,6 +564,28 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  if (ctx.runtime_stats != null) {
+    const div = metadata.appendChild(document.createElement("div"));
+    div.className = "stats-list";
+    for (const [i, s] of ctx.runtime_stats.entries()) {
+      const p = div.appendChild(document.createElement("p"));
+      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
+      const table = div.appendChild(document.createElement("table"));
+      const tbody = table.appendChild(document.createElement("tbody"));
+      for (const { name, value, unit, subunits } of s.data) {
+          const mainRow = appendRow(tbody, name, value, unit, "main-row");
+          if (!subunits?.length) continue;
+          const subunitRow = tbody.appendChild(document.createElement("tr"));
+          subunitRow.style.display = "none";
+          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
+          mainRow.style.cursor = "pointer";
+          const td = subunitRow.appendChild(document.createElement("td"));
+          td.colSpan = 2;
+          const table = td.appendChild(document.createElement("table"));
+          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
+      }
+    }
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
