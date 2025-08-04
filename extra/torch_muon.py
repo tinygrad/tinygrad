@@ -36,7 +36,7 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps: int):
 def muon_update(grad, momentum, beta=0.95, ns_steps=5, nesterov=True):
   if beta:
     momentum.mul_(beta).add_(grad)
-    update = grad.add(momentum,alpha=beta)
+    update = grad.add(momentum,alpha=beta) if nesterov else momentum
   else: update = grad
   if update.ndim == 4: # for the case of conv filters
     update = update.view(len(update), -1)
