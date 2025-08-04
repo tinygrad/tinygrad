@@ -1298,16 +1298,11 @@ class Tensor(MathTrait):
       self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    if not unwrap(self.uop.st).contiguous:
-      raise RuntimeError("setitem target needs to be contiguous")
-    if isinstance(v, get_args(ConstType)):
-      v = Tensor(v, device=self.device, dtype=self.dtype)
-    if not isinstance(v, Tensor):
-      raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
-    if self.requires_grad or v.requires_grad:
-      raise NotImplementedError("setitem with requires_grad is not supported")
-    if not isinstance(indices, tuple):
-      indices = (indices,)
+    if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
+    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
+    if not isinstance(indices, tuple): indices = (indices,)
     indices = tuple(i for i in indices if i is not None)
     res = self._getitem(indices, v)
     if res.shape == self.shape and res.uop is not self.uop:
@@ -1316,14 +1311,12 @@ class Tensor(MathTrait):
     # basic indexing: v was ignored by _getitem, do mask/canvas manually
     view = self._getitem(indices)  # slice
     rhs = v.cast(view.dtype)._broadcast_to(view.shape)
-    if rhs.uop is self.uop:
-      rhs = rhs.contiguous()
+    if rhs.uop is self.uop: rhs = rhs.contiguous()
     normal_idxs = _expand_basic_indices(indices, self.shape, self.device)
     mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
     mask[normal_idxs] = True
     rhs_flat = rhs.flatten()
-    if rhs_flat.uop is self.uop:
-      rhs_flat = rhs_flat.contiguous()
+    if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
     canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
     canvas[normal_idxs] = rhs_flat
     new_tensor = mask.where(canvas, self)
