@@ -17,8 +17,8 @@ def get_llama_re():
 class SimpleTokenizer:
   def __init__(self, pat: str, normal_tokens: dict[bytes, int], special_tokens: dict[str, int]):
     self._normal_tokens, self._special_tokens, self._pat = normal_tokens, special_tokens, re.compile(pat)
-    self._tok2str = { tid: tok for tok, tid in special_tokens.items() } | { tid: tok.decode(errors="ignore") for tok, tid in normal_tokens.items()  }
-    self._special_re = re.compile("|".join(re.escape(tok) for tok in self._special_tokens.keys()))
+    self._tok2str = { tid: tok.encode() for tok, tid in special_tokens.items() } | { tid: tok for tok, tid in normal_tokens.items()  }
+    self._special_re = re.compile("|".join(re.escape(tok) for tok in self._special_tokens.keys()) if special_tokens else r"(?!)")
 
   @staticmethod
   def from_gguf_kv(kv: dict):
@@ -36,11 +36,12 @@ class SimpleTokenizer:
       pos = match.end(0)
     return tokens + self._encode_sentence(text[pos:])
 
-  def decode(self, ids: list[int]) -> str: return ''.join(self._tok2str[tid] for tid in ids)
+  def decode(self, ids: list[int]) -> str: return b''.join(self._tok2str[tid] for tid in ids).decode()
   def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
 
   def _encode_sentence(self, chunk: str): return [ tok for word in self._pat.findall(chunk) for tok in self._encode_word(word.encode()) ]
   def _encode_word(self, word: bytes):
+    if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
     parts = [word[i:i+1] for i in range(len(word))]
     while True:
       min_tid, min_idx = 2**32, -1
