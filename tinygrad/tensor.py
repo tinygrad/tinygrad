@@ -20,40 +20,33 @@ from tinygrad.schedule.kernelize import get_kernelize_map
 
 
 def _expand_basic_indices(indices, shape, device):
-    # Normalize to tuple of length ndim
-    if not isinstance(indices, (list, tuple)):
-        indices = (indices,)
-    # replace Ellipsis
-    if Ellipsis in indices:
-        ell_pos = indices.index(Ellipsis)
-        before = indices[:ell_pos]
-        after = indices[ell_pos+1:]
-        fill = (slice(None),) * (len(shape) - (len(before) + len(after)))
-        indices = tuple(before) + fill + tuple(after)
-    # pad with full slices
-    if len(indices) < len(shape):
-        indices = tuple(indices) + (slice(None),) * (len(shape) - len(indices))
-
-    per_dim = []
-    for idx, dim_size in zip(indices, shape):
-        if isinstance(idx, slice):
-            start, stop, step = idx.indices(dim_size)
-            per_dim.append(list(range(start, stop, step)))
-        elif isinstance(idx, int):
-            if idx < 0:
-                idx = dim_size + idx
-            per_dim.append([idx])
-        elif idx is None:
-            per_dim.append([0])  # will be handled by reshape semantics upstream
-        else:
-            raise IndexError(f"unsupported basic index {idx!r}")
-
-    import itertools
-    grids = list(itertools.product(*per_dim))
-    if not grids:
-        return tuple(Tensor([], dtype=dtypes.int, device=device) for _ in shape)
-    concrete = list(zip(*grids))  # per-dim lists
-    return tuple(Tensor(list(c), dtype=dtypes.int, device=device) for c in concrete)
+  # Normalize to tuple of length ndim
+  if not isinstance(indices, (list, tuple)): indices = (indices,)
+  # replace Ellipsis
+  if Ellipsis in indices:
+    ell_pos = indices.index(Ellipsis)
+    before = indices[:ell_pos]
+    after = indices[ell_pos + 1 :]
+    fill = (slice(None),) * (len(shape) - (len(before) + len(after)))
+    indices = tuple(before) + fill + tuple(after)
+  # pad with full slices
+  if len(indices) < len(shape): indices = tuple(indices) + (slice(None),) * (len(shape) - len(indices))
+  per_dim = []
+  for idx, dim_size in zip(indices, shape):
+    if isinstance(idx, slice):
+      start, stop, step = idx.indices(dim_size)
+      per_dim.append(list(range(start, stop, step)))
+    elif isinstance(idx, int):
+      if idx < 0:
+        idx = dim_size + idx
+      per_dim.append([idx])
+    elif idx is None: per_dim.append([0])  # will be handled by reshape semantics upstream
+    else: raise IndexError(f"unsupported basic index {idx!r}")
+  grids = list(itertools.product(*per_dim))
+  if not grids:
+    return tuple(Tensor([], dtype=dtypes.int, device=device) for _ in shape)
+  concrete = list(zip(*grids))  # per-dim lists
+  return tuple(Tensor(list(c), dtype=dtypes.int, device=device) for c in concrete)
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
