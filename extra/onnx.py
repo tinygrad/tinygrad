@@ -200,7 +200,7 @@ class OnnxPBParser:
     return obj
 
   def _parse_NodeProto(self) -> dict:
-    obj: dict[str, Any] = {"input": [], "output": [], "attribute": []}
+    obj: dict[str, Any] = {"input": [], "output": [], "attribute": [], "domain": None}
     for fid, wire_type in self._parse_message(self._decode_end_pos()):
       match fid:
         case 1: obj["input"].append(self.reader.read_string())
@@ -420,7 +420,7 @@ class OnnxRunner:
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = OnnxPBParser(model_path, load_external_data=True).parse()
     graph = model["graph"]
-    self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
+    self.is_training = any(n["domain"] in {Domain.AI_ONNX_TRAINING.value, Domain.AI_ONNX_PREVIEW_TRAINING.value} for n in graph["node"])
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
