@@ -108,7 +108,6 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim), in_dim, out_dim)
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
-
   def _test_conv(self, tiny_conv, torch_conv, BS, C1, DIMS, C2, K, S, P, D=1, winograd=False):
     # create in tinygrad
     layer = tiny_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D)
@@ -143,12 +142,12 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
-  def test_conv1d(self): 
+  def test_conv1d(self):
     BS, C1, DIMS = 4, 16, [224//4]
     C2, K, S, P = 64, 7, 2, 1
     self._test_conv(Conv1d, torch.nn.Conv1d, BS, C1, DIMS, C2, K, S, P)
 
-  def test_conv2d(self): 
+  def test_conv2d(self):
     BS, C1, DIMS = 4, 16, [224//4, 224//4]
     C2, K, S, P = 64, 7, 2, 1
     self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P)
@@ -171,7 +170,7 @@ class TestNN(unittest.TestCase):
   def test_conv2d_same_padding_with_dilation(self):
     BS, C1, DIMS = 16, 3, [28, 28]
     C2, K, S, P, D = 32, 3, 1, 'same', 3
-    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P, D)
 
   def test_conv2d_same_padding_invalid_stride(self):
     C1, C2, K, S, P = 16, 32, 2, 2, 'same'
@@ -187,7 +186,7 @@ class TestNN(unittest.TestCase):
     C2, K, S, P = 8, 3, 1, 1
     self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P, winograd=True)
 
-  def test_conv_transpose1d(self): 
+  def test_conv_transpose1d(self):
     BS, C1, DIMS = 4, 16, [224//4]
     C2, K, S, P = 64, 7, 2, 1
     self._test_conv(ConvTranspose1d, torch.nn.ConvTranspose1d, BS, C1, DIMS, C2, K, S, P)
