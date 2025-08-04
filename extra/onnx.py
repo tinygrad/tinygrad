@@ -144,7 +144,7 @@ class OnnxRunner:
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = onnx_load(model_path)
-    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in model.graph.node)
+    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING.value, Domain.AI_ONNX_PREVIEW_TRAINING.value} for n in model.graph.node)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
     self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
