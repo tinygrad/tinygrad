@@ -129,7 +129,7 @@ class LARS(Optimizer):
       if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(steps=self.steps, params=self.ns_params).reshape(g.shape)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      if not self.pre_wd and self.wd > 0: t = t * (1.0 - self.wd * self.lr)#muon does post wd
+      if not self.pre_wd and self.wd > 0: t = t.detach() * (1.0 - self.wd * self.lr)#muon does post wd
 
       ret.append((t.detach() - g).cast(t.dtype))
     return ret, self.b
