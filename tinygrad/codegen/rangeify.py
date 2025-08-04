@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType, TRACK_MATCH_STATS
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, KernelInfo, GroupOp, AxisType, TRACK_MATCH_STATS, identity_element
 from tinygrad.opt.kernel import axis_colors, Opt, OptOps
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, AddrSpace
@@ -36,11 +36,12 @@ def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
   out_ranges = idx.src[1:]
   idx_sink = UOp.sink(*out_ranges)
   upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
-  if len(upcast_ranges) or True:
-    replace_ranges = {}
-    reg_size = prod([x.vmax+1 for x in upcast_ranges])
-    buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=reg_size, addrspace=AddrSpace.REG), arg=(ctx.regs,))
+  upcast_shape = tuple([x.vmax+1 for x in upcast_ranges])
+  if len(upcast_ranges):
+    buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=prod([x.vmax+1 for x in upcast_ranges]), addrspace=AddrSpace.REG), arg=(ctx.regs,))
+    buf = buf.reshape(upcast_shape)
     ctx.regs += 1
+    replace_ranges = {}
     for r in upcast_ranges:
       replace_ranges[r] = UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.UPCAST))
       ctx.idx += 1
@@ -52,17 +53,50 @@ def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
   else:
     return UOp(Ops.INDEX, load.src[0].dtype, src=(load.src[0],)+out_ranges).load()
 
-def map_reduce(ctx:RangeifyContext, x:UOp, r:UOp):
-  rngs = list(x.src[1:])
+def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
+  rngs = list(idx.src[1:])
+
+  input_ranges = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE and x.arg[1] != AxisType.UPCAST]
+
+  upcast_ranges = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
+  upcast_shape = tuple([x.vmax+1 for x in upcast_ranges])
+  acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=prod([x.vmax+1 for x in upcast_ranges]), addrspace=AddrSpace.REG),
+            arg=(ctx.regs,)).reshape(upcast_shape)
+  ctx.regs += 1
+
+
+  # create reduce dims (before new upcast dims)
   new_ranges = []
-  for i,s in enumerate(r.src[0].shape):
-    if i in r.arg[1]:
+  for i,s in enumerate(red.src[0].shape):
+    if i in red.arg[1]:
       assert rngs[i].op == Ops.CONST
       rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
       new_ranges.append(rngs[i])
       ctx.idx += 1
-  mm = UOp(Ops.INDEX, r.src[0].dtype, src=(r.src[0],)+tuple(rngs))
-  return UOp(Ops.REDUCE, r.dtype, src=(mm,)+tuple(new_ranges), arg=r.arg[0])
+
+  # create new upcast dims
+  replace_ranges = {}
+  for r in upcast_ranges:
+    replace_ranges[r] = UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.UPCAST))
+    ctx.idx += 1
+  replace_ranges_v = list(replace_ranges.values())
+  rngs = list(UOp.sink(*rngs).substitute(replace_ranges).src)
+
+  # identity store
+  identity_ranges = []
+  for r in upcast_ranges:
+    identity_ranges.append(UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.LOOP)))
+    ctx.idx += 1
+  identity = UOp.const(red.dtype, identity_element(red.arg[0], red.dtype.scalar()))
+  do_identity_store = acc.index(*identity_ranges).store(identity, *identity_ranges, UOp(Ops.NOOP, src=tuple(input_ranges)), tag=1)
+
+  mm = UOp(Ops.INDEX, red.src[0].dtype, src=(red.src[0],)+tuple(rngs))
+  rbufidx = acc.index(*replace_ranges_v)
+  loaded = rbufidx.load(do_identity_store, *new_ranges)
+  reduce_store = rbufidx.store(loaded.alu(red.arg[0], mm), *new_ranges, *replace_ranges_v, tag=1)
+  return acc.index(*replace_ranges.keys()).load(reduce_store)
+
+  #return UOp(Ops.REDUCE, red.dtype, src=(mm, loaded)+tuple(replace_ranges_v)+tuple(new_ranges), arg=red.arg[0])
 
 def map_reshape(x:UOp, r:UOp):
   acc = 1
@@ -151,7 +185,7 @@ pm_rangeify = PatternMatcher([
 
   # TODO: handle INDEX on STORE
   (UPat(Ops.STORE, name="x"), map_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="r"),), allow_any_len=True, name="x"), map_reduce),
+  (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # this is like the definitions of these
   (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
