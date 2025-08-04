@@ -108,7 +108,7 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim), in_dim, out_dim)
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
-  def _test_conv(self, tiny_conv, torch_conv, BS, C1, DIMS, C2, K, S, P, D=1, winograd=False):
+  def _test_conv(self, tiny_conv, torch_conv, BS, C1, DIMS, C2, K, S, P, D=1):
     # create in tinygrad
     layer = tiny_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D)
 
@@ -120,27 +120,10 @@ class TestNN(unittest.TestCase):
 
     # test
     x = Tensor.uniform(BS, C1, *DIMS)
-    if winograd:
-      with Context(WINO=1):
-        z = layer(x)
-    else:
-      z = layer(x)
+    z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
-    # extra tests for winograd
-    if not winograd: return
-    m = z.mean()
-    m.backward()
-    gw = layer.weight.grad.realize()
-    gb = layer.bias.grad.realize()
-    gx = x.grad.realize()
-
-    torch_z.mean().backward()
-    np.testing.assert_allclose(gw.numpy(), torch_layer.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
-    np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
-    np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv1d(self):
     BS, C1, DIMS = 4, 16, [224//4]
@@ -182,9 +165,39 @@ class TestNN(unittest.TestCase):
 
   @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
-    BS, C1, DIMS = 2, 8, [16, 16]
+    BS, C1, H, W = 2, 8, 16, 16
     C2, K, S, P = 8, 3, 1, 1
-    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P, winograd=True)
+
+    # create in tinygrad
+    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
+    layer.weight.requires_grad = True
+    layer.bias.requires_grad = True
+
+    # create in torch
+    torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+    torch_layer.weight = torch.nn.Parameter(torch.tensor(layer.weight.numpy(), dtype=torch.float32))
+    torch_layer.bias = torch.nn.Parameter(torch.tensor(layer.bias.numpy(), dtype=torch.float32))
+
+    # test
+    x = Tensor.uniform(BS, C1, H, W, requires_grad=True)
+
+    with Context(WINO=1):
+      z = layer(x)
+
+    torch_x = torch.tensor(x.numpy(), requires_grad=True)
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+    m = z.mean()
+    m.backward()
+    gw = layer.weight.grad.realize()
+    gb = layer.bias.grad.realize()
+    gx = x.grad.realize()
+
+    torch_z.mean().backward()
+    np.testing.assert_allclose(gw.numpy(), torch_layer.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv_transpose1d(self):
     BS, C1, DIMS = 4, 16, [224//4]
