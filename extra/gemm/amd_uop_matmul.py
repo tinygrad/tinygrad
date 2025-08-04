@@ -4,7 +4,8 @@ from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.dtype import AddrSpace
 from tinygrad.schedule.kernelize import merge_views, view_left
 from tinygrad.helpers import getenv, colored, prod, unwrap
-from tinygrad.shape.shapetracker import ShapeTracker, View, strides_for_shape
+from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.view import strides_for_shape
 from tinygrad.opt.kernel import axis_colors
 
 def to_colored(full_shape, axis_types): return '_'.join([colored(str(s), axis_colors[at]) for s,at in zip(full_shape, axis_types)])
@@ -86,6 +87,7 @@ def hl_spec_kernel3():
 
   # this makes all the global loads match
   # this can also be more simply done by rebinding the RANGEs
+  # but sadly, rebinding the RANGEs doesn't work to change the order of the local axes
   permute_a[17:20] = [11,12,13]
   permute_a[11:14] = [17,18,19]
   permute_a[7], permute_a[10] = permute_a[10], permute_a[7]

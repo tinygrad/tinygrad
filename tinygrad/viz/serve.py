@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -54,7 +55,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort()):
     # always exclude DEVICE/CONST/UNIQUE
-    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE}: excluded.add(u)
+    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
     # only exclude CONST VIEW source if it has no other children in the graph
     if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
       excluded.update(u.src)
@@ -125,12 +126,15 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    name, cat = e.name, None
-    if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
+    name, cat, info = e.name, None, None
+    if (ref:=ref_map.get(name)) is not None:
+      name = ctxs[ref]["name"]
+      if isinstance(p:=contexts[0][ref].ret, ProgramSpec):
+        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -185,11 +189,36 @@ def get_runtime_stats(key) -> list[dict]:
       ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
   return ret
 
+# ** Assembly analyzers
+
+def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
+  target_args = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
+  # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
+  data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
+  cr = data["CodeRegions"][0]
+  rows:list = [{"data":[instr], "segs":{}} for instr in cr["Instructions"]]
+  for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): rows[i]["data"].append(info["Latency"])
+  for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
+    i, r = d["InstructionIndex"], d["ResourceIndex"]
+    if i>len(rows)-1: continue
+    rows[i]["segs"][r] = rows[i]["segs"].get(r, 0)+d["ResourceUsage"]
+  # rescale segment width to 0-100
+  max_usage = max([sum(x["segs"].values()) for x in rows], default=0)
+  for x in rows: x["segs"] = {k:{"width":(v/max_usage)*100, "value":v} for k,v in x["segs"].items()}
+  return {"rows":rows, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}
+
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
-  lib = Device[prg.device].compiler.compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): Device[prg.device].compiler.disassemble(lib)
-  return json.dumps({"src":buf.getvalue()}).encode()
+  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
+  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
+  disasm_str = buf.getvalue()
+  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
+  if isinstance(compiler, LLVMCompiler):
+    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
+    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
+    ret = get_llvm_mca(disasm_str, mtriple, mcpu)
+  else: ret = {"src":disasm_str}
+  return json.dumps(ret).encode()
 
 # ** HTTP server
 

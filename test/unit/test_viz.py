@@ -138,6 +138,16 @@ class TestViz(BaseTestViz):
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
+  def test_const_node_visibility(self):
+    a = UOp.variable("a", 0, 10)
+    z = UOp.const(dtypes.int, 0)
+    alu = a*z
+    exec_rewrite(alu, [sym])
+    graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
+    # embed const in the parent node when possible
+    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
+    self.assertEqual(list(graphs[1]), [id(z)])
+
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
