@@ -10,6 +10,12 @@ def with_opts(c:Tensor, opts_to_apply:list[Opt]):
   print(program.src)
 
 class TestRangeify(unittest.TestCase):
+  def test_dont_upcast(self):
+    a = Tensor.empty(4, 4)
+    b = Tensor.empty(4, 4)
+    c = a + b
+    with_opts(c, [])
+
   def test_upcast(self):
     a = Tensor.empty(4, 4)
     b = Tensor.empty(4, 4)

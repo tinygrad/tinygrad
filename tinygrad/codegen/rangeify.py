@@ -7,9 +7,10 @@ from tinygrad.helpers import argsort, colored, prod, all_same, getenv
 @dataclass
 class RangeifyContext:
   idx: int = 0
+  regs: int = 0
   opts: tuple[Opt, ...] = ()
 
-def rangify_store(ctx:RangeifyContext, x:UOp):
+def map_store(ctx:RangeifyContext, x:UOp):
   if x.tag == 1: return None
   ranges = []
   for i,s in enumerate(x.shape):
@@ -30,6 +31,26 @@ def rangify_store(ctx:RangeifyContext, x:UOp):
   mm = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[0],)+tuple(ranges))
   mm2 = UOp(Ops.INDEX, dtype=x.src[0].dtype, src=(x.src[1],)+tuple(ranges))
   return UOp(Ops.STORE, src=(mm, mm2)+tuple([x for x in UOp.sink(*ranges).toposort() if x.op is Ops.RANGE]), tag=1)
+
+def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
+  out_ranges = idx.src[1:]
+  idx_sink = UOp.sink(*out_ranges)
+  upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
+  if len(upcast_ranges) or True:
+    replace_ranges = {}
+    reg_size = prod([x.vmax+1 for x in upcast_ranges])
+    buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=reg_size, addrspace=AddrSpace.REG), arg=(ctx.regs,))
+    ctx.regs += 1
+    for r in upcast_ranges:
+      replace_ranges[r] = UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.UPCAST))
+      ctx.idx += 1
+    replace_ranges_v = list(replace_ranges.values())
+    out_ranges = idx_sink.substitute(replace_ranges).src
+    ret = load.src[0].index(*out_ranges).load()
+    ret = buf.index(*upcast_ranges).load(buf.index(*replace_ranges_v).store(ret, *replace_ranges_v, tag=1))
+    return ret
+  else:
+    return UOp(Ops.INDEX, load.src[0].dtype, src=(load.src[0],)+out_ranges).load()
 
 def map_reduce(ctx:RangeifyContext, x:UOp, r:UOp):
   rngs = list(x.src[1:])
@@ -104,7 +125,8 @@ def capture_sink(ctx:RangeifyContext, x: UOp):
         inp = k.src[0]
         print(save_shape, full_shape)
         if len(save_shape):
-          buf = UOp(Ops.DEFINE_REG, inp.dtype.ptr(size=prod(save_shape), addrspace=AddrSpace.REG), arg=(ctx.idx,))
+          buf = UOp(Ops.DEFINE_REG, inp.dtype.ptr(size=prod(save_shape), addrspace=AddrSpace.REG), arg=(ctx.regs,))
+          ctx.regs += 1
           buf = buf.reshape(tuple(save_shape)).expand(tuple(full_shape))
           store = UOp(Ops.INDEX, buf.dtype, (buf,)+new_idxs).store(UOp(Ops.INDEX, inp.dtype, (inp,)+new_idxs), *only_new_idxs, tag=1)
           for vi in v:
@@ -124,30 +146,11 @@ def capture_sink(ctx:RangeifyContext, x: UOp):
   if getenv("FUSE") and TRACK_MATCH_STATS > 0: x = x.substitute(replace_children)
   return x.replace(arg=None, tag=1)
 
-def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
-  out_ranges = idx.src[1:]
-  idx_sink = UOp.sink(*out_ranges)
-  upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
-  if len(upcast_ranges):
-    replace_ranges = {}
-    reg_size = prod([x.vmax+1 for x in upcast_ranges])
-    buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=reg_size, addrspace=AddrSpace.REG), arg=(ctx.idx,))
-    for r in upcast_ranges:
-      replace_ranges[r] = UOp.range(dtypes.int, r.vmax+1, (ctx.idx, AxisType.UPCAST))
-      ctx.idx += 1
-    replace_ranges_v = list(replace_ranges.values())
-    out_ranges = idx_sink.substitute(replace_ranges).src
-    ret = load.src[0].index(*out_ranges).load()
-    ret = buf.index(*upcast_ranges).load(buf.index(*replace_ranges_v).store(ret, *replace_ranges_v, tag=1))
-    return ret
-  else:
-    return UOp(Ops.INDEX, load.src[0].dtype, src=(load.src[0],)+out_ranges).load()
-
 pm_rangeify = PatternMatcher([
   (UPat(Ops.SINK, name="x"), capture_sink),
 
   # TODO: handle INDEX on STORE
-  (UPat(Ops.STORE, name="x"), rangify_store),
+  (UPat(Ops.STORE, name="x"), map_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="r"),), allow_any_len=True, name="x"), map_reduce),
 
   # this is like the definitions of these
@@ -180,6 +183,9 @@ pm_rangeify = PatternMatcher([
 
   # map load
   (UPat(Ops.INDEX, src=(UPat(Ops.LOAD, name="load"),), allow_any_len=True, name="idx"), map_load),
+
+  # INDEX without ranges on a DEFINE is just index 0
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines),), name="x"), lambda x: x.replace(src=x.src+(UOp.const(dtypes.int, 0),))),
 
   # CONST can't have axes
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c),
