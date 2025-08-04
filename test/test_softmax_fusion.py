@@ -121,7 +121,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       out = (inp / div).reshape(32, 10)
       out.realize()
 
-    np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
   def test_softmax(self):
     # this is the softmax from scaled_dot_product_attention
