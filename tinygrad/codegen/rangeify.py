@@ -17,7 +17,6 @@ def map_store(ctx:RangeifyContext, x:UOp):
     upcast_amount = prod([o.arg if o.arg != 0 else s for o in ctx.opts if o.axis == i and o.op == OptOps.UPCAST])
     if resolve(s!=1):
       if upcast_amount != 1:
-        print(x.shape, upcast_amount)
         assert s%upcast_amount == 0
         rng = UOp.range(dtypes.int, s//upcast_amount, (ctx.idx, AxisType.LOOP)) * upcast_amount
         rng = rng + UOp.range(dtypes.int, upcast_amount, (ctx.idx+1, AxisType.UPCAST))
@@ -35,7 +34,7 @@ def map_store(ctx:RangeifyContext, x:UOp):
 def map_load(ctx:RangeifyContext, idx:UOp, load:UOp):
   out_ranges = idx.src[1:]
   idx_sink = UOp.sink(*out_ranges)
-  upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.UPCAST]
+  upcast_ranges = [x for x in idx_sink.toposort() if x.op is Ops.RANGE and x.arg[1] in (AxisType.UPCAST, AxisType.UNROLL)]
   upcast_shape = tuple([x.vmax+1 for x in upcast_ranges])
   if len(upcast_ranges):
     buf = UOp(Ops.DEFINE_REG, load.dtype.ptr(size=prod([x.vmax+1 for x in upcast_ranges]), addrspace=AddrSpace.REG), arg=(ctx.regs,))
@@ -67,12 +66,24 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
   # create reduce dims (before new upcast dims)
   new_ranges = []
+  reduce_axis = 0
   for i,s in enumerate(red.src[0].shape):
     if i in red.arg[1]:
+      unroll_amount = prod([o.arg if o.arg != 0 else s for o in ctx.opts if o.axis == reduce_axis and o.op == OptOps.UNROLL])
+      reduce_axis += 1
       assert rngs[i].op == Ops.CONST
-      rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
-      new_ranges.append(rngs[i])
-      ctx.idx += 1
+      #rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
+      #ctx.idx += 1
+      if unroll_amount != 1:
+        assert s%unroll_amount == 0
+        rngs[i] = UOp.range(dtypes.int, s//unroll_amount, (ctx.idx, AxisType.REDUCE)) * unroll_amount
+        rngs[i] = rngs[i] + UOp.range(dtypes.int, unroll_amount, (ctx.idx+1, AxisType.UNROLL))
+        ctx.idx += 2
+        new_ranges.extend(list(rngs[i].src))
+      else:
+        rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
+        ctx.idx += 1
+        new_ranges.append(rngs[i])
 
   # create new upcast dims
   replace_ranges = {}
