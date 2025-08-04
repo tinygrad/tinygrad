@@ -225,7 +225,8 @@ class RemoteHandler:
             graph_cls = graph_class(Device[self.base_device])
             rp = RemoteProperties(
               real_device=dev.device, renderer=(cls.__module__, cls.__name__, args), offset_supported=hasattr(dev.allocator, '_offset'),
-              graph_supported=graph_cls is not None, graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner),
+              graph_supported=graph_cls is not None,
+              graph_supports_multi=graph_cls is not None and issubclass(graph_cls, MultiGraphRunner) and hasattr(dev.allocator, '_transfer'),
               ib_gid=bytes(self.ib_ctx.gid_attr.raw) if self.ib_ctx is not None else None,
             )
             ret = repr(rp).encode()
