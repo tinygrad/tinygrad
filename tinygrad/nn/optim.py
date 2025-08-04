@@ -71,7 +71,7 @@ class OptimizerGroup(Optimizer):
   def schedule_step(self) -> list[Tensor]: return [x for o in self.optimizers for x in o.schedule_step()]
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 it's just standard SGD.
-def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, pre_wd=True, nesterov=False, classic=False, fused=FUSE_OPTIM):
+def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False, fused=FUSE_OPTIM):
   """
   Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
 
@@ -79,10 +79,10 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, pre_wd=T
 
   - Described: https://paperswithcode.com/method/sgd
   """
-  return LARS(params, lr, momentum, weight_decay, pre_wd, nesterov, classic, tcoef=0.0, fused=fused)
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
-def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, pre_wd=False, nesterov=True, \
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
          classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
   """
   SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
@@ -93,7 +93,7 @@ def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, pre_wd=
   - Paper: https://arxiv.org/pdf/2505.02222
   """
   assert not FUSE_OPTIM, "FUSE_OPTIM not allowed for Muon optimizer"
-  return LARS(params, lr, momentum, weight_decay, pre_wd, nesterov, classic, tcoef=0.0, fused=fused, ns_params=ns_params, steps=steps)
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused, ns_params=ns_params, steps=steps, pre_wd=False)
 
 class LARS(Optimizer):
   """
@@ -102,8 +102,8 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, pre_wd=True, nesterov=False, \
-             classic=True, tcoef=0.001, fused=FUSE_OPTIM, ns_params=None, steps=3):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, \
+             classic=True, tcoef=0.001, fused=FUSE_OPTIM, ns_params=None, steps=3, pre_wd=True):
     super().__init__(params, lr, fused)
     self.momentum, self.wd, self.pre_wd, self.nesterov, self.classic, self.tcoef, self.ns_params, self.steps = \
     momentum, weight_decay, pre_wd, nesterov, classic, tcoef, ns_params, steps

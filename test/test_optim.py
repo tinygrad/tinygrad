@@ -3,7 +3,7 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon
-from tinygrad.helpers import CI
+from tinygrad.helpers import Context, CI
 from tinygrad.device import is_dtype_supported
 from extra.torch_muon import SingleDeviceMuon as TorchMuon
 
@@ -90,11 +90,15 @@ class TestOptim(unittest.TestCase):
   def test_muon(self): self._test_muon(1, {'lr': 0.001 }, 1e-6, 0) #TODO:change to torch.muon when it comes out
   def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-6, 3e-4)
   def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.1}, 1e-6, 0)
-  def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.5}, 1e-6, 0)
+
+  def test_multistep_muon_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9}, 1e-6, 0)
   def test_multistep_muon_momentum_wd(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
   def test_multistep_muon_no_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'momentum': 0.9, 'nesterov': False}, 1e-5, 0)
   def test_multistep_muon_high_lr_momentum(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)
   def test_multistep_muon_high_lr_momentum_wd(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
+
+  def test_muon_assert_fuse_optim(self):
+    with self.assertRaises(AssertionError): self._test_muon(1, {'fused': True}, 0, 0)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)

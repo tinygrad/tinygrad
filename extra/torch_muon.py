@@ -48,8 +48,8 @@ class SingleDeviceMuon(torch.optim.Optimizer):
   """
   Muon variant for usage in non-distributed settings.
   """
-  def __init__(self, params, lr=0.02, weight_decay=0.0, momentum=0.95, nesterov=True):
-    defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov)
+  def __init__(self, params, lr=0.02, weight_decay=0.0,pre_wd=False, momentum=0.95, nesterov=True,fused=False):
+    defaults = dict(lr=lr, weight_decay=weight_decay, pre_wd=pre_wd, momentum=momentum, nesterov=nesterov)
     super().__init__(params, defaults)
 
   @torch.no_grad()
