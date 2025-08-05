@@ -1,4 +1,5 @@
 from pathlib import Path
+import tempfile
 
 import numpy as np
 
@@ -16,10 +17,21 @@ if __name__ == '__main__':
   def tofull(sd):
     return {k: v.float() for k,v in sd.items()}
 
+  def tohalf(sd):
+    return {k: v.half() for k,v in sd.items()}
+
   def todevice(sd, device):
     return {k: v.replace(v.to(device=device).realize()) for k,v in sd.items()}
 
   model, enc = init_whisper("small.en")
+  def reload(model, change_sd=None):
+    if change_sd is None:
+      change_sd = lambda x: x
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+      f.close()
+      safe_save(change_sd(get_state_dict(model)), f.name)
+      load_state_dict(model, safe_load(f.name))
+
 
   dirname = Path(__file__).parent
   # NOTE(irwin): force export as f32 as it's a little easier to validate
