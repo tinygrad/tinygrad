@@ -52,14 +52,14 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item([ji_graph_dev], ji)
 
     # Check if the current batch can be extended with this item.
-    new_batched_devs = dedup(current_batch_devs + [ji_graph_dev])
-    can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and graph_class(current_batch_devs[0]).supports_exec_item(new_batched_devs, ji)
+    can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and \
+                      graph_class(current_batch_devs[0]).supports_exec_item(dedup(current_batch_devs + [ji_graph_dev]), ji)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
 
     # Flush the current batch if any, since it can't be extended or is full.
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
     (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
-    current_batch_devs = new_batched_devs if can_be_graphed else []
+    current_batch_devs = dedup(current_batch_devs + [ji_graph_dev]) if can_be_graphed else []
 
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
