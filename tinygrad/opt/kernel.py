@@ -37,6 +37,15 @@ class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
 
+def check_load_st(glbl:UOp, view:UOp):
+  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
+  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
+  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
+  # if it has a single view and it's equal when you shrink a contig, it's fine
+  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
+  # otherwise, it's not fine
+  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 cleanup_pm = PatternMatcher([
   # add VIEW to any DEFINE_GLOBAL that somehow lost its view
@@ -46,6 +55,8 @@ cleanup_pm = PatternMatcher([
    lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
   # VIEW on SINK is SINK
   (UPat(Ops.VIEW, name="v").sink(), lambda v: v.src[0].sink()),
+  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
+  (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
 ])
 
 @dataclass

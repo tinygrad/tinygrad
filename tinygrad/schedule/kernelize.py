@@ -161,24 +161,12 @@ add_buffer_ops = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
 ])
 
-def check_load_st(glbl:UOp, view:UOp):
-  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
-  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
-  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
-  # if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
-  # otherwise, it's not fine
-  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-
 fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
-  (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
 ])
 
 replace_globals = PatternMatcher([
