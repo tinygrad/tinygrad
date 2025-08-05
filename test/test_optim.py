@@ -99,14 +99,14 @@ class TestOptim(unittest.TestCase):
   def test_multistep_muon_no_nesterov_momentum(self): self._test_muon(10, {'lr': 0.001, 'nesterov': False}, 1e-5, 0)
   def test_multistep_muon_high_lr_no_nesterov_momentum(self): self._test_muon(10, {'lr': 10, 'nesterov': False}, 0.5e-1, 1e-1)
 
-  def test_muon_nsteps(self): self._test_muon(1, {'lr': 0.001, 'ns_steps': 3}, 1e-6, 0)
-  def test_muon_high_lr_nsteps(self): self._test_muon(1, {'lr': 10, 'ns_steps': 3}, 1e-5, 3e-4)
-  def test_muon_params(self): self._test_muon(1, {'lr': 0.001,'ns_params': (2.0,-1.5,0.5)}, 1e-6, 0)
-  def test_muon_high_lr_nparams(self): self._test_muon(1, {'lr': 10,'ns_params': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
+  def test_muon_ns_steps(self): self._test_muon(1, {'lr': 0.001, 'ns_steps': 3}, 1e-6, 0)
+  def test_muon_high_lr_ns_steps(self): self._test_muon(1, {'lr': 10, 'ns_steps': 3}, 1e-5, 3e-4)
+  def test_muon_ns_params(self): self._test_muon(1, {'lr': 0.001,'ns_params': (2.0,-1.5,0.5)}, 1e-6, 0)
+  def test_muon_high_lr_ns_params(self): self._test_muon(1, {'lr': 10,'ns_params': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
 
-  def test_muon_momentum_wd_nsteps_nparams(self):
+  def test_muon_momentum_wd_ns_steps_ns_params(self):
     self._test_muon(10, {'lr': 0.001, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_params': (2.0,-1.5,0.5)}, 1e-5, 0)
-  def test_multistep_muon_high_lr_momentum_wd_nsteps_nparams(self):
+  def test_multistep_muon_high_lr_momentum_wd_ns_steps_ns_params(self):
     self._test_muon(10, {'lr': 10, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_params': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
