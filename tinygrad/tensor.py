@@ -18,6 +18,33 @@ from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
+all_tensors: dict[weakref.ref[Tensor], None] = {}
+def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
+  return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
+
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
+  # get all children of keys in applied_map
+  all_uops: set[UOp] = set()
+  search_uops = list(applied_map)
+  while len(search_uops):
+    x = search_uops.pop()
+    if x in all_uops: continue
+    all_uops.add(x)
+    search_uops.extend([u for c in x.children if (u:=c()) is not None])
+
+  # link the found UOps back to Tensors. exit early if there's no Tensors to realize
+  # NOTE: this uses all_tensors, but it's fast
+  if len(fixed_tensors := _find_all_tensors_for_uops(all_uops)):
+    # potentially rewrite all the discovered Tensors
+    sink = UOp.sink(*[t.uop for t in fixed_tensors])
+    new_sink = sink.substitute(applied_map, name=name)
+
+    # set the relevant uop to the realized UOps
+    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
+      if s is ns: continue
+      t.uop = ns
+
+# **** Tensor helper functions ****
 
 def _normalise_basic_indices(indices, ndim):
   if not isinstance(indices, (tuple, list)): indices = (indices,)
@@ -53,34 +80,6 @@ def _expand_basic_indices(indices, shape, device):
     return tuple(Tensor([], dtype=dtypes.int, device=device) for _ in shape)
   concrete = list(zip(*grids))  # per-dim lists
   return tuple(Tensor(list(c), dtype=dtypes.int, device=device) for c in concrete)
-
-all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
-  return [t for tref in all_tensors if (t:=tref()) is not None and t.uop in all_uops]
-
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
-  # get all children of keys in applied_map
-  all_uops: set[UOp] = set()
-  search_uops = list(applied_map)
-  while len(search_uops):
-    x = search_uops.pop()
-    if x in all_uops: continue
-    all_uops.add(x)
-    search_uops.extend([u for c in x.children if (u:=c()) is not None])
-
-  # link the found UOps back to Tensors. exit early if there's no Tensors to realize
-  # NOTE: this uses all_tensors, but it's fast
-  if len(fixed_tensors := _find_all_tensors_for_uops(all_uops)):
-    # potentially rewrite all the discovered Tensors
-    sink = UOp.sink(*[t.uop for t in fixed_tensors])
-    new_sink = sink.substitute(applied_map, name=name)
-
-    # set the relevant uop to the realized UOps
-    for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
-      if s is ns: continue
-      t.uop = ns
-
-# **** Tensor helper functions ****
 
 # this tracks the tensor.py METADATA
 _METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
