@@ -3,12 +3,12 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, getenv
+from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
-from tinygrad.helpers import Context, JIT, GlobalCounters
+from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -804,7 +804,7 @@ class TestJitGraphSplit(unittest.TestCase):
       op3 = self.copy(f"{Device.DEFAULT}:1", Device.DEFAULT, op2)
       op4 = self.compute(f"{Device.DEFAULT}:1", op2)
       op5 = self.compute(Device.DEFAULT, op3)
-      return op4, op5
+      return op1, op4, op5
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
