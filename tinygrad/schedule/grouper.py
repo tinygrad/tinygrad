@@ -28,7 +28,11 @@ do_realize = PatternMatcher([
   # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
   (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
   # realize before expand or unsafe pad ops
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
+  (UPat(Ops.EXPAND, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),)), lambda ctx,tr:
+   realize(ctx,tr) if not DONT_REALIZE_EXPAND and tr.base.op not in ALWAYS_CONTIGUOUS else None),
+  (UPat(Ops.PAD, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),)), lambda ctx,tr:
+   realize(ctx,tr) if not can_pad(tr, ctx) and tr.base.op not in ALWAYS_CONTIGUOUS else None),
+  #(UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
@@ -60,7 +64,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
   children: dict[UOp, dict[UOp, None]] = {}
   assigns: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
-    if u.op in {Ops.VIEW, Ops.SINK}: continue
+    if u.op in GroupOp.Movement.union({Ops.VIEW, Ops.SINK}): continue
     if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
     for s in u.src: children.setdefault(s.base, {})[u] = None
 

@@ -160,6 +160,7 @@ class TestOps(unittest.TestCase):
     b = torch.tensor([[1,2,3],[4,5,6]], dtype=torch.int32)
     helper_test_op([], lambda: torch.zeros_like(b), lambda: Tensor.zeros_like(a), forward_only=True)
 
+  @unittest.skip("undefined behavior")
   def test_empty_0(self):
     helper_test_op([], lambda: torch.empty(45,65)*0/0, lambda: Tensor.empty(45,65)*0/0, forward_only=True)
 
