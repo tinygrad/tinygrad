@@ -86,6 +86,18 @@ class TestFuse(unittest.TestCase):
       return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
     self._test_fuse(embedding, a, atol=1e-5)
 
+  def test_attention_kernel_count(self):
+    wq = Tensor.empty(32, 32)
+    wk = Tensor.empty(32, 32)
+    wv = Tensor.empty(32, 32)
+    x = Tensor.empty(2, 100, 32)
+    q = (x @ wq).contiguous()
+    k = (x @ wk).contiguous()
+    v = (x @ wv).contiguous()
+    attn = q.scaled_dot_product_attention(k, v).fuse()
+    s = attn.schedule()
+    self.assertEqual(len(s), 4) # 3 matmul and 1 attention
+
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
