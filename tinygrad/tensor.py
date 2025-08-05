@@ -19,28 +19,34 @@ from tinygrad.schedule.kernelize import get_kernelize_map
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 
+def _normalise_basic_indices(indices, ndim):
+  if not isinstance(indices, (tuple, list)): indices = (indices,)
+  flat = []
+  for idx in indices:
+    if isinstance(idx, (list, tuple)) and all(isinstance(i, slice) for i in idx): flat.extend(idx)
+    else: flat.append(idx)
+  indices = tuple(flat)
+  if any(i is Ellipsis for i in indices):
+    pos = next(i for i, v in enumerate(indices) if v is Ellipsis)
+    before, after = indices[:pos], indices[pos + 1 :]
+    fill = (slice(None),) * (ndim - len(before) - len(after))
+    indices = before + fill + after
+  if len(indices) < ndim: indices = indices + (slice(None),) * (ndim - len(indices))
+  return indices
+
+
 def _expand_basic_indices(indices, shape, device):
-  # Normalize to tuple of length ndim
-  if not isinstance(indices, (list, tuple)): indices = (indices,)
-  # replace Ellipsis
-  if Ellipsis in indices:
-    ell_pos = indices.index(Ellipsis)
-    before = indices[:ell_pos]
-    after = indices[ell_pos + 1 :]
-    fill = (slice(None),) * (len(shape) - (len(before) + len(after)))
-    indices = tuple(before) + fill + tuple(after)
-  # pad with full slices
-  if len(indices) < len(shape): indices = tuple(indices) + (slice(None),) * (len(shape) - len(indices))
+  indices = _normalise_basic_indices(indices, len(shape))
   per_dim = []
-  for idx, dim_size in zip(indices, shape):
+  for idx, dim in zip(indices, shape):
     if isinstance(idx, slice):
-      start, stop, step = idx.indices(dim_size)
-      per_dim.append(list(range(start, stop, step)))
-    elif isinstance(idx, int):
-      if idx < 0:
-        idx = dim_size + idx
-      per_dim.append([idx])
-    elif idx is None: per_dim.append([0])  # will be handled by reshape semantics upstream
+      rng = range(*idx.indices(dim))
+      per_dim.append(list(rng))
+    elif isinstance(idx, int): per_dim.append([idx % dim])  # wrap negative ints
+    elif idx is None: per_dim.append([0])  # kept for reshape
+    elif isinstance(idx, Tensor):
+      arr = (idx.to(device) % dim).flatten().tolist()
+      per_dim.append(arr)
     else: raise IndexError(f"unsupported basic index {idx!r}")
   grids = list(itertools.product(*per_dim))
   if not grids:
@@ -1294,26 +1300,22 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    if not isinstance(indices, tuple): indices = (indices,)
-    indices = tuple(i for i in indices if i is not None)
     res = self._getitem(indices, v)
     if res.shape == self.shape and res.uop is not self.uop:
       self.assign(res)
-      return
-    # basic indexing: v was ignored by _getitem, do mask/canvas manually
-    view = self._getitem(indices)  # slice
-    rhs = v.cast(view.dtype)._broadcast_to(view.shape)
-    if rhs.uop is self.uop: rhs = rhs.contiguous()
-    normal_idxs = _expand_basic_indices(indices, self.shape, self.device)
-    mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
-    mask[normal_idxs] = True
-    rhs_flat = rhs.flatten()
-    if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
-    canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
-    canvas[normal_idxs] = rhs_flat
-    new_tensor = mask.where(canvas, self)
-    self.assign(new_tensor)
-    return
+    else:
+      rhs = v.cast(res.dtype)._broadcast_to(res.shape)
+      if rhs.uop is self.uop: rhs = rhs.contiguous()
+      norm = tuple(i for i in _normalise_basic_indices(indices, self.ndim) if i is not None)   # drop
+      normal_idxs = _expand_basic_indices(norm, self.shape, self.device)
+      mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
+      mask[normal_idxs] = True
+      rhs_flat = rhs.flatten()
+      if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
+      canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
+      canvas[normal_idxs] = rhs_flat
+      new_tensor = mask.where(canvas, self)
+      self.assign(new_tensor)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
