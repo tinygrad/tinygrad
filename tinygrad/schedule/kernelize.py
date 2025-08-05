@@ -193,10 +193,6 @@ replace_globals = PatternMatcher([
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace global memory ops with the BUFFER they write to
-  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
-  # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
@@ -204,6 +200,11 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
+  # replace global memory ops with the BUFFER they write to
+  ast = graph_rewrite(k.arg.ast, replace_globals, bufs, bottom_up=True, name="replace globals")
+  # TODO: move these to codegen
+  ast = graph_rewrite(ast, view_left, name="Main View Left")
+  ast = graph_rewrite(ast, view_right, name="Main View Right")
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
