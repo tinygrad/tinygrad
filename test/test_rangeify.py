@@ -32,5 +32,10 @@ class TestRangeify(unittest.TestCase):
     b = a.sum(axis=1)
     with_opts(b, [Opt(op=OptOps.UNROLL, axis=0, arg=4)])
 
+  def test_both_sum(self):
+    a = Tensor.empty(4, 4)
+    b = a.sum(axis=1)
+    with_opts(b, [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=4)])
+
 if __name__ == '__main__':
   unittest.main()
