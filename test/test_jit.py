@@ -718,6 +718,8 @@ class TestJitGraphSplit(unittest.TestCase):
   def ji_xfer(self): return {"type": "xfer"}
 
   def test_jit_split_simple(self):
+    if Device.DEFAULT == "REMOTE": raise unittest.SkipTest("REMOTE gpu is broken")
+
     @TinyJit
     def f(inp):
       op0 = self.compute(Device.DEFAULT, inp)
@@ -816,6 +818,7 @@ class TestJitGraphSplit(unittest.TestCase):
   @unittest.skipIf(getenv("MOCKGPU"), "MockGPU does not support parallel copies")
   def test_jit_multidev_copy(self):
     if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
+    if Device.DEFAULT == "REMOTE": raise unittest.SkipTest("REMOTE gpu is broken")
 
     @TinyJit
     def f(inp):
