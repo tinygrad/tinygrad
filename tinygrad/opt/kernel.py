@@ -5,16 +5,16 @@ from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType, UPat, PatternMatcher
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
-from tinygrad.dtype import ImageDType, AddrSpace
+from tinygrad.dtype import ImageDType, AddrSpace, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.schedule.kernelize import view_left
+from tinygrad.opt.swizzler import view_left, view_right
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -37,6 +37,17 @@ class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
 
+
+cleanup_pm = PatternMatcher([
+  # add VIEW to any DEFINE_GLOBAL that somehow lost its view
+  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_GLOBAL, name="d"),), name="x", allow_any_len=True), lambda d,x: x.replace(src=(d.view(d.st),)+x.src[1:])),
+  # VALID
+  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
+   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
+  # VIEW on SINK is SINK
+  (UPat(Ops.VIEW, name="v").sink(), lambda v: v.src[0].sink()),
+])
+
 @dataclass
 class TensorCoreOptions:
   axes: tuple[int, ...] # the location of the original N and M axes if still in the shape
@@ -52,6 +63,8 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, ast:UOp, opts:Renderer|None=None):
     assert ast.op is Ops.SINK, ast.op
+    ast = graph_rewrite(ast, view_left, name="Main View Left")
+    ast = graph_rewrite(ast, view_right+cleanup_pm, name="Main View Right")
     self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
@@ -73,7 +86,7 @@ class Kernel:
       self.sts.append(unwrap(x.src[0].st))
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
-    full_shape = ast.full_shape
+    full_shape = self.ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
     # parameters for optimization
