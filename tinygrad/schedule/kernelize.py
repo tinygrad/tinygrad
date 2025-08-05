@@ -147,7 +147,6 @@ create_kernels = PatternMatcher([
    lambda ms: UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).reshape(ms.src[0].arg)),
 ])
 
-
 # **** fix kernel AST
 
 add_buffer_ops = PatternMatcher([
