@@ -79,7 +79,7 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
   - Described: https://paperswithcode.com/method/sgd
   """
-  return LARS(params, lr, momentum, weight_decay, nesterov=nesterov, classic=classic, tcoef=0.0, fused=fused)
+  return LARS(params, lr, momentum, weight_decay, 0, None, nesterov, classic, pre_wd=True, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
 def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.7750, 2.0315), nesterov=True):
@@ -90,7 +90,7 @@ def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_step
   - Paper: https://arxiv.org/pdf/2502.16982
   """
   assert not FUSE_OPTIM, "FUSE_OPTIM not allowed for Muon optimizer"
-  return LARS(params, lr, momentum, weight_decay, ns_steps, ns_params, nesterov, classic=False, pre_wd=False, tcoef=0.0)
+  return LARS(params, lr, momentum, weight_decay, ns_steps, ns_params, nesterov, classic=False, pre_wd=False, tcoef=0.0, fused=False)
 
 class LARS(Optimizer):
   """
