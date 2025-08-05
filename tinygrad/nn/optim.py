@@ -90,7 +90,7 @@ def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_step
   You may pass in ns_params to set the coefficients for the NS iterations. The choice of parameters can be tuned.
 
   - Described: https://kellerjordan.github.io/posts/muon/
-  - Paper: https://arxiv.org/pdf/2505.02222
+  - Paper: https://arxiv.org/pdf/2502.16982
   """
   assert not FUSE_OPTIM, "FUSE_OPTIM not allowed for Muon optimizer"
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, ns_steps, ns_params, pre_wd=False, tcoef=0.0)
