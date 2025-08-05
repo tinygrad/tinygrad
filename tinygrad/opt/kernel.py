@@ -14,7 +14,7 @@ from tinygrad.dtype import ImageDType, AddrSpace
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.schedule.kernelize import view_left
+from tinygrad.opt.swizzler import view_left, view_right
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -52,6 +52,8 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, ast:UOp, opts:Renderer|None=None):
     assert ast.op is Ops.SINK, ast.op
+    ast = graph_rewrite(ast, view_left, name="Main View Left")
+    ast = graph_rewrite(ast, view_right, name="Main View Right")
     self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
@@ -73,7 +75,7 @@ class Kernel:
       self.sts.append(unwrap(x.src[0].st))
 
     # add a shapetracker to the end to track the full shape, with 0 strides so it can merge
-    full_shape = ast.full_shape
+    full_shape = self.ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
     # parameters for optimization
