@@ -154,6 +154,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       sz = cast(PtrDType, self.dtype).size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
 
+    # hack for PTX, CASTing the ptr loses the shape
+    if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
+
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
