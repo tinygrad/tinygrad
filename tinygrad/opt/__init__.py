@@ -33,5 +33,6 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
   return ret
 
 pm_optimize = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx) if ast.arg is None or ast.arg.opts_to_apply is not None else None),
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast:
+   get_optimized_ast(ast, ctx) if (ast.arg is None or ast.arg.opts_to_apply is not None) and ast.src[0].st is not None else None),
 ])
