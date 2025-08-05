@@ -126,7 +126,7 @@ print(t_log_grad.uop)
 """
 void E_(float* restrict data0, float* restrict data1) {
   float val0 = *(data1+0);
-  *(data0+0) = (0.6931471805599453f*(1/(val0*0.6931471805599453f)));
+  *(data0+0) = (1/val0);
 }
 """
 # the derivative is close to 1/3

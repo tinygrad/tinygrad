@@ -1,7 +1,7 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
+from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv, dedup
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Variable
@@ -29,7 +29,7 @@ class HCQGraph(MultiGraphRunner):
     for ji in jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
-    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(sz, BufferSpec(cpu_access=True)) for dev,sz in kernargs_size.items()}
+    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_args: dict[int, HCQArgsState] = {}
@@ -51,8 +51,8 @@ class HCQGraph(MultiGraphRunner):
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
     self.copy_queues: dict[HCQCompiled, HWQueue] = {} # lazy allocation
 
-    self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if dev.device != "CPU"},
-      **{"KICK": self.devices[0].new_signal(value=0)}, **{dev: self.devices[0].new_signal(value=0) for dev in self.devices if dev.device == "CPU"}}
+    self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
+      **{"KICK": self.devices[0].new_signal(value=0)}, **{dev: self.devices[0].new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
@@ -87,7 +87,7 @@ class HCQGraph(MultiGraphRunner):
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
         enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
 
-      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.new_signal(value=0))
+      out_signal = self.signals.setdefault(enqueue_queue, self.devices[0].new_signal(value=0))
 
       # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
@@ -225,7 +225,17 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(dev, ei:ExecItem) -> bool:
+  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
+    # Check if all devices are HCQ
+    all_devs = cast(list[HCQCompiled], dedup(devs + [Device[b.device] for b in ei.bufs if b]))
+    if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
+
+    # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
+    cpu_support = all(isinstance(d.timeline_signal.base_buf.view, MMIOInterface) for d in all_devs)
+
+    # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
+    if len(set(d.peer_group for d in all_devs if cpu_support and not d._is_cpu())) > 1: return False
+
     # MOCKGPU is not supported, since it can't execute commands in parallel
-    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, dev).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
-    return all(issubclass(type(Device[b.device]), HCQCompiled) for b in ei.bufs if b) and (isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy)
+    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, devs[0]).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
+    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy

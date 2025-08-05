@@ -106,13 +106,12 @@ class TestViz(BaseTestViz):
 
   # name can also come from a function that returns a TracingKey
   def test_tracing_key(self):
-    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,), fmt=f"input={inp.render()}"))
+    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
     def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
     test(UOp.variable("a", 1, 10)+1)
     lst = get_viz_list()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
-    self.assertEqual(lst[0]["fmt"], "input=(a+1)")
 
   def test_colored_label(self):
     # NOTE: dataclass repr prints literal escape codes instead of unicode chars
@@ -137,6 +136,16 @@ class TestViz(BaseTestViz):
     # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
+
+  def test_const_node_visibility(self):
+    a = UOp.variable("a", 0, 10)
+    z = UOp.const(dtypes.int, 0)
+    alu = a*z
+    exec_rewrite(alu, [sym])
+    graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
+    # embed const in the parent node when possible
+    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
+    self.assertEqual(list(graphs[1]), [id(z)])
 
 # VIZ displays nested graph_rewrites in a tree view
 

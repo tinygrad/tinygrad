@@ -1294,9 +1294,12 @@ def train_llama3():
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
-  SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 1_200_000)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
+  SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000)
+
+  # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
+  # trains to 7
 
   opt_adamw_beta_1 = 0.9
   opt_adamw_beta_2 = 0.95
@@ -1311,7 +1314,33 @@ def train_llama3():
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=SEQLEN, jit=False, disable_kv_cache=True)
+  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}
+  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
+  model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+
+  if (DP := getenv("DP", 1)) > 1:
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+    for v in get_parameters(model):
+      v.shard_(device, axis=None)
+
+  # TODO: MP
+  # if (GPUS := getenv("GPUS", 1)) > 1:
+  #   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(GPUS))
+  #   for k,v in get_state_dict(model).items():
+  #     if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+  #     # elif '.attention.wq' in k: v.shard_(device, axis=0)
+  #     # elif '.attention.wk' in k: v.shard_(device, axis=0)
+  #     # elif '.attention.wv' in k: v.shard_(device, axis=0)
+  #     # elif '.attention.wo' in k: v.shard_(device, axis=1)
+  #     # elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+  #     # elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
+  #     # elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+  #     # elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+  #     elif 'output.weight' in k: v.shard_(device, axis=0)  # 243.32
+  #     else:
+  #       # print(k)
+  #       # attention_norm, ffn_norm, norm
+  #       v.shard_(device, axis=None)
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
@@ -1319,12 +1348,17 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, tokens):
+  def train_step(model, tokens:Tensor, grad_acc:int):
     optim.zero_grad()
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    loss.backward()
-
+    # grad acc
+    for batch in tokens.split(tokens.shape[0]//grad_acc):
+      if (DP := getenv("DP", 1)) > 1:
+        device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+        batch = batch.shard(device, 0)
+      logits:Tensor = model(batch[:, :-1], start_pos=0, temperature=math.nan)
+      loss = logits.sparse_categorical_crossentropy(batch[:, 1:])
+      loss.backward()
+      Tensor.realize(*[p.grad for p in optim.params])
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
@@ -1343,24 +1377,27 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  from examples.mlperf.dataloader import batch_load_llama3
-  iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+  if getenv("FAKEDATA", 0):
+    def fake_data():
+      for _ in range(SAMPLES // GBS):
+        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+    iter = fake_data()
+  else:
+    from examples.mlperf.dataloader import batch_load_llama3
+    iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
 
   i = 0
-  for tokens in tqdm(iter, total=SAMPLES//BS):
+  for tokens in tqdm(iter, total=SAMPLES//GBS):
+    t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens)
-    # BS=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
-    # uses 43% ~= 83GB
-    # 8B bf16 = 16GB. model + grad + optim m and v = 64GB
-    # TODO: this OOM
-    # BS=1 SEQLEN=4000 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=8B WARMUP_STEPS=2 DECAY_STEPS=300 PYTHONPATH=. AMD=1 MODEL=llama3 python3 examples/mlperf/model_train.py
+    loss, lr = train_step(model, tokens, grad_acc)
     # above as tqdm.write f-string
-    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
-    with open("loss.txt", "a") as f:
-      f.write(f"{i} {loss.item():.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
+    if (fname:=getenv("LOSS_FILE", "")):
+      with open(fname, "a") as f:
+        f.write(f"{i} {loss.item():.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
-    if i % 200 == 0 or i == 10:
+    if getenv("CKPT") and (i % 200 == 0 or i == 10):
       tqdm.write("saving checkpoint")
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
       fn = f"{ckpt_dir}/{i}.safe"

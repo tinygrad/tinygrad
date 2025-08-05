@@ -5,9 +5,10 @@ import numpy as np
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import TinyJit
+from tinygrad.engine.jit import TinyJit, GraphRunner
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, GlobalCounters
+from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -470,6 +471,32 @@ class TestJit(unittest.TestCase):
       zc, wc = jf(a, b)
       np.testing.assert_allclose((a.numpy()+b.numpy()), zc.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose((a.numpy()*b.numpy()), wc.numpy(), atol=1e-4, rtol=1e-5)
+
+  @unittest.skipUnless((not isinstance(Device.default, HCQCompiled)) and Device.default.graph is not None, "must be non-hcq with graph")
+  def test_jit_several_incompatible_devs(self):
+    assert isinstance(Device["CPU"], HCQCompiled) and Device["CPU"].graph is not None
+    assert (not isinstance(Device.default, HCQCompiled)) and Device.default.graph is not None
+
+    d0, d1 = Device.DEFAULT, "CPU"
+
+    @TinyJit
+    def f(a0, b0):
+      a1 = (a + 2.0).contiguous().realize()
+      a2 = (a1 * 2.0).contiguous().realize()
+
+      b1 = (b0 + 2.0).contiguous().realize()
+      b2 = (b1 * 2.0).contiguous().realize()
+
+      return a2, b2
+
+    for _ in range(5):
+      a = Tensor.randn(10, 10, device=d0).realize()
+      b = Tensor.randn(10, 10, device=d1).realize()
+      a1, b1 = f(a, b)
+      np.testing.assert_allclose(((a.numpy()+2.0)*2.0), a1.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose(((b.numpy()+2.0)*2.0), b1.numpy(), atol=1e-4, rtol=1e-5)
+
+    assert all(isinstance(ei.prg, GraphRunner) for ei in f.jit_cache), repr(f.jit_cache)
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_jitted_view(self):
