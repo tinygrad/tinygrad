@@ -103,7 +103,7 @@ class LARS(Optimizer):
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
   def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True,
-               ns_steps=5, ns_params=None, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
+               ns_steps=0, ns_params=None, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
     super().__init__(params, lr, fused)
     self.momentum, self.wd, self.nesterov, self.classic, self.pre_wd, self.tcoef = momentum, weight_decay, nesterov, classic, pre_wd, tcoef
     self.ns_steps, self.ns_params = ns_steps, ns_params
