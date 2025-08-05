@@ -3,7 +3,7 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV
+from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, getenv
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
@@ -791,7 +791,7 @@ class TestJitGraphSplit(unittest.TestCase):
       hcqgraph=[self.ji_graph(5)])
 
   def test_jit_multidev_xfer(self):
-    if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
+    if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
 
     try: Device[f"{Device.DEFAULT}:1"]
     except Exception: raise unittest.SkipTest("no multidevice")
@@ -813,8 +813,9 @@ class TestJitGraphSplit(unittest.TestCase):
       multigraph=[self.ji_graph(6)],
       hcqgraph=[self.ji_graph(6)])
 
+  @unittest.skipIf(getenv("MOCKGPU"), "MockGPU does not support parallel copies")
   def test_jit_multidev_copy(self):
-    if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
+    if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
 
     @TinyJit
     def f(inp):
