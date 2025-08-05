@@ -5,16 +5,16 @@ from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType, UPat, PatternMatcher
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
-from tinygrad.dtype import ImageDType, AddrSpace, dtypes
+from tinygrad.dtype import ImageDType, AddrSpace
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.opt.swizzler import view_left, view_right
+from tinygrad.opt.swizzler import view_left
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -37,28 +37,6 @@ class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
 
-def check_load_st(glbl:UOp, view:UOp):
-  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
-  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
-  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
-  # if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
-  # otherwise, it's not fine
-  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-
-cleanup_pm = PatternMatcher([
-  # add VIEW to any DEFINE_GLOBAL that somehow lost its view
-  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_GLOBAL, name="d"),), name="x", allow_any_len=True), lambda d,x: x.replace(src=(d.view(d.st),)+x.src[1:])),
-  # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
-   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
-  # VIEW on SINK is SINK
-  (UPat(Ops.VIEW, name="v").sink(), lambda v: v.src[0].sink()),
-  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
-  (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
-])
-
 @dataclass
 class TensorCoreOptions:
   axes: tuple[int, ...] # the location of the original N and M axes if still in the shape
@@ -74,9 +52,7 @@ class TensorCoreOptions:
 class Kernel:
   def __init__(self, ast:UOp, opts:Renderer|None=None):
     assert ast.op is Ops.SINK, ast.op
-    ast = graph_rewrite(ast, view_left, name="Main View Left")
-    ast = graph_rewrite(ast, view_right, name="Main View Right")
-    self.ast = graph_rewrite(ast, cleanup_pm, name="Final Cleanup")
+    self.ast = ast
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
