@@ -64,8 +64,8 @@ class Kernel:
   def __init__(self, ast:UOp, opts:Renderer|None=None):
     assert ast.op is Ops.SINK, ast.op
     ast = graph_rewrite(ast, view_left, name="Main View Left")
-    ast = graph_rewrite(ast, view_right+cleanup_pm, name="Main View Right")
-    self.ast = ast
+    ast = graph_rewrite(ast, view_right, name="Main View Right")
+    self.ast = graph_rewrite(ast, cleanup_pm, name="Final Cleanup")
 
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     # verify AST matches the spec
