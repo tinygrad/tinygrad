@@ -8,10 +8,20 @@
         window.moduleReady = new Promise(resolve => window._resolveModule = resolve);
     </script>
     <script type="module">
-        import mel from "./mel.js"; window.mel = mel;
-        import encoder from "./encoder.js"; window.encoder = encoder;
-        import decoder from "./decoder.js"; window.decoder = decoder;
-        import silero from "./vad.js"; window.silero = silero;
+        const modules = [
+            ["mel", "./mel.js"],
+            ["encoder", "./encoder.js"],
+            ["decoder", "./decoder.js"],
+            ["vad", "./vad.js"]
+        ];
+        window.modules = modules;
+
+        const nets = {};
+        for (const [name, path] of modules) {
+            const mod = await import(path);
+            window[name] = mod.default;
+        }
+        window.nets = nets;
         window._resolveModule();
     </script>
     <style>
@@ -96,7 +106,6 @@
     </div>
 
     <script>
-        let net_encoder = null;
         const wgpuError = document.getElementById('wgpu-error');
         const loadingContainer = document.getElementById('div-loading');
         const transcriptionLog = document.getElementById('transcription-log');
@@ -223,8 +232,8 @@
         }
 
         async function transcribeAudio(audioFetcher) {
-            if (!net_encoder) {
-                await window.moduleReady;
+            await window.moduleReady;
+            if (!nets.encoder) {
                 const device = await getDevice();
                 if (!device) {
                     wgpuError.style.display = "block";
@@ -234,15 +243,14 @@
                 if (!db) {
                     db = await initDb();
                 }
-                net_silero = await silero.setupNet(device, new Uint8Array(await getPart("vad")));
-                net_mel = await mel.setupNet(device, new Uint8Array(await getPart("mel")));
-                net_encoder = await encoder.setupNet(device, new Uint8Array(await getPart("encoder")));
-                net_decoder = await decoder.setupNet(device, new Uint8Array(await getPart("decoder")));
+
+                for (const [name, path] of modules) {
+                    nets[name] = await window[name].setupNet(device, new Uint8Array(await getPart(name)));
+                }
 
                 loadingContainer.style.display = "none";
             }
 
-            // const { samples } = await fetchMonoFloat32Array(`./${AUDIO_PATH}`);
             const { samples } = await audioFetcher();
 
             async function vad_go_brrr(samples_array) {
@@ -267,7 +275,7 @@
                         vad_chunk = new Float32Array(stride+prefix);
                         vad_chunk.set(samples_array.slice(i));
                     }
-                    const vad_output = await net_silero(vad_chunk, hn, cn);
+                    const vad_output = await nets.vad(vad_chunk, hn, cn);
                     hn = vad_output[1];
                     cn = vad_output[2];
                     vad_probs.set(vad_output[0], batch_n * VAD_BS);
@@ -350,7 +358,7 @@
                     padded.set(chunk);
                     chunk = padded;
                 }
-                let [mel_spec] = await net_mel(chunk);
+                let [mel_spec] = await nets.mel(chunk);
                 log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
             }
 
@@ -415,7 +423,7 @@
                     padded.set(log_specs_full.slice(seek));
                     log_spec = padded;
                 }
-                const [audio_features] = await net_encoder(log_spec);
+                const [audio_features] = await nets.encoder(log_spec);
                 const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
                 const TOK_STARTOFPREV = 50360;
                 const TOK_TRANSCRIBE = 50358;
@@ -479,7 +487,7 @@
                     let last_token_index = i;
                     let one_before_last_token_index = i - 1;
 
-                    let [decoder_output] = await net_decoder(context, audio_features, [i]);
+                    let [decoder_output] = await nets.decoder(context, audio_features, [i]);
                     let nextLogits = decoder_output;
                     if (!DECODER_OUTPUTS_TOKENS) decoder_output = argsort(decoder_output);
                     // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
