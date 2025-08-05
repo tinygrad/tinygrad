@@ -79,21 +79,18 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
   - Described: https://paperswithcode.com/method/sgd
   """
-  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
+  return LARS(params, lr, momentum, weight_decay, nesterov=nesterov, classic=classic, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
-def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.7750, 2.0315),
-         nesterov=True, classic=False):
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.7750, 2.0315), nesterov=True):
   """
-  SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
-
-  You may pass in ns_params to set the coefficients for the NS iterations. The choice of parameters can be tuned.
+  SGD with newton-schulz (NS) iteration.
 
   - Described: https://kellerjordan.github.io/posts/muon/
   - Paper: https://arxiv.org/pdf/2502.16982
   """
   assert not FUSE_OPTIM, "FUSE_OPTIM not allowed for Muon optimizer"
-  return LARS(params, lr, momentum, weight_decay, nesterov, classic, ns_steps, ns_params, pre_wd=False, tcoef=0.0)
+  return LARS(params, lr, momentum, weight_decay, ns_steps, ns_params, nesterov, classic=False, pre_wd=False, tcoef=0.0)
 
 class LARS(Optimizer):
   """
@@ -102,11 +99,11 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True,
-               ns_steps=0, ns_params=None, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, ns_steps=0, ns_params=None, 
+               nesterov=False, classic=True, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
     super().__init__(params, lr, fused)
-    self.momentum, self.wd, self.nesterov, self.classic, self.pre_wd, self.tcoef = momentum, weight_decay, nesterov, classic, pre_wd, tcoef
-    self.ns_steps, self.ns_params = ns_steps, ns_params
+    self.momentum, self.wd, self.ns_steps, self.ns_params  = momentum, weight_decay, ns_steps, ns_params
+    self.nesterov, self.classic, self.pre_wd, self.tcoef = nesterov, classic, pre_wd, tcoef
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
