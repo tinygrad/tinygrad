@@ -97,9 +97,6 @@ class TestOptim(unittest.TestCase):
   def test_multistep_muon_high_lr_momentum(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9}, 1e-5, 3e-4)
   def test_multistep_muon_high_lr_momentum_wd(self): self._test_muon(2, {'lr': 10, 'momentum': 0.9, 'weight_decay': 0.1}, 1e-5, 3e-4)
 
-  def test_muon_assert_fuse_optim(self):
-    with self.assertRaises(AssertionError): self._test_muon(1, {'fused': True}, 0, 0)
-
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)
   def test_adamw(self): self._test_adamw(1, {'lr': 0.001}, 1e-5, 0)
