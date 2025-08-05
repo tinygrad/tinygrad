@@ -345,7 +345,7 @@ pm_fuse = PatternMatcher([
 def do_fusion(x:UOp):
   found_contiguous = {}
   def gate_contiguous(x):
-    if is_contiguous:=(x.op is Ops.CONTIGUOUS): found_contiguous[x] = x.replace(src=(UOp(Ops.VIEW, arg=x.st),))
+    if is_contiguous:=(x.op is Ops.CONTIGUOUS): found_contiguous[x] = x.replace(src=(UOp(Ops.VIEW, arg=x.st), UOp.unique()))
     return not is_contiguous
   x.toposort(gate=gate_contiguous)
   del gate_contiguous
