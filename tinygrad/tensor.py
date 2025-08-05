@@ -4070,7 +4070,7 @@ class Tensor(MathTrait):
     print(t.newton_schulz(steps=5, params=(2,-1.5,0.5)).numpy())
     ```
     """
-    assert self.ndim == 2
+    assert self.ndim == 2, "NS only works for two dims"
     G = self / (self.square().sum().sqrt() + 1.0e-7)
     G = G.T if G.shape[0] > G.shape[1] else G
     for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.T) @ x, [G]*i, G) for i,p in enumerate(params))
