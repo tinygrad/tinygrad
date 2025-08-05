@@ -122,13 +122,11 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-
       if self.ns_params: g = g.reshape(g.shape[0], -1).newton_schulz(self.ns_steps, self.ns_params).reshape(g.shape)
       # muon does post momentum weight decay
       if not self.pre_wd and self.wd > 0: t = t.detach() * (1.0 - self.wd * self.lr)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-
       ret.append((t.detach() - g).cast(t.dtype))
     return ret, self.b
 
