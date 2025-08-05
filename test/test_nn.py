@@ -163,12 +163,13 @@ class TestNN(unittest.TestCase):
     with Context(WINO=1):
       z = layer(x)
 
+    m = z.mean()
+    m.backward()
+
     torch_x = torch.tensor(x.numpy(), requires_grad=True)
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-    m = z.mean()
-    m.backward()
     gw = layer.weight.grad.realize()
     gb = layer.bias.grad.realize()
     gx = x.grad.realize()
