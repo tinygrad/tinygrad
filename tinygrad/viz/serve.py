@@ -30,10 +30,13 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
               "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-    if isinstance(k.ret, ProgramSpec): steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
-    ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    ret.append(r:={"name":k.display_name, "steps":steps})
     # use the first key to get runtime profiling data about this context
     if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
+    # program spec metadata
+    if isinstance(k.ret, ProgramSpec):
+      steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
+      r["fmt"] = k.ret.src
     for key in k.keys: ref_map[key] = i
   return ret
 
