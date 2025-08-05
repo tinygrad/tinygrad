@@ -579,9 +579,9 @@
         const getDevice = async () => {
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
-            // TODO(irwin): the default is too small for larger models, set it according to max value in console error description.
-            //              2GB is probably overkill and device-specific, find a suitable middle ground or query
-            return adapter?.requestDevice({ requiredLimits: {"maxStorageBufferBindingSize": 2147483644}, powerPreference: "high-performance" });
+            let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
+            let maxBufferSize = adapter.limits.maxBufferSize;
+            return adapter?.requestDevice({ requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize }, powerPreference: "high-performance" });
         };
 
         // async function dropHandler(ev) {
