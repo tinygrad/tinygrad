@@ -13,12 +13,18 @@ from examples.whisper import init_whisper, TextDecoder
 from examples.whisper import RATE, SAMPLES_PER_SEGMENT, N_FFT, HOP_LENGTH, N_MELS
 import math
 
+# NOTE(irwin): change to True to export weights in float16.
+# IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
+FLOAT16 = False
+
 if __name__ == '__main__':
   def tofull(sd):
     return {k: v.float() for k,v in sd.items()}
 
   def tohalf(sd):
     return {k: v.half() for k,v in sd.items()}
+
+  change_sd = tohalf if FLOAT16 else tofull
 
   def todevice(sd, device):
     return {k: v.replace(v.to(device=device).realize()) for k,v in sd.items()}
@@ -50,15 +56,15 @@ if __name__ == '__main__':
         self.stride = stride
         self.pad = pad
         self.pad_mode = pad_mode
-        self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).half().realize()
-        self.mel = mel(sr=RATE, n_fft=self.n_fft, n_mels=N_MELS).half().realize()
+        self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft))
+        self.mel = mel(sr=RATE, n_fft=self.n_fft, n_mels=N_MELS)
 
       def stft_full(self, x:Tensor) -> Tensor:
         res = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
         return res
 
       def __call__(self, waveforms):
-        return self.forward(waveforms).float().realize()
+        return self.forward(waveforms)
 
       def forward(self, waveforms):
         spec = self.stft_full(waveforms.reshape(-1, waveforms.shape[-1]))
@@ -75,8 +81,7 @@ if __name__ == '__main__':
         return log_spec
 
     prep_audio = AudioPrep(N_FFT, stride=HOP_LENGTH, pad=(200, 200))
-    # safe_save(tofull(get_state_dict(prep_audio)), (dirname / "mel_temp.safetensors").as_posix())
-    # load_state_dict(prep_audio, safe_load(str(dirname / "mel_temp.safetensors")))
+    reload(prep_audio, change_sd=change_sd)
 
     prg, inp_sizes, out_sizes, state = export_model(prep_audio, Device.DEFAULT.lower(), Tensor.randn(1, SAMPLES_PER_SEGMENT), model_name="mel")
     (dirname / 'mel.js').write_text(prg)
@@ -84,14 +89,14 @@ if __name__ == '__main__':
     return prg, inp_sizes, out_sizes, state
 
   def export_encoder():
-    reload(model.encoder, tohalf)
+    reload(model.encoder, change_sd=change_sd)
     prg, inp_sizes, out_sizes, state = export_model(model.encoder, Device.DEFAULT.lower(), Tensor.randn(1,80,3000), model_name="encoder")
     (dirname / 'encoder.js').write_text(prg)
     safe_save(state, (dirname / 'encoder.safetensors'))
     return prg, inp_sizes, out_sizes, state
 
   def export_decoder_2():
-    reload(model.decoder, tohalf)
+    reload(model.decoder, change_sd=change_sd)
     def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
       seqlen = x.shape[-1]
       x = self.token_embedding(x)
