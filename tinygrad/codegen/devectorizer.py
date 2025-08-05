@@ -260,6 +260,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \
       len(store.src) <= 2 or store.src[2].op != Ops.IF else None),
+  # TODO: CONST shouldn't have src
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
@@ -277,7 +279,7 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   return [inp]
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
-  inp, reduce_range = red.src[0], red.src[1:]
+  inp, acc, reduce_range = red.src[0], red.src[1], red.src[2:]
   lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
@@ -285,8 +287,8 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     topo = inp.toposort()
     stored_ranges = flatten([x.src[2:] for x in topo if x.op is Ops.STORE])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in stored_ranges])
-    identity = red.const_like(identity_element(red.arg, red.dtype.scalar()))
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
+    identity = UOp.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    #acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
     do_store = acc.store(identity, UOp(Ops.NOOP, src=input_ranges)) if len(input_ranges) else acc.store(identity)
     lst = [acc.load(do_store, *reduce_range)] + lst  # put acc as the first element
     ctx.acc_num += 1
@@ -370,7 +372,7 @@ def reduce_collapse(red:UOp):
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
+  reduce_parented, reduce_unparented = partition(red.src[2:], lambda x: x in red.src[0].sparents)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:
