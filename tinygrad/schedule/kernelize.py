@@ -150,9 +150,12 @@ create_kernels = PatternMatcher([
 
 # **** fix kernel AST
 
-add_buffer_ops = PatternMatcher([
+early_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).view(x.st),)),
+])
+
+add_buffer_ops = PatternMatcher([
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
@@ -201,7 +204,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
   # replace global memory ops with the BUFFER they write to
-  ast = graph_rewrite(k.arg.ast, replace_globals, bufs, bottom_up=True, name="replace globals")
+  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
+  ast = graph_rewrite(ast, early_buffer_ops, bufs, bottom_up=True, name="replace buffer early")
   # TODO: move these to codegen
   ast = graph_rewrite(ast, view_left, name="Main View Left")
   ast = graph_rewrite(ast, view_right, name="Main View Right")
