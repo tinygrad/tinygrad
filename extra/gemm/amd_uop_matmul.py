@@ -2,7 +2,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, AxisType, PatternMatcher, UPat
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.dtype import AddrSpace
-from tinygrad.schedule.kernelize import merge_views, view_left
+from tinygrad.opt.swizzler import merge_views, view_left
 from tinygrad.helpers import getenv, colored, prod, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.view import strides_for_shape

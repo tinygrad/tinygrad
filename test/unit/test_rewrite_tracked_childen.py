@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.uop.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
-from tinygrad.schedule.kernelize import sym, merge_views
+from tinygrad.schedule.kernelize import sym
+from tinygrad.opt.swizzler import merge_views
 
 class TestRewriteTrackedChildren(unittest.TestCase):
   @unittest.skip("track_children no longer supported")
