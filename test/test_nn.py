@@ -108,97 +108,52 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim), in_dim, out_dim)
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
-  def test_conv1d(self):
-    BS, C1, W = 4, 16, 224//4
-    C2, K, S, P = 64, 7, 2, 1
-
+  def _test_conv(self, tiny_conv, torch_conv, BS, C1, DIMS, C2, K, S, P, D=1):
     # create in tinygrad
-    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
+    layer = tiny_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D)
 
     # create in torch
     with torch.no_grad():
-      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer = torch_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D).eval()
       torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
       torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
 
     # test
-    x = Tensor.uniform(BS, C1, W)
+    x = Tensor.uniform(BS, C1, *DIMS)
     z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+  def test_conv1d(self):
+    BS, C1, DIMS = 4, 16, [224//4]
+    C2, K, S, P = 64, 7, 2, 1
+    self._test_conv(Conv1d, torch.nn.Conv1d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
+    BS, C1, DIMS = 4, 16, [224//4, 224//4]
     C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv1d_same_padding(self):
-    BS, C1, W = 8, 3, 32
+    BS, C1, DIMS = 8, 3, [32]
     C2, K, S, P = 16, 3, 1, 'same'
-
-    # create in tinygrad
-    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
-  def _run_conv2d_same_padding_test(self, BS, C1, C2, H, W, K, S, padding='same', D=1):
-    # create in tinygrad
-    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+    self._test_conv(Conv1d, torch.nn.Conv1d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv2d_same_padding_odd_input(self):
-    BS, C1, H, W = 16, 16, 29, 31
+    BS, C1, DIMS = 16, 16, [29, 31]
     C2, K, S, P = 32, 5, 1, 'same'
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv2d_same_padding_large_kernel(self):
-    BS, C1, H, W = 16, 16, 28, 33
+    BS, C1, DIMS = 16, 16, [28, 33]
     C2, K, S, P = 32, 9, 1, 'same'
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv2d_same_padding_with_dilation(self):
-    BS, C1, H, W = 16, 3, 28, 28
+    BS, C1, DIMS = 16, 3, [28, 28]
     C2, K, S, P, D = 32, 3, 1, 'same', 3
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P, D)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS, C1, DIMS, C2, K, S, P, D)
 
   def test_conv2d_same_padding_invalid_stride(self):
     C1, C2, K, S, P = 16, 32, 2, 2, 'same'
@@ -245,44 +200,14 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv_transpose1d(self):
-    BS, C1, W = 4, 16, 224//4
+    BS, C1, DIMS = 4, 16, [224//4]
     C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+    self._test_conv(ConvTranspose1d, torch.nn.ConvTranspose1d, BS, C1, DIMS, C2, K, S, P)
 
   def test_conv_transpose2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
+    BS, C1, DIMS = 4, 16, [224//4, 224//4]
     C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+    self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose2d, BS, C1, DIMS, C2, K, S, P)
 
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3
