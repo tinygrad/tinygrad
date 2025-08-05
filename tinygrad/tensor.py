@@ -4434,7 +4434,7 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
     return ret
   return _wrapper
 
-if TRACEMETA >= 1:
+if TRACEMETA >= 1 and DEBUG >= 2:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))

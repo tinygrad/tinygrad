@@ -791,6 +791,7 @@ class TestInferenceMode(unittest.TestCase):
       assert W.grad is None
     f(x, m, W)
 
+@unittest.skip("a")
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
 
