@@ -130,9 +130,15 @@
         }
 
 
-        const getProgressDlForPart = async (part, progressCallback) => {
-            const response = await fetch(part);
+        const getProgressDlForPart = async (part, progressCallback, lastModified) => {
+            const response = await fetch(part, {
+                headers: lastModified ? { "If-Modified-Since": lastModified } : {}
+            });
+            if (response.status === 304) return null; // not modified
+
             const total = parseInt(response.headers.get('content-length'), 10);
+            const newLastModified = response.headers.get('Last-Modified');
+
             const res = new Response(new ReadableStream({
                 async start(controller) {
                     const reader = response.body.getReader();
@@ -145,13 +151,13 @@
                     controller.close();
                 },
             }));
-            return res.arrayBuffer();
+            return { buffer: await res.arrayBuffer(), lastModified: newLastModified };
         };
 
         function initDb() {
             return new Promise((resolve, reject) => {
                 let db;
-                const request = indexedDB.open('tinywhisperdb', 1);
+                const request = indexedDB.open('tinywhisperdb', 2);
                 request.onerror = (event) => {
                     console.error('Database error:', event.target.error);
                     resolve(null);
@@ -165,6 +171,7 @@
 
                 request.onupgradeneeded = (event) => {
                     db = event.target.result;
+                    if (event.oldVersion < 2) db.deleteObjectStore?.('tensors');
                     if (!db.objectStoreNames.contains('tensors')) {
                         db.createObjectStore('tensors', { keyPath: 'id' });
                     }
@@ -203,7 +210,7 @@
             });
         }
 
-        function saveTensorToDb(db, id, tensor) {
+        function saveTensorToDb(db, id, tensor, lastModified) {
             return readTensorFromDb(db, id).then((result) => {
                 if (!result) {
                     new Promise((resolve, reject) => {
@@ -213,7 +220,7 @@
 
                         const transaction = db.transaction(['tensors'], 'readwrite');
                         const store = transaction.objectStore('tensors');
-                        const request = store.put({ id: id, content: tensor });
+                        const request = store.put({ id: id, content: tensor, lastModified: lastModified });
 
                         transaction.onabort = (event) => {
                             console.log("Transaction error while saving tensor: " + event.target.error);
@@ -247,14 +254,19 @@
         };
 
         const getPart = async(key) => {
-            let part = await readTensorFromDb(db, key);
+            let full_url = `${BASE_URL}/${key}.safetensors`;
+            const cached = await readTensorFromDb(db, key);
 
-            if (part) {
+            const download = await getProgressDlForPart(full_url, progressCallback, cached?.lastModified);
+
+            if (download === null && cached) {
                 console.log(`Cache hit: ${key}`);
-                return Promise.resolve(part.content);
-            } else {
-                console.log(`Cache miss: ${key}`);
-                return getProgressDlForPart(`${BASE_URL}/${key}.safetensors`, progressCallback);
+                return cached.content;
+            }
+            {
+                console.log(`Cache refresh: ${key}`);
+                await saveTensorToDb(db, key, download.buffer, download.lastModified);
+                return download.buffer;
             }
         }
 
