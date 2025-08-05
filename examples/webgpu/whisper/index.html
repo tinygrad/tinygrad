@@ -191,7 +191,7 @@
         const tensorStore = (db) => ({
             get: (id) => new Promise(r => {
                 const req = db.transaction('tensors').objectStore('tensors').get(id);
-                req.onsuccess = () => r(req.results || null);
+                req.onsuccess = () => r(req.result || null);
                 req.onerror = () => r(null);
             }),
             put: (id, content, lastModified) => new Promise(r => {
