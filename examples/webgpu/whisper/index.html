@@ -533,48 +533,7 @@
             return adapter?.requestDevice({ requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize }, powerPreference: "high-performance" });
         };
 
-        // async function dropHandler(ev) {
-        //     console.log("File(s) dropped");
-
-        //     // Prevent default behavior (Prevent file from being opened)
-        //     ev.preventDefault();
-
-        //     if (ev.dataTransfer.items) {
-        //         // Use DataTransferItemList interface to access the file(s)
-        //         [...ev.dataTransfer.items].forEach(async (item, i) => {
-        //         // If dropped items aren't files, reject them
-        //         if (item.kind === "file") {
-        //             const file = item.getAsFile();
-        //             console.log(`… file[${i}].name = ${file.name}`);
-        //             // if (file.name.endsWith('.glb')) {
-        //                 // modelChunks = await loadGLBFile(file);
-        //                 await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
-        //             // }
-        //         }
-        //         });
-        //     } else {
-        //         // Use DataTransfer interface to access the file(s)
-        //         [...ev.dataTransfer.files].forEach((file, i) => {
-        //         console.log(`… file[${i}].name = ${file.name}`);
-        //         });
-        //     }
-        // }
-
-        // function dragOverHandler(ev) {
-        //     console.log("File(s) in drop zone");
-
-        //     // Prevent default behavior (Prevent file from being opened)
-        //     ev.preventDefault();
-        // }
-
-        /*
-        ondrop="dropHandler(event);" ondragover="dragOverHandler(event);"
-        */
         const overlay = document.getElementById('overlay');
-        // overlay.ondrop = dropHandler;
-        // overlay.ondragover = dragOverHandler;
-        // transcriptionLog.ondragstart = function (event) { event.target.style.border = "3px dotted red"; }
-        // transcriptionLog.ondrag = function (event) { event.target.style.color = "black"; }
 
         let counter = 0;
 
@@ -614,10 +573,7 @@
                     if (item.kind === "file") {
                         const file = item.getAsFile();
                         console.log(`… file[${i}].name = ${file.name}`);
-                        // if (file.name.endsWith('.glb')) {
-                            // modelChunks = await loadGLBFile(file);
                             await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
-                        // }
                     }
                 });
             } else {
