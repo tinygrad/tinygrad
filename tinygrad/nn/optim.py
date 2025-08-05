@@ -82,8 +82,8 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
-def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nesterov=True, \
-         classic=False, fused=FUSE_OPTIM, ns_params=(3.4445, -4.7750, 2.0315), steps=5):
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.7750, 2.0315),
+         nesterov=True, classic=False, fused=FUSE_OPTIM):
   """
   SGD with newton-schulz (NS) iteration. Nesterov and weight decay are recommended.
 
@@ -93,7 +93,7 @@ def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, nestero
   - Paper: https://arxiv.org/pdf/2505.02222
   """
   assert not FUSE_OPTIM, "FUSE_OPTIM not allowed for Muon optimizer"
-  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused, ns_params=ns_params, steps=steps, pre_wd=False)
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, ns_steps, ns_params, pre_wd=False, tcoef=0.0, fused=fused)
 
 class LARS(Optimizer):
   """
@@ -102,11 +102,11 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, \
-             classic=True, tcoef=0.001, fused=FUSE_OPTIM, ns_params=None, steps=3, pre_wd=True):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True,
+               ns_steps=5, ns_params=None, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
     super().__init__(params, lr, fused)
-    self.momentum, self.wd, self.pre_wd, self.nesterov, self.classic, self.tcoef, self.ns_params, self.steps = \
-    momentum, weight_decay, pre_wd, nesterov, classic, tcoef, ns_params, steps
+    self.momentum, self.wd, self.nesterov, self.classic, self.pre_wd, self.tcoef = momentum, weight_decay, nesterov, classic, pre_wd, tcoef
+    self.ns_steps, self.ns_params = ns_steps, ns_params
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -126,8 +126,9 @@ class LARS(Optimizer):
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
 
-      if self.ns_params is not None: g = g.detach().reshape(g.shape[0], -1).newton_schulz(steps=self.steps, params=self.ns_params).reshape(g.shape)
-      if not self.pre_wd and self.wd > 0: t = t.detach() * (1.0 - self.wd * self.lr)#muon does post wd
+      if self.ns_params: g = g.reshape(g.shape[0], -1).newton_schulz(self.ns_steps, self.ns_params).reshape(g.shape)
+      # muon does post momentum weight decay
+      if not self.pre_wd: t = t.detach() * (1.0 - self.wd * self.lr)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
 
