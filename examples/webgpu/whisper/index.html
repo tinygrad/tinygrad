@@ -200,7 +200,9 @@
         const progressCallback = (part, loaded, total) => {
             totalLoaded += loaded;
             if (!partSize[part]) { totalSize += total; partSize[part] = true; }
-            loadingText.innerHTML = `Loading model ${part.split('/').pop().split('.')[0]} ${Math.trunc((totalLoaded/totalSize) * 100)}%`;
+            const name = part.split('/').pop().split('.')[0];
+            const percent = Math.trunc((totalLoaded/totalSize) * 100);
+            loadingText.textContent = `Loading model ${name} ${percent}%`;
         };
 
         const getPart = async(key) => {
