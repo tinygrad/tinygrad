@@ -13,7 +13,7 @@ merge_views = PatternMatcher([
   (UPat(GroupOp.Movement, src=(UPat.var("x"),), name="mop"), lambda mop,x: x.base.view(mop.st)),
   # remove NOOP views
   (UPat.var("x").view(name="view"),
-   lambda x,view: x if x.st is not None and view.st.contiguous and view.shape == x.shape else None),
+   lambda x,view: x if x.st is not None and x.op not in GroupOp.Defines and view.st.contiguous and view.shape == x.shape else None),
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL}).view(name="view"),
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # only unmaksed VIEW on CONST replaces the ShapeTracker
@@ -103,4 +103,6 @@ view_right = merge_views+PatternMatcher([
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] is r2.arg[0] else None),
+  # add VIEW to any DEFINE_GLOBAL that somehow lost its view
+  (UPat(Ops.STORE, src=(UPat(Ops.DEFINE_GLOBAL, name="d"),), name="x", allow_any_len=True), lambda d,x: x.replace(src=(d.view(d.st),)+x.src[1:])),
 ])
