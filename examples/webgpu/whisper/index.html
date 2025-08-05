@@ -179,47 +179,19 @@
             });
         }
 
-        async function readTensorFromDb(db, id) {
-            if (!db) return null;
-            return new Promise((resolve) => {
+        const tensorStore = (db) => ({
+            get: (id) => new Promise(r => {
                 const req = db.transaction('tensors').objectStore('tensors').get(id);
-                req.onsuccess = () => resolve(req.result || null);
-                req.onerror = () => resolve(null);
-            });
-        }
-
-        function saveTensorToDb(db, id, tensor, lastModified) {
-            return readTensorFromDb(db, id).then((result) => {
-                if (!result) {
-                    new Promise((resolve, reject) => {
-                        if (db == null) {
-                            resolve(null);
-                        }
-
-                        const transaction = db.transaction(['tensors'], 'readwrite');
-                        const store = transaction.objectStore('tensors');
-                        const request = store.put({ id: id, content: tensor, lastModified: lastModified });
-
-                        transaction.onabort = (event) => {
-                            console.log("Transaction error while saving tensor: " + event.target.error);
-                            resolve(null);
-                        };
-
-                        request.onsuccess = () => {
-                            console.log('Tensor saved successfully.');
-                            resolve();
-                        };
-
-                        request.onerror = (event) => {
-                            console.error('Tensor save failed:', event.target.error);
-                            resolve(null);
-                        };
-                    });
-                } else {
-                    return null;
-                }
-            }).catch(()=> null);
-        }
+                req.onsuccess = () => r(req.results || null);
+                req.onerror = () => r(null);
+            }),
+            put: (id, content, lastModified) => new Promise(r => {
+                const req = db.transaction('tensors', 'readwrite')
+                    .objectStore('tensors').put({ id, content, lastModified });
+                req.onsuccess = () => r();
+                req.onerror = () => r(null);
+            })
+        });
 
         var db;
 
@@ -233,7 +205,7 @@
 
         const getPart = async(key) => {
             let full_url = `${BASE_URL}/${key}.safetensors`;
-            const cached = await readTensorFromDb(db, key);
+            const cached = await tensorStore(db).get(key);
 
             const download = await getProgressDlForPart(full_url, progressCallback, cached?.lastModified);
 
@@ -243,7 +215,7 @@
             }
             {
                 console.log(`Cache refresh: ${key}`);
-                await saveTensorToDb(db, key, download.buffer, download.lastModified);
+                await tensorStore(db).put(key, download.buffer, download.lastModified);
                 return download.buffer;
             }
         }
@@ -260,21 +232,10 @@
                 if (!db) {
                     db = await initDb();
                 }
-                let vad_buf = await getPart("vad");
-                saveTensorToDb(db, "vad", new Uint8Array(vad_buf));
-                net_silero = await silero.setupNet(device, new Uint8Array(vad_buf));
-
-                let mel_buf = await getPart("mel");
-                saveTensorToDb(db, "mel", new Uint8Array(mel_buf));
-                net_mel = await mel.setupNet(device, new Uint8Array(mel_buf));
-
-                let encoder_buf = await getPart("encoder");
-                saveTensorToDb(db, "encoder", new Uint8Array(encoder_buf));
-                net_encoder = await encoder.setupNet(device, new Uint8Array(encoder_buf));
-
-                let decoder_buf = await getPart("decoder");
-                saveTensorToDb(db, "decoder", new Uint8Array(decoder_buf));
-                net_decoder = await decoder.setupNet(device, new Uint8Array(decoder_buf));
+                net_silero = await silero.setupNet(device, new Uint8Array(await getPart("vad")));
+                net_mel = await mel.setupNet(device, new Uint8Array(await getPart("mel")));
+                net_encoder = await encoder.setupNet(device, new Uint8Array(await getPart("encoder")));
+                net_decoder = await decoder.setupNet(device, new Uint8Array(await getPart("decoder")));
 
                 loadingContainer.style.display = "none";
             }
