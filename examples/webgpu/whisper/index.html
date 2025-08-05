@@ -530,7 +530,7 @@
             const adapter = await navigator.gpu.requestAdapter();
             let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
             let maxBufferSize = adapter.limits.maxBufferSize;
-            return adapter?.requestDevice({ requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize }, powerPreference: "high-performance" });
+            return adapter?.requestDevice({ requiredFeatures: ["shader-f16"], requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize }, powerPreference: "high-performance" });
         };
 
         const overlay = document.getElementById('overlay');
