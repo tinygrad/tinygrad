@@ -761,5 +761,27 @@ class TestJitGraphSplit(unittest.TestCase):
       multigraph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
       hcqgraph=[self.ji_graph(5)])
 
+  def test_jit_multidev(self):
+    if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
+
+    try: Device[f"{Device.DEFAULT}:1"]
+    except Exception: raise unittest.SkipTest("no multidevice")
+
+    @TinyJit
+    def f(inp, inp_d1):
+      op0 = self.compute(Device.DEFAULT, inp)
+      op1 = self.compute(Device.DEFAULT, op0)
+      op2 = self.compute(f"{Device.DEFAULT}:1", inp_d1)
+      op3 = self.compute(f"{Device.DEFAULT}:1", op2)
+      op4 = self.compute(Device.DEFAULT, op1)
+      return op3, op4
+
+    inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+    inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
+    self.expect(f, inp, inp_d1,
+      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
+      multigraph=[self.ji_graph(5)],
+      hcqgraph=[self.ji_graph(5)])
+
 if __name__ == '__main__':
   unittest.main()
