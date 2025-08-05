@@ -16,6 +16,7 @@ from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexin
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.optional import get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
+from tinygrad.opt.swizzler import view_left, view_right, cleanup_pm
 from tinygrad.opt import pm_optimize
 
 @dataclass
@@ -28,6 +29,12 @@ class RewriteStep:
     return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
+
+rewrites_for_views = [
+  RewriteStep(view_left, name="view left"),
+  RewriteStep(view_right, name="view right"),
+  RewriteStep(cleanup_pm, name="cleanup view"),
+]
 
 rewrites_for_linearizer = [
   RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
@@ -43,6 +50,9 @@ def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[Rewri
 def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
+
+  # this used to be in schedule
+  ret.extend(rewrites_for_views)
 
   # this is kernel.py
   ret.append(RewriteStep(pm_optimize, ctx=lambda _: opts, name="optimize ast"))

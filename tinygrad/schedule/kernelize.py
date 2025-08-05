@@ -3,12 +3,11 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, colored, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.opt.swizzler import merge_views, view_left, view_right, apply_swizzle, swizzle_reduceop
+from tinygrad.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
 import sys
@@ -159,20 +158,7 @@ add_buffer_ops = PatternMatcher([
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
   # passthrough ASSIGN
   (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
-  # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
-   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
 ])
-
-def check_load_st(glbl:UOp, view:UOp):
-  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
-  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
-  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
-  # if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
-  # otherwise, it's not fine
-  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
   # remove CONTIGUOUS/DEVICE from kernel AST
@@ -180,8 +166,6 @@ fix_kernel_ops = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # no ImageDType after index
   (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
-  (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
 ])
 
 replace_globals = PatternMatcher([
@@ -195,8 +179,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
   # replace global memory ops with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
-  # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
@@ -204,7 +186,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
-  ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
+  ast = graph_rewrite(ast, merge_views+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
