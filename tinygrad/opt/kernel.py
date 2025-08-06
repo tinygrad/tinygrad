@@ -14,7 +14,7 @@ from tinygrad.dtype import ImageDType, AddrSpace
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.schedule.kernelize import view_left
+from tinygrad.opt.swizzler import view_left, view_left_through_load
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -503,4 +503,4 @@ class Kernel:
     self.finalized = True
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
-    return graph_rewrite(fixed_ast, view_left, name="fixup optimized AST")
+    return graph_rewrite(fixed_ast, view_left+view_left_through_load, name="fixup optimized AST")
