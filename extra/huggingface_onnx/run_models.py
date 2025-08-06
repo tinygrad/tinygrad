@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from tinygrad.frontend.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
+from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR
 
 def get_config(root_path: Path) -> dict[str, Any]:
   ret = {}
@@ -84,14 +85,13 @@ if __name__ == "__main__":
 
   if args.debug:
     from huggingface_hub import snapshot_download
-    download_dir = Path(__file__).parent / "models"
     path:list[str] = args.debug.split("/")
     if len(path) == 2:
       # repo id
       # validates all onnx models inside repo
       repo_id = "/".join(path)
-      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], cache_dir=download_dir))
-      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], cache_dir=DOWNLOADS_DIR))
+      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=DOWNLOADS_DIR)
       config = get_config(root_path)
       for onnx_model in root_path.rglob("*.onnx"):
         rtol, atol = get_tolerances(onnx_model.name)
@@ -103,8 +103,8 @@ if __name__ == "__main__":
       onnx_model = path[-1]
       assert path[-1].endswith(".onnx")
       repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
-      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=[relative_path], cache_dir=download_dir))
-      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=download_dir)
+      root_path = Path(snapshot_download(repo_id=repo_id, allow_patterns=[relative_path], cache_dir=DOWNLOADS_DIR))
+      snapshot_download(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=DOWNLOADS_DIR)
       config = get_config(root_path)
       rtol, atol = get_tolerances(onnx_model)
       print(f"validating {relative_path} with truncate={args.truncate}, {rtol=}, {atol=}")
