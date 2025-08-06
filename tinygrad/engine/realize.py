@@ -3,16 +3,17 @@ import time, pprint
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.codegen import full_rewrite
+from tinygrad.opt.kernel import Opt
 
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda _ast,_renderer,ret: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret))
-def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
@@ -27,6 +28,10 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
 
   # linearize
+  if renderer is None: renderer = Device.default.renderer
+  if opts is not None:
+    assert ast.arg is None, "can't apply opts if sink has an arg"
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   try:
     uops = full_rewrite(ast, renderer)
   except RuntimeError:
@@ -39,7 +44,7 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   if DEBUG >= 6: print_uops(uops)
   src = renderer.render(uops)
 
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops,
+  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
