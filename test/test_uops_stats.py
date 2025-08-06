@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
-from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.opt.kernel import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 
 def flops_mem(uops, ignore_indexing=False):
@@ -178,10 +178,10 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
   def test_gemm_tc_unroll(self):
-    k = Kernel(self.ast_gemm)
-    if not k.apply_tensor_cores(): self.skipTest("no tensor cores")
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 2))
-    p = get_program(k.get_optimized_ast(), k.opts)
+    try:
+      p = get_program(self.ast_gemm, opts=[Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)])
+    except KernelOptError:
+      raise unittest.SkipTest("no tensor cores")
     print(p.src)
     self.check_gemm(p)
 
@@ -217,19 +217,16 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
 
   def test_reduce(self):
-    k = Kernel(self.ast_reduce)
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(self.ast_reduce, opts=[])
     print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
     self.assertEqual(p.estimates.ops, N*N)
     self.assertEqual(p.estimates.mem, N*N*4 + 4)
 
   def test_reduce_group(self):
-    k = Kernel(self.ast_reduce)
     try:
-      k.apply_opt(Opt(OptOps.GROUP, 0, 50))
+      p = get_program(self.ast_reduce, opts=[Opt(OptOps.GROUP, 0, 50)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
-    p = get_program(k.get_optimized_ast(), k.opts)
     # NOTE: these are wrong, they don't respect the if statement
     print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
 
