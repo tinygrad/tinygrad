@@ -150,18 +150,11 @@ create_kernels = PatternMatcher([
 
 # **** fix kernel AST
 
-add_buffer_ops = PatternMatcher([
+early_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).view(x.st),)),
-  # STORE (except for meta ops)
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x), tag=1)),
+  # no SINK for meta ops
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
-  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
-   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
-  # passthrough ASSIGN
-  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
-  # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
-   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
 ])
 
 def check_load_st(glbl:UOp, view:UOp):
@@ -175,6 +168,16 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
+  # add the LOAD
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: x.replace(tag=None).view(x.st).load() if x.tag is not None else None),
+  # STORE (except for meta ops)
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda sink:
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(s.st.real_size()), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
+  # passthrough ASSIGN
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
+  # VALID
+  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
+   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
@@ -193,10 +196,6 @@ replace_globals = PatternMatcher([
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
   if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE for s in k.arg.ast.src): return None
-  # replace global memory ops with the BUFFER they write to
-  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
-  # push views to edges
-  ast = graph_rewrite(graph_rewrite(ast, view_left, name="Main View Left"), view_right, name="Main View Right")
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
@@ -204,9 +203,15 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
-  ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
+  # replace global memory ops with the BUFFER they write to
+  ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
+  ast = graph_rewrite(ast, early_buffer_ops, bufs, bottom_up=True, name="replace buffer early")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
+  # TODO: move these to codegen
+  ast = graph_rewrite(ast, view_left, name="Main View Left")
+  ast = graph_rewrite(ast, view_right, name="Main View Right")
+  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="replace buffer")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
