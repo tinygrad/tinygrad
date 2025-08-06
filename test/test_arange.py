@@ -14,10 +14,7 @@ class TestArange(unittest.TestCase):
     tt = Tensor.arange(N)
     sched = tt.schedule()
     self.assertEqual(len(sched), 1)
-    k = Kernel(sched[-1].ast)
-    if opts is not None:
-      for o in opts: k.apply_opt(o)
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(sched[-1].ast, opts=opts)
     print(p.name)
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
