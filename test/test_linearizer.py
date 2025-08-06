@@ -30,9 +30,11 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
-  p = get_program(realized_ast, opts=[Opt(OptOps.TC, axis, arg=(tc_select, tc_opt, use_tensor_cores))])
-  prg = CompiledRunner(replace(p, device=Device.DEFAULT))
+  k = Kernel(realized_ast)
+  k.apply_tensor_cores(use_tensor_cores, axis=axis, tc_select=tc_select, tc_opt=tc_opt)
+  prg = CompiledRunner(replace(get_program(k.get_optimized_ast(), k.opts), device=Device.DEFAULT))
   if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
@@ -323,7 +325,10 @@ class TestLinearizer(unittest.TestCase):
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       sched = r.schedule()
-      prg = get_program(sched[-1].ast, opts=[Opt(OptOps.TC, 0, (-1, 2, 1))])
+      realized_ast = sched[-1].ast
+      kernel = Kernel(realized_ast)
+      kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
+      prg = get_program(kernel.get_optimized_ast(), kernel.opts)
       if Device.DEFAULT == "LLVM":
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and AMD_LLVM:
