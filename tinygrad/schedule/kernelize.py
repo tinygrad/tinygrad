@@ -149,6 +149,10 @@ create_kernels = PatternMatcher([
 
 # **** fix kernel AST
 
+def unbind_view(x:UOp):
+  if any(x.op is Ops.BIND for x in x.arg.vars()): return x.replace(arg=x.arg.unbind()[0])
+  return None
+
 replace_buffers = PatternMatcher([
   # replace ASSIGN with the target BUFFER
   (UPat(Ops.ASSIGN, src=(UPat((Ops.BUFFER, Ops.LOAD)), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
@@ -171,6 +175,8 @@ replace_buffers = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(), UPat(Ops.BIND)), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
   # remove any BINDs from DEFINE_VARs
   (UPat(Ops.BIND, name="x"), lambda x: x.src[0]),
+  # remove BINDs from ShapeTrackers
+  (UPat(Ops.VIEW, name="x"), unbind_view),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -295,10 +301,9 @@ def limit_bufs(root:UOp):
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
-def unbind_view(x:UOp):
-  if any(x.op is Ops.BIND for x in x.arg.vars()):
-    st, var_vals = x.arg.unbind()
-    return x.replace(src=x.src+tuple([k.bind(v) for k,v in var_vals.items()]), arg=st)
+def view_add_srcs(x:UOp):
+  if len(avars:=x.arg.vars()) and len(x.src) == 1:
+    return x.replace(src=x.src+tuple(avars))
   return None
 
 finalize_contiguous = PatternMatcher([
@@ -308,8 +313,8 @@ finalize_contiguous = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONTIGUOUS),), name="x"), lambda x: x.src[0]),
   # simplify views
   (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
-  # unbind views
-  (UPat(Ops.VIEW, name="x"), unbind_view),
+  # vars to views srcs
+  (UPat(Ops.VIEW, name="x"), view_add_srcs),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
