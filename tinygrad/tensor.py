@@ -46,41 +46,6 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 
 # **** Tensor helper functions ****
 
-def _normalise_basic_indices(indices, ndim):
-  if not isinstance(indices, (tuple, list)): indices = (indices,)
-  flat = []
-  for idx in indices:
-    if isinstance(idx, (list, tuple)) and all(isinstance(i, slice) for i in idx): flat.extend(idx)
-    else: flat.append(idx)
-  indices = tuple(flat)
-  if any(i is Ellipsis for i in indices):
-    pos = next(i for i, v in enumerate(indices) if v is Ellipsis)
-    before, after = indices[:pos], indices[pos + 1 :]
-    fill = (slice(None),) * (ndim - len(before) - len(after))
-    indices = before + fill + after
-  if len(indices) < ndim: indices = indices + (slice(None),) * (ndim - len(indices))
-  return indices
-
-
-def _expand_basic_indices(indices, shape, device):
-  indices = _normalise_basic_indices(indices, len(shape))
-  per_dim = []
-  for idx, dim in zip(indices, shape):
-    if isinstance(idx, slice):
-      rng = range(*idx.indices(dim))
-      per_dim.append(list(rng))
-    elif isinstance(idx, int): per_dim.append([idx % dim])  # wrap negative ints
-    elif idx is None: per_dim.append([0])  # kept for reshape
-    elif isinstance(idx, Tensor):
-      arr = (idx.to(device) % dim).flatten().tolist()
-      per_dim.append(arr)
-    else: raise IndexError(f"unsupported basic index {idx!r}")
-  grids = list(itertools.product(*per_dim))
-  if not grids:
-    return tuple(Tensor([], dtype=dtypes.int, device=device) for _ in shape)
-  concrete = list(zip(*grids))  # per-dim lists
-  return tuple(Tensor(list(c), dtype=dtypes.int, device=device) for c in concrete)
-
 # this tracks the tensor.py METADATA
 _METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
@@ -1157,28 +1122,27 @@ class Tensor(MathTrait):
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
   # ***** movement high level ops *****
-
-  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
-    # wrap single index into a list
+  @staticmethod
+  def _parse_indices(indices, ndim, shape, device):
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, list(indices)
+    indices = list(indices)
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
+    if num_indices > ndim: raise IndexError(f"too many {num_indices=} for {ndim=}")
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (ndim - num_indices)
 
     indices_parsed, dim = [], 0
     for index in indices:
-      size = 1 if index is None else self.shape[dim]
+      size = 1 if index is None else shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
         case list() | tuple() | Tensor():
-          if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
+          if not isinstance(index, Tensor): index = Tensor(index, device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          index = (index.to(device) < 0).where(index+size, index)  # treat negative index values
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -1202,7 +1166,42 @@ class Tensor(MathTrait):
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
       if index is not None: dim += 1
+    return indices_parsed
 
+  @staticmethod
+  def _expand_basic_indices(indices, ndim, shape, device):
+      """
+      Convert the parsed index specs into one 1-D Tensor per *real*
+      dimension for the mask/canvas fallback.  Skips any `None` (new-
+      axis) entries entirely, since they don’t map to storage dims.
+      """
+      parsed = Tensor._parse_indices(indices, ndim, shape, device)
+      coord_lists: list[list[int]] = []
+      dim_it = 0
+      # Walk through every spec, but only consume
+      # shape dims for non-None indices.
+      for spec in parsed:
+          idx = spec["index"]
+          if idx is None: continue # new-axis: no real dimension to select
+          dim_size = shape[dim_it]
+          dim_it += 1
+          if isinstance(idx, slice): coord_lists.append(list(range(*idx.indices(dim_size))))
+          elif isinstance(idx, (int, UOp)): coord_lists.append([int(idx) % dim_size])
+          elif isinstance(idx, Tensor): coord_lists.append((idx.to(device) % dim_size).flatten().tolist())
+          elif isinstance(idx, (list, tuple)): coord_lists.append([int(i) % dim_size for i in idx])
+          else: raise IndexError(f"unsupported basic index {idx!r}")
+      # Zero-dim tensor corner
+      if not coord_lists: return ()
+      # Cartesian product in row-major order
+      prod = list(itertools.product(*coord_lists))
+      if not prod: return tuple(Tensor([], device=device, dtype=dtypes.int) for _ in coord_lists) # empty selection: still one list per real dim
+      per_dim = list(zip(*prod))  # shape: (n_real_dims, N)
+      return tuple(Tensor(list(c), device=device, dtype=dtypes.int) for c in per_dim)
+
+  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    # wrap single index into a list
+    x = self
+    indices_parsed = Tensor._parse_indices(indices, self.ndim, self.shape, self.device)
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
@@ -1303,21 +1302,20 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     res = self._getitem(indices, v)
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res)
+    if res.shape == self.shape and res.uop is not self.uop: self.assign(res)
     else:
-      rhs = v.cast(res.dtype)._broadcast_to(res.shape)
-      if rhs.uop is self.uop: rhs = rhs.contiguous()
-      norm = tuple(i for i in _normalise_basic_indices(indices, self.ndim) if i is not None)   # drop
-      normal_idxs = _expand_basic_indices(norm, self.shape, self.device)
-      mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
-      mask[normal_idxs] = True
-      rhs_flat = rhs.flatten()
-      if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
-      canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
-      canvas[normal_idxs] = rhs_flat
-      new_tensor = mask.where(canvas, self)
-      self.assign(new_tensor)
+        rhs = v.cast(res.dtype)
+        if rhs.ndim < res.ndim: rhs = rhs.reshape((1,) * (res.ndim - rhs.ndim) + rhs.shape)
+        rhs = rhs._broadcast_to(res.shape)
+        if rhs.uop is self.uop: rhs = rhs.contiguous()
+        normal_idxs = Tensor._expand_basic_indices(indices, self.ndim, self.shape, self.device)
+        mask = Tensor.zeros(*self.shape, dtype=dtypes.bool, device=self.device).contiguous()
+        mask[normal_idxs] = True
+        rhs_flat = rhs.flatten()
+        if rhs_flat.uop is self.uop: rhs_flat = rhs_flat.contiguous()
+        canvas = Tensor.zeros_like(self, dtype=rhs_flat.dtype).contiguous()
+        canvas[normal_idxs] = rhs_flat
+        self.assign(mask.where(canvas, self))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
