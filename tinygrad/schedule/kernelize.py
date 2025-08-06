@@ -153,11 +153,12 @@ create_kernels = PatternMatcher([
 early_buffer_ops = PatternMatcher([
   # LOAD
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).view(x.st),)),
+  # no SINK for meta ops
+  (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
 ])
 
 add_buffer_ops = PatternMatcher([
   # STORE (except for meta ops)
-  (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
   # passthrough ASSIGN
@@ -206,12 +207,12 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace global memory ops with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_globals, bottom_up=True, name="replace globals")
   ast = graph_rewrite(ast, early_buffer_ops, bufs, bottom_up=True, name="replace buffer early")
+  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   # TODO: move these to codegen
   ast = graph_rewrite(ast, view_left, name="Main View Left")
   ast = graph_rewrite(ast, view_right, name="Main View Right")
   ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
-  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
