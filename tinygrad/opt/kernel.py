@@ -451,7 +451,8 @@ class Kernel:
         return ret.replace(src=(ret.src[0].replace(arg=st),)+ret.src[1:])
       if op.op is Ops.SINK:
         # NOTE: should group_for_reduces be added to the local_dims?
-        kernel_name = ret.arg.name if ret.arg is not None else self.name if name_override is None else name_override
+        # TODO: arg.name should be able to be None
+        kernel_name = ret.arg.name if ret.arg is not None and ret.arg.name != "test" else self.name if name_override is None else name_override
         return ret.replace(arg=KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts)))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2

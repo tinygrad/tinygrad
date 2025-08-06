@@ -173,8 +173,7 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
-    k = Kernel(self.ast_gemm)
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(self.ast_gemm, opts=[])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
@@ -189,42 +188,30 @@ class TestStatsOptimized(unittest.TestCase):
   # this is a good lesson about why UPCASTing is a good idea
 
   def test_gemm_one_upcasted(self):
-    k = Kernel(self.ast_gemm)
-    k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4)])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted(self):
-    k = Kernel(self.ast_gemm)
-    k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-    k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
-    k.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted_locals(self):
-    k = Kernel(self.ast_gemm)
-    k.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-    k.apply_opt(Opt(OptOps.UPCAST, 1, 4))
     try:
-      k.apply_opt(Opt(OptOps.LOCAL, 0, 5))
-      k.apply_opt(Opt(OptOps.LOCAL, 1, 5))
+      p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4),
+                                           Opt(OptOps.LOCAL, 0, 4),  Opt(OptOps.LOCAL, 1, 4)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
-    p = get_program(k.get_optimized_ast(), k.opts)
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_group(self):
-    k = Kernel(self.ast_gemm)
     try:
-      k.apply_opt(Opt(OptOps.GROUP, 0, 4))
+      p = get_program(self.ast_gemm, opts=[Opt(OptOps.GROUP, 0, 4)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     SZ = N*N*4
-    p = get_program(k.get_optimized_ast(), k.opts)
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
     self.check_gemm(p, extra_flops=SZ*4)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
