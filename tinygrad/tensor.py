@@ -4405,7 +4405,6 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
     return ret
   return _wrapper
 
-# asfd
 if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
