@@ -176,7 +176,9 @@ class Tensor(MathTrait):
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
-  def __del__(self): all_tensors.pop(weakref.ref(self), None)
+  def __del__(self):
+    # asdf
+    if os.getpid() == _main_process_pid: all_tensors.pop(weakref.ref(self), None)
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
@@ -4381,7 +4383,6 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
     is_not_main_thread = threading.get_ident() != _main_thread_id
     if is_forked_child or is_not_main_thread:
       return fn(*args, **kwargs)
-
     if _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
