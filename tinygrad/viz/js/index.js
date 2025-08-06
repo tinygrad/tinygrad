@@ -115,6 +115,32 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
+function generateKernelColor(sat = 0.55, light = 0.45) {
+  const h = Math.random();
+  return hslToHex(h, sat, light);
+
+  function hslToHex(h, s, l) {
+    const [r, g, b] = hslToRgb(h, s, l);
+    return '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+  }
+
+  function hslToRgb(h, s, l) {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+
+    if (s === 0) return [l, l, l];
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return [hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)];
+  }
+}
+
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -123,7 +149,12 @@ async function renderProfiler() {
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
-  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
+  // canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
+  canvas.addEventListener("wheel", (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+    }
+  }, { passive: false });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -135,6 +166,11 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
+  console.time('start');
+
+  // divided into cells horizontal and levels
+  // const spatialTimeline =
+
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -153,8 +189,8 @@ async function renderProfiler() {
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
-        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
-        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
+        if (colorScheme[k]) colorMap.set(colorKey, colorScheme[k][colorMap.size%colorScheme[k].length]);
+        else colorMap.set(colorKey, generateKernelColor());
       }
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
@@ -178,22 +214,31 @@ async function renderProfiler() {
       area = maxArea*4;
       data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
     }
-    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
-    for (const [i,e] of mem.shapes.entries()) {
-      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y0 = e.y.map(yscale);
-      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-      const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
-    }
+    // const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+    // for (const [i,e] of mem.shapes.entries()) {
+    //   const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+    //   const y0 = e.y.map(yscale);
+    //   const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+    //   const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+    //   data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+    // }
     // lastly, adjust device rect by number of levels
+    console.log(timeline.shapes.length, mem.shapes.length, timeline.maxDepth, mem.peak);
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
+  console.timeEnd('start');
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform) {
+    console.time('render');
+    // dict to reports if there is something inside a pixel
+    var hasInsidePixel = {};
+    var culled = 0;
+    var wtf = 0;
+    var fastCut = 10000;
+
     zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
@@ -210,6 +255,10 @@ async function renderProfiler() {
     for (const e of data.shapes) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
+      if (end-start < fastCut) continue;
+
+      culled += 1
+
       ctx.fillStyle = e.fillColor;
       // generic polygon
       if (e.width == null) {
@@ -231,8 +280,15 @@ async function renderProfiler() {
         continue;
       }
       // contiguous rect
+
       const x = xscale(start);
       const width = xscale(end)-x;
+      if (hasInsidePixel[Math.round(x)] && width < 0.1) {
+        fastCut = end-start;
+        continue;
+      }
+      hasInsidePixel[Math.round(x)] = true;
+
       ctx.fillRect(x, e.y, width, e.height);
       rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
@@ -252,6 +308,7 @@ async function renderProfiler() {
         labelX += l.width;
       }
     }
+    console.timeEnd('render');
     // draw axes
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -290,6 +347,7 @@ async function renderProfiler() {
       }
     }
     ctx.restore();
+    console.log(`Rendered ${culled} shapes of ${data.shapes.length}, ${rectLst.length} rects ${wtf} WTF`);
   }
 
   function resize() {
@@ -305,7 +363,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
+  canvasZoom = d3.zoom().filter(e => ((e.ctrlKey && e.type === 'wheel') || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
