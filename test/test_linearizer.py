@@ -344,7 +344,7 @@ class TestLinearizer(unittest.TestCase):
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       sched = r.schedule()
-      realized_ast = sched[-1].ast
+      realized_ast = push_views(sched[-1].ast)
       kernel = Kernel(realized_ast)
       kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
       prg = get_program(kernel.get_optimized_ast(), kernel.opts)
