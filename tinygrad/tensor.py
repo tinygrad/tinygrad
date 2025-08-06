@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars, os
 from contextlib import ContextDecorator
 from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -47,6 +47,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
 # **** Tensor helper functions ****
 
 # this tracks the tensor.py METADATA
+_main_process_pid = os.getpid()
 _METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
@@ -4375,6 +4376,8 @@ P = ParamSpec("P")
 T = TypeVar("T")
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+    # is forked child
+    if os.getpid() != _main_process_pid: return fn(*args, **kwargs)
     if _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
