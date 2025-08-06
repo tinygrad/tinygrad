@@ -190,7 +190,8 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
   # replace global memory ops with the BUFFER they write to
-  ast = graph_rewrite(k.arg.ast, replace_buffers, bufs, bottom_up=True, name="replace buffers")
+  # NOTE: merge_views is needed to unbind the reshapes
+  ast = graph_rewrite(k.arg.ast, merge_views+replace_buffers, bufs, bottom_up=True, name="replace buffers")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   # TODO: move these to codegen
