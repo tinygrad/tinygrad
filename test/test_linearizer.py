@@ -124,7 +124,7 @@ class TestLinearizer(unittest.TestCase):
     with Context(FUSE_ARANGE=1):
       sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
-    helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
+    helper_linearizer_ast(push_views(sink), [dataset, idxs], wanna_output=[real_index])
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
