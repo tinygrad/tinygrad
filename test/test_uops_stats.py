@@ -173,8 +173,7 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
-    k = Kernel(self.ast_gemm)
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(self.ast_gemm, opts=[])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
