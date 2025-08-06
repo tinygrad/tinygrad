@@ -77,7 +77,7 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
   `classic` is a boolean flag that determines whether to use the popular momentum update rule or the classic momentum update rule.
   """
-  return LARS(params, lr, momentum, weight_decay, 0, None, nesterov, classic, pre_wd=True, tcoef=0.0, fused=fused)
+  return LARS(params, lr, momentum, weight_decay, 0, None, nesterov, classic=classic, pre_wd=True, tcoef=0.0, fused=fused)
 
 # Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
 def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.775, 2.0315),
