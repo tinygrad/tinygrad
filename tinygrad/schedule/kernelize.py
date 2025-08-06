@@ -121,7 +121,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI, Ops.BIND}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
@@ -167,6 +167,8 @@ replace_buffers = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
   # passthrough ASSIGN (but let MSTACK process first)
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: x.src[1]),
+  # remove any BINDs from VIEWS
+  (UPat(Ops.VIEW, src=(UPat(), UPat(Ops.BIND)), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -174,13 +176,14 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
+    if s.op is Ops.BIND: continue
     s = s.buf_uop
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
   # replace global memory ops with the BUFFER they write to
   ast = graph_rewrite(k.arg.ast, replace_buffers, bufs, bottom_up=True, name="replace buffers")
-  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
+  if ast.op is Ops.SINK and not all_same([x.device for x in k.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   # TODO: move these to codegen
   ast = graph_rewrite(ast, view_left, name="Main View Left")
@@ -287,6 +290,12 @@ def limit_bufs(root:UOp):
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
+def unbind_view(x:UOp):
+  if any(x.op is Ops.BIND for x in x.arg.vars()):
+    st, var_vals = x.arg.unbind()
+    return x.replace(src=x.src+tuple([k.bind(v) for k,v in var_vals.items()]), arg=st)
+  return None
+
 finalize_contiguous = PatternMatcher([
   # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
@@ -294,6 +303,8 @@ finalize_contiguous = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONTIGUOUS),), name="x"), lambda x: x.src[0]),
   # simplify views
   (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
+  # unbind views
+  (UPat(Ops.VIEW, name="x"), unbind_view),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
