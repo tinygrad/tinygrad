@@ -138,25 +138,7 @@ class OnnxPBParser:
     self.reader = PBBufferedReader(self.tensor)
 
   def parse(self) -> dict:
-    """
-    Parses the ONNX model into a nested dictionary.
-
-    Usage:
-    ```python
-    from extra.onnx import OnnxPBParser
-    output = OnnxPBParser("your_model.onnx").parse()
-    ```
-
-    The output structure closely follows the official `onnx` library's `MessageToDict` format:
-    ```python
-    import onnx
-    from google.protobuf.json_format import MessageToDict
-    output = MessageToDict(onnx.load("your_model.onnx"), preserving_proto_field_name=True)
-    ```
-
-    Some fields are omitted like `doc_string` since they're not used for execution.
-    In addition, extra `parsed_*` fields are added for convenience: `parsed_node`, `parsed_tensor`, `parsed_type`.
-    """
+    """Parses the ONNX model into a nested dictionary. """
     return self._parse_ModelProto()
 
   def _parse_message(self, end_pos: int) -> Generator[tuple[int, WireType], None, None]:
