@@ -30,6 +30,12 @@ class RewriteStep:
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
+rewrites_for_views = [
+  RewriteStep(view_left, name="Main View Left"),
+  RewriteStep(view_right, name="Main View Right"),
+  RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"),
+]
+
 rewrites_for_linearizer = [
   RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
   RewriteStep(pm_blockend_merge, name="Linearizer: Merge Blockends"),
@@ -46,9 +52,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret: list[RewriteStep] = []
 
   # view pushing
-  ret.append(RewriteStep(view_left, name="Main View Left"))
-  ret.append(RewriteStep(view_right, name="Main View Right"))
-  ret.append(RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"))
+  ret.extend(rewrites_for_views)
 
   # this is kernel.py
   ret.append(RewriteStep(pm_optimize, ctx=lambda _: opts, name="optimize ast"))

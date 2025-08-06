@@ -131,10 +131,11 @@ class TestBEAM(unittest.TestCase):
     assert tm
 
   def test_beam_unnamed_kernels(self):
+    from test.test_linearizer import push_views
     a = Tensor.rand(100)
     b = Tensor.rand(100)
     si = (a+b).schedule()[-1]
-    lin = Kernel(si.ast)
+    lin = Kernel(push_views(si.ast))
     bufs = bufs_from_lin(lin)
     # TODO: beam should have better instrumentation so we don't have to check this indirect thing
     kcount = len(Kernel.kernel_cnt)
