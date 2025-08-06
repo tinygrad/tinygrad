@@ -1,8 +1,9 @@
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, resolve, sint
-from tinygrad.helpers import all_same, prod, unwrap
+from tinygrad.helpers import all_same, prod, unwrap, colored
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
 from tinygrad.schedule.grouper import ALWAYS_CONTIGUOUS
+from tinygrad.dtype import ImageDType, dtypes
 
 merge_views = PatternMatcher([
   # merge adjacent views
@@ -99,4 +100,34 @@ view_right = merge_views+PatternMatcher([
   # merge axes for double reduce (invert of SPLIT_REDUCEOP=1)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] is r2.arg[0] else None),
+])
+
+def check_load_st(glbl:UOp, view:UOp):
+  if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
+  # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
+  if len(st.views) == 1 and st.shrink(tuple((0,1) if st == 0 else (0,s) for s,st in zip(st.shape, st.views[0].strides))).contiguous: return
+  # if it has a single view and it's equal when you shrink a contig, it's fine
+  if len(st.views) == 1 and (mask:=st.views[0].mask) is not None and ShapeTracker.from_shape(st.shape).shrink(mask) == st.shrink(mask): return
+  # otherwise, it's not fine
+  raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                     +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+
+fix_kernel_ops = PatternMatcher([
+  # add the LOAD
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: x.replace(tag=None).view(x.st).load() if x.tag is not None else None),
+  # STORE (except for meta ops)
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda sink:
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(s.st.real_size()), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
+  # passthrough ASSIGN
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
+  # VALID
+  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
+   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
+  # remove CONTIGUOUS/DEVICE from kernel AST
+  (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
+  # no ImageDType after index
+  (UPat(GroupOp.All-{Ops.DEFINE_GLOBAL, Ops.VIEW}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
+  (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
 ])
