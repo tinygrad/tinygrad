@@ -1385,6 +1385,7 @@ def train_stable_diffusion():
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
   from tinygrad.helpers import Context
+  from examples.mlperf.helpers import get_training_state
   import csv, PIL
   import numpy as np
 
@@ -1402,10 +1403,11 @@ def train_stable_diffusion():
   #assert 30_000 % EVAL_BS == 0, "Eval (which generates 30,000 images) is currently implemented without padding"
   lr                 = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
 
-  # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+  # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
-  CKPT_IMAGE_INTERVAL = config["EVAL_STEP_INTERVAL"]     = 512_000 if 512_000 % BS == 0 else math.ceil(512_000 / BS)
-  #assert CKPT_IMAGE_INTERVAL % BS == 0, "This is to ensure that UNet training checkpoints are collected as per the mlperf requirements"
+  # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
+  print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
@@ -1487,7 +1489,7 @@ def train_stable_diffusion():
     optimizer.zero_grad()
     timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
 
-    for i, t in enumerate((mean_logvar, tokens, timestep)):
+    for t in (mean_logvar, tokens, timestep):
       if len(GPUS) > 1: t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
 
@@ -1598,9 +1600,8 @@ def train_stable_diffusion():
   """
 
   # training loop
-  num_seen_images = 0
   dl = batch_load_train_stable_diffusion(BS)
-  for i, batch in enumerate(dl):
+  for i, batch in enumerate(dl, start=1):
     t0 = time.perf_counter()
     GlobalCounters.reset()
 
@@ -1617,19 +1618,21 @@ def train_stable_diffusion():
       wandb.log({"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed})
 
-    num_seen_images += BS
-    if num_seen_images % CKPT_IMAGE_INTERVAL == 0:
+    if i % CKPT_STEP_INTERVAL == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
-      if WANDB and wandb.run is not None:
-        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}.safetensors"
-      else:
-        fn = f"{UNET_CKPTDIR}/{time.strftime('%Y%m%d_%H%M%S')}.safetensors"
-      print(f"saving unet ckpt to {fn}")
-      safe_save(get_state_dict(unet), fn)
+
+      if i == CKPT_STEP_INTERVAL and WANDB and wandb.run is not None:
+        with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
+          f.write(f"wandb.run.id = {wandb.run.id}")
+
+      #prefix = f"{UNET_CKPTDIR}/{i}"
+      fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+      print(f"saving training state checkpoint at {fn}")
+      safe_save(get_training_state(unet, optimizer, lr_scheduler, grad_scaler), fn)
 
       # Only checkpoint collection is required here; eval can be done offline
-      # TODO: move eval call to not block training loop
+      # TODO: move eval to trigger after certain amount of training, and enable running eval only in separate process
       #clip_score, fid_score = eval_unet()
       #print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
 

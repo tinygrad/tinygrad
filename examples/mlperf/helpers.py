@@ -15,10 +15,11 @@ from tinygrad.helpers import getenv, unwrap
 def invert_dict(d): return {v: k for k, v in reversed(d.items())}
 def dedup_dict(d): return invert_dict(invert_dict(d))
 # store each tensor into the first key it appears in
-def get_training_state(model, optimizer, scheduler):
+def get_training_state(model, optimizer, scheduler, grad_scaler=None):
   # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
   # readable and can be loaded as a model for eval
   train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
+  if grad_scaler is not None: train_state['grad_scaler'] = grad_scaler
   return dedup_dict(state.get_state_dict(train_state))
 def load_training_state(model, optimizer, scheduler, state_dict):
   # use fresh model to restore duplicate keys
