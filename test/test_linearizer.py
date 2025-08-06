@@ -802,10 +802,7 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      k = Kernel(s.ast)
-      k.shift_to(1, 4, AxisType.UPCAST)  # manual trigger float4 dim
-      k.shift_to(1, shift, AxisType.UPCAST, insert_at=k.shape_len-1)
-      return get_program(k.get_optimized_ast(), k.opts).uops
+      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
