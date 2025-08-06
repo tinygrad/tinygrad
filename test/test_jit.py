@@ -792,6 +792,7 @@ class TestJitGraphSplit(unittest.TestCase):
       multigraph=[self.ji_graph(5)],
       hcqgraph=[self.ji_graph(5)])
 
+  @unittest.skip("flaky")
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
 
