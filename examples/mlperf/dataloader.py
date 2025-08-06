@@ -544,7 +544,7 @@ class BinIdxDataset:
     self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin"))
 
   def _index(self, idx) -> tuple[int, int]:
-    return self.pointers[idx], self.sizes[idx]
+    return int(self.pointers[idx]), int(self.sizes[idx])
 
   def get(self, idx, offset:int=0, length:int|None=None):
     ptr, size = self._index(idx)
@@ -679,7 +679,8 @@ class GPTDataset:
 
 class BlendedGPTDataset:
   def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, seed:int, shuffle:bool):
-    self.seed = seed
+    self.shuffle = shuffle
+    self.rng = np.random.RandomState(seed)
 
     # normalize weights
     total_weight = sum(weights)
