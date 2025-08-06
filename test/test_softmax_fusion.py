@@ -111,6 +111,13 @@ class TestFuse(unittest.TestCase):
     with Context(NOOPT=1):
       self._test_fuse(Tensor.scaled_dot_product_attention, q, k, v, atol=1e-5)
 
+  @unittest.expectedFailure
+  def test_mismatch_reduce(self):
+    a = Tensor.ones(16, 10).contiguous().realize()
+    b = Tensor.ones(16, 20).contiguous().realize()
+    c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
+    self.assertListEqual(c.tolist(), [30]*16)
+
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
