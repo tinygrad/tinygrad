@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.opt.swizzler import merge_views, view_left, view_right, fix_kernel_ops, apply_swizzle, swizzle_reduceop
+from tinygrad.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
 import sys
@@ -194,10 +194,6 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   ast = graph_rewrite(k.arg.ast, merge_views+replace_buffers, bufs, bottom_up=True, name="replace buffers")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
-  # TODO: move these to codegen
-  ast = graph_rewrite(ast, view_left, name="Main View Left")
-  ast = graph_rewrite(ast, view_right, name="Main View Right")
-  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([
