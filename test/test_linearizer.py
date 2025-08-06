@@ -234,10 +234,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
     accs = [u for u in uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
@@ -249,9 +246,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    k = Kernel(out.schedule()[-1].ast)
-    k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(out.schedule()[-1].ast, opts=[Opt(OptOps.LOCAL, axis=0, arg=4)]).uops
     self.assertEqual(len(prg.src.split("for")), 5)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -261,10 +256,8 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    realized_ast = r.schedule()[-1].ast
     opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    program = get_program(r.schedule()[-1].ast, opts=opts_to_apply)
 
     stores = [u for u in program.uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
@@ -278,10 +271,7 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0)]).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
@@ -291,16 +281,14 @@ class TestLinearizer(unittest.TestCase):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule()[-1].ast
-        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        program = get_program(realized_ast, opts=[])
         local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule()[-1].ast
-      realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+      program = get_program(realized_ast, opts=[])
       local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
       self.assertEqual(local[0].dtype.base, expected_dtype)
 
@@ -758,11 +746,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
-
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
     assert TestFloat4.count_float4(uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
@@ -773,10 +757,7 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      k = Kernel(s.ast)
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=shift))
-      return get_program(k.get_optimized_ast(), k.opts).uops
+      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
@@ -806,10 +787,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=2))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 2)
 
@@ -842,9 +820,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UNROLL, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 0)
 
@@ -858,10 +834,7 @@ class TestFloat4(unittest.TestCase):
     # UPDATE: now we do this fusion
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
 
@@ -874,9 +847,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 1)
 
@@ -888,9 +859,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 
