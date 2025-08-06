@@ -157,17 +157,6 @@ early_buffer_ops = PatternMatcher([
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
 ])
 
-add_buffer_ops = PatternMatcher([
-  # STORE (except for meta ops)
-  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
-   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
-  # passthrough ASSIGN
-  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
-  # VALID
-  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
-   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
-])
-
 def check_load_st(glbl:UOp, view:UOp):
   if glbl.arg != 0 or (st:=unwrap(view.st)).contiguous: return
   # if it has a single view and it becomes contiguous when you shrink expanded axes, it's fine
@@ -179,6 +168,14 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
+  # STORE (except for meta ops)
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda sink:
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(s.st.real_size()), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
+  # passthrough ASSIGN
+  (UPat(Ops.ASSIGN, name="x"), lambda x: x.src[1]),
+  # VALID
+  (UPat(Ops.VIEW, src=(UPat.cvar(),), name="self"),
+   lambda self: UOp.where(UOp(Ops.VALID, dtypes.bool, (UOp(Ops.VIEW, arg=self.st),)), self.const_like(self.base.arg), 0)),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
@@ -212,7 +209,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # TODO: move these to codegen
   ast = graph_rewrite(ast, view_left, name="Main View Left")
   ast = graph_rewrite(ast, view_right, name="Main View Right")
-  ast = graph_rewrite(ast, view_left+add_buffer_ops+fix_kernel_ops, bufs, bottom_up=True, name="replace buffer")
+  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="replace buffer")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
