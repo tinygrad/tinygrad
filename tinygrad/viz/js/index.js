@@ -109,7 +109,7 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62"],
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
@@ -221,7 +221,13 @@ async function renderProfiler() {
         ctx.closePath();
         ctx.fill();
         // NOTE: y coordinates are in reverse order
-        for (let i = 0; i < x.length - 1; i++) rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], arg:e.arg });
+        for (let i = 0; i < x.length - 1; i++) {
+          let tooltipText = e.arg.tooltipText;
+          if (yscale != null && ((yaxisVal=yscale.invert(e.y1[i]))>0)) {
+            tooltipText += `\nTotal: ${formatUnit(yaxisVal, data.axes.y.fmt)}`;
+          }
+          rectLst.push({ x0:x[i], x1:x[i+1], y0:e.y1[i], y1:e.y0[i], arg:{...e.arg, tooltipText} });
+        }
         continue;
       }
       // contiguous rect
