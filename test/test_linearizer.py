@@ -241,7 +241,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    k = Kernel(r.schedule()[-1].ast)
+    k = Kernel(push_views(r.schedule()[-1].ast))
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
     k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
     uops = get_program(k.get_optimized_ast(), k.opts).uops
@@ -881,7 +881,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
+    k = Kernel(push_views(s.ast))
     k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
     uops = get_program(k.get_optimized_ast(), k.opts).uops
 
