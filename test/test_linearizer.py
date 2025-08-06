@@ -951,7 +951,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
 
     s = layer_2.schedule()[-1]
-    k = Kernel(s.ast)
+    k = Kernel(push_views(s.ast))
     k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
@@ -964,7 +964,7 @@ class TestHandCodedOpts(unittest.TestCase):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
 
     s = monster.schedule()[-1]
-    k = Kernel(s.ast)
+    k = Kernel(push_views(s.ast))
     k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
@@ -980,7 +980,7 @@ class TestHandCodedOpts(unittest.TestCase):
       wino_schedule = out.schedule()
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
-        k = Kernel(si.ast)
+        k = Kernel(push_views(si.ast))
         k.apply_opts(hand_coded_optimizations(k))
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
         if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
@@ -992,7 +992,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
       backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
-        k = Kernel(si.ast)
+        k = Kernel(push_views(si.ast))
         k.apply_opts(hand_coded_optimizations(k))
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
