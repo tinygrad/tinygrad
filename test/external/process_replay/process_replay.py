@@ -74,6 +74,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
       early_stop.set()
       break
+    name, loc = "", ""
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
@@ -90,7 +91,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
         warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
     except Exception as e:
       changed += 1
-      warnings.warn(e, ProcessReplayWarning)
+      warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
   conn.commit()
   cur.close()
 
@@ -123,5 +124,5 @@ if __name__ == "__main__":
   logging.info(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap(replayers)
   except Exception as e:
-    logging.info("process replay err", e)
+    logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))

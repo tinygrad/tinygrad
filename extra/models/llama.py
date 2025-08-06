@@ -99,7 +99,9 @@ class FeedForward:
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
   def __call__(self, x:Tensor) -> Tensor:
-    return self.w2(self.w1(x).silu() * self.w3(x)) # SwiGLU [arxiv/2002.05202, eq (5)]
+    w1 = self.w1(x).silu()
+    w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
+    return self.w2(w1 * w3)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
@@ -111,7 +113,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):

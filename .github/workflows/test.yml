@@ -329,7 +329,7 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
-        python3 -m ruff check extra/onnx.py extra/onnx_parser.py
+        python3 -m ruff check extra/onnx.py
         python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
@@ -337,7 +337,6 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-        python -m mypy --strict-equality extra/onnx_parser.py
         python -m mypy --strict-equality extra/onnx.py
 
   unittest:
@@ -871,28 +870,28 @@ jobs:
       run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
 
   osxremote:
-    name: MacOS (remote metal)
-    runs-on: macos-15
-    timeout-minutes: 10
-    env:
-      REMOTE: 1
-      REMOTEDEV: METAL
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: macos-remote
-          deps: testing_minimal
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
-          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run REMOTE=1 Test
-        run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
+   name: MacOS (remote metal)
+   runs-on: macos-15
+   timeout-minutes: 10
+   env:
+     REMOTE: 1
+     REMOTEDEV: METAL
+   steps:
+     - name: Checkout Code
+       uses: actions/checkout@v4
+     - name: Setup Environment
+       uses: ./.github/actions/setup-tinygrad
+       with:
+         key: macos-remote
+         deps: testing_minimal
+     - name: Check Device.DEFAULT and print some source
+       run: |
+         python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+         python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
+         DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+     - name: Run REMOTE=1 Test
+       run: |
+         python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
 
   amdremote:
     name: Linux (remote)
