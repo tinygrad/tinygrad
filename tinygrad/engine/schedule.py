@@ -1,9 +1,9 @@
 from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.uop.ops import UOp, Variable, Ops, UPat, PatternMatcher, buffers
+from tinygrad.uop.ops import UOp, Variable, Ops, buffers
 from tinygrad.device import Device, Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, unwrap, all_same
+from tinygrad.helpers import Metadata, all_same
 
 # **** ScheduleItem return type
 
@@ -13,26 +13,6 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[Variable, int] = field(default_factory=dict)
-
-# **** unbind Variables
-
-def unbind_view(ctx:list[dict[Variable, int]], x:UOp):
-  st = unwrap(x.st).simplify()
-  if any(x.op is Ops.BIND for x in st.vars()):
-    st, var_vals = st.unbind()
-    ctx.append(var_vals)
-    return x.replace(arg=st)
-  return None
-
-def unbind_bind(ctx:list[dict[Variable, int]], x:UOp):
-  var, val = x.unbind()
-  ctx.append({var.replace(src=()):val})
-  return var
-
-pm_unbind = PatternMatcher([
-  (UPat(Ops.VIEW, name="x"), unbind_view),
-  (UPat(Ops.BIND, name="x"), unbind_bind),
-])
 
 # **** schedule linearizer
 

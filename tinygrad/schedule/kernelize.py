@@ -169,6 +169,8 @@ replace_buffers = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: x.src[1]),
   # remove any BINDs from VIEWS
   (UPat(Ops.VIEW, src=(UPat(), UPat(Ops.BIND)), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
+  # remove any BINDs from DEFINE_VARs
+  (UPat(Ops.BIND, name="x"), lambda x: x.src[0]),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -191,7 +193,10 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
-create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
+create_ast = PatternMatcher([
+  (UPat(Ops.KERNEL, name="k"), fix_kernel_ast),
+  (UPat(Ops.DEFINE_VAR, src=(UPat(),), allow_any_len=True, name="x"), lambda x: x.replace(src=())),
+])
 
 # ** add metadata of KERNEL outputs
 
