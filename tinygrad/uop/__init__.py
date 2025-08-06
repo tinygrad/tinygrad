@@ -21,7 +21,7 @@ class Ops(FastEnum):
   BUFFERIZE = auto()
 
   # ops that adjust the behavior of the scheduler
-  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
+  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto(); FUSE_BACKWARD = auto() # noqa: E702
 
   # blocks in linearizer (only used there)
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
