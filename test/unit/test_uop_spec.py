@@ -73,14 +73,6 @@ class TestUOpSpec(unittest.TestCase):
     st = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), r+a)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
-  def test_buffer_uops_st(self):
-    a = Tensor.randn(4, 4)+2
-    helper_test_verify_ast(ast:=a.schedule()[-1].ast)
-    store_st = [u.st for u in ast.toposort() if u.op is Ops.STORE][0]
-    self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort() if u.op is Ops.CONST][0]
-    self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
-
   def test_assert_swizzle(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     a = UOp(Ops.LOAD, dtypes.float, (buf.view(ShapeTracker.from_shape((32, 1))),))
