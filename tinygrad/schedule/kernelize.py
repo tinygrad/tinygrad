@@ -172,7 +172,7 @@ replace_buffers = PatternMatcher([
   # passthrough ASSIGN (but let MSTACK process first)
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: x.src[1]),
   # remove any BINDs from VIEWS
-  (UPat(Ops.VIEW, src=(UPat(), UPat(Ops.BIND)), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
+  (UPat(Ops.VIEW, src=(UPat(), UPat((Ops.BIND, Ops.DEFINE_VAR))), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
   # remove any BINDs from DEFINE_VARs
   (UPat(Ops.BIND, name="x"), lambda x: x.src[0]),
   # remove BINDs from ShapeTrackers
