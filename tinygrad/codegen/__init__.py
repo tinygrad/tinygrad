@@ -17,6 +17,7 @@ from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexin
 from tinygrad.codegen.optional import get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.opt import pm_optimize
+from tinygrad.opt.swizzler import view_left, view_right, fix_kernel_ops
 
 @dataclass
 class RewriteStep:
@@ -43,6 +44,11 @@ def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[Rewri
 def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
+
+  # view pushing
+  ret.append(RewriteStep(view_left, name="Main View Left"))
+  ret.append(RewriteStep(view_right, name="Main View Right"))
+  ret.append(RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"))
 
   # this is kernel.py
   ret.append(RewriteStep(pm_optimize, ctx=lambda _: opts, name="optimize ast"))
