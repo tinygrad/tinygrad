@@ -214,9 +214,9 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    ast = r.schedule()[-1].ast
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=(Opt(op=OptOps.UPCAST, axis=0, arg=0),)))
+    uops = get_program(ast, Device[a.device].renderer).uops
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
@@ -227,9 +227,9 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    ast = r.schedule()[-1].ast
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=(Opt(op=OptOps.UPCAST, axis=0, arg=0),)))
+    uops = get_program(ast, Device[a.device].renderer).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
