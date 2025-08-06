@@ -134,14 +134,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  # TODO: remove this hack. it's needed because swizzler replaces MovementOps with VIEW up to the base
-  @functools.cached_property
-  def mop_st(self) -> ShapeTracker:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    if self.op is Ops.VIEW: return self.arg
-    if self.op in GroupOp.Movement: return self.src[0].mop_st.mop(self.op, self.arg)
-    return ShapeTracker.from_shape(self.shape)
-
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
@@ -153,8 +145,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
-    if self.op in {Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}:
-      return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
+    if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
