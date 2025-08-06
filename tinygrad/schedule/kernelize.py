@@ -152,7 +152,7 @@ create_kernels = PatternMatcher([
 
 early_buffer_ops = PatternMatcher([
   # LOAD
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp.load(UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).view(x.st),)),
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x), tag=1)),
   # no SINK for meta ops
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
 ])
@@ -168,6 +168,8 @@ def check_load_st(glbl:UOp, view:UOp):
                      +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
 
 fix_kernel_ops = PatternMatcher([
+  # add the LOAD
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: x.replace(tag=None).view(x.st).load() if x.tag is not None else None),
   # STORE (except for meta ops)
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda sink:
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(s.st.real_size()), (), i).view(s.st), s) for i,x in enumerate(sink.src)])),
