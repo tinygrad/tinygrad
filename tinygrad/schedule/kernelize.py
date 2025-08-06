@@ -176,7 +176,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # TODO: move these to codegen
   ast = graph_rewrite(ast, view_left, name="Main View Left")
   ast = graph_rewrite(ast, view_right, name="Main View Right")
-  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="replace buffer")
+  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
 create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
