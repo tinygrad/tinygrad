@@ -107,7 +107,7 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="r1"),), name="r2"),
    lambda r1,r2: r1.replace(arg=(r1.arg[0], r2.arg[1]+r1.arg[1])) if r1.arg[0] is r2.arg[0] else None),
   # remove view from sink
-  (UPat(Ops.VIEW, name="v").sink(), lambda v: v.src[0].sink()),
+  (UPat(Ops.VIEW, name="v").sink(name="sink"), lambda v,sink: v.src[0].sink(arg=sink.arg)),
 ])
 
 def check_load_st(glbl:UOp, view:UOp):
