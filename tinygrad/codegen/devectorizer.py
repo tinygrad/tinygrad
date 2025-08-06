@@ -316,6 +316,9 @@ def reduce_rangeless(red:UOp):
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
+  # lift range out of add chain
+  ((UPat.var("x")+UPat.var("y")) + UPat.var("z"), lambda x,y,z: (x+z)+y if no_range(x) and no_range(z) and (not no_range(y)) and
+   z.op not in (Ops.CONST, Ops.VCONST) else None),
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
