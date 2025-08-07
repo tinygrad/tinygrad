@@ -14,6 +14,7 @@ try:
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt.kernel import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+  from tinygrad.device import Device
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
@@ -53,6 +54,8 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts
   # NOTE: this always uses the opts_to_apply path
   sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
   input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
+  # if no renderer was provided, open the device to get it
+  if renderer is None: renderer = Device[p.device].renderer
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
