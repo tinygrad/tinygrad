@@ -1541,13 +1541,10 @@ def train_stable_diffusion():
     
     @TinyJit
     def denoise_step(x:Tensor, t:Tensor, uc:Tensor, c:Tensor, alpha_prev:Tensor, unet:UNetModel, GPUS) -> Tensor:
-    # Workaround for a bug with cat in multi: https://raw.githubusercontent.com/hooved/train-sd/refs/heads/master/multi_bug_2.txt
-    #def denoise_step(x:Tensor, x_x:Tensor, t:Tensor, t_t:Tensor, uc_c:Tensor, alpha_prev:Tensor, unet:UNetModel) -> Tensor:
-      #out_uncond, out = unet(x.cat(x), t.cat(t), uc_c).chunk(2)
+    # Workaround because x.cat(x) doesn't work on multi: https://raw.githubusercontent.com/hooved/train-sd/refs/heads/master/multi_bug_2.txt
       x_x = Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64).shard(GPUS, axis=0)
       t_t = Tensor.stack(t.to("CPU"), t.to("CPU"), dim=1).reshape(-1).shard(GPUS, axis=0)
       uc_c = Tensor.stack(uc.to("CPU"), c.to("CPU"), dim=1).reshape(-1, 77, 1024).shard(GPUS, axis=0)
-      #out_uncond, out = unet(x_x, t_t, uc_c).chunk(2)
       out_uncond, out = unet(x_x, t_t, uc_c).to("CPU").reshape(-1, 2, 4, 64, 64).chunk(2, dim=1)
       out_uncond = out_uncond.squeeze(1).shard(GPUS,axis=0)
       out = out.squeeze(1).shard(GPUS,axis=0)
@@ -1559,9 +1556,7 @@ def train_stable_diffusion():
       pred_x0 = sqrt_alphas_cumprod_t * x - sqrt_one_minus_alphas_cumprod_t * v_t
       dir_xt = (1. - alpha_prev).sqrt() * e_t
       x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
-      #return x_prev
-      ret = x_prev.realize()
-      return ret
+      return x_prev
 
     @TinyJit
     def decode(x:Tensor) -> Tensor:
@@ -1607,59 +1602,34 @@ def train_stable_diffusion():
         captions = [row["caption"] for row in batch]
         captions = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in captions], dim=0)
         x = Tensor.randn(EVAL_BS,4,64,64)
-        #x_x = x.cat(x)
-        #uc_c = uncond_tokens.cat(captions)
         for t in (x, captions):
-        #for t in (x, uc_c):
           if len(GPUS) > 1: t.shard_(GPUS, axis=0)
           else: t.to_(GPUS[0])
         c = jit_context_step(captions)
-        #uc_c = jit_context_step(uc_c)
 
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
           ts = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.int, device="CPU")
-          #ts_ts = ts.cat(ts)
-          #for t in (ts, ts_ts):
           for t in (ts,):
             if len(GPUS) > 1: t.shard_(GPUS, axis=0)
             else: t.to_(GPUS[0])
 
           x = denoise_step(x, ts, uc, c, alpha_prev, unet, GPUS)
-          #x = denoise_step(x:Tensor, x_x:Tensor, t:Tensor, t_t:Tensor, uc_c:Tensor, alpha_prev:Tensor, unet:UNetModel) -> Tensor:
-          #x = denoise_step(x, x_x, ts, ts_ts, uc_c, alpha_prev, unet)
-      
-        #x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
-        #x = model.first_stage_model.decoder(x)
-        #x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+
         x = decode(x)
-        #inception_activation = inception(x)
         inception_activation = jit_inception(x)
         inception_activations.append(inception_activation.squeeze(3).squeeze(2).to("CPU"))
 
         ### clip preprocessing
-        # TODO: replace numpy with Tensors
         # Tensor.interpolate does not yet support bicubic
         # without to("AMD:0").realize: AttributeError: 'MultiBuffer' object has no attribute 'ensure_allocated'. Did you mean: 'is_allocated'?
         x = (x.to("AMD:0").realize().permute(0,2,3,1) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
         downscaled = []
         for i in range(x.shape[0]):
-          #y = (x[i].permute(1,2,0) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
-          #r = np.array(PIL.Image.fromarray(y).resize((224,224), PIL.Image.BICUBIC))
           downscaled.append(np.array(PIL.Image.fromarray(x[i]).resize((224,224), PIL.Image.BICUBIC)))
-        #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
-
-        #r = Tensor(r).permute(2,0,1).cast(dtypes.float) / 255
         r = (Tensor.stack(*[Tensor(ds, device="CPU") for ds in downscaled], dim=0).permute(0,3,1,2).cast(dtypes.float) / 255).shard(GPUS, axis=0)
         normalized = ((r - clip_encoder.mean) / clip_encoder.std)
-
-        #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(caption) for caption in captions], dim=0)
-        #clip_score = clip_encoder.get_clip_score(tokens, normalized.unsqueeze(0))
-        # NOTE: some token encoding steps here are redundant with above
-        #clip_score = clip_encoder.get_clip_score(captions, normalized.unsqueeze(0))
-        #clip_score = jit_clip_score(captions, normalized.unsqueeze(0))
-
         clip_score = jit_clip_score(captions, normalized)
         clip_scores.append(clip_score.to("CPU"))
         elapsed = time.perf_counter() - t0
