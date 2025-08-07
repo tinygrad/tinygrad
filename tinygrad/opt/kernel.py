@@ -33,6 +33,11 @@ axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", A
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
                AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
+def new_shape_fxn(axis:int, amount:int, top:bool, x:tuple[sint, ...]):
+  amt = amount if amount != 0 else x[axis]
+  if x[axis] % amt != 0: raise RuntimeError(f"LATE invalid shift {x[axis]=}, {amt=}")
+  return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if x[axis] > 1 else (1,1)) + x[axis+1:]
+
 class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -179,12 +184,8 @@ class Kernel:
     self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
-    def new_shape_fxn(x):
-      amt = amount if amount != 0 else x[axis]
-      check(x[axis] % amt == 0, f"no longer valid shift {x[axis]=}, {amt=}")
-      return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if x[axis] > 1 else (1,1)) + x[axis+1:]
     new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
-    self.reshape(new_shape_fxn)
+    self.reshape(functools.partial(new_shape_fxn, axis, amount, top))
     self.permute(new_axes)
 
   # ******************** complex simplifiers ********************
@@ -274,6 +275,9 @@ class Kernel:
       check(isinstance(opt.arg, int), "arg should be int")
       amt = cast(int, opt.arg)
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
+      if opt.op is not OptOps.PADTO:
+        for s in self.sts: check(s.shape[axis] == 1 or amt == 0 or s.shape[axis] % amt == 0,
+                                 f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
