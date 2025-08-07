@@ -7,6 +7,7 @@ from tinygrad.opt.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
+from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -49,11 +50,11 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
 
   def test_all_opts(self, opts=None, exclude=None):
-    k = Kernel(Tensor.arange(256).schedule()[-1].ast)
+    k = Kernel(apply_rewrites(Tensor.arange(256).schedule()[-1].ast, rewrites_for_views))
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_256 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
-    k = Kernel(Tensor.arange(2560).schedule()[-1].ast)
+    k = Kernel(apply_rewrites(Tensor.arange(2560).schedule()[-1].ast, rewrites_for_views))
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_2560 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
