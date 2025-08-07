@@ -30,7 +30,7 @@ export HCQDEV_WAIT_TIMEOUT_MS=300000
 
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
-export GPUS=6 BS=12 EVAL_BS=12
+export GPUS=6 BS=6 EVAL_BS=36
 #export GPUS=1 BS=1 EVAL_BS=1
 
 export RUN_EVAL=1
