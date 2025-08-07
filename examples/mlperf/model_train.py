@@ -1599,6 +1599,12 @@ def train_stable_diffusion():
         GlobalCounters.reset()
 
         batch = eval_inputs[batch_idx: batch_idx + EVAL_BS]
+
+        # pad the last batch, for when len(eval_inputs) % EVAL_BS != 0
+        unpadded_bs = len(batch)
+        if unpadded_bs < EVAL_BS:
+          batch = batch + [batch[-1]] * (EVAL_BS - unpadded_bs)
+
         captions = [row["caption"] for row in batch]
         captions = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in captions], dim=0)
         x = Tensor.randn(EVAL_BS,4,64,64)
@@ -1619,7 +1625,7 @@ def train_stable_diffusion():
 
         x = decode(x)
         inception_activation = jit_inception(x)
-        inception_activations.append(inception_activation.squeeze(3).squeeze(2).to("CPU"))
+        inception_activations.append(inception_activation.squeeze(3).squeeze(2).to("CPU").realize()[0:unpadded_bs].realize())
 
         ### clip preprocessing
         # Tensor.interpolate does not yet support bicubic
@@ -1631,7 +1637,7 @@ def train_stable_diffusion():
         r = (Tensor.stack(*[Tensor(ds, device="CPU") for ds in downscaled], dim=0).permute(0,3,1,2).cast(dtypes.float) / 255).shard(GPUS, axis=0)
         normalized = ((r - clip_encoder.mean) / clip_encoder.std)
         clip_score = jit_clip_score(captions, normalized)
-        clip_scores.append(clip_score.to("CPU"))
+        clip_scores.append(clip_score.to("CPU").realize()[0:unpadded_bs].realize())
         elapsed = time.perf_counter() - t0
         print(f"elapsed:{elapsed:0.3f}, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS")
 

@@ -42,6 +42,6 @@ export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"
 mkdir -p $UNET_CKPTDIR
 
 export WANDB=1
-#export PARALLEL=0
+export PARALLEL=4
 
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
