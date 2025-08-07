@@ -271,7 +271,10 @@ class Kernel:
       check(isinstance(opt.arg, int), "arg should be int")
       amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
-      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+      if opt.op is not OptOps.PADTO:
+        # we check both the full_shape and each shape
+        check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+        for st in self.sts: check(st.shape[axis] == 1 or st.shape[axis] % amt == 0, f"no longer valid shift {st.shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
