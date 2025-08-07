@@ -9,7 +9,6 @@ from tinygrad.device import Device
 
 # Explicitly set USE_TC ContextVar to match TC environment variable
 tc_value = int(os.getenv("TC", "0"))
-print(f"Before update: USE_TC.value = {USE_TC.value}, tc_value = {tc_value}")
 
 # Map TC=3 to a valid value (1 or 2) for use_tensor_cores
 # The apply_tensor_cores method only accepts 0, 1, or 2
@@ -18,8 +17,6 @@ if tc_value > 2:
     USE_TC.value = 2
 else:
     USE_TC.value = tc_value
-
-print(f"After update: USE_TC.value = {USE_TC.value} (mapped from TC={tc_value})")
 
 dtype_in = dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else dtypes.float
 acc_dtype = dtypes.half if getenv("ACC_HALF") else dtypes.bfloat16 if getenv("ACC_BFLOAT16") else None

@@ -344,132 +344,34 @@ class Kernel:
   # **** kernel outputs, mostly tensor cores ****
 
   def _create_tc_opts(self, reduceop:UOp, tc:TensorCore, axis:int, opt_level:int) -> TensorCoreOptions|None:
-    print(f"DEBUG: _create_tc_opts called with tc.dims={tc.dims}, tc.dtype_in={tc.dtype_in}, tc.dtype_out={tc.dtype_out}, axis={axis}, opt_level={opt_level}")
     has_cast = tc.dtype_in != tc.dtype_out
-    print(f"DEBUG: has_cast={has_cast}")
-    if has_cast:
-      print(f"DEBUG: reduceop.src[0].op is Ops.CAST? {reduceop.src[0].op is Ops.CAST}")
-      if reduceop.src[0].op is Ops.CAST:
-        print(f"DEBUG: reduceop.src[0].dtype == tc.dtype_out? {reduceop.src[0].dtype == tc.dtype_out}")
-    
-    if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out):
-      print(f"DEBUG: Early return: has_cast but not matching CAST op")
-      return None
+    if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
-    print(f"DEBUG: mul_op.op is Ops.MUL? {mul_op.op is Ops.MUL}")
-    if mul_op.op is not Ops.MUL:
-      print(f"DEBUG: Early return: mul_op.op is not Ops.MUL")
-      return None
+    if mul_op.op is not Ops.MUL: return None
 
     def buf_index(src:UOp) -> int|None:
       # TODO: apply tc even if the sources are not from LOAD
-      print(f"DEBUG: buf_index called with src.op={src.op}, src.dtype={src.dtype}")
-      if src.op is Ops.LOAD and src.dtype == tc.dtype_in:
-        try:
-          idx = self.bufs.index(src)
-          print(f"DEBUG: Found LOAD index: {idx}")
-          return idx
-        except ValueError:
-          print(f"DEBUG: ValueError finding LOAD index")
-          return None
+      if src.op is Ops.LOAD and src.dtype == tc.dtype_in: return self.bufs.index(src)
       try:
-        if opt_level >= 1 and src.op is Ops.CAST and src.dtype == tc.dtype_in:
-          idx = self.bufs.index(src.src[0])
-          print(f"DEBUG: Found CAST index: {idx}")
-          return idx
-      except ValueError:
-        print(f"DEBUG: ValueError finding CAST index")
-        return None
-      print(f"DEBUG: No matching index found")
+        if opt_level >= 1 and src.op is Ops.CAST and src.dtype == tc.dtype_in: return self.bufs.index(src.src[0])
+      except ValueError: return None
       return None
-    
-    buf0 = buf_index(mul_op.src[0])
-    buf1 = buf_index(mul_op.src[1])
-    print(f"DEBUG: buf0={buf0}, buf1={buf1}")
-    if buf0 is None or buf1 is None:
-      print(f"DEBUG: Early return: buf0 or buf1 is None")
-      return None
+    if (buf0:=buf_index(mul_op.src[0])) is None or (buf1:=buf_index(mul_op.src[1])) is None: return None
 
     buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
-    print(f"DEBUG: buf0_strides={buf0_strides}, buf1_strides={buf1_strides}")
-    print(f"DEBUG: upcastable_dims={self.upcastable_dims}")
-    
     axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i in self.upcastable_dims if buf0_strides[i] == 0]
     axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i in self.upcastable_dims if buf1_strides[i] == 0]
-    print(f"DEBUG: axis_buf0={axis_buf0}, axis_buf1={axis_buf1}")
-    
-    reduce_axes = self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)
-    print(f"DEBUG: reduce_axes={reduce_axes}, len={len(reduce_axes)}")
-    
-    if not (axis_buf0 and axis_buf1 and (len(reduce_axes) == 1 or (opt_level >= 1))):
-      print(f"DEBUG: Early return: axis_buf0={bool(axis_buf0)}, axis_buf1={bool(axis_buf1)}, len(reduce_axes)={len(reduce_axes)}, opt_level={opt_level}")
-      return None
+    if not (axis_buf0 and axis_buf1 and (len(self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (opt_level >= 1))): return None
 
-    axis_choices = list(itertools.product(axis_buf0, axis_buf1, reduce_axes))
-    print(f"DEBUG: axis_choices={axis_choices}, len={len(axis_choices)}, axis={axis}")
-    
-    if not (axis < len(axis_choices)):
-      print(f"DEBUG: Early return: axis >= len(axis_choices)")
-      return None
+    axis_choices = list(itertools.product(axis_buf0, axis_buf1, self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)))
+    if not (axis < len(axis_choices)): return None
 
     s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
-    print(f"DEBUG: s0={s0}, s1={s1}, s2={s2}")
-    
     axis_pads = tuple((x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if resolve(self.full_shape[x]%tc.dims[i] != 0))
-    print(f"DEBUG: axis_pads={axis_pads}, opt_level={opt_level}")
-    
-    if axis_pads and (opt_level < 2):
-      print(f"DEBUG: Early return: axis_pads and opt_level < 2")
-      return None
-    
+    if axis_pads and (opt_level < 2): return None
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
-    print(f"DEBUG: Successfully created TensorCoreOptions")
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
-
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
-    print(f"DEBUG: _apply_tc_opt called with use_tensor_cores={use_tensor_cores}, axis={axis}, tc_select={tc_select}, opt_level={opt_level}")
-    print(f"DEBUG: self.reduceop is None? {self.reduceop is None}")
-    if self.reduceop is not None:
-      print(f"DEBUG: self.reduceop.arg[0] is Ops.ADD? {self.reduceop.arg[0] is Ops.ADD}")
-    
-    if use_tensor_cores and self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
-      tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
-      print(f"DEBUG: Number of tensor cores available: {len(tensor_cores)}")
-      for tc_idx, tc in enumerate(tensor_cores):
-        print(f"DEBUG: Processing tensor core {tc_idx}, dims={tc.dims}, dtype_in={tc.dtype_in}, dtype_out={tc.dtype_out}")
-        tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
-        print(f"DEBUG: tensor_core_opts created: {[opt is not None for opt in tensor_core_opts]}")
-        # can only fuse reduces with the same tc options
-        assert all_same(tensor_core_opts)
-        if tensor_core_opts[0] is None:
-          print(f"DEBUG: tensor_core_opts[0] is None, skipping this tensor core")
-          continue
-        self.tensor_core_opts = tc_opts = tensor_core_opts[0]
-        print(f"DEBUG: tensor_core_opts set, axes={tc_opts.axes}, axis_pads={tc_opts.axis_pads}")
-
-        # attempt to pad the tensor axes that require it
-        try:
-          for pad_axis, dim in tc_opts.axis_pads:
-            print(f"DEBUG: Applying PADTO opt for axis={pad_axis}, dim={dim}")
-            self.apply_opt(Opt(OptOps.PADTO, pad_axis, dim), append_opt=False) # PADTO might fail
-        except KernelOptError as e:
-          print(f"DEBUG: KernelOptError during PADTO: {e}")
-          continue
-        # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
-        print(f"DEBUG: Applying tensor core opts: {tc.opts}")
-        for opt in tc.opts:
-          print(f"DEBUG: Applying {opt[0]} opt for axis={tc_opts.axes[int(opt[1])]}")
-          self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], tc_opts.axes[int(opt[1])], 2), append_opt=False)
-        for dim, amt in tc.get_reduce_axes():
-          print(f"DEBUG: Applying UNROLL opt for dim={dim}, amt={amt}")
-          self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False) # TODO: this should be the reduce, not 0
-        self.tensor_core = tc
-        self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
-        print(f"DEBUG: Successfully applied tensor core optimization!")
-        return True
-    print(f"DEBUG: Failed to apply tensor core optimization")
-    return False
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:list[Opt]|None=None, axis:int=0, tc_select:int|None=None, tc_opt:int|None=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
