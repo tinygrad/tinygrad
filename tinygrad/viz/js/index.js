@@ -4,13 +4,6 @@ const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
 
-const coloredSpan = ({ st, color }) => {
-  const ret = document.createElement("span");
-  ret.textContent = st;
-  ret.style.color = color;
-  return ret;
-}
-
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
@@ -181,15 +174,14 @@ async function renderProfiler() {
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
-      const coloredName = parseColors(e.name);
-      const label = coloredName.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { name:e.name, tooltipText:coloredName.concat(["\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : "")]), ...ref };
+      const arg = { name:e.name, tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
 
       var chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
       for (let i = chunkStart; i <= chunkEnd; i++) {
@@ -426,10 +418,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      if (Array.isArray(foundRect.tooltipText)) {
-        tooltip.replaceChildren(...foundRect.tooltipText.map(t => typeof t === "string" ? document.createTextNode(t) : coloredSpan(t)));
-      }
-      else tooltip.innerText = foundRect.tooltipText;
+      tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -562,7 +551,7 @@ async function main() {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      p.replaceChildren(...parseColors(name).map(coloredSpan));
+      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
@@ -701,7 +690,9 @@ async function main() {
         metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
         const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
         for (const line of diff) {
-          diffCode.appendChild(coloredSpan({ st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}));
+          const span = diffCode.appendChild(document.createElement("span"));
+          span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+          span.innerText = line;
           diffCode.appendChild(document.createElement("br"));
         }
         diffCode.className = "wrap";
