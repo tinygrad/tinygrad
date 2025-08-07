@@ -274,8 +274,8 @@ class Kernel:
       amt = cast(int, opt.arg)
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
       if opt.op is not OptOps.PADTO:
-        for s in self.sts: check(s.shape[axis] == 1 or amt == 0 or s.shape[axis] % amt == 0,
-                                 f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+        for st in self.sts: check(st.shape[axis] == 1 or amt == 0 or st.shape[axis] % amt == 0,
+                                  f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
