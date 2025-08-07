@@ -45,15 +45,16 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 def merge_contiguous_reduces(reduce: UOp, view: UOp):
-    st = view.st
-    if not all_int(st.shape) or not all_int(st.views[-1].strides): return None
-    reduce_axis = reduce.arg[1]
-    if len(reduce_axis) == 1 or (sorted_axis:=sorted(reduce_axis))!=list(range(sorted_axis[0], sorted_axis[0]+len(sorted_axis))): return None
-    reduced_shape = sorted([(d,s) for d,s in zip(st.shape[sorted_axis[0]:sorted_axis[-1]+1], st.views[-1].strides[sorted_axis[0]:sorted_axis[-1]+1])], key=lambda x: x[1])
-    for i, (d,s) in enumerate(reduced_shape[1:], start=1):
-        if s != d*reduced_shape[i-1][1]: return None
-    new_shape = st.shape[:sorted_axis[0]] + (prod(d for (d, _) in reduced_shape),) + st.shape[sorted_axis[-1]+1:]
-    return view.reshape(new_shape).r(reduce.arg[0], (sorted_axis[0],)).reshape(tuple(1 if i in reduce_axis else s for i,s in enumerate(st.shape)))
+  st = view.st
+  if not all_int(st.shape) or not all_int(st.views[-1].strides): return None
+  reduce_axis = reduce.arg[1]
+  if len(reduce_axis) == 1 or (sorted_axis:=sorted(reduce_axis))!=list(range(sorted_axis[0], sorted_axis[0]+len(sorted_axis))): return None
+  reduced_shape = sorted([(d,s) for d,s in zip(st.shape[sorted_axis[0]:sorted_axis[-1]+1], st.views[-1].strides[sorted_axis[0]:sorted_axis[-1]+1])],
+    key=lambda x: x[1])
+  for i, (d,s) in enumerate(reduced_shape[1:], start=1):
+    if s != d*reduced_shape[i-1][1]: return None
+  new_shape = st.shape[:sorted_axis[0]] + (prod(d for (d, _) in reduced_shape),) + st.shape[sorted_axis[-1]+1:]
+  return view.reshape(new_shape).r(reduce.arg[0], (sorted_axis[0],)).reshape(tuple(1 if i in reduce_axis else s for i,s in enumerate(st.shape)))
 
 def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
