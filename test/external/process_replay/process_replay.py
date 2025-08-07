@@ -48,9 +48,9 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   input_ast = ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast
-  p2 = get_program(input_ast, renderer, opts)
+  p2 = get_program(input_ast, renderer, opts=opts)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
     if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
