@@ -206,6 +206,7 @@ spec = PatternMatcher([
 ])
 
 # *** this is the UOp AST spec ***
+
 ast_spec = PatternMatcher([
   # VIEW can only exist in the edges
   (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
