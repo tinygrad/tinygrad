@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, DEBUG, SPLIT_REDUCEOP, flatten
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
@@ -239,7 +239,8 @@ new_fusion = PatternMatcher([
   (UPat(Ops.FUSE, src=(UPat(Ops.CONTIGUOUS, name="c"),)), lambda c: c.src[0].fuse() if c.tag == 2 else c),
   (UPat(Ops.FUSE, src=(UPat(name="s"),)), lambda s: s.replace(src=tuple([y.fuse() for y in s.src]))),
   # remove CONTIGUOUS if there's no BUFFER upsteam
-  (UPat(Ops.CONTIGUOUS, name="c"), lambda c: None if c.tag != 2 or any(x.op is Ops.BUFFER for x in c.toposort()) else c.src[0]),
+  (UPat(Ops.CONTIGUOUS, name="c"),
+   lambda c: None if c.tag != 2 or any(x.op in GroupOp.UnsafePad.union({Ops.BUFFER}) for x in c.toposort()) else c.src[0]),
 ])
 
 finalize_contiguous = PatternMatcher([
@@ -274,8 +275,9 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
 
   # insert contiguous in places determined by the realize map
+  forced_realize = flatten([x.base.src if x.base.op is Ops.MSTACK else [x.base] for x in tensor_map[sink].src])
   realize_map = group_realizes(tensor_map[sink])
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=(realize_map, tensor_map[sink].src),
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=(realize_map, forced_realize),
                                  bottom_up=True, input_map=tensor_map, name="add_contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], new_fusion, input_map=tensor_map, name="new_fusion")
   tensor_map = graph_rewrite_map(tensor_map[sink], finalize_contiguous+remove_tags, input_map=tensor_map, name="finalize_contiguous")
