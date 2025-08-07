@@ -145,11 +145,11 @@ class LAMB(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, (t, g) in enumerate(zip(params, grads)):
-      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
-      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
+      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g.to(self.m[i].device)).cast(self.m[i].dtype))
+      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * g.to(self.v[i].device) ** 2).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
-      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+      up = (m_hat / (v_hat.sqrt() + self.eps)).to(t.device) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
         r2 = up.square().sum().sqrt()

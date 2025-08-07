@@ -1346,6 +1346,9 @@ def train_llama3():
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
+  if getenv("OFFLOAD_OPTIM"):
+    for t in optim.m + optim.v + [optim.b1_t, optim.b2_t]: t.to_("CPU")
+
   @TinyJit
   @Tensor.train()
   def train_step(model, tokens:Tensor, grad_acc:int):
