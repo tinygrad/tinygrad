@@ -115,32 +115,6 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-function generateKernelColor(sat = 0.67, light = 0.25) {
-  const h = Math.random();
-  return hslToHex(h, sat, light);
-
-  function hslToHex(h, s, l) {
-    const [r, g, b] = hslToRgb(h, s, l);
-    return '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
-  }
-
-  function hslToRgb(h, s, l) {
-    const hue2rgb = (p, q, t) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1/6) return p + (q - p) * 6 * t;
-      if (t < 1/2) return q;
-      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-      return p;
-    };
-
-    if (s === 0) return [l, l, l];
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return [hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)];
-  }
-}
-
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = false;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -201,8 +175,8 @@ async function renderProfiler() {
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
       if (!colorMap.has(colorKey)) {
-        if (colorScheme[k]) colorMap.set(colorKey, colorScheme[k][colorMap.size%colorScheme[k].length]);
-        else colorMap.set(colorKey, generateKernelColor());
+        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
+        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
@@ -220,18 +194,13 @@ async function renderProfiler() {
         lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
 
         // add a shape for the current chunk
-        spatialTimeline[i] ??= {};
-        spatialTimeline[i][lodIdx] ??= [];
-        spatialTimeline[i][lodIdx].push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
 
         // this block won't be displayed on higher LODs, create a proxy for it
         for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
           const ix = Math.floor((e.st-st) / timelineLODThresholds[jlod + 1]);
           const iy = offsetY+levelHeight*e.depth;
-          tempProxiesBuilder[i] ??= {};
-          tempProxiesBuilder[i][jlod] ??= {};
-          tempProxiesBuilder[i][jlod][ix] ??= {};
-          tempProxiesBuilder[i][jlod][ix][iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor: fillColor };
+          ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor };
           tempProxiesBuilder[i][jlod][ix][iy].pct += e.dur / timelineLODThresholds[jlod + 1];
         }
       }
@@ -243,10 +212,8 @@ async function renderProfiler() {
         const lod = +lodIdx;
         for (const [ix, ys] of Object.entries(rects)) {
           for (const [iy, e] of Object.entries(ys)) {
-            timelineProxies[i] ??= {};
-            timelineProxies[i][lod] ??= [];
-            const arg = { name:null, tooltipText:"merged cells, zoom in"};
-            timelineProxies[i][lod].push({x: e.x, y: e.y, width: timelineLODThresholds[lod + 1] * Math.max(0.1, Math.min(e.pct, 1.0)), height: e.h, fillColor: e.fillColor, arg});
+            ((timelineProxies[i] ??= {})[lod] ??= []).push({x: e.x, y: e.y, width: timelineLODThresholds[lod+1] * Math.max(0.1, Math.min(e.pct, 1.0)),
+              height: e.h, fillColor: e.fillColor, arg:{ name:null, tooltipText:"merged cells, zoom in"}});
           }
         }
       }
@@ -273,7 +240,6 @@ async function renderProfiler() {
       }
     }
     // lastly, adjust device rect by number of levels
-    console.log(timeline.shapes.length, mem.shapes.length, timeline.maxDepth, mem.peak);
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
 
     data.gridlines.add(offsetY + Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding-5);
