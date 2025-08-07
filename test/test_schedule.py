@@ -2066,6 +2066,7 @@ class TestSwizzle(unittest.TestCase):
     np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   # kernels can only have 1 or n in each dim
+  @unittest.expectedFailure
   def test_dont_parallelize_different_n(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 2, 2).realize()

@@ -179,10 +179,8 @@ class Kernel:
     self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
+    def new_shape_fxn(x): return x[0:axis] + (((amount,x[axis]//amount) if top else (x[axis]//amount,amount)) if x[axis] > 1 else (1,1)) + x[axis+1:]
     new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
-    def new_shape_fxn(x:tuple[sint, ...]):
-      amt = amount if amount != 0 else x[axis]
-      return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if resolve(x[axis] > 1) else (1,1)) + x[axis+1:]
     self.reshape(new_shape_fxn)
     self.permute(new_axes)
 
@@ -271,11 +269,9 @@ class Kernel:
     if opt.op is OptOps.SWAP: amt = self.real_axis(opt.op, cast(int, opt.arg))  # arg is an axis in the SWAPs
     elif opt.arg is not None:
       check(isinstance(opt.arg, int), "arg should be int")
-      amt = cast(int, opt.arg)
+      amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
-      if opt.op is not OptOps.PADTO:
-        for st in self.sts: check(st.shape[axis] == 1 or amt == 0 or st.shape[axis] % amt == 0,
-                                  f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
