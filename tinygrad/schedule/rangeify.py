@@ -82,4 +82,7 @@ pm_rangeify = PatternMatcher([
   # move MAP through elementwise ALU
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([UOp(Ops.INDEX, dtype=s.dtype, src=(s,)+x.src[1:]) for s in x.src[0].src]))),
+
+  # CONST can't have axes
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c),
 ])
