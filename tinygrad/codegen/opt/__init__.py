@@ -22,7 +22,11 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
   k = Kernel(ast, opts=renderer)
   if ast.arg is not None and ast.arg.opts_to_apply is not None: k.apply_opts(ast.arg.opts_to_apply)
   elif not NOOPT:
-    if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
+    print(f"DEBUG: In get_optimized_ast, USE_TC.value = {USE_TC.value}")
+    print(f"DEBUG: k.opts.tensor_cores available: {len(k.opts.tensor_cores) if hasattr(k.opts, 'tensor_cores') else 'None'}")
+    tc_applied = k.apply_tensor_cores(USE_TC.value)
+    print(f"DEBUG: apply_tensor_cores returned: {tc_applied}")
+    if not tc_applied: k.apply_opts(hand_coded_optimizations(k))
     if BEAM >= 1:
       from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
       kb = Kernel(ast, opts=renderer)
