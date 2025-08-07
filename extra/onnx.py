@@ -730,18 +730,19 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
       else: raise ValueError(f"invalid {nearest_mode=}")
       return index.cast(dtypes.int32).clip(0, input_dim-1)
-    def _apply_transformation(index: Tensor, input_dim, scale_dim, mode):
+    def _apply_transformation(index: Tensor, input_dim, scale_dim, t_mode):
       # TODO: needs more testing, not confident in this
       # NOTE: their reference implementation differ from the implementation in their reference docs
       # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
       # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
       output_dim = scale_dim * input_dim
-      if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-      elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
-      elif mode == "asymmetric": index = index / scale_dim
-      elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
-      elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
+      if t_mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
+      elif t_mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
+      elif t_mode == "asymmetric": index = index / scale_dim
+      elif t_mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
+      elif t_mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
       else: raise NotImplementedError(f"invalid {coordinate_transformation_mode=}")
+      if mode == "cubic": return index
       return index.clip(0, input_dim-1)
 
     scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
@@ -784,24 +785,18 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape, index = [1] * X.ndim, indexes[i]
         reshape[i] = expand[i] = sizes[i]
 
-        p = index.floor().cast(dtypes.int32)
+        p = index.floor().int()
+        # ratio = (index == index.int()).where(1, index - p)
         ratio = index - p.cast(index.dtype)
 
         # Calculate indices
-        idx0 = p - 1
-        idx1 = p
-        idx2 = p + 1
-        idx3 = p + 2
+        idx0, idx1, idx2, idx3 = [p + i for i in [-1, 0, 1, 2]]
 
         # Calculate coefficients
-        ratio_plus_1 = ratio + 1
-        one_minus_ratio = 1.0 - ratio
-        one_minus_ratio_plus_1 = one_minus_ratio + 1.0
-
-        c0 = ((A * ratio_plus_1 - 5 * A) * ratio_plus_1 + 8 * A) * ratio_plus_1 - 4 * A
+        c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
         c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1.0
-        c2 = ((A + 2) * one_minus_ratio - (A + 3)) * one_minus_ratio * one_minus_ratio + 1.0
-        c3 = ((A * one_minus_ratio_plus_1 - 5 * A) * one_minus_ratio_plus_1 + 8 * A) * one_minus_ratio_plus_1 - 4 * A
+        c2 = ((A + 2) * (1.0 - ratio) - (A + 3)) * (1.0 - ratio) * (1.0 - ratio) + 1.0
+        c3 = ((A * ((1.0 - ratio) + 1.0) - 5 * A) * ((1.0 - ratio) + 1.0) + 8 * A) * ((1.0 - ratio) + 1.0) - 4 * A
 
         if exclude_outside:
           c0 = (p - 1 >= 0).where(c0, 0)
