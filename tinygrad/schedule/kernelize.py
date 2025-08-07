@@ -240,7 +240,8 @@ new_fusion = PatternMatcher([
   (UPat(Ops.FUSE, src=(UPat(name="s"),)), lambda s: s.replace(src=tuple([y.fuse() for y in s.src]))),
   # remove CONTIGUOUS if there's no BUFFER upsteam
   (UPat(Ops.CONTIGUOUS, name="c"),
-   lambda c: None if c.tag != 2 or any(x.op in GroupOp.UnsafePad.union({Ops.BUFFER}) for x in c.toposort()) else c.src[0]),
+   lambda c: None if c.tag != 2 or c.src[0].op is Ops.COPY or
+     any(x.op in GroupOp.UnsafePad.union({Ops.BUFFER}) for x in c.toposort()) else c.src[0]),
 ])
 
 finalize_contiguous = PatternMatcher([
