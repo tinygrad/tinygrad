@@ -366,8 +366,6 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
-    - name: test a failure
-      run: exit 1
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
@@ -429,6 +427,7 @@ jobs:
       - name: Run fused optimizer tests
         run: PYTHONPATH="." GPU=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testgendataset:
@@ -484,6 +483,7 @@ jobs:
       - name: Test openpilot compile4
         run: PYTHONPATH="." NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testonnxcpu:
@@ -514,6 +514,7 @@ jobs:
       - name: Test Quantize ONNX
         run: CPU=1 PYTHONPATH=. python3 test/test_quantize_onnx.py
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testopencl:
@@ -545,6 +546,7 @@ jobs:
       - name: Test MLPerf stuff
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testllm:
@@ -584,6 +586,7 @@ jobs:
       - name: Test models (cpu)
         run: CPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testdsp:
@@ -652,6 +655,7 @@ jobs:
           --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py \
           --ignore=test/test_fuzz_shape_ops.py --durations=20
     - name: Run process replay tests
+      if: always()
       uses: ./.github/actions/process-replay
 
   testamd:
@@ -698,6 +702,7 @@ jobs:
           PROFILE=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testnvidia:
@@ -730,6 +735,7 @@ jobs:
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   tests:
@@ -765,6 +771,7 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
 # ****** OSX Tests ******
@@ -830,6 +837,7 @@ jobs:
       run: |
         python3 -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
+      if: always()
       uses: ./.github/actions/process-replay
 
   osxwebgpu:
@@ -987,6 +995,7 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
