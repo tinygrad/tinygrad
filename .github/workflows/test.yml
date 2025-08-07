@@ -369,7 +369,6 @@ jobs:
     - name: test a failure
       run: exit 1
     - name: Run process replay tests
-      if: always()
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
       run: |

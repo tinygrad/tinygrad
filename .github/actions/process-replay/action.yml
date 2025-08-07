@@ -5,6 +5,7 @@ runs:
   steps:
     - name: Run process replay tests
       shell: bash
+      if: always()
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         export CURRENT_SHA=${{ github.event.pull_request && github.event.pull_request.head.sha || github.sha }}
