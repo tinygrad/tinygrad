@@ -94,8 +94,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
-  except KernelOptError:
-    pass
+  except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
