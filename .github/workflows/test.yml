@@ -366,7 +366,10 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: PYTHONPATH="." python test/external/external_uop_gc.py
+    - name: test a failure
+      run: exit 1
     - name: Run process replay tests
+      if: always()
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
       run: |
