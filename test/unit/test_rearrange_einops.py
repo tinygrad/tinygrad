@@ -6,6 +6,7 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor
+from tinygrad.helpers import Context
 
 
 class test_rearrange_examples(unittest.TestCase):
@@ -109,6 +110,14 @@ class test_rearrange_examples(unittest.TestCase):
 
 
 class test_rearrange_ops(unittest.TestCase):
+  def setUp(self):
+    # Some of these generate very long expression that time out the z3 solver
+    self.context = Context(IGNORE_OOB=1)
+    self.context.__enter__()
+
+  def tearDown(self):
+    self.context.__exit__(None, None, None)
+
   def test_rearrange_errors(self):
     x = Tensor.zeros([1, 1, 1, 1, 1])
     x.rearrange("a b c d ... ->  a b c ... d")
