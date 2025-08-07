@@ -9,7 +9,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
 
 testing_minimal = [
   "numpy",
-  "torch",
+  "torch==2.7.1",
   "pytest",
   "pytest-xdist",
   "hypothesis",

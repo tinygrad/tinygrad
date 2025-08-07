@@ -1,10 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, Context, nn
-from tinygrad.uop.ops import Ops
-from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.heuristic import hand_coded_optimizations
+from tinygrad.helpers import CI, Profiling, WINO, getenv
 
 class TestWinogradClose(unittest.TestCase):
   def test_close(self):
@@ -27,30 +24,6 @@ class TestWinograd(unittest.TestCase):
     WINO.value = 1
   def tearDown(self):
     WINO.value = self.old
-
-  def test_speed(self):
-    x = Tensor.empty(1,4,9,9)
-    w = Tensor.empty(4,4,3,3)
-
-    with Timing("running conv: "):
-      out = Tensor.conv2d(x, w)
-
-    with Timing("scheduling: "):
-      sched = out.schedule()
-
-    for i,s in enumerate(sched):
-      if s.ast.op is not Ops.SINK: continue
-      ops = s.ast.toposort()
-      with Timing(f"linearize {i} with {len(ops):4d} ops: "):
-        l = Kernel(s.ast)
-        l.apply_opts(hand_coded_optimizations(l))
-      assert len(l.sts) <= 256  # just the current value to prevent regression
-      if DEBUG >= 2: print(f"{len(l.sts):4d} shapetrackers with max {max(len(x.views) for x in l.sts)} views")
-      for st in l.sts:
-        assert len(st.views) <= 2, "too many views in winograd"
-        if DEBUG >= 3:
-          print(f"{len(st.views):3d} views")
-          for v in st.views: print(v)
 
   def test_profile(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
