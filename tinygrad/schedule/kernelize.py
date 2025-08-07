@@ -44,7 +44,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted.r(*reduce.arg).r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-def merge_consecutive_reduces(reduce: UOp, view: UOp):
+def merge_contiguous_reduces(reduce: UOp, view: UOp):
     reduce_axis = reduce.arg[1]
     if len(reduce_axis) == 1 or (sorted_axis:=sorted(reduce_axis))!=list(range(sorted_axis[0], sorted_axis[0]+len(sorted_axis))): return None
     st = view.st
@@ -69,7 +69,7 @@ sym = symbolic_simple+PatternMatcher([
   # reduce on stride 0 is collapsed
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_stride0_reduce),
   # merge consecutive reduce ops if they have been permuted
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat(Ops.VIEW, name="view"),)), merge_consecutive_reduces),
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat(Ops.VIEW, name="view"),)), merge_contiguous_reduces),
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
