@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
+from dataclasses import replace
 from typing import Callable, Any
 
 ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
@@ -50,7 +51,8 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   # NOTE: this always uses the opts_to_apply path
-  input_ast = ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name))
+  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
+  input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
