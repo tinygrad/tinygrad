@@ -345,7 +345,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     candidates = []
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
+      candidates.append([(Xi, UOp.variable("fake", Xi.const_factor(), Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
     elif expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
