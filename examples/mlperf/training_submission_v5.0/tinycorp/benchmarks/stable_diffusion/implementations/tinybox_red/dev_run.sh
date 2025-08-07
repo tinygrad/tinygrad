@@ -41,7 +41,7 @@ export BASEDIR="/home/hooved/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"
 mkdir -p $UNET_CKPTDIR
 
-export WANDB=1 PARALLEL=0
+export WANDB=1
 #export PARALLEL=0
 
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
