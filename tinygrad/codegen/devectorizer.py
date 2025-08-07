@@ -25,12 +25,14 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   solver = z3.Solver(ctx=z3.Context())
   idx0, idx1, *z3_valids = uops_to_z3(solver, idx.gep(0), idx.gep(1), *(valids:=list(split_uop(valid, Ops.AND))))
   drop_stmt = []
-  for stmt, z3_stmt in zip(valids, z3_valids):
-    for i,bound in zip((idx0, idx1), (buf.dtype.shape[1], buf.dtype.shape[0])):
-      solver.add(z3.Not(z3_stmt))
-      # if the index cannot be in bound when valid is False
-      if solver.check((0<=i)&(i<bound))==z3.unsat:
-        drop_stmt.append(stmt)
+  # for stmt, z3_stmt in zip(valids, z3_valids):
+  v = functools.reduce(operator.and_, z3_valids)
+  solver.add(z3.Not(v))
+  for i,bound in zip((idx0, idx1), (buf.dtype.shape[1], buf.dtype.shape[0])):
+    # if the index cannot be in bound when valid is False
+    if solver.check((0<=i)&(i<bound))==z3.unsat:
+      drop_stmt = valids
+    # solver.pop()
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valids if s not in drop_stmt]) else None
