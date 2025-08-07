@@ -4,9 +4,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.uop.symbolic import split_uop, uop_given_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
+from tinygrad.uop.spec import z3_imported
 
 # ***** image load valid simplification *****
 
@@ -16,33 +17,23 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   # wait for it to be image indexed before running simplification
   if start_idx.dtype.count != 2: return None
+  if not z3_imported: return None
+  from tinygrad.uop.spec import uops_to_z3
+  import z3
 
   # can drop valid if idx is out of bound when valid is False
+  solver = z3.Solver(ctx=z3.Context())
+  idx0, idx1, *z3_valids = uops_to_z3(solver, idx.gep(0), idx.gep(1), *(valids:=list(split_uop(valid, Ops.AND))))
   drop_stmt = []
-  for stmt in split_uop(valid, Ops.AND):
-    try: X, is_upper_bound, c = parse_valid(stmt)
-    except ValueError: return None
-
-    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, Ops.ADD), idx)
-      testidx = testidx.simplify()
-      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
+  for stmt, z3_stmt in zip(valids, z3_valids):
+    for i,bound in zip((idx0, idx1), (buf.dtype.shape[1], buf.dtype.shape[0])):
+      solver.add(z3.Not(z3_stmt))
+      # if the index cannot be in bound when valid is False
+      if solver.check((0<=i)&(i<bound))==z3.unsat:
         drop_stmt.append(stmt)
-        continue
-
-    # if X <= c, check if it's out of bound when X = c+1
-    # if X >= c, check if it's out of bound when X = c-1
-    test_value = c + 1 if is_upper_bound else c - 1
-    for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
-      if i.is_increasing():
-        rw = i.substitute({X:X.const_like(test_value)}).simplify()
-        if rw.vmin >= b or rw.vmax < 0:
-          drop_stmt.append(stmt)
-          break
 
   if not drop_stmt and idx is start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, Ops.AND) if s not in drop_stmt]) else None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valids if s not in drop_stmt]) else None
   return buf.index(idx, new_valid)
 
 def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:

@@ -31,6 +31,9 @@ try:
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
   ])
 
+  def uops_to_z3(solver, *uops: UOp) -> 'list[z3.ExprRef]':
+    return [s.arg for s in graph_rewrite(uops[0].sink(*uops[1:]), z3_renderer, ctx=(solver, {})).src]
+
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
