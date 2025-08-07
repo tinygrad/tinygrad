@@ -182,7 +182,7 @@ class Kernel:
     new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
     def new_shape_fxn(x:tuple[sint, ...]):
       amt = amount if amount != 0 else x[axis]
-      return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if x[axis] > 1 else (1,1)) + x[axis+1:]
+      return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if resolve(x[axis] > 1) else (1,1)) + x[axis+1:]
     self.reshape(new_shape_fxn)
     self.permute(new_axes)
 
