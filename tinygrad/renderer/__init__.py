@@ -6,8 +6,8 @@ from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
-  from tinygrad.opt.tc import TensorCore
-  from tinygrad.opt.kernel import Opt
+  from tinygrad.codegen.opt.tc import TensorCore
+  from tinygrad.codegen.opt.kernel import Opt
 
 @dataclass(frozen=True)
 class Estimates:

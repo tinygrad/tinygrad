@@ -16,8 +16,8 @@ from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexin
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.optional import get_late_rewrite_patterns
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.opt import pm_optimize
-from tinygrad.opt.swizzler import view_left, view_right, fix_kernel_ops
+from tinygrad.codegen.opt import pm_optimize
+from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 
 @dataclass
 class RewriteStep:

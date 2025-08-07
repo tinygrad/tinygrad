@@ -8,8 +8,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.opt.search import Opt, OptOps
-from tinygrad.opt.kernel import Kernel
+from tinygrad.codegen.opt.search import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.engine.realize import get_program
 
 class TestLinearizerDumb(unittest.TestCase):

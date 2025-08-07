@@ -1,7 +1,7 @@
 from typing import cast, Callable
 import struct
 from collections import defaultdict
-from tinygrad.opt import tc
+from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
