@@ -3,11 +3,11 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
+from tinygrad.opt.swizzler import merge_views
 
 # creation can recurse a lot
 import sys
@@ -209,77 +209,8 @@ def append_metadata(root:UOp, k:UOp):
 
 replace_metadata = PatternMatcher([(UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.KERNEL, name="k")), name="root", allow_any_len=True), append_metadata),])
 
-pm_fuse = PatternMatcher([
-  # FUSE on CONTIGUOUS removes FUSE
-  (UPat(Ops.CONTIGUOUS, name="c").fuse(), lambda c: c),
-
-  # FUSE triggers swizzle on reduceop
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").or_casted(),), name="view").fuse(),
-   lambda r,src,view: ret.cast(view.dtype) if (ret:=swizzle_reduceop(r, src, view, fuse=True)) is not None else None),
-
-  # FUSE on reduce (without view) adds fuse marker to grouper
-  (UPat(Ops.REDUCE_AXIS, name="r").fuse(),
-   lambda r: r.replace(src=(r.src[0].fuse(),), arg=r.arg+(True,)) if len(r.arg) == 2 else None),
-
-  # remove FUSE and insert CONTIGUOUS if it's an unsafe pad
-  (UPat(Ops.VIEW, src=(UPat(GroupOp.UnsafePad, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.contiguous().view(view.st) if any(v.mask is not None for v in view.st.views) else None),
-
-  # FUSE elementwise.
-  (UPat(Ops.VIEW, src=(UPat({*GroupOp.ALU, Ops.CAST}, name="alu"),), name="view").fuse(),
-   lambda alu, view: alu.replace(src=tuple(apply_swizzle(x.view(view.arg)).fuse() for x in alu.src))),
-
-  # push FUSE through to srcs
-  (UPat(Ops.FUSE, name="x"), lambda x: x.src[0].replace(src=tuple(y.fuse() for y in x.src[0].src))),
-])
-
-def do_fusion(x:UOp):
-  found_contiguous = {}
-  def gate_contiguous(x):
-    if is_contiguous:=(x.op is Ops.CONTIGUOUS): found_contiguous[x] = x.replace(src=(UOp(Ops.VIEW, arg=x.st), UOp.unique()))
-    return not is_contiguous
-  x.toposort(gate=gate_contiguous)
-  del gate_contiguous
-  return graph_rewrite(x.substitute(found_contiguous), pm_fuse, name="local fusion").substitute({v:k for k,v in found_contiguous.items()})
-
-def fuse_arange(root:UOp):
-  # skip if root is arange
-  if not FUSE_ARANGE or root.src[0].base.op is Ops.CONST: return None
-  # gather all local aranges (including any fused ones)
-  local_arange: list[UOp] = []
-  def gate_reduce(u):
-    if u.op is Ops.REDUCE_AXIS and u.src[0].base.op is Ops.CONST: local_arange.append(u)
-    return u.op not in {*ALWAYS_CONTIGUOUS, Ops.REDUCE_AXIS} or u is root
-  toposort = root.toposort(gate=gate_reduce)
-  if not local_arange: return None
-  # fuse the nearest expand child of arange
-  local_children: dict[UOp, list[UOp]] = {}
-  for u in toposort:
-    for s in u.src: local_children.setdefault(s, []).append(u)
-  fuse_rep: dict[UOp, UOp] = {}
-  # skip if root depends on aranges with different ndims. This can be improved
-  if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
-  for r in local_arange:
-    # skip if already fused
-    if len(r.arg) > 2: continue
-    q = list(local_children[r])
-    while q:
-      u = q.pop()
-      if not (curr_children:=local_children.get(u, [])): continue
-      for child in curr_children:
-        other_paths = {s for s in child.toposort() if s.op in {Ops.REDUCE_AXIS, Ops.BUFFER} and s not in {root, r}}
-        fuse_rep[child] = child.replace(src=tuple(s.fuse() if s is u else s for s in child.src))
-        if other_paths: break
-      else: q.extend(curr_children)
-  return root.substitute(fuse_rep, name="fuse_arange") if fuse_rep else None
-
-do_fuse = PatternMatcher([
-  (UPat(Ops.FUSE, name="x"), do_fusion),
-  (UPat(Ops.REDUCE_AXIS, name="root"), fuse_arange),
-])
-
 add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"),
-                                lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
+                                lambda ctx,x: x.replace(tag=1).contiguous(tag=3 if x in ctx[1] else 2) if x in ctx[0] and x.tag is None else None)])
 
 # TODO: get this from the device through GrouperOpts
 DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
@@ -302,6 +233,14 @@ def view_add_srcs(x:UOp):
   if len(avars:=x.arg.vars()) and len(x.src) == 1:
     return x.replace(src=x.src+tuple(avars))
   return None
+
+new_fusion = PatternMatcher([
+  # FUSE removes CONTIGUOUS tag=2, dies to CONTIGUOUS w/o tag,
+  (UPat(Ops.FUSE, src=(UPat(Ops.CONTIGUOUS, name="c"),)), lambda c: c.src[0].fuse() if c.tag == 2 else c),
+  (UPat(Ops.FUSE, src=(UPat(name="s"),)), lambda s: s.replace(src=tuple([y.fuse() for y in s.src]))),
+  # remove CONTIGUOUS if there's no BUFFER upsteam
+  (UPat(Ops.CONTIGUOUS, name="c"), lambda c: None if c.tag != 2 or any(x.op is Ops.BUFFER for x in c.toposort()) else c.src[0]),
+])
 
 finalize_contiguous = PatternMatcher([
   # if an op takes more than one input, check combined LOADs don't exceed device limits
@@ -329,14 +268,16 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
 
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, multi_pm+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
 
   # insert contiguous in places determined by the realize map
   realize_map = group_realizes(tensor_map[sink])
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=(realize_map, tensor_map[sink].src),
+                                 bottom_up=True, input_map=tensor_map, name="add_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], new_fusion, input_map=tensor_map, name="new_fusion")
   tensor_map = graph_rewrite_map(tensor_map[sink], finalize_contiguous+remove_tags, input_map=tensor_map, name="finalize_contiguous")
 
   # group into kernels (this is context-free)
