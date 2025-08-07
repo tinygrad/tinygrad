@@ -373,6 +373,32 @@ class Kernel:
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
+  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
+    if use_tensor_cores and self.reduceop is not None and self.reduceop.arg[0] is Ops.ADD:
+      tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      for tc_idx, tc in enumerate(tensor_cores):
+        tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
+        # can only fuse reduces with the same tc options
+        assert all_same(tensor_core_opts)
+        if tensor_core_opts[0] is None: continue
+        self.tensor_core_opts = tc_opts = tensor_core_opts[0]
+
+        # attempt to pad the tensor axes that require it
+        try:
+          for pad_axis, dim in tc_opts.axis_pads:
+            self.apply_opt(Opt(OptOps.PADTO, pad_axis, dim), append_opt=False) # PADTO might fail
+        except KernelOptError as e:
+          continue
+        # tensor core -- unroll the reduce dim (K), upcast and local the inner and outer dims (N, M)
+        for opt in tc.opts:
+          self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], tc_opts.axes[int(opt[1])], 2), append_opt=False)
+        for dim, amt in tc.get_reduce_axes():
+          self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False) # TODO: this should be the reduce, not 0
+        self.tensor_core = tc
+        self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
+        return True
+    return False
+
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:list[Opt]|None=None, axis:int=0, tc_select:int|None=None, tc_opt:int|None=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
