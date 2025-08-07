@@ -132,13 +132,8 @@ async function renderProfiler() {
 
   canvas.addEventListener("wheel", (e) => {
     if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-      e.preventDefault();
-      e.stopPropagation();
-      d3.select(canvas).call(canvasZoom.translateBy, -e.deltaX / zoomLevel.k, 0);
-    } else if (e.ctrlKey) {
-      e.preventDefault();
-      e.stopPropagation();
-    } }, { passive: false });
+      e.preventDefault(), e.stopPropagation(), d3.select(canvas).call(canvasZoom.translateBy, -e.deltaX / zoomLevel.k, 0);
+    } else if (e.ctrlKey) { e.preventDefault(), e.stopPropagation(); } }, { passive: false });
 
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
@@ -252,9 +247,6 @@ async function renderProfiler() {
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform) {
-    console.time('render');
-    // dict to reports if there is something inside a pixel
-
     zoomLevel = transform;
     rectLst.length = 0;
     ctx.save();
@@ -272,11 +264,9 @@ async function renderProfiler() {
     var render_rects = [];
     var small_rect = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
 
-    console.time('filterLOD');
     var bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
     var bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
-    var lastLod = 0;
-    for (; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= small_rect; lastLod++);
+    for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= small_rect; lastLod++);
 
     for (let i = bucketStart; i <= bucketEnd; i++) {
       if (spatialTimeline[i] == null) continue;
@@ -296,9 +286,7 @@ async function renderProfiler() {
         render_rects.push(e);
       }
     }
-
     for (const e of data.shapes) render_rects.push(e);
-    console.timeEnd('filterLOD');
 
     for (const e of render_rects) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
@@ -325,12 +313,10 @@ async function renderProfiler() {
         continue;
       }
       // contiguous rect
-
       const x = xscale(start);
       const width = xscale(end)-x;
-
       ctx.fillRect(x, e.y, width, e.height);
-      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:{...e.arg} });
+      rectLst.push({ y0:e.y, y1:e.y+e.height, x0:x, x1:x+width, arg:e.arg });
       // add label
       if (e.label == null) continue;
       ctx.textAlign = "left";
@@ -348,7 +334,6 @@ async function renderProfiler() {
         labelX += l.width;
       }
     }
-    console.timeEnd('render');
     // draw axes
     ctx.beginPath();
     ctx.moveTo(0, 0);
