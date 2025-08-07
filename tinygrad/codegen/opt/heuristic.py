@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
@@ -80,18 +80,21 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     else: break
 
   # if last reduce dim is small(ish), loop unroll the reduce
-  upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
-  if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
-    if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
-      k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
-      # if it's small, upcast a second reduce dimension too
-      if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
+  # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
+  try:
+    upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
+    if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
+      if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
         k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
-    else:
-      for splits in [4]:
-        if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
-          k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
-          break
+        # if it's small, upcast a second reduce dimension too
+        if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
+          k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
+      else:
+        for splits in [4]:
+          if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
+            k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
+            break
+  except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:

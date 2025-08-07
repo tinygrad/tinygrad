@@ -70,7 +70,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
-  def test_arange_avgpool2d(self, kcount=2):
+  def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
     sched = t.schedule()
@@ -1028,14 +1028,14 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax_multireduce_fusion(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    run_schedule(check_schedule(out, 3))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
@@ -1613,7 +1613,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
-    run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
+    run_schedule(check_schedule(out, 2))
 
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(5, FUSE_CONV_BW=1)
@@ -1727,7 +1727,8 @@ class TestIndexing(unittest.TestCase):
       s = Tensor.schedule(*lst)
       lowered = [x[1] for x in lower_schedule(s.copy())]
       kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
-      if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
+      if FUSE_ARANGE and len(kernels) != cnt:
+        raise KernelCountException(f"{len(kernels)} != {cnt}")
       for ei in lowered: ei.run(do_update_stats=True)
     return s
 
@@ -1741,7 +1742,7 @@ class TestIndexing(unittest.TestCase):
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [1, 2]]
-    self.check_schedule(xt, 5)
+    self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
   def test_advanced_indexing(self):
@@ -1753,13 +1754,13 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
-    self.check_schedule(xt, 6)
+    self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), 6)
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [1, 2]]
-    self.check_schedule(xt, 4)
+    self.check_schedule(xt, 2)
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)
@@ -2066,7 +2067,6 @@ class TestSwizzle(unittest.TestCase):
     np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   # kernels can only have 1 or n in each dim
-  @unittest.expectedFailure
   def test_dont_parallelize_different_n(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 2, 2).realize()
