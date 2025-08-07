@@ -157,7 +157,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
     y2 = cmod(factors[0]*v.vmax+const, c) if which is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
 
-  if not CORRECT_DIVMOD_FOLDING or x_min>=0:
+  if x_min>=0:
     # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
     # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
     rems = [min(r, r-c, key=abs) for r in remainders]
