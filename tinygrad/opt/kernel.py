@@ -33,11 +33,6 @@ axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", A
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
                AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
-def new_shape_fxn(axis:int, amount:int, top:bool, x:tuple[sint, ...]):
-  amt = amount if amount != 0 else x[axis]
-  if x[axis] % amt != 0: raise RuntimeError(f"LATE invalid shift {x[axis]=}, {amt=}")
-  return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if x[axis] > 1 else (1,1)) + x[axis+1:]
-
 class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):
   if not cond: raise KernelOptError(msg)
@@ -185,7 +180,10 @@ class Kernel:
     move_axis = axis if top else axis+1
     if move_axis < insert_at: insert_at += 1
     new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
-    self.reshape(functools.partial(new_shape_fxn, axis, amount, top))
+    def new_shape_fxn(x:tuple[sint, ...]):
+      amt = amount if amount != 0 else x[axis]
+      return x[0:axis] + (((amt,x[axis]//amt) if top else (x[axis]//amt,amt)) if x[axis] > 1 else (1,1)) + x[axis+1:]
+    self.reshape(new_shape_fxn)
     self.permute(new_axes)
 
   # ******************** complex simplifiers ********************
