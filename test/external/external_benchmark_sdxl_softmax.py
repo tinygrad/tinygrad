@@ -8,7 +8,7 @@ if __name__ == "__main__":
   GlobalCounters.reset()
   t.softmax(-1, dtype="half", _single_kernel=True).realize()
 
-  from tinygrad.opt.kernel import Kernel, Opt, OptOps
+  from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
   from tinygrad.helpers import get_single_element
   GlobalCounters.reset()
   si = get_single_element(t.softmax(-1, dtype="half", _single_kernel=True).schedule())

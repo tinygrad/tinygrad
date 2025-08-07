@@ -3,9 +3,9 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.opt.kernel import Opt, OptOps, Kernel, KernelOptError
+from tinygrad.codegen.opt.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
-from tinygrad.opt.search import get_kernel_actions
+from tinygrad.codegen.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
