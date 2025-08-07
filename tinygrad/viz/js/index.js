@@ -131,7 +131,7 @@ async function renderProfiler() {
     .on("change", function () { showMemoryProf = this.checked; renderProfiler(); });
 
   canvas.addEventListener("wheel", (e) => {
-    if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    if (!e.ctrlKey && Math.abs(e.deltaX) > 0) {
       e.preventDefault(), e.stopPropagation(), d3.select(canvas).call(canvasZoom.translateBy, -e.deltaX / zoomLevel.k, 0);
     } else if (e.ctrlKey) { e.preventDefault(), e.stopPropagation(); } }, { passive: false });
 
