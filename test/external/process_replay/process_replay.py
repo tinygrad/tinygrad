@@ -11,6 +11,7 @@ try:
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.codegen.opt.kernel import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 except ImportError as e:
   print(repr(e))
@@ -47,9 +48,9 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None) -> tuple[str, str, tuple[Any, ...]]:
   input_ast = ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast
-  p2 = get_program(input_ast, renderer)
+  p2 = get_program(input_ast, renderer, opts)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
     if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
