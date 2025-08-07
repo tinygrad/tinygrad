@@ -147,7 +147,7 @@ async function renderProfiler() {
   const data = {shapes:[], axes:{}, gridlines:new Set()};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=20]);
 
-  // divided into cells horizontal and levels
+  // Cells are divided into chunks of 30 seconds, each chunk can be rendered at a different level of detail.
   const timelineChunkLen = 30 * 1000000; // 30 seconds
   const timelineLODThresholds = [30e9, 5e9, 1e9, 300e6, 80e6, 20e6, 1e6, 500e3, 200e3, 120e3, 80e3, 50e3, 30e3, 20e3, 10e3, 5e3]; // 30s to 5us
   const spatialTimeline = {}, tempProxiesBuilder = {}, timelineProxies = {};
@@ -201,18 +201,14 @@ async function renderProfiler() {
       }
     }
 
-    // build proxies
-    for (const [i, lods] of Object.entries(tempProxiesBuilder)) {
-      for (const [lodIdx, rects] of Object.entries(lods)) {
-        const lod = +lodIdx;
-        for (const [ix, ys] of Object.entries(rects)) {
-          for (const [iy, e] of Object.entries(ys)) {
-            ((timelineProxies[i] ??= {})[lod] ??= []).push({x: e.x, y: e.y, width: timelineLODThresholds[lod+1] * Math.max(0.1, Math.min(e.pct, 1.0)),
+    // finalize proxies into displayed blocks.
+    for (const [i, lods] of Object.entries(tempProxiesBuilder))
+      for (const [lodIdx, rects] of Object.entries(lods))
+        for (const [ix, ys] of Object.entries(rects))
+          for (const [iy, e] of Object.entries(ys))
+            ((timelineProxies[i] ??= {})[+lodIdx] ??= []).push({x: e.x, y: e.y,
+              width: timelineLODThresholds[+lodIdx+1] * Math.max(0.1, Math.min(e.pct, 1.0)),
               height: e.h, fillColor: e.fillColor, arg:{ name:null, tooltipText:"merged cells, zoom in"}});
-          }
-        }
-      }
-    }
 
     // position shapes on the canvas and scale to fit fixed area
     let area = !showMemoryProf || mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
@@ -261,17 +257,14 @@ async function renderProfiler() {
     }
     // draw shapes
 
-    var render_rects = [];
-    var small_rect = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
-
+    var render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
     var bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
     var bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
-    for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= small_rect; lastLod++);
+    for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= render_threshold; lastLod++);
 
     for (let i = bucketStart; i <= bucketEnd; i++) {
-      if (spatialTimeline[i] == null) continue;
       for (let lod = 0; lod <= lastLod; lod++) {
-        if (spatialTimeline[i][lod] == null) continue;
+        if (spatialTimeline[i] == null || spatialTimeline[i][lod] == null) continue;
         for (const e of spatialTimeline[i][lod]) {
           const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
           if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
