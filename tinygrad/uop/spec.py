@@ -110,7 +110,7 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
   z3_idx = z3_sink.src[0].arg
   solver.add(z3_sink.src[1].arg)
-  solver.set("timeout", 5000)
+  solver.set("timeout", 10000)
   if not ((res:=solver.check((z3_idx<0)|(sz<=z3_idx))) == z3.unsat):
     if res == z3.unknown: print(f"# OOB SOLVER TIMEOUT\nconstraints = {solver}")
     else: print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
