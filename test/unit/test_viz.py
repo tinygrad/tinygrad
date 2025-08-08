@@ -97,9 +97,9 @@ class TestViz(BaseTestViz):
 
   # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
-    @track_rewrites(name=lambda a,ret: a.render())
-    def name_from_fxn(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_from_fxn(UOp.variable("a", 1, 10)+1)
+    @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
+    def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
+    name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
     lst = get_viz_list()
     # name gets deduped by the function call counter
     self.assertEqual(lst[0]["name"], "(a+1) n1")
