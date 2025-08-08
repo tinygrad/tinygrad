@@ -25,9 +25,7 @@ def _find_all_tensors_for_uops(all_uops: set[UOp]) -> list[Tensor]:
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
   # get all children of keys in applied_map
   all_uops: set[UOp] = set()
-  search_uops = list(applied_map)
-  while len(search_uops):
-    x = search_uops.pop()
+  for x in (search_uops:=list(applied_map)):
     if x in all_uops: continue
     all_uops.add(x)
     search_uops.extend([u for c in x.children if (u:=c()) is not None])
