@@ -35,13 +35,14 @@ export GPUS=6 BS=6 EVAL_BS=36
 
 export RUN_EVAL=1
 export EVAL_ONLY=1
-export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval"
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval"
+export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_469337"
 
 export BASEDIR="/home/hooved/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints"
 mkdir -p $UNET_CKPTDIR
 
 export WANDB=1
-export PARALLEL=4
+export PARALLEL=16
 
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
