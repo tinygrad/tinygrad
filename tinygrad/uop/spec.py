@@ -1,5 +1,5 @@
 from typing import cast, Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -209,16 +209,7 @@ spec = PatternMatcher([
 
 # *** this is the UOp AST spec ***
 
-def verify_sink_dims(sink:UOp):
-  if not all_same([s.shape for s in sink.src]): return False
-  for dims in zip(*[x.shape for x in sink.toposort() if x.op is Ops.VIEW]):
-    if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
-      print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
-      return False
-
 ast_spec = PatternMatcher([
-  # shapes must have either 1 or n in each dimension
-  (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges
   (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
   (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),

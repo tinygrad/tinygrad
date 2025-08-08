@@ -4,13 +4,6 @@ const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
 
-const coloredSpan = ({ st, color }) => {
-  const ret = document.createElement("span");
-  ret.textContent = st;
-  ret.style.color = color;
-  return ret;
-}
-
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
@@ -122,26 +115,15 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = false;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
-  const meta = d3.select(".metadata").html("");
-
-  loadingText = meta.append("h3");
-  loadingText.text("Loading...");
-  meta.append("label").text("Show memory: ")
-    .insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
-    .on("change", function () { showMemoryProf = this.checked; renderProfiler(); });
-
-  canvas.addEventListener("wheel", (e) => {
-    if (!e.ctrlKey && Math.abs(e.deltaX) > 0) {
-      e.preventDefault(), e.stopPropagation(), d3.select(canvas).call(canvasZoom.translateBy, -e.deltaX / zoomLevel.k, 0);
-    } else if (e.ctrlKey) { e.preventDefault(), e.stopPropagation(); } }, { passive: false });
-
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -151,14 +133,8 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
-  const data = {shapes:[], axes:{}, gridlines:new Set()};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=20]);
-
-  // Cells are divided into chunks of 30 seconds, each chunk can be rendered at a different level of detail.
-  const timelineChunkLen = 30 * 1000000; // 30 seconds
-  const timelineLODThresholds = [30e9, 5e9, 1e9, 300e6, 80e6, 20e6, 1e6, 500e3, 200e3, 120e3, 80e3, 50e3, 30e3, 20e3, 10e3, 5e3]; // 30s to 5us
-  const spatialTimeline = {}, tempProxiesBuilder = {}, timelineProxies = {};
-
+  const data = {shapes:[], axes:{}};
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -181,71 +157,38 @@ async function renderProfiler() {
         colorMap.set(colorKey, colors[colorMap.size%colors.length]);
       }
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
-      const coloredName = parseColors(e.name);
-      const label = coloredName.map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
       else if (ref != null) {
         const start = ref.step>0 ? ref.step+1 : 0;
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { name:e.name, tooltipText:coloredName.concat(["\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : "")]), ...ref };
-
-      var chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
-      for (let i = chunkStart; i <= chunkEnd; i++) {
-        for (var lodIdx = 0; lodIdx < timelineLODThresholds.length && Math.min(timelineChunkLen, e.dur) < timelineLODThresholds[lodIdx]; lodIdx++);
-        lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
-
-        // add a shape for the current chunk
-        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
-
-        // this block won't be displayed on higher LODs, create a proxy for it
-        for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
-          const ix = Math.floor((e.st-st) / timelineLODThresholds[jlod + 1]);
-          const iy = offsetY+levelHeight*e.depth;
-          ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor };
-          tempProxiesBuilder[i][jlod][ix][iy].pct += e.dur / timelineLODThresholds[jlod + 1];
-        }
-      }
+      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+      // offset y by depth
+      data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
-
-    // finalize proxies into displayed blocks.
-    for (const [i, lods] of Object.entries(tempProxiesBuilder))
-      for (const [lodIdx, rects] of Object.entries(lods))
-        for (const [ix, ys] of Object.entries(rects))
-          for (const [iy, e] of Object.entries(ys))
-            ((timelineProxies[i] ??= {})[+lodIdx] ??= []).push({x: e.x, y: e.y,
-              width: timelineLODThresholds[+lodIdx+1] * Math.max(0.1, Math.min(e.pct, 1.0)),
-              height: e.h, fillColor: e.fillColor, arg:{ name:null, tooltipText:"merged cells, zoom in"}});
-
     // position shapes on the canvas and scale to fit fixed area
-    let area = !showMemoryProf || mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
-    if (showMemoryProf) {  
-      const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-      if (area === 0) div.style.pointerEvents = "none";
-      else div.style.cursor = "pointer";
-      if (k === focusedDevice) {
-        // expand memory graph for the focused device
-        area = maxArea*4;
-        data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
-      }
-      const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
-      for (const [i,e] of mem.shapes.entries()) {
-        const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-        const y0 = e.y.map(yscale);
-        const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-        const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-        data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
-      }
+    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
+    else div.style.cursor = "pointer";
+    if (k === focusedDevice) {
+      // expand memory graph for the focused device
+      area = maxArea*4;
+      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
+    }
+    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+    for (const [i,e] of mem.shapes.entries()) {
+      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+      const y0 = e.y.map(yscale);
+      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+      const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
-
-    data.gridlines.add(offsetY + Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding-5);
-    div.style.borderBottom = `2px solid #252529`;
   }
-  loadingText.text("");
-
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -264,35 +207,9 @@ async function renderProfiler() {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
     // draw shapes
-
-    var render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
-    var bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
-    var bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
-    for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= render_threshold; lastLod++);
-
-    for (let i = bucketStart; i <= bucketEnd; i++) {
-      for (let lod = 0; lod <= lastLod; lod++) {
-        if (spatialTimeline[i] == null || spatialTimeline[i][lod] == null) continue;
-        for (const e of spatialTimeline[i][lod]) {
-          const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-          if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-          render_rects.push(e);
-        }
-      }
-
-      if (timelineProxies[i] == null || timelineProxies[i][lastLod] == null) continue;
-      for (const e of timelineProxies[i][lastLod]) {
-        const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-        render_rects.push(e);
-      }
-    }
-    for (const e of data.shapes) render_rects.push(e);
-
-    for (const e of render_rects) {
+    for (const e of data.shapes) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-
       ctx.fillStyle = e.fillColor;
       // generic polygon
       if (e.width == null) {
@@ -372,14 +289,6 @@ async function renderProfiler() {
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
     }
-    ctx.strokeStyle = "#252529";
-    ctx.lineWidth = 2;
-    for (const y of data.gridlines) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.clientWidth, y);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -396,7 +305,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  canvasZoom = d3.zoom().filter((e) => ((e.ctrlKey && e.type === "wheel") || e.type === "mousedown") && !e.button)
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
@@ -426,10 +335,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      if (Array.isArray(foundRect.tooltipText)) {
-        tooltip.replaceChildren(...foundRect.tooltipText.map(t => typeof t === "string" ? document.createTextNode(t) : coloredSpan(t)));
-      }
-      else tooltip.innerText = foundRect.tooltipText;
+      tooltip.innerText = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -562,7 +468,7 @@ async function main() {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      p.replaceChildren(...parseColors(name).map(coloredSpan));
+      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
@@ -701,7 +607,9 @@ async function main() {
         metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
         const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
         for (const line of diff) {
-          diffCode.appendChild(coloredSpan({ st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}));
+          const span = diffCode.appendChild(document.createElement("span"));
+          span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+          span.innerText = line;
           diffCode.appendChild(document.createElement("br"));
         }
         diffCode.className = "wrap";

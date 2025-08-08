@@ -401,7 +401,7 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self, ops=41410, kcount=3):
+  def test_embedding_one_kernel(self, ops=612000, kcount=2):
     GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
@@ -409,7 +409,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = result.schedule()
-    self.assertEqual(kcount, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes weight and embedding")
+    self.assertEqual(len([item for item in schedule if item.ast.op is Ops.SINK]), kcount, "first run realizes weight and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],

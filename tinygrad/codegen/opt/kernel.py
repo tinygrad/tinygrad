@@ -8,13 +8,13 @@ from enum import Enum, auto
 from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
-from tinygrad.opt.tc import TensorCore
+from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import ImageDType, AddrSpace
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
-from tinygrad.opt.swizzler import view_left, view_left_through_load
+from tinygrad.codegen.opt.swizzler import view_left, view_left_through_load
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -271,7 +271,10 @@ class Kernel:
       check(isinstance(opt.arg, int), "arg should be int")
       amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
       check(isinstance(amt, int) and amt != 1, f"shift/padto of {amt=}, 1 or symbolic amount is meaningless")
-      if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+      if opt.op is not OptOps.PADTO:
+        # we check both the full_shape and each shape
+        check(self.full_shape[axis] % amt == 0, f"no longer valid shift {self.full_shape[axis]=}, {amt=}")
+        for st in self.sts: check(st.shape[axis] == 1 or st.shape[axis] % amt == 0, f"no longer valid shift {st.shape[axis]=}, {amt=}")
     else: amt = -1
 
     if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \

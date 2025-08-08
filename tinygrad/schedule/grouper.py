@@ -26,8 +26,8 @@ def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/CONTIGUOUS/GroupOp.Meta
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}, name="tr"), realize),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize parents of COPY, MSELECT, MSTACK

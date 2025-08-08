@@ -8,11 +8,11 @@ from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.codegen import full_rewrite
-from tinygrad.opt.kernel import Opt
+from tinygrad.codegen.opt.kernel import Opt
 
 # **************** Program Creation ****************
 
-@track_rewrites(name=lambda _ast,_renderer,ret: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret))
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret))
 def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
@@ -77,7 +77,7 @@ class CompiledRunner(Runner):
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
-      from tinygrad.opt.search import optimize_local_size
+      from tinygrad.codegen.opt.search import optimize_local_size
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)

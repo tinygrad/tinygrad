@@ -1,7 +1,7 @@
 from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
-from tinygrad.opt import tc
+from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
