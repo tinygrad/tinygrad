@@ -562,9 +562,10 @@
             const adapter = await navigator.gpu.requestAdapter();
             let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
             let maxBufferSize = adapter.limits.maxBufferSize;
+            let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
             const params = {
                 // requiredFeatures: ["shader-f16"],
-                requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize },
+                requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize, "maxComputeWorkgroupStorageSize": maxComputeWorkgroupStorageSize },
                 powerPreference: "high-performance"
             };
             return adapter?.requestDevice(params);
