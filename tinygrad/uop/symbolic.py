@@ -123,8 +123,10 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 def cancel_divmod(d: UOp) -> UOp|None:
   # simple cancel div/mod case when the range of the numerator lies within a single denominator interval
   x,y = d.src
-  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
-  if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax):
+  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
+  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
+  if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
+  if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
     return x - q*y if d.op is Ops.MOD else d.const_like(q)
 
 def remove_nested_mod(m: UOp) -> UOp|None:
@@ -171,9 +173,6 @@ def fold_divmod_congruence(d: UOp) -> UOp|None:
 
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
-  x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
-  assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
-
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
 
   svars, factors, const = x.terms_factors_and_const
@@ -204,7 +203,7 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
       quo += q * v
 
   # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x_min < 0 or rem.vmin < 0) and remainders: return None
+  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
   if which is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
   return rem//(c//gcd)+quo
 
