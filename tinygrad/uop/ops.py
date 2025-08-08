@@ -135,35 +135,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop shape stuff ***
 
   @functools.cached_property
-  def st1(self) -> ShapeTracker|None:
-    if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # VIEW and MovementOps define a new ShapeTracker from the arg
-    if self.op is Ops.VIEW: return self.arg
-    if self.op in GroupOp.Movement: return unwrap(self.src[0].st1).mop(self.op, self.arg)
-    # CONST with a DEVICE has a shape of ()
-    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
-    # BufferOps and ASSIGN flow ShapeTracker from a direct edge
-    if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st1
-    if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st1 for x in self.src if x.op is Ops.VIEW]) else None
+  def reduced(self) -> tuple[int, ...]:
+    return tuple((set(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else set()).union(
+      *(x.reduced for x in self.src if x.op not in GroupOp.Movement and x.op != Ops.VIEW)))
 
-    # BUFFER/BUFFER_VIEW and KERNEL only have a size
-    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
-    #if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}: return ShapeTracker.from_shape((self.dtype.size,))
+  @functools.cached_property
+  def shape_with_reduced(self) -> tuple[sint, ...]:
+    shape = self.shape
+    for i in sorted(self.reduced): shape = shape[:i] + (1,) + shape[i:]
+    return shape
 
-    # otherwise we get the shape from sources
-    if not (src_sts := [x.st1 for x in self.src if x.st1 is not None]): return None
-    # TODO: hack for TestDSPCache.test_cache_speed
-    # assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    match self.op:
-      case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
-      case Ops.BITCAST:
-        shape = src_sts[0].shape
-        if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce1(self.axis_arg)
-      case _: shape = src_sts[0].shape
-    return ShapeTracker.from_shape(shape)
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
@@ -189,14 +170,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
-    # TODO: hack for TestDSPCache.test_cache_speed
     # assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.reduced)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -210,8 +190,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> tuple[sint, ...]:
     assert self.st is not None, f"{self.op} doesn't have a shape"
     return unwrap(self.st).shape
-  @property
-  def shape1(self) -> tuple[sint, ...]: return unwrap(self.st1).shape
   @property
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
@@ -378,7 +356,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
-    # for master spec compatibility
     if self.op not in (Ops.REDUCE_AXIS, Ops.WMMA) and self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 

@@ -82,7 +82,6 @@ class ShapeTracker:
   def size(self) -> int: return self.views[-1].size()
 
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(s for i,s in enumerate(self.shape) if i not in axis)
-  def reduce1(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(s if i not in axis else 1 for i,s in enumerate(self.shape) )
 
   def to_indexed_uops(self, _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)

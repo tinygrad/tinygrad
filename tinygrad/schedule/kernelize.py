@@ -21,8 +21,7 @@ def simplify_stride0_reduce(reduce:UOp, x:UOp):
   # must have all stride 0 in the relevant axis (NOTE: can do partial)
   if not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.arg[1]) or not all_int(x.shape): return None
   prshape = prod(x.shape[i] for i in reduce.arg[1])
-  new_shape = tuple(s for i, s in enumerate(x.shape) if i not in reduce.arg[1])
-  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape))).reshape(new_shape)
+  ret = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
   match reduce.arg[0]:
     case Ops.ADD: return ret*prshape
     case Ops.MUL: return ret.pow(prshape)
