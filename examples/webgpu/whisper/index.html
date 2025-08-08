@@ -385,6 +385,38 @@
                 return indices;
             }
 
+            function logSoftmax(logits) {
+                const max = Math.max.apply(null, logits);
+                const exps = logits.map(x => Math.exp(x - max));
+                const sumExp = exps.reduce((a, b) => a + b, 0);
+                const logSumExp = Math.log(sumExp);
+                return [logits.map(x => x - max - logSumExp), max];
+            }
+
+            function softmax(logits) {
+                const scaled = logits;
+                const max = Math.max.apply(null, scaled); // prevent overflow
+                const exps = scaled.map(x => Math.exp(x - max));
+                const sum = exps.reduce((a, b) => a + b, 0);
+                return exps.map(x => x / sum);
+            }
+
+
+            function sample(probs) {
+                const r = Math.random();
+                let cum = 0;
+                for (let i = 0; i < probs.length; i++) {
+                    cum += probs[i];
+                    if (r < cum) return i;
+                }
+                return probs.length - 1; // fallback for float imprecision
+            }
+
+            function normalize(probs) {
+                const sum = probs.reduce((a, b) => a + b, 0);
+                return probs.map(p => p / sum);
+            }
+
             function has_speech(vad_probabilities, log_spec_seek, threshold=0.2) {
                 let seek_seconds = log_spec_seek / MEL_SPEC_CHUNK_LENGTH * 30.0;
                 let seek_milliseconds = seek_seconds * 1000.0;
