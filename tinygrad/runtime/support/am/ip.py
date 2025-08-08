@@ -15,7 +15,8 @@ class AM_SOC(AM_IP):
     self.module = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 11: 'soc21', 12: 'soc24'}[self.adev.ip_ver[am.GC_HWIP][0]])}")
 
   def init_hw(self):
-    self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
+    # pass
+    # self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
@@ -101,7 +102,7 @@ class AM_GMC(AM_IP):
     self.adev.reg(f"reg{ip}VM_L2_CNTL2").update(invalidate_all_l1_tlbs=1, invalidate_l2_cache=1)
     self.adev.reg(f"reg{ip}VM_L2_CNTL3").write(bank_select=9, l2_cache_bigk_fragment_size=6,l2_cache_4k_associativity=1,l2_cache_bigk_associativity=1)
     self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(l2_cache_4k_partition_count=1)
-    self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(walker_priority_client_id=0x1ff)
+    # self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(walker_priority_client_id=0x1ff)
 
     self.enable_vm_addressing(self.adev.mm.root_page_table, ip, vmid=0)
 
@@ -143,12 +144,13 @@ class AM_SMU(AM_IP):
     self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
-    with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
+    elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
     time.sleep(0.5) # 500ms
 
@@ -297,28 +299,29 @@ class AM_IH(AM_IP):
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
 
   def init_hw(self):
-    for ring_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
+    pass
+    # for ring_vm, rwptr_vm, suf, ring_id in self.rings:
+    #   self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(self.ring_size//4).bit_length(),
-        mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
+    #   self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(self.ring_size//4).bit_length(),
+    #     mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
-      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
+    #   if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
 
-      self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
-      self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
+    #   self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
+    #   self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
 
-      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(offset=(am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2, enable=1)
+    #   self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(offset=(am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2, enable=1)
 
-    self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
-    self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
-    self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
+    # self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
+    # self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
+    # self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
-    # toggle interrupts
-    for _, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
+    # # toggle interrupts
+    # for _, rwptr_vm, suf, ring_id in self.rings:
+    #   self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
-    self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
+    # self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
   def interrupt_handler(self):
     _, rwptr_vm, suf, _ = self.rings[0]
@@ -384,9 +387,10 @@ class AM_PSP(AM_IP):
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
     self.max_tmr_size = 0x1300000
-    self.boot_time_tmr = self.adev.ip_ver[am.GC_HWIP] >= (12,0,0)
-    if not self.boot_time_tmr:
-      self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True)
+    self.autoload_supported, self.boot_time_tmr = False, True
+    # if not self.boot_time_tmr:
+    # self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True)
+    self.tmr_paddr = 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -395,16 +399,19 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
-    if not self.is_sos_alive():
-      for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
-      while not self.is_sos_alive(): time.sleep(0.01)
+    print(self.is_sos_alive())
+    
+    # if not self.is_sos_alive():
+      # print(self.adev.fw.sos_fw)
+    for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
+    while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
-    self._tmr_init()
+    if not self.boot_time_tmr or self.autoload_supported: self._tmr_init()
 
     # SMU fw should be loaded before TMR.
     self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
-    if not self.boot_time_tmr: self._tmr_load_cmd()
+    if not self.boot_time_tmr or not self.autoload_supported: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
@@ -491,7 +498,7 @@ class AM_PSP(AM_IP):
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
-    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
+    cmd.cmd.cmd_setup_tmr.buf_size = 0 # self.tmr_size
     return self._ring_submit(cmd)
 
   def _load_toc_cmd(self, toc_size):
