@@ -200,16 +200,18 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
   data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
+  resource_labels = data["TargetInfo"]["Resources"]
   rows:list = [{"data":[instr], "segs":{}} for instr in cr["Instructions"]]
+  summary:list[dict] = []
   for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): rows[i]["data"].append(info["Latency"])
   for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
     i, r = d["InstructionIndex"], d["ResourceIndex"]
-    if i>len(rows)-1: continue
-    rows[i]["segs"][r] = rows[i]["segs"].get(r, 0)+d["ResourceUsage"]
+    if i>len(rows)-1: summary.append({"idx":r, "label":resource_labels[r], "value":d["ResourceUsage"]})
+    else: rows[i]["segs"][r] = rows[i]["segs"].get(r, 0)+d["ResourceUsage"]
   # rescale segment width to 0-100
   max_usage = max([sum(x["segs"].values()) for x in rows], default=0)
   for x in rows: x["segs"] = {k:{"width":(v/max_usage)*100, "value":v} for k,v in x["segs"].items()}
-  return {"rows":rows, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}
+  return {"rows":rows, "cols":["Opcode", "Latency", "HW Resources"], "segments":resource_labels, "summary":summary}
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
