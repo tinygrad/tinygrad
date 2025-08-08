@@ -142,7 +142,7 @@ def remove_nested_mod(m: UOp) -> UOp|None:
     new_x.append(u)
   return None if not something_changed else functools.reduce(operator.add, new_x)%y
 
-def fold_binary_numerator(d: UOp):
+def fold_binary_numerator(d: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   x,y = d.src
   if y.op is not Ops.CONST: return None  # TODO: handle variable denominator
@@ -151,6 +151,21 @@ def fold_binary_numerator(d: UOp):
     y1 = cmod(factors[0]*v.vmin+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, y.arg)
     y2 = cmod(factors[0]*v.vmax+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, y.arg)
     return (y2-y1)*(v-v.vmin) + y1
+
+def fold_divmod_congruence(d: UOp) -> UOp|None:
+  # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
+  x,y = d.src
+  x_min = x.vmin
+  assert isinstance(x_min, int)
+  if y.op is not Ops.CONST: return None  # TODO: handle variable denominator
+  c = y.arg
+  terms, factors, const = x.terms_factors_and_const
+  if not CORRECT_DIVMOD_FOLDING or x_min>=0:
+    # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+    rems = [min((r:=f%c), r-c, key=abs) for f in factors]
+    if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
+      if d.op is Ops.MOD: return rem - rem.vmin//c*c
+      return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
 
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
@@ -169,14 +184,6 @@ def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split
     if f > 1 and c % f == 0 and (div == 1 or div > f): div = f
     gcd = math.gcd(r, gcd)
     quotients.append(q); remainders.append(r)  # noqa: E702
-
-  if not CORRECT_DIVMOD_FOLDING or x_min>=0:
-    # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
-    # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-    rems = [min(r, r-c, key=abs) for r in remainders]
-    if (rem:=sum(r*v for r,v in zip(rems,svars))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
-      if which is Ops.MOD: return rem - rem.vmin//c*c
-      return sum((f-r)//c * v for f,r,v in zip(factors,rems,svars)) + (const-const%c+rem.vmin//c*c)//c
 
   if (g:=math.gcd(gcd, const))!=1:
     ret = UOp(which, x.dtype, src=(sum(f//g * v for f,v in zip(factors, svars)) + const//g, x.const_like(c//g)))
@@ -303,6 +310,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d"), cancel_divmod),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d"), fold_binary_numerator),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d"), fold_divmod_congruence),
   (UPat(Ops.MOD, dtypes.sints, name="m"), remove_nested_mod),
   (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
