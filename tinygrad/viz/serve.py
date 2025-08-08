@@ -208,10 +208,13 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
     instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
     instr_usage[i][r] += d["ResourceUsage"]
-  max_usage = max([sum(v.values()) for v in instr_usage.values()], default=0)
+  max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items():
-    if i < len(rows): rows[i].append({k:{"width":(v/max_usage)*100, "value":v} for k,v in usage.items()})
-  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":data["TargetInfo"]["Resources"]}]}
+    if i<len(rows): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
+  # last row is the summary
+  resource_labels = data["TargetInfo"]["Resources"]
+  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.get(len(rows), {}).items()]
+  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
