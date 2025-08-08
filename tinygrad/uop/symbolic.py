@@ -125,17 +125,20 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
+def fold_div_mod_const(d: UOp) -> UOp|None:
+  # simple cancel div/mod case
+  x,y = d.src
+  if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
+  if y.vmin*y.vmax > 0 and (q:=cdiv(x.vmin,y.vmin)) == cdiv(x.vmin,y.vmax) == cdiv(x.vmax,y.vmin) == cdiv(x.vmax,y.vmax):
+    return x - q*y if d.op is Ops.MOD else d.const_like(q)
+  else: return None
+
 def div_and_mod_folding(x: UOp, y: UOp, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> UOp|None:
   # simplify x // y or x % y, None means no change
-  # simple cancel div/mod case
   x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
   assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
 
-  if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
-    return x - q*y if which is Ops.MOD else x.const_like(q)
-
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  if y.arg == 0: raise ZeroDivisionError(f"{'Division' if which is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(which, y)}")
 
   svars, factors, quotients, remainders, gcd, div, const, something_changed = [], [], [], [], c, 1, 0, False
   for u in split_uop(x, Ops.ADD):
@@ -288,6 +291,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # div folding
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
     if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d"), fold_div_mod_const),
   (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),
