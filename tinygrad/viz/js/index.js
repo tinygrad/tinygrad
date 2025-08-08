@@ -514,7 +514,6 @@ async function main() {
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
-      const usage = {};
       for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
@@ -528,20 +527,18 @@ async function main() {
           seg.style.width = width+"%";
           seg.title = `${ret.segments[k]} ${value}`;
           seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-          if (!(k in usage)) usage[k] = 0;
-          usage[k] += value;
         }
       }
       const summary = metadata.appendChild(document.createElement("table"));
-      for (const [i,s] of ret.segments.entries()) {
+      for (const s of ret.summary) {
         const tr = summary.appendChild(document.createElement("tr"));
         tr.className = "main-row";
         const td = tr.appendChild(document.createElement("td"));
         const div = td.appendChild(document.createElement("div"));
         div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
-        div.appendChild(document.createElement("p")).textContent = s;
-        appendTd(tr, usage[i] ?? 0);
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
+        div.appendChild(document.createElement("p")).textContent = s.label;
+        appendTd(tr, s.value);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
