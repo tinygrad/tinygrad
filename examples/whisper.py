@@ -144,21 +144,25 @@ RECORD_SECONDS = 10
 
 @functools.lru_cache(maxsize=16)
 def get_mel_filters(n_mels=80, n_fft=400, sr=16000):
-  return mel(sr=sr, n_fft=n_fft, n_mels=n_mels).numpy()
+  return mel(sr=sr, n_fft=n_fft, n_mels=n_mels)
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> Tensor:
   max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-  waveforms = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
-  if waveforms.shape[0] < batch_size:
-    waveforms = np.pad(waveforms, ((0, batch_size - waveforms.shape[0]), (0, 0)))
-  waveforms_tensor = Tensor(waveforms)
+  wf_np = np.stack([np.pad(wav[:max_len], (0, max(0, max_len - len(wav))), 'constant') for wav in waveforms])
+  if wf_np.shape[0] < batch_size:
+    wf_np = np.pad(wf_np, ((0, batch_size - wf_np.shape[0]), (0, 0)))
+  waveforms_tensor = Tensor(wf_np)
+
   stft_processor = STFT(n_fft=N_FFT, stride=HOP_LENGTH, pad=(N_FFT//2, N_FFT//2))
   stft_result = stft_processor(waveforms_tensor)
-  magnitudes = stft_result[..., :-1] ** 2
+  magnitudes = (stft_result[..., :-1] ** 2)
   mel_filters_matrix = get_mel_filters(N_MELS, N_FFT, RATE)
-  log_spec = np.log10(np.clip(mel_filters_matrix @ magnitudes.numpy(), 1e-10, None))
-  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
+  mel_filters_matrix = mel_filters_matrix[:, :magnitudes.shape[1]]
+
+  log_spec = (mel_filters_matrix @ magnitudes)
+  log_spec = log_spec.maximum(1e-10).log10()
+  log_spec = log_spec.maximum(log_spec.max((1,2), keepdims=True) - 8.0)
   return (log_spec + 4.0) / 4.0
 
 def compression_ratio(text) -> float:
