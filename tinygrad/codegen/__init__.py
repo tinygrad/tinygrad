@@ -87,7 +87,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   # final rules for the renderer (without sym)
   pm_final_rewrite = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)+pm_render+extra_matcher
-  ret.append(RewriteStep(pm_final_rewrite, lambda _: opts, name="final rewrite"))
+  ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # return the list (with optional linearizer)
   return ret + (rewrites_for_linearizer if linearizer else [])
