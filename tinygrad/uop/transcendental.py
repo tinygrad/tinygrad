@@ -266,7 +266,7 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   # fix 0 ** 0 = 1
   return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
 
-# *** fast integer division ***
+# *** integer division ***
 
 @functools.lru_cache(None)
 def magicgu(vmax:int, d:int) -> tuple[int,int]:
