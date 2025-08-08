@@ -2933,11 +2933,11 @@ class Tensor(MathTrait):
     """
     return self*-1 if self.dtype != dtypes.bool else self.logical_not()
 
-  def contiguous(self) -> Tensor:
+  def contiguous(self, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
     """
-    return self._apply_uop(UOp.contiguous)
+    return self._apply_uop(UOp.contiguous, **kwargs)
 
   def fuse(self) -> Tensor:
     """

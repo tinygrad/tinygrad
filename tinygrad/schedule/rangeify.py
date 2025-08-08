@@ -8,15 +8,26 @@ class RangeifyContext:
   idx: int = 0
   regs: int = 0
 
-def map_contiguous(ctx:RangeifyContext, x:UOp):
+def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
+  if x.tag == 1: return None
   ranges = []
-  for s in x.shape:
+  new_ranges = []
+  passthrough_idx = []
+  for i,s in enumerate(x.shape):
+    if x.arg is not None and i not in x.arg:
+      assert idx is not None, "partial contig requires index"
+      ranges.append(idx.src[1+i])
+      continue
+    if idx is not None: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
       ranges.append(UOp.range(dtypes.int, s, ctx.idx))
+      new_ranges.append(ranges[-1])
       ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
-  return x.src[0].index(*ranges)
+  ret = x.src[0].index(*ranges).contiguous(arg=x.arg, tag=1)
+  ret = ret.replace(src=(ret.src[0],)+tuple(new_ranges))
+  return ret.index(*passthrough_idx) if idx is not None else ret
 
 def map_reshape(x:UOp, r:UOp):
   acc = 1
@@ -63,7 +74,10 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
 pm_rangeify = PatternMatcher([
+  # if there's an INDEX it can support partial contig
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
   (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
+
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # this is like the definitions of these
