@@ -655,23 +655,27 @@ if __name__ == "__main__":
     p.daemon = True
     p.start()
 
+    # maintain a fixed window buffer
+    window_samples = SAMPLES_PER_SEGMENT
+    buf = np.zeros((window_samples,), dtype=np.float32)
+    filled = 0
+    
     lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    total = None
-    did_read = False
     for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-      while not q.empty() or total is None:
-        waveform = q.get()
-        if total is None: total = waveform
-        else: total = np.concatenate([total, waveform])
-        did_read = True
-      if did_read:
-        log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
-        encoded_audio = model.encoder.encode(Tensor(log_spec))
-      # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-      out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
-      idx = int(out[0,-1].argmax().numpy().item())
-      lst.append(idx)
-      dec = enc.decode(lst)
-      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-      if dec.endswith("<|endoftext|>"):
-        lst.pop()
+      while not q.empty():
+        data = q.get()
+        waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3)
+        cnt = min(len(waveform), window_samples)
+        buf = np.concatenate([buf[cnt:], waveform[-cnt:]]) 
+        filled = min(filled + cnt, window_samples)
+      
+      if filled >= window_samples:
+        log_spec = prep_audio([buf], model.batch_size, truncate=True)
+        encoded_audio = model.encoder.encode(log_spec)
+        out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
+        idx = int(out[0,-1].argmax().numpy().item())
+        lst.append(idx)
+        dec = enc.decode(lst)
+        print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+        if dec.endswith("<|endoftext|>"):
+          lst.pop()
