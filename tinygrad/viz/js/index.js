@@ -169,22 +169,24 @@ async function renderProfiler() {
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
-    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
-    else div.style.cursor = "pointer";
-    if (k === focusedDevice) {
-      // expand memory graph for the focused device
-      area = maxArea*4;
-      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
-    }
-    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
-    for (const [i,e] of mem.shapes.entries()) {
-      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y0 = e.y.map(yscale);
-      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-      const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+    else {
+      const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+      div.style.cursor = "pointer";
+      if (k === focusedDevice) {
+        // expand memory graph for the focused device
+        area = maxArea*4;
+        data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
+      }
+      const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+      for (const [i,e] of mem.shapes.entries()) {
+        const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+        const y0 = e.y.map(yscale);
+        const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+        const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+        data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+      }
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
