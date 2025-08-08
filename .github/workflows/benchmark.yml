@@ -611,12 +611,12 @@ jobs:
       run: BENCHMARK_LOG=openpilot_0_9_7 PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
     - name: benchmark openpilot w IMAGE=2 0.9.7
       run: BENCHMARK_LOG=openpilot_0_9_7_image PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
-    - name: openpilot compile3 0.9.7
-      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
-    - name: openpilot compile3 0.9.7+ tomb raider
-      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
-    - name: openpilot dmonitoring compile3 0.9.7
-      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: openpilot compile3 0.9.9 driving_vision
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot compile3 0.9.9 driving_policy
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
+    - name: openpilot compile3 0.9.9 dmonitoring
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: openpilot compile3 Space Lab policy + vision
       run: |
         PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
