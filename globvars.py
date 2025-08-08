@@ -1,5 +1,6 @@
-from tinygrad.nn.state import safe_load
-from tinygrad import Tensor, dtypes
+from tinygrad.nn.state import safe_load, get_parameters
+from tinygrad import Tensor, dtypes, Device
+from tinygrad.helpers import getenv
 
 def md(a:Tensor, b:Tensor):
   diff = (a - b).abs()
@@ -12,5 +13,14 @@ def md(a:Tensor, b:Tensor):
   print()
   return mean_diff.item(), a.abs().mean().item(), max_diff.item()
 
-d = safe_load("/home/hooved/train-sd/training/stable_diffusion/checkpoints/mixed.safetensors")
-for v in d.values(): v.to_("NV").realize()
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+for x in GPUS: Device[x]
+
+data = safe_load("/home/hooved/stable_diffusion/checkpoints/val0.safetensors")
+for d in (data,):
+  for v in get_parameters(d):
+    v.to_("CPU").realize()
+#data['t_in'] = data['t_in'].cast(dtypes.int).realize()
+
+with open("/home/hooved/stable_diffusion/checkpoints/val0prompt.txt", "r") as f:
+  prompt = f.read()

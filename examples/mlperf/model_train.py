@@ -1540,23 +1540,25 @@ def train_stable_diffusion():
     jit_context_step = TinyJit(model.cond_stage_model.embed_tokens)
     
     @TinyJit
-    def denoise_step(x:Tensor, t:Tensor, uc:Tensor, c:Tensor, alpha_prev:Tensor, unet:UNetModel, GPUS) -> Tensor:
+    def denoise_step(x:Tensor, x_x, t_t, uc_c,
+                     sqrt_alphas_cumprod_t:Tensor, sqrt_one_minus_alphas_cumprod_t:Tensor, alpha_prev:Tensor,
+                     unet:UNetModel, GPUS) -> Tensor:
     # Workaround because x.cat(x) doesn't work on multi: https://raw.githubusercontent.com/hooved/train-sd/refs/heads/master/multi_bug_2.txt
-      x_x = Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64).shard(GPUS, axis=0)
-      t_t = Tensor.stack(t.to("CPU"), t.to("CPU"), dim=1).reshape(-1).shard(GPUS, axis=0)
-      uc_c = Tensor.stack(uc.to("CPU"), c.to("CPU"), dim=1).reshape(-1, 77, 1024).shard(GPUS, axis=0)
+      #x_x = Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64).shard(GPUS, axis=0)
+      #t_t = Tensor.stack(t.to("CPU"), t.to("CPU"), dim=1).reshape(-1).shard(GPUS, axis=0)
+      #uc_c = Tensor.stack(uc.to("CPU"), c.to("CPU"), dim=1).reshape(-1, 77, 1024).shard(GPUS, axis=0)
       out_uncond, out = unet(x_x, t_t, uc_c).to("CPU").reshape(-1, 2, 4, 64, 64).chunk(2, dim=1)
       out_uncond = out_uncond.squeeze(1).shard(GPUS,axis=0)
       out = out.squeeze(1).shard(GPUS,axis=0)
       # unconditional guidance scale = 8.0
       v_t = out_uncond + 8.0 * (out - out_uncond)
-      sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t].reshape(v_t.shape[0], 1, 1, 1)
-      sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t].reshape(x.shape[0], 1, 1, 1)
+      #sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t].reshape(v_t.shape[0], 1, 1, 1)
+      #sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t].reshape(x.shape[0], 1, 1, 1)
       e_t = sqrt_alphas_cumprod_t * v_t + sqrt_one_minus_alphas_cumprod_t * x
       pred_x0 = sqrt_alphas_cumprod_t * x - sqrt_one_minus_alphas_cumprod_t * v_t
       dir_xt = (1. - alpha_prev).sqrt() * e_t
       x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
-      return x_prev
+      return x_prev.realize()
 
     @TinyJit
     def decode(x:Tensor) -> Tensor:
@@ -1605,24 +1607,56 @@ def train_stable_diffusion():
         if unpadded_bs < EVAL_BS:
           batch = batch + [batch[-1]] * (EVAL_BS - unpadded_bs)
 
-        captions = [row["caption"] for row in batch]
+        import globvars as gv
+
+        #captions = [row["caption"] for row in batch]
+        captions = [gv.prompt] * EVAL_BS
         captions = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in captions], dim=0)
-        x = Tensor.randn(EVAL_BS,4,64,64)
+
+        #x = Tensor.randn(EVAL_BS,4,64,64)
+        x = [gv.data['init_latent']] * EVAL_BS
+        x = Tensor.cat(*x)
+
         for t in (x, captions):
           if len(GPUS) > 1: t.shard_(GPUS, axis=0)
           else: t.to_(GPUS[0])
         c = jit_context_step(captions)
 
+        uc = Tensor.cat(*[gv.data['uc']] * 6).shard(GPUS,axis=0)
+        c = Tensor.cat(*[gv.data['c']] * 6).shard(GPUS,axis=0)
+        uc_c = Tensor.stack(uc.to("CPU"), c.to("CPU"), dim=1).reshape(-1, 77, 1024).shard(GPUS, axis=0).realize()
+        #x_in = Tensor.randn_like(x).realize()
+
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
+          # TODO: ts shard not needed, test correctness without
           ts = Tensor.full(x.shape[0], fill_value=timestep, dtype=dtypes.int, device="CPU")
-          for t in (ts,):
+          ts_ts = ts.cat(ts).realize()
+          for t in (ts, ts_ts):
             if len(GPUS) > 1: t.shard_(GPUS, axis=0)
             else: t.to_(GPUS[0])
+          sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[ts].reshape(EVAL_BS, 1, 1, 1)
+          sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[ts].reshape(EVAL_BS, 1, 1, 1)
 
-          x = denoise_step(x, ts, uc, c, alpha_prev, unet, GPUS)
+          #x = denoise_step(x, ts, uc, c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
 
+          x_x = Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64).shard(GPUS, axis=0)
+          x = denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
+
+          #x_in.assign(x).realize()
+          #x = denoise_step(x_in, ts, uc, c, alpha_prev, unet, GPUS)
+          #print(f"ts: {ts.tolist()[0]}")
+          #print(sqrt_alphas_cumprod_t.flatten().tolist()[0])
+          #print(sqrt_one_minus_alphas_cumprod_t.flatten().tolist()[0])
+          #print(x[0].flatten()[0:10].tolist())
+          #pause = 1
+
+        samples = Tensor.cat(*[gv.data['samples']] * 6).shard(GPUS,axis=0)
+        gv.md(samples, x)
+        # diff.abs().mean(): 0.0004790386592503637
+        # a.abs().mean(): 0.5573192834854126
+        # diff.abs().max(): 0.008502483367919922
         x = decode(x)
         inception_activation = jit_inception(x)
         inception_activations.append(inception_activation.squeeze(3).squeeze(2).to("CPU").realize()[0:unpadded_bs].realize())
