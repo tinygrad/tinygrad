@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
   def export_audio_prep():
     class AudioPrep:
-      def __init__(self, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="constant"):
+      def __init__(self, n_fft:int, stride:int, pad:tuple[int, int], window="hann", pad_mode="reflect"):
         assert window == "hann", "other window types not implemented yet"
         self.n_fft = n_fft
         self.stride = stride
