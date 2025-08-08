@@ -200,20 +200,19 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
   data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
-  rows:list = [[inst] for i,inst in enumerate(cr["Instructions"])]
-  # add latency estimates
+  resource_labels = data["TargetInfo"]["Resources"]
+  rows:list = [[instr] for instr in cr["Instructions"]]
+  # add scheduler estimates
   for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
   # map per instruction resource usage
   instr_usage:dict[int, dict[int, int]] = {}
   for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
     instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
     instr_usage[i][r] += d["ResourceUsage"]
+  # last row is the usage summary
+  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
-  for i,usage in instr_usage.items():
-    if i<len(rows): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  # last row is the summary
-  resource_labels = data["TargetInfo"]["Resources"]
-  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.get(len(rows), {}).items()]
+  for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_disassembly(ctx:list[str]):

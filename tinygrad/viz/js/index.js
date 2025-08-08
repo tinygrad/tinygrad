@@ -519,20 +519,19 @@ async function main() {
         const tr = asm.appendChild(document.createElement("tr"));
         tr.className = "main-row code-row";
         for (const [i,value] of r.entries()) {
-          // reuse scalar value render
-          if (!Array.isArray(value)) {
-            appendTd(tr, value);
-            continue;
-          }
+          // string format scalar values
+          if (!Array.isArray(value)) appendTd(tr, value);
           // display arrays in a bar graph
-          const td = tr.appendChild(document.createElement("td"));
-          td.className = "pct-row";
-          const barGraph = td.appendChild(document.createElement("div"));
-          for (const [k, v, width] of value) {
-            const seg = barGraph.appendChild(document.createElement("div"));
-            seg.style.width = width+"%";
-            seg.title = `${ret.cols[i].labels[k]} ${v}`;
-            seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+          else {
+            const segmentsTd = tr.appendChild(document.createElement("td"));
+            segmentsTd.className = "pct-row";
+            const usageBar = segmentsTd.appendChild(document.createElement("div"));
+            for (const [k, v, width] of value) {
+              const seg = usageBar.appendChild(document.createElement("div"));
+              seg.style.width = width+"%";
+              seg.title = `${ret.cols[i].labels[k]} ${v}`;
+              seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+            }
           }
         }
       }
