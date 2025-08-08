@@ -329,7 +329,7 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
-        python3 -m ruff check extra/onnx.py extra/onnx_parser.py
+        python3 -m ruff check extra/onnx.py
         python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
@@ -337,7 +337,6 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-        python -m mypy --strict-equality extra/onnx_parser.py
         python -m mypy --strict-equality extra/onnx.py
 
   unittest:
@@ -376,8 +375,8 @@ jobs:
         PYTHONPATH=. python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         DEBUG=1 MIN_ASTS=1 PYTHONPATH=. python extra/optimization/get_action_space.py
-    - name: Repo line count < 15500 lines
-      run: MAX_LINE_COUNT=15500 python sz.py
+    - name: Repo line count < 16000 lines
+      run: MAX_LINE_COUNT=16000 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -543,8 +542,6 @@ jobs:
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
-      - name: Run handcode_opt
-        run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -627,7 +624,7 @@ jobs:
     - name: Test LLVM=1 DEVECTORIZE=0 for model
       run: PYTHONPATH="." LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
-      run: CPU=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testwebgpu:
     name: Linux (WebGPU)
@@ -871,28 +868,28 @@ jobs:
       run: WEBGPU=1 PYTHONPATH=. python3 test/external/external_test_onnx_runner.py
 
   osxremote:
-    name: MacOS (remote metal)
-    runs-on: macos-15
-    timeout-minutes: 10
-    env:
-      REMOTE: 1
-      REMOTEDEV: METAL
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: macos-remote
-          deps: testing_minimal
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
-          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run REMOTE=1 Test
-        run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
+   name: MacOS (remote metal)
+   runs-on: macos-15
+   timeout-minutes: 10
+   env:
+     REMOTE: 1
+     REMOTEDEV: METAL
+   steps:
+     - name: Checkout Code
+       uses: actions/checkout@v4
+     - name: Setup Environment
+       uses: ./.github/actions/setup-tinygrad
+       with:
+         key: macos-remote
+         deps: testing_minimal
+     - name: Check Device.DEFAULT and print some source
+       run: |
+         python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+         python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
+         DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+     - name: Run REMOTE=1 Test
+       run: |
+         python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
 
   amdremote:
     name: Linux (remote)

@@ -2234,7 +2234,7 @@ class Tensor(MathTrait):
     """
     def parse_formula(formula:str, *operands:Tensor):
       if "..." in (formula := formula.replace(" ", "")):
-        ell_chars, ell_longest = "".join(set(string.ascii_letters) - set(formula)), 0
+        ell_chars, ell_longest = "".join(c for c in string.ascii_letters if c not in formula), 0
         for i, inp in enumerate(filter(lambda x: "..." in x, inputs := formula.split("->")[0].split(","))):
           if (ell_count := max(operands[i].ndim, 1) - (len(inp) - len("..."))) > ell_longest: ell_longest = ell_count
           inputs[i] = inp.replace("...", ell_chars[-ell_count:])
@@ -2332,8 +2332,6 @@ class Tensor(MathTrait):
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
-    See: https://paperswithcode.com/method/average-pooling
-
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.avg_pool2d().numpy())
@@ -2379,8 +2377,6 @@ class Tensor(MathTrait):
     When `return_indices` is set to `True`, the argmax will be returned along with the max values.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
-
-    See: https://paperswithcode.com/method/max-pooling
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
@@ -3010,8 +3006,6 @@ class Tensor(MathTrait):
     """
     Applies the Rectified Linear Unit (ReLU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/relu
-
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
     ```
@@ -3048,7 +3042,6 @@ class Tensor(MathTrait):
     Applies the Hardsigmoid function element-wise.
     NOTE: default `alpha` and `beta` values are taken from torch
 
-    - Described: https://paperswithcode.com/method/hard-sigmoid
     - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3291,7 +3284,6 @@ class Tensor(MathTrait):
     """
     Applies the Exponential Linear Unit (ELU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/elu
     - Paper: https://arxiv.org/abs/1511.07289v5
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3304,7 +3296,6 @@ class Tensor(MathTrait):
     """
     Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/celu
     - Paper: https://arxiv.org/abs/1704.07483
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3317,7 +3308,6 @@ class Tensor(MathTrait):
     """
     Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/selu
     - Paper: https://arxiv.org/abs/1706.02515v5
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3342,7 +3332,6 @@ class Tensor(MathTrait):
     """
     Applies the Sigmoid Linear Unit (SiLU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/silu
     - Paper: https://arxiv.org/abs/1606.08415
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3355,7 +3344,6 @@ class Tensor(MathTrait):
     """
     Applies the ReLU6 function element-wise.
 
-    - Described: https://paperswithcode.com/method/relu6
     - Paper: https://arxiv.org/abs/1704.04861v1
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3368,7 +3356,6 @@ class Tensor(MathTrait):
     """
     Applies the Hardswish function element-wise.
 
-    - Described: https://paperswithcode.com/method/hard-swish
     - Paper: https://arxiv.org/abs/1905.02244v5
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3453,8 +3440,6 @@ class Tensor(MathTrait):
     """
     Applies the Hardtanh function element-wise.
 
-    - Described: https://paperswithcode.com/method/hardtanh-activation
-
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).hardtanh().numpy())
     ```
@@ -3479,7 +3464,6 @@ class Tensor(MathTrait):
     """
     Applies the Gaussian Error Linear Unit (GELU) function element-wise.
 
-    - Described: https://paperswithcode.com/method/gelu
     - Paper: https://arxiv.org/abs/1606.08415v5
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3492,8 +3476,6 @@ class Tensor(MathTrait):
     """
     Applies the Sigmoid GELU approximation element-wise.
 
-    - Described: https://paperswithcode.com/method/gelu
-
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).quick_gelu().numpy())
     ```
@@ -3503,8 +3485,6 @@ class Tensor(MathTrait):
   def leaky_relu(self, neg_slope=0.01) -> Tensor:
     """
     Applies the Leaky ReLU function element-wise.
-
-    - Described: https://paperswithcode.com/method/leaky-relu
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
@@ -3519,7 +3499,6 @@ class Tensor(MathTrait):
     """
     Applies the Mish function element-wise.
 
-    - Described: https://paperswithcode.com/method/mish
     - Paper: https://arxiv.org/abs/1908.08681v3
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3528,23 +3507,20 @@ class Tensor(MathTrait):
     """
     return self * self.softplus().tanh()
 
-  def softplus(self, beta=1) -> Tensor:
+  def softplus(self, beta=1.0, threshold=20.0) -> Tensor:
     """
     Applies the Softplus function element-wise.
-
-    - Described: https://paperswithcode.com/method/softplus
+    For numerical stability, the implementation folds into identity function when `self * beta > threshold`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
     ```
     """
-    return (1/beta) * (1 + (self*beta).exp()).log()
+    return (self * beta > threshold).where(self, (1/beta) * (1 + (self*beta).exp()).log())
 
   def softsign(self) -> Tensor:
     """
     Applies the Softsign function element-wise.
-
-    - Described: https://paperswithcode.com/method/softsign
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
@@ -3839,7 +3815,6 @@ class Tensor(MathTrait):
     """
     Applies Layer Normalization over a mini-batch of inputs.
 
-    - Described: https://paperswithcode.com/method/layer-normalization
     - Paper: https://arxiv.org/abs/1607.06450v1
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3858,7 +3833,6 @@ class Tensor(MathTrait):
     """
     Applies Batch Normalization over a mini-batch of inputs.
 
-    - Described: https://paperswithcode.com/method/batch-normalization
     - Paper: https://arxiv.org/abs/1502.03167
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3883,7 +3857,6 @@ class Tensor(MathTrait):
 
     NOTE: dropout is only applied when `Tensor.training` is `True`.
 
-    - Described: https://paperswithcode.com/method/dropout
     - Paper: https://jmlr.org/papers/v15/srivastava14a.html
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -3925,7 +3898,6 @@ class Tensor(MathTrait):
     Computes scaled dot-product attention.
     `self` is the query tensor, `key` is the key tensor, and `value` is the value tensor.
 
-    - Described: https://paperswithcode.com/method/scaled
     - Paper: https://arxiv.org/abs/1706.03762v7
 
     ```python exec="true" source="above" session="tensor" result="python"

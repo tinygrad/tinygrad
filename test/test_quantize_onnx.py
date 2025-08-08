@@ -4,9 +4,9 @@ import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item, get_program
-from tinygrad.opt.search import bufs_from_lin
+from tinygrad.codegen.opt.search import bufs_from_lin
 from tinygrad.shape.shapetracker import ShapeTracker, View # noqa: F401 # pylint: disable=unused-import
 
 N = 512
@@ -40,10 +40,7 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
-  k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
-  #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-  k.apply_opts(opts)
-  prg = get_program(k.get_optimized_ast(), k.opts)
+  prg = get_program(si.ast, opts=opts)
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
@@ -297,10 +294,7 @@ class TestDSPCache(unittest.TestCase):
             x41,)),)),)),))""")
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     with Context(DEVECTORIZE=0, QUANTIZE=1):
-      k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-      k.apply_opts(opts)
-      prg = get_program(k.get_optimized_ast(), k.opts)
-      #print(prg.src)
+      prg = get_program(ast, opts=opts)
 
     new_src = """
 typedef int int32 __attribute__((aligned(128),vector_size(128)));
@@ -362,7 +356,7 @@ __attribute__((noinline)) void r_196_32_4_24_8(unsigned char* restrict __attribu
     prg = replace(prg, src=new_src+prg.src.split("/* DSP boilerplate */ ")[1])
     rt = CompiledRunner(prg)
     #Device.default.compiler.disassemble(rt.lib)
-    ei = ExecItem(rt, bufs_from_lin(k))
+    ei = ExecItem(rt, bufs_from_lin(Kernel(ast)))
     tm = ei.run(wait=True)
     print(f"final time {tm*1e6:.2f} us")
 

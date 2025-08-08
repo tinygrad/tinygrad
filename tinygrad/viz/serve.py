@@ -30,10 +30,13 @@ def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]
   for i,(k,v) in enumerate(zip(keys, contexts)):
     steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
               "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-    if isinstance(k.ret, ProgramSpec): steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
-    ret.append(r:={"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    ret.append(r:={"name":k.display_name, "steps":steps})
     # use the first key to get runtime profiling data about this context
     if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
+    # program spec metadata
+    if isinstance(k.ret, ProgramSpec):
+      steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
+      r["fmt"] = k.ret.src
     for key in k.keys: ref_map[key] = i
   return ret
 
@@ -129,7 +132,8 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      if isinstance(p:=contexts[0][ref].ret, ProgramSpec):
+      # TODO: support symbolic by capturing var_vals in profile events
+      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and all(isinstance(es,int) for es in [p.estimates.ops, p.estimates.mem, p.estimates.lds]):
         info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
@@ -196,16 +200,20 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
   data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
-  rows:list = [{"data":[instr], "segs":{}} for instr in cr["Instructions"]]
-  for i,info in enumerate(cr["InstructionInfoView"]["InstructionList"]): rows[i]["data"].append(info["Latency"])
+  resource_labels = data["TargetInfo"]["Resources"]
+  rows:list = [[instr] for instr in cr["Instructions"]]
+  # add scheduler estimates
+  for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
+  # map per instruction resource usage
+  instr_usage:dict[int, dict[int, int]] = {}
   for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
-    i, r = d["InstructionIndex"], d["ResourceIndex"]
-    if i>len(rows)-1: continue
-    rows[i]["segs"][r] = rows[i]["segs"].get(r, 0)+d["ResourceUsage"]
-  # rescale segment width to 0-100
-  max_usage = max([sum(x["segs"].values()) for x in rows], default=0)
-  for x in rows: x["segs"] = {k:{"width":(v/max_usage)*100, "value":v} for k,v in x["segs"].items()}
-  return {"rows":rows, "cols":["Opcode", "Latency", "HW Resources"], "segments":data["TargetInfo"]["Resources"]}
+    instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
+    instr_usage[i][r] += d["ResourceUsage"]
+  # last row is the usage summary
+  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
+  max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
+  for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
+  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
