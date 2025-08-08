@@ -33,5 +33,29 @@ class TestRangeify(unittest.TestCase):
     F = Tensor.empty(N, N)
     (A@B@C@D@E@F).realize()
 
+  def test_conv2d(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    x.conv2d(w1).realize()
+
+  def test_double_conv2d(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    w2 = Tensor.empty(12, 8, 3, 3)
+    x.conv2d(w1).conv2d(w2).realize()
+
+  def test_double_conv2d_half_contig(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    w2 = Tensor.empty(12, 8, 3, 3)
+    # NOTE: this contiguous doesn't help
+    x.conv2d(w1).contiguous(arg=(1,)).conv2d(w2).permute(0,2,3,1).contiguous().realize()
+
+  def test_double_conv2d_contig(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    w2 = Tensor.empty(12, 8, 3, 3)
+    x.conv2d(w1).contiguous().conv2d(w2).realize()
+
 if __name__ == '__main__':
   unittest.main()

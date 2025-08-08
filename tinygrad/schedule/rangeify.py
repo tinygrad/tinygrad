@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.helpers import argsort
+from tinygrad.helpers import argsort, getenv
 
 @dataclass
 class RangeifyContext:
@@ -25,6 +25,18 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
+
+  # conv hack. we replace ranges
+  if idx is not None and getenv("CONVHACK"):
+    sub = {}
+    sub[UOp.range(dtypes.int, 3, 4)] = UOp.range(dtypes.int, 3, ctx.idx)
+    ctx.idx += 1
+    sub[UOp.range(dtypes.int, 3, 5)] = UOp.range(dtypes.int, 3, ctx.idx)
+    ctx.idx += 1
+    ranges = UOp.sink(*ranges).substitute(sub).src
+    passthrough_idx.extend(sub.keys())
+    new_ranges.extend(sub.values())
+
   ret = x.src[0].index(*ranges).contiguous(arg=x.arg, tag=1)
   ret = ret.replace(src=(ret.src[0],)+tuple(new_ranges))
   return ret.index(*passthrough_idx) if idx is not None else ret
