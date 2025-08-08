@@ -384,20 +384,8 @@ function codeBlock(st, language, { loc, wrap }={}) {
 }
 
 function appendTd(tr, value, unit=null) {
-  const td = tr.appendChild(document.createElement("td"));
-  if (Array.isArray(value)) {
-    td.className = "pct-row";
-    const barGraph = td.appendChild(document.createElement("div"));
-    for (const [k, v, width] of value) {
-      const seg = barGraph.appendChild(document.createElement("div"));
-      seg.style.width = width+"%";
-      seg.title = `${k} ${v}`;
-      seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-    }
-  } else {
-    const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
-    td.innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
-  }
+  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
+  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
 }
 
 function appendRow(table, name, value, unit=null, cls="main-row") {
@@ -530,7 +518,23 @@ async function main() {
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
         tr.className = "main-row code-row";
-        for (const d of r) appendTd(tr, d);
+        for (const [i,value] of r.entries()) {
+          // reuse scalar value render
+          if (!Array.isArray(value)) {
+            appendTd(tr, value);
+            continue;
+          }
+          // display arrays in a bar graph
+          const td = tr.appendChild(document.createElement("td"));
+          td.className = "pct-row";
+          const barGraph = td.appendChild(document.createElement("div"));
+          for (const [k, v, width] of value) {
+            const seg = barGraph.appendChild(document.createElement("div"));
+            seg.style.width = width+"%";
+            seg.title = `${ret.cols[i].labels[k]} ${v}`;
+            seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+          }
+        }
       }
       const summary = metadata.appendChild(document.createElement("table"));
       for (const s of ret.summary) {
