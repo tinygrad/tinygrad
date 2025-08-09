@@ -469,7 +469,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
     if hasattr(dev.iface, "as_dmaref"): self._as_dmaref = dev.iface.as_dmaref
-    self.allow_copy_from_disk = not dev.is_usb()
+    self.supports_copy_from_disk = not dev.is_usb()
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
