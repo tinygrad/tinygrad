@@ -1,78 +1,115 @@
-# mypy: disable-error-code="misc, list-item, assignment, operator, index, arg-type"
-from types import SimpleNamespace
+from typing import Any, Sequence, cast, Literal, NamedTuple
+import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
-from typing import Any, Sequence, cast, Literal, Callable, get_args, NamedTuple
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum, os, struct
-from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
+from tinygrad.nn.state import TensorIO
 
-# Protobuf Wire Types
-WIRETYPE_VARINT = 0; WIRETYPE_FIXED64 = 1; WIRETYPE_LENGTH_DELIMITED = 2; WIRETYPE_START_GROUP = 3; WIRETYPE_END_GROUP = 4; WIRETYPE_FIXED32 = 5 # noqa: E702
+class WireType(enum.IntEnum):
+  """
+  Protocol Buffer wire types for decoding fields.
+  Reference: https://github.com/protocolbuffers/protobuf/blob/main/python/google/protobuf/internal/wire_format.py#L24-L29
+  """
+  VARINT = 0; FIXED64 = 1; LENGTH_DELIMITED = 2; START_GROUP = 3; END_GROUP = 4; FIXED32 = 5 # noqa: E702
 
-# TensorProto.DataType
-class TensorDataType:
-  UNDEFINED = 0; FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7 # noqa: E702
-  STRING = 8; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12; UINT64 = 13; COMPLEX64 = 14; COMPLEX128 = 15; BFLOAT16 = 16 # noqa: E702
+class AttributeType(enum.IntEnum):
+  """
+  ONNX attribute type identifiers.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/onnx.proto3#L128-L145
+  """
+  FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; GRAPH = 5; FLOATS = 6; INTS = 7; STRINGS = 8 # noqa: E702
 
-# AttributeProto.AttributeType
-class AttributeType:
-  UNDEFINED = 0; FLOAT = 1; INT = 2; STRING = 3; TENSOR = 4; GRAPH = 5; SPARSE_TENSOR = 11; TYPE_PROTO = 13; FLOATS = 6; INTS = 7 # noqa: E702
-  STRINGS = 8; TENSORS = 9; GRAPHS = 10; SPARSE_TENSORS = 12; TYPE_PROTOS = 14 # noqa: E702
+  def to_field_name(self) -> str: return {1: "f", 2: "i", 3: "s", 4: "t", 5: "g", 6: "floats", 7: "ints", 8: "strings"}[self.value]
 
-class PBType: FLOAT = 1; INT = 2; STRING = 3; FLOATS = 4; INTS = 5; STRINGS = 6; BYTES = 7; SUB = 8 # noqa: E702
+class OnnxDataType(enum.IntEnum):
+  """
+  ONNX tensor data type identifiers.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/onnx.proto3#L500-L544
+  """
+  FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12 # noqa: E702
+  UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
-PB_INFOS: dict[str, dict] = {
-  "OperatorSetIdProto": {1: ("domain", PBType.STRING), 2: ("version", PBType.INT)},
-  "StringStringEntryProto": {1: ("key", PBType.STRING), 2: ("value", PBType.STRING)},
-  "TensorProto": {1: ("dims", PBType.INT, True), 2: ("data_type", PBType.INT), 4: ("float_data", PBType.FLOATS),
-    13: ("external_data", PBType.SUB, True, "StringStringEntryProto"), 14: ("data_location", PBType.INT),
-    5: ("int32_data", PBType.INTS), 7: ("int64_data", PBType.INTS), 8: ("name", PBType.STRING), 9: ("raw_data", PBType.BYTES),
-    10: ("double_data", PBType.FLOATS), 11: ("uint64_data", PBType.INTS)},
-  "TensorShapeProtoDimension": {1: ("dim_value", PBType.INT), 2: ("dim_param", PBType.STRING)},
-  "TensorShapeProto": {1: ("dim", PBType.SUB, True, "TensorShapeProtoDimension")},
-  "ModelProto": {1: ("ir_version", PBType.INT), 5: ("model_version", PBType.INT),
-    2: ("producer_name", PBType.STRING), 3: ("producer_version", PBType.STRING), 4: ("domain", PBType.STRING), 6: ("doc_string", PBType.STRING),
-    7: ("graph", PBType.SUB, False, ("GraphProto", lambda: {"node": [], "initializer": [], "input": [], "output": [], "value_info": []})),
-    8: ("opset_import",PBType.SUB, True, "OperatorSetIdProto")},
-  "GraphProto": {2: ("name", PBType.STRING), 10: ("doc_string", PBType.STRING),
-    1: ("node", PBType.SUB, True, ("NodeProto", lambda: {"input": [], "output": [], "attribute": [], "domain": None})),
-    5: ("initializer", PBType.SUB, True, ("TensorProto", lambda: {"dims": [], "float_data": None, "int32_data": None, "string_data": None,
-                                                                  "int64_data": None, "double_data": None, "uint64_data": None, "raw_data": None})),
-    11: ("input", PBType.SUB, True, "ValueInfoProto"), 12: ("output", PBType.SUB, True, "ValueInfoProto")},
-  "NodeProto": { 1: ("input", PBType.STRING, True), 2: ("output", PBType.STRING, True), 3: ("name", PBType.STRING),
-    4: ("op_type", PBType.STRING), 6: ("doc_string", PBType.STRING), 7: ("domain", PBType.STRING),
-    5: ("attribute", PBType.SUB, True, ("AttributeProto", lambda: {"floats": [], "ints": [], "strings": []}))},
-  "AttributeProto": {1: ("name", PBType.STRING), 20: ("type", PBType.INT), 3: ("i", PBType.INT), 8: ("ints", PBType.INT, True),
-    2: ("f", PBType.FLOAT), 7: ("floats", PBType.FLOAT, True), 4: ("s", PBType.BYTES), 9: ("strings", PBType.BYTES, True),
-    5:("t", PBType.SUB, False, ("TensorProto", lambda: {"dims": [], "float_data": None, "int32_data": None, "string_data": None, "int64_data": None,
-                                                        "double_data": None, "uint64_data": None, "raw_data": None}))},
-  "ValueInfoProto": {1: ("name", PBType.STRING), 2: ("type", PBType.SUB, False, "TypeProto"), 3: ("doc_string", PBType.STRING)},
-  "TypeProto": {1: ("tensor_type", PBType.SUB, False, "TypeProtoTensor"), 4: ("sequence_type", PBType.SUB, False, "TypeProtoSequence"),
-    9: ("optional_type", PBType.SUB, False, "TypeProtoOptional"), 6: ("denotation", PBType.STRING)},
-  "TypeProtoSequence": {1: ("elem_type", PBType.SUB, False, "TypeProto")},
-  "TypeProtoOptional": {1: ("elem_type", PBType.SUB, False, "TypeProto")},
-  "TypeProtoTensor": {1: ("elem_type", PBType.INT), 2: ("shape", PBType.SUB, False, ("TensorShapeProto", lambda: {"dim": []}))},
-}
+  def to_dtype(self) -> DType: return dtypes.fields()[self.name.lower()]
 
-def onnx_load(fn: Tensor|str|pathlib.Path, load_external_data: bool=True):
-  parser = OnnxParser(fn, load_external_data)
-  onnx_model = parser.parse()
-  model = dict_to_namespace(onnx_model)
-  return model
+def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
+  if is_dtype_supported(dtype): return dtype
+  default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+  warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
+  assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
+  return default_dtype
 
-def gen_result(obj: dict, key_name, val, repeated: bool):
-  if repeated: obj.setdefault(key_name, []).append(val)
-  else: obj[key_name] = val
+class Domain(enum.Enum):
+  """
+  ONNX operator domains.
+  Reference: https://github.com/onnx/onnx/blob/rel-1.18.0/onnx/common/constants.h#L12-L18
+  """
+  ONNX = "ai.onnx"
+  ONNX_ML = "ai.onnx.ml"
+  AI_ONNX_TRAINING = "ai.onnx.training"
+  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
+  MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  @classmethod
+  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
-def dict_to_namespace(d):
-  if isinstance(d, dict): return SimpleNamespace(**{k: dict_to_namespace(v) for k, v in d.items()})
-  elif isinstance(d, list): return [dict_to_namespace(i) for i in d]
-  return d
+# ***** protobuf parsing ******
+class PBBufferedReader(BufferedReader):
+  def __init__(self, tensor: Tensor):
+    assert tensor.dtype is dtypes.uint8, tensor
+    super().__init__(TensorIO(tensor))
+    self.len = tensor.nbytes()
 
-class OnnxParser:
+  def decode_varint(self) -> int:
+    """Reference: https://protobuf.dev/programming-guides/encoding/#varints"""
+    result = 0
+    shift = 0
+    while True:
+      data = self.read(1)
+      if data == b"": raise EOFError("decode_varint EOF")
+      result |= (data[0] & 0x7F) << shift
+      if not (data[0] & 0x80): return result
+      shift += 7
+      if shift >= 70: raise ValueError("Varint too long")
+
+  def read_delimited(self, use_tensor=False):
+    str_len = self.decode_varint()
+    if not use_tensor: return self.read(str_len)
+    raw = self.raw
+    assert isinstance(raw, TensorIO)
+    res = raw._tensor[self.tell():(self.tell()+str_len)]
+    self.seek(str_len, os.SEEK_CUR)
+    return res
+  def read_string(self) -> str: return self.read_delimited().decode("utf-8")
+  def read_bytes(self) -> Tensor: return self.read_delimited(use_tensor=True)
+  def read_float(self) -> float: return struct.unpack("<f", self.read(4))[0]
+  def read_packed_floats(self) -> Tensor: return self.read_delimited(use_tensor=True)
+  def read_int64(self) -> int:
+    val = self.decode_varint()
+    return val - 2**64 if val & (1 << 63) else val
+  def read_packed_int64s(self) -> list[int]:
+    total_bytes_len = self.decode_varint()
+    old_pos = self.tell()
+    values = []
+    while self.tell() < total_bytes_len + old_pos:
+      val = self.decode_varint() # need copy here because packed ints are varint
+      values.append(val - 2**64 if val & (1 << 63) else val)
+    return values
+
+  def skip_field(self, wire_type: WireType) -> None:
+    """Skip a field based on its wire type."""
+    match wire_type:
+      case WireType.VARINT: self.decode_varint()
+      case WireType.FIXED64: self.seek(8, os.SEEK_CUR)
+      case WireType.FIXED32: self.seek(4, os.SEEK_CUR)
+      case WireType.LENGTH_DELIMITED: self.seek(self.decode_varint(), os.SEEK_CUR)
+      case _: raise ValueError(f"Unknown wire type: {wire_type}")
+
+class OnnxPBParser:
+  """
+  ONNX protobuf parser.
+  Reference: https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
+  """
   def __init__(self, inp: Tensor|str|pathlib.Path, load_external_data: bool=True):
     self.file_path: pathlib.Path|None = None
     self.load_external_data = load_external_data
@@ -80,202 +117,233 @@ class OnnxParser:
       self.file_path = pathlib.Path(inp)
       self.tensor = Tensor(self.file_path)
     else: self.tensor = inp
-    self.attr_func_dict = { PBType.BYTES: self._handle_bytes, PBType.SUB: self._handle_sub_message, PBType.FLOATS: self._handle_packed_floats,
-      PBType.INT: self._handle_int64, PBType.INTS: self._handle_packed_int64s, PBType.STRING: self._handle_string, PBType.FLOAT: self._handle_float}
-    self.registered_handles = {}
-    for pb_name in PB_INFOS:
-      res = {}
-      for fid, config in PB_INFOS[pb_name].items():
-        parser_fn, repeated = None, False
-        if len(config) == 2: name, attr = config
-        elif len(config) == 3: name, attr, repeated = config
-        elif len(config) == 4: name, attr, repeated, parser_fn = config
-        handler_fn = self.attr_func_dict[attr]
-        def _wrapper_handler(obj, reader, wt, h=handler_fn, n=name, p=parser_fn, r=repeated): return h(obj, n, reader, wt, parser_func=p, repeated=r)
-        res[fid] = _wrapper_handler
-      self.registered_handles[pb_name] = res
+    self.reader = PBBufferedReader(self.tensor)
 
-  def parse(self):
-    reader = BufferedReader(TensorIO(self.tensor))
-    return self._parse_message(reader, "ModelProto", lambda: {"opset_import": [], "domain": None, "graph": None})
+  # ***** parsing helpers *****
+  def _parse_message(self, end_pos: int):
+    while self.reader.tell() < end_pos:
+      tag = self.reader.decode_varint()
+      yield tag >> 3, WireType(tag & 0x07)
 
-  def decode_varint(self, reader: BufferedReader) -> int:
-    result = 0
-    shift = 0
-    while True:
-      data = reader.read(1)
-      if data == b"": raise EOFError("decode_varint EOF")
-      result |= (data[0] & 0x7F) << shift
-      if not (data[0] & 0x80): return result
-      shift += 7
-      if shift >= 70: raise ValueError("Varint too long")
+  def _decode_end_pos(self):
+    str_len = self.reader.decode_varint()
+    start_pos = self.reader.tell()
+    return start_pos + str_len
 
-  def skip_field_value(self, reader: BufferedReader, wire_type):
-    if wire_type == WIRETYPE_VARINT: self.decode_varint(reader)
-    elif wire_type == WIRETYPE_FIXED64: reader.seek(8, os.SEEK_CUR)
-    elif wire_type == WIRETYPE_FIXED32: reader.seek(4, os.SEEK_CUR)
-    elif wire_type == WIRETYPE_LENGTH_DELIMITED: reader.seek(self.decode_varint(reader), os.SEEK_CUR)
-    else: raise ValueError(f"Unknown wire type: {wire_type}")
+  # ***** protobuf parsing *****
+  def parse_ModelProto(self) -> dict:
+    """Entry point for parsing the ONNX model."""
+    obj: dict[str, Any] = {"opset_import": []}
+    for fid, wire_type in self._parse_message(self.reader.len): # TODO self.reader.len - 5 still works, why?
+      match fid:
+        case 4: obj["domain"] = self.reader.read_string()
+        case 5: obj["model_version"] = self.reader.read_int64()
+        case 7: obj["graph"] = self._parse_GraphProto()
+        case 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
+        case _: self.reader.skip_field(wire_type)
 
-  def _parse_message(self, reader, message_field_handlers_name, initial_obj_factory=lambda: {}):
-    message_field_handlers = self.registered_handles[message_field_handlers_name]
-    obj = initial_obj_factory()
-    while True:
-      try:
-        tag_val = self.decode_varint(reader)
-        field_number = tag_val >> 3
-        wire_type = tag_val & 0x07
-        if handler := message_field_handlers.get(field_number):
-          handler(obj, reader, wire_type)
-        else: self.skip_field_value(reader, wire_type)
-      except EOFError: break
-    if message_field_handlers_name == "TensorProto" and self.load_external_data and obj.get("data_location", 0) == 1: self._parse_external_data(obj)
+    # update opset version
+    opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
+    for n in obj["graph"]["node"]:
+      n_ = n["parsed_node"]
+      n["parsed_node"] = OnnxNode(n_.op, OpSetId(n_.opset_id.domain, opset_imports.get(n_.opset_id.domain, 1)), n_.inputs, n_.outputs, n_.opts)
     return obj
 
-  def _handle_delimited(self, reader:BufferedReader, use_tensor=False) -> Tensor|bytes:
-    str_len = self.decode_varint(reader)
-    if not use_tensor: return reader.read(str_len)
-    raw = reader.raw
-    assert isinstance(raw, TensorIO)
-    res = raw._tensor[reader.tell():(reader.tell()+str_len)]
-    reader.seek(str_len, os.SEEK_CUR)
-    return res
+  def _parse_GraphProto(self) -> dict:
+    obj: dict[str, Any] = {"node": [], "initializer": [], "input": [], "output": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["node"].append(self._parse_NodeProto())
+        case 2: obj["name"] = self.reader.read_string()
+        case 5: obj["initializer"].append(self._parse_TensorProto())
+        case 11: obj["input"].append(self._parse_ValueInfoProto())
+        case 12: obj["output"].append(self._parse_ValueInfoProto())
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-  def _handle_string(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for string field '{key_name}'")
-    value = self._handle_delimited(reader)
-    assert isinstance(value, bytes)
-    gen_result(obj, key_name, value.decode("utf-8"), repeated)
+  def _parse_NodeProto(self) -> dict:
+    obj: dict[str, Any] = {"input": [], "output": [], "attribute": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["input"].append(self.reader.read_string())
+        case 2: obj["output"].append(self.reader.read_string())
+        case 3: obj["name"] = self.reader.read_string()
+        case 4: obj["op_type"] = self.reader.read_string()
+        case 5: obj["attribute"].append(self._parse_AttributeProto())
+        case 6: obj["doc_string"] = self.reader.read_string()
+        case 7: obj["domain"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
 
-  def _handle_bytes(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for bytes field '{key_name}'")
-    value = self._handle_delimited(reader, use_tensor=True)
-    gen_result(obj, key_name, value, repeated)
+    # parse node
+    attributes = {attr_dict["name"]: attr_dict[AttributeType(attr_dict["type"]).to_field_name()] for attr_dict in obj["attribute"]}
+    opset_id = OpSetId(Domain.from_onnx(obj.get('domain')), 1)  # default version, to be updated later
+    obj["parsed_node"] = OnnxNode(obj["op_type"], opset_id, tuple(obj["input"]), tuple(obj["output"]), attributes)
+    return obj
 
-  def _handle_int64(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_VARINT: raise ValueError(f"Expected varint for int64 field '{key_name}'")
-    val = self.decode_varint(reader)
-    gen_result(obj, key_name, val - 2**64 if val & (1 << 63) else val, repeated)
+  def _parse_TensorProto(self) -> dict:
+    obj: dict[str, Any] = {"dims": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["dims"].append(self.reader.read_int64())
+        case 2: obj["data_type"] = self.reader.read_int64()
+        case 4: obj["float_data"] = self.reader.read_packed_floats()
+        case 5: obj["int32_data"] = self.reader.read_packed_int64s()
+        case 7: obj["int64_data"] = self.reader.read_packed_int64s()
+        case 8: obj["name"] = self.reader.read_string()
+        case 9: obj["raw_data"] = self.reader.read_bytes()
+        case 10: obj["double_data"] = self.reader.read_packed_floats()
+        case 11: obj["uint64_data"] = self.reader.read_packed_int64s()
+        case 13: obj.setdefault("external_data", []).append(self._parse_StringStringEntryProto())
+        case 14: obj["data_location"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
 
-  def _handle_float(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_FIXED32: raise ValueError(f"Expected fixed32 for float field '{key_name}'")
-    val, = struct.unpack("<f", reader.read(4))
-    gen_result(obj, key_name, val, repeated)
+    # load external data
+    if self.load_external_data and obj.get("data_location", 0) == 1:
+      if "external_data" not in obj: raise ValueError("no external_data")
+      location, length, offset = None, None, 0
+      for kv in obj["external_data"]:
+        if kv["key"] == "location": location = kv["value"]
+        if kv["key"] == "offset": offset = int(kv["value"])
+        if kv["key"] == "length": length = int(kv["value"])
+      if location is None: raise ValueError("no location in external_data")
 
-  def _handle_packed_int64s(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed int64s expected length_delimited")
-    total_bytes_len = self.decode_varint(reader)
-    old_pos = reader.tell()
-    values = []
-    while reader.tell() < total_bytes_len + old_pos:
-      val = self.decode_varint(reader) # need copy here because packed ints are varint
-      values.append(val - 2**64 if val & (1 << 63) else val)
-    obj[key_name] = values
+      if self.file_path is None:
+        if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
+          self.file_path = pathlib.Path(self.tensor.device[5:])
+        else: raise Exception("onnx external_data needs the origin file path, try passing onnx file path to onnx_load")
+      ext_path = self.file_path.parent.joinpath(location)
+      if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
 
-  def _handle_packed_floats(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError("Packed floats expected length_delimited")
-    value = self._handle_delimited(reader, use_tensor=True)
-    obj[key_name] = value
+      ext_tensor = Tensor(ext_path)
+      obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
+      obj["data_location"] = 0
 
-  def _handle_sub_message(self, obj, key_name, reader, wire_type, parser_func=None, repeated=False):
-    if wire_type != WIRETYPE_LENGTH_DELIMITED: raise ValueError(f"Expected length-delimited for sub-message field '{key_name}'")
-    value = self._handle_delimited(reader, use_tensor=True)
-    assert isinstance(value, Tensor)
-    if isinstance(parser_func, str): sub_obj = self._parse_message(BufferedReader(TensorIO(value)), parser_func)
-    elif isinstance(parser_func, tuple): sub_obj = self._parse_message(BufferedReader(TensorIO(value)), parser_func[0], parser_func[1])
-    else: sub_obj = parser_func(BufferedReader(TensorIO(value)))
-    gen_result(obj, key_name, sub_obj, repeated)
+    # parse tensor
+    to_dtype = dtype_fallback(true_dtype := OnnxDataType(obj['data_type']).to_dtype(), "buffer parse")
+    shape = tuple(obj['dims'])
+    present_fields = [field for field in ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', 'raw_data'] if field in obj]
+    assert len(present_fields) == 1, f"only 1 data field is allowed from {obj=}"
+    data = obj[present_fields[0]]
+    if not isinstance(data, Tensor):
+      obj["parsed_tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
+      return obj
+    assert isinstance(data, Tensor) and data.dtype is dtypes.uint8, data
+    # TODO: early realize here is for const folding for non disk tensor models (PYTHON)
+    data = data.bitcast(true_dtype).realize().reshape(shape)
+    data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
+    # const folding
+    if shape == ():
+      if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
+      data = Tensor(data.item(), dtype=to_dtype).reshape(shape)
+    obj["parsed_tensor"] = data
+    return obj
 
-  def _parse_external_data(self, obj):
-    if "external_data" not in obj: raise ValueError("no external_data")
-    location = None
-    length = None
-    offset = 0
-    for kv in obj["external_data"]:
-      if kv["key"] == "location": location = kv["value"]
-      if kv["key"] == "offset": offset = int(kv["value"])
-      if kv["key"] == "length": length = int(kv["value"])
-    if location is None: raise ValueError("no location in external_data")
-    if self.file_path is None:
-      # get onnx file path from Tensor
-      if isinstance(self.tensor.device, str) and self.tensor.device.startswith("DISK:"):
-        self.file_path = pathlib.Path(self.tensor.device[5:])
-        if not (ext_path := self.file_path.parent.joinpath(location)).exists():
-          raise Exception(f"external location not exists: {ext_path}, may caused by symbolic link, try passing onnx file path to onnx_load")
-      else: raise Exception("onnx external_data need the origin file path, try passing onnx file path to onnx_load")
-    ext_path = self.file_path.parent.joinpath(location)
-    if not ext_path.exists(): raise Exception(f"external location not exists: {ext_path}")
-    ext_tensor = Tensor(ext_path)
-    obj["raw_data"] = ext_tensor[offset:offset+length] if length is not None else ext_tensor[offset:]
-    obj["data_location"] = 0
+  def _parse_AttributeProto(self) -> dict:
+    obj: dict[str, Any] = {"floats": [], "ints": [], "strings": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["name"] = self.reader.read_string()
+        case 2: obj["f"] = self.reader.read_float()
+        case 3: obj["i"] = self.reader.read_int64()
+        case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
+        case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
+        case 6: obj["g"] = self._parse_GraphProto()
+        case 7: obj["floats"].append(self.reader.read_float())
+        case 8: obj["ints"].append(self.reader.read_int64())
+        case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
+        case 20: obj["type"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
+    obj["floats"], obj["ints"], obj["strings"] = tuple(obj["floats"]), tuple(obj["ints"]), tuple(obj["strings"])
+    return obj
 
-# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L500-L544
-data_types: dict[int, DType] = {
-  1:dtypes.float32, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-  9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
-}
+  def _parse_ValueInfoProto(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["name"] = self.reader.read_string()
+        case 2: obj["type"] = self._parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
 
-# https://github.com/onnx/onnx/blob/rel-1.17.0/onnx/onnx.proto3#L128-L145
-attribute_types: dict[int, Callable] = {
-  1: lambda a: float(a.f),
-  2: lambda a: int(a.i),
-  3: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
-  4: lambda a: buffer_parse(a.t),
-  6: lambda a: tuple(float(x) for x in a.floats),
-  7: lambda a: tuple(int(x) for x in a.ints),
-  8: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
-}
+    # parse type
+    if "type" not in obj: return {**obj, "parsed_type": None}
+    type_obj = obj["type"]
+    if is_optional := "optional_type" in type_obj: type_obj = type_obj["optional_type"]["elem_type"]
+    if is_sequence := "sequence_type" in type_obj: type_obj = type_obj["sequence_type"]["elem_type"]
+    assert "tensor_type" in type_obj, type_obj
+    shape_dims = type_obj['tensor_type'].get('shape', {}).get('dim', [])
+    obj['parsed_type'] = OnnxValue(tuple(d.get('dim_param') or d.get('dim_value') for d in shape_dims),
+                                   OnnxDataType(type_obj['tensor_type']['elem_type']).to_dtype(), is_optional, is_sequence)
+    return obj
 
-# ***** protobuf parsing ******
-from onnx import AttributeProto, TensorProto, TypeProto
+  def _parse_TypeProto(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["tensor_type"] = self._parse_TypeProtoTensor()
+        case 4: obj["sequence_type"] = self._parse_TypeProtoSequence()
+        case 9: obj["optional_type"] = self._parse_TypeProtoOptional()
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-def has_field(onnx_type: TypeProto|SimpleNamespace, field):
-  if isinstance(onnx_type, TypeProto): return onnx_type.HasField(field)
-  return hasattr(onnx_type, field)
+  def _parse_TypeProtoTensor(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["elem_type"] = self.reader.read_int64()
+        case 2: obj["shape"] = self._parse_TensorShapeProto()
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-def dtype_parse(onnx_dtype: int, fallback_context: str | None = None) -> DType:
-  if onnx_dtype not in data_types: raise NotImplementedError(f"onnx dtype id {onnx_dtype} is not supported")
-  if is_dtype_supported(dtype := data_types[onnx_dtype]): return dtype
-  # if fallback_context is provided, we can fall back to a default dtype
-  if fallback_context is not None:
-    default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-    warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
-    assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
-    return default_dtype
-  raise RuntimeError(f"dtype {dtype} on device {Device.DEFAULT} is not supported")
+  def _parse_TypeProtoSequence(self) -> dict:
+    obj = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["elem_type"] = self._parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-def attribute_parse(onnx_attribute: AttributeProto):
-  if onnx_attribute.type not in attribute_types: raise NotImplementedError(f"attribute type {onnx_attribute.type} is not supported")
-  return attribute_types[onnx_attribute.type](onnx_attribute)
+  def _parse_TypeProtoOptional(self) -> dict:
+    obj = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["elem_type"] = self._parse_TypeProto()
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-def buffer_parse(onnx_tensor: TensorProto) -> Tensor:
-  if onnx_tensor.string_data: raise NotImplementedError("Parsing for buffer with string data is not implemented.")
-  to_dtype, true_dtype = dtype_parse(onnx_tensor.data_type, "buffer parse"), data_types[onnx_tensor.data_type]
-  shape = tuple(onnx_tensor.dims)
-  keys = ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', "raw_data"]
-  data = next((val for k in keys if (val := getattr(onnx_tensor, k)) is not None), None)
-  if data is None: raise RuntimeError("empty buffer")
-  if not isinstance(data, Tensor): return Tensor(data, dtype=to_dtype).reshape(shape)
-  assert data.dtype is dtypes.uint8, data.dtype
-  data = data.bitcast(true_dtype).reshape(shape)
-  data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
-  if shape == ():
-    if data.dtype is dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-    return Tensor(data.item(), dtype=to_dtype).reshape(shape)
-  return data
+  def _parse_TensorShapeProto(self) -> dict:
+    obj: dict[str, Any] = {"dim": []}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["dim"].append(self._parse_TensorShapeProtoDimension())
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
-def type_parse(onnx_type: TypeProto):
-  elem_type = onnx_type
-  if has_field(elem_type, "map_type") or has_field(elem_type, "sparse_tensor_type") or has_field(elem_type, "opaque_type"):
-    raise NotImplementedError("parsing for map_type, sparse_tensor_type and opaque_type are not implemented")
-  if is_optional := has_field(elem_type, "optional_type"): elem_type = elem_type.optional_type.elem_type
-  if is_sequence := has_field(elem_type, "sequence_type"): elem_type = elem_type.sequence_type.elem_type
-  if has_field(elem_type, "tensor_type"):
-    shape = tuple(getattr(d, "dim_param", None) or getattr(d, "dim_value") for d in elem_type.tensor_type.shape.dim) \
-      if has_field(elem_type.tensor_type, "shape") else None # test_identity_sequence_cpu
-    dtype = data_types[elem_type.tensor_type.elem_type]
-    return OnnxValue(shape, dtype, is_optional, is_sequence)
-  raise RuntimeError(f"TypeProto was not parsed properly: {onnx_type=}")
+  def _parse_TensorShapeProtoDimension(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["dim_value"] = self.reader.read_int64()
+        case 2: obj["dim_param"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
+    return obj
+
+  def _parse_StringStringEntryProto(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["key"] = self.reader.read_string()
+        case 2: obj["value"] = self.reader.read_string()
+        case _: self.reader.skip_field(wire_type)
+    return obj
+
+  def _parse_OperatorSetIdProto(self) -> dict:
+    obj: dict[str, Any] = {}
+    for fid, wire_type in self._parse_message(self._decode_end_pos()):
+      match fid:
+        case 1: obj["domain"] = self.reader.read_string()
+        case 2: obj["version"] = self.reader.read_int64()
+        case _: self.reader.skip_field(wire_type)
+    return obj
 
 # ***** onnx spec *****
 @dataclasses.dataclass(frozen=True)
@@ -285,22 +353,12 @@ class OnnxValue:
   is_optional: bool
   is_sequence: bool
 
-class Domain(enum.Enum):
-  ONNX = "ai.onnx"
-  ONNX_ML = "ai.onnx.ml"
-  AI_ONNX_TRAINING = "ai.onnx.training"
-  AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
-  MICROSOFT_CONTRIB_OPS = "com.microsoft"
-  @classmethod
-  def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
-
 class OpSetId(NamedTuple):
   domain: Domain
   version: int
 
 @dataclasses.dataclass(frozen=True)
 class OnnxNode:
-  num: int
   op: str
   opset_id: OpSetId
   inputs: tuple[str, ...]
@@ -344,22 +402,20 @@ class OnnxRunner:
     model_path: The ONNX model, provided as a file path (a string or Path object) or a Tensor.
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
-    model = onnx_load(model_path)
-    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in model.graph.node)
+    model = OnnxPBParser(model_path, load_external_data=True).parse_ModelProto()
+    self._load_graph(model["graph"])
+
+  def _load_graph(self, graph: dict):
+    self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
+    self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
+    self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
+    self.graph_outputs = tuple(o["name"] for o in graph["output"])
+    self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
+
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
-    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
-    self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = tuple(x.name for x in model.graph.output)
-    opset_imports = {Domain.from_onnx(getattr(x, "domain", "")):x.version for x in model.opset_import}
-    self.graph_nodes = []
-    for num, n in enumerate(model.graph.node):
-      domain = Domain.from_onnx(n.domain)
-      opset_id = OpSetId(domain, opset_imports.get(domain, 1))
-      self.graph_nodes.append(OnnxNode(num, n.op_type, opset_id, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}))
-    self.graph_nodes = tuple(self.graph_nodes)
-    self.variable_dims: dict[str, int] = {}
 
+    self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
@@ -394,7 +450,7 @@ class OnnxRunner:
 
   def to(self, device:str|None):
     self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
-    self.graph_nodes = tuple(OnnxNode(n.num, n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
+    self.graph_nodes = tuple(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
                                       {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
     return self
 
@@ -403,15 +459,15 @@ class OnnxRunner:
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
-    for node in self.graph_nodes:
+    for num, node in enumerate(self.graph_nodes):
       inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if node.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
+      if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
 
-      if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
+      if debug >= 1: print(f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
       ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
@@ -419,18 +475,21 @@ class OnnxRunner:
 
       self.graph_values.update(dict(zip(node.outputs, ret[:len(node.outputs)], strict=True)))
 
-      if node.num == limit:
+      if num == limit:
         Tensor.training = self.old_training
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training = self.old_training
     return {name:self.graph_values[name] for name in self.graph_outputs}
+
+class SubGraphOnnxRunner(OnnxRunner):
+  def __init__(self, graph: dict): self._load_graph(graph)
 
 ####################
 ##### ONNX OPS #####
 ####################
 def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionType]]:
   # ***** helper functions *****
-  def _resolve_const(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)
+  def _resolve_const(x: Sequence[ConstType]|ConstType): return get_single_element(x) if isinstance(x, Sequence) else x
 
   def _axes(axes, noop_with_empty_axes): return axes or ([] if noop_with_empty_axes else None)
 
@@ -444,7 +503,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
   def _resolve_pool_pads(x:Tensor, p_, k_, d_, s_, auto_pad:AUTO_PAD_OPTIONS):
-    if auto_pad == "VALID": return [0]*(len(k_)*2)
+    if auto_pad == "VALID": return (0,)*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
@@ -491,6 +550,19 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
+  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors):
+    else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
+    else_graph.graph_values.update(intermediate_tensors)
+    then_graph.graph_values.update(intermediate_tensors)
+    else_out = else_graph({k:intermediate_tensors[k] for k in else_graph.graph_inputs.keys()})
+    then_out = then_graph({k:intermediate_tensors[k] for k in then_graph.graph_inputs.keys()})
+    assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
+    # can use where op when output shape is the same
+    if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
+      return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
+    # otherwise, use condition to select the output in python
+    return tuple(t if condition.item() else e for t,e in zip(then_out.values(), else_out.values()))
+
   def Identity(x:Tensor): return x
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
               value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
@@ -515,7 +587,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype, "EyeLike op") if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_fallback(OnnxDataType(dtype).to_dtype(), "EyeLike op") if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -569,7 +641,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   # ***** Casting Ops *****
   # TODO: saturate
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_parse(to, "Cast op"))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_fallback(OnnxDataType(to).to_dtype(), "Cast op"))
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -649,13 +721,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Processing Ops *****
   def AveragePool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, count_include_pad:int=0,
                   dilations:list[int]|int=1, pads:list[int]|int=0, strides:list[int]|int=1):
-    return X.avg_pool2d(kernel_shape, strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad),
+    return X.avg_pool2d(tuple(kernel_shape), strides, dilations, _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad),
                         ceil_mode=ceil_mode, count_include_pad=count_include_pad)
 
   def MaxPool(X: Tensor, kernel_shape:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", ceil_mode:int=0, dilations:list[int]|int=1, pads:list[int]|int=0,
               storage_order:int=0, strides:list[int]|int=1):
-    pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
-    ret, idx = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode, return_indices=True)
+    pool_pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
+
+    ret, idx = cast(tuple[Tensor, Tensor], X.max_pool2d(tuple(kernel_shape), strides, dilations, pool_pads, ceil_mode=ceil_mode, return_indices=True))
     return ret, idx.transpose(-2, -1).cast(dtypes.int64) if storage_order else idx.cast(dtypes.int64)
 
   def Conv(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
@@ -666,20 +739,23 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ConvTranspose(X: Tensor, W: Tensor, B:Tensor|None=None, auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:list[int]|int=1, group:int=1,
                     kernel_shape:list[int]|None=None, pads:list[int]|None=None, output_shape:list[int]|None=None, output_padding:list[int]|int=0,
                     strides:list[int]|int=1):
-    input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
-    strides, dilations, output_padding = (make_tuple(x, len(input_shape)) for x in (strides, dilations, output_padding))
-    if output_shape is not None: # we pad according to output_shape
-      pads = _auto_pad([s*(i-1) + op + ((k-1)*d+1) - os for s,i,op,k,d,os in
-                        zip(strides, input_shape, output_padding, kernel_shape, dilations, output_shape)], auto_pad)
-    if pads is None: # we generate pads
-      output_shape = output_shape or [X.shape[i+2] * strides[i] for i in range(len(strides))]
-      pads = [strides[i]*(input_shape[i]-1)+output_padding[i]+((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
-      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape) * 2
-    pads = _onnx_pads_to_tiny_pads(pads)
-    return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
+    input_shape_, kernel_shape_ = X.shape[2:], (kernel_shape or W.shape[2:])
 
-  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=None, pads:list[int]|int=0, strides:list[int]|int=1):
-    return Tensor.max_unpool2d(xT, xI, kernel_shape, strides, 1, pads, outshape if outshape is None else tuple(outshape))
+    strides_, dilations_, output_padding_ = (make_tuple(x, len(input_shape_)) for x in (strides, dilations, output_padding))
+    if output_shape is not None: # we pad according to output_shape
+      pads = _auto_pad([s_*(i-1) + op_ + ((k_-1)*d_+1) - os for s_,i,op_,k_,d_,os in
+                        zip(strides_, input_shape_, output_padding_, kernel_shape_, dilations_, output_shape)], auto_pad)
+    if pads is None: # we generate pads
+      output_shape = output_shape or [X.shape[i+2] * strides_[i] for i in range(len(strides_))]
+      pads = [strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i]
+              for i in range(len(input_shape_))]
+      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
+    pads = _onnx_pads_to_tiny_pads(pads)
+    return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
+
+  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]=[], pads:list[int]|int=0, strides:list[int]|int=1):
+    pads_: int | tuple[int, ...] = tuple(pads) if isinstance(pads, list) else pads
+    return Tensor.max_unpool2d(xT, xI, tuple(kernel_shape), strides, 1, pads_, outshape if outshape is None else tuple(outshape))
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X:Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -739,6 +815,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       else:
         scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
     else:
+      assert scales is not None, "either sizes or scales must be provided"
       sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
@@ -757,12 +834,55 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape[i] = expand[i] = sizes[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
-    if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
-    return X.permute(*argsort(perm)) if perm else X
+    if mode == "cubic":
+      A = cubic_coeff_a
+      expand = list(X.shape)
+      for i in range(-len(sizes), 0):
+        input_dim = X.shape[i]
+        reshape, index = [1] * X.ndim, indexes[i]
+        reshape[i] = expand[i] = sizes[i]
+
+        p = index.floor().cast(dtypes.int32)
+        ratio = index - p.cast(index.dtype)
+
+        # Calculate indices
+        idx0 = p - 1
+        idx1 = p
+        idx2 = p + 1
+        idx3 = p + 2
+
+        # Calculate coefficients
+        ratio_plus_1 = ratio + 1
+        one_minus_ratio = 1.0 - ratio
+        one_minus_ratio_plus_1 = one_minus_ratio + 1.0
+
+        c0 = ((A * ratio_plus_1 - 5 * A) * ratio_plus_1 + 8 * A) * ratio_plus_1 - 4 * A
+        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1.0
+        c2 = ((A + 2) * one_minus_ratio - (A + 3)) * one_minus_ratio * one_minus_ratio + 1.0
+        c3 = ((A * one_minus_ratio_plus_1 - 5 * A) * one_minus_ratio_plus_1 + 8 * A) * one_minus_ratio_plus_1 - 4 * A
+
+        if exclude_outside:
+          c0 = (p - 1 >= 0).where(c0, 0)
+          c2 = (p + 1 < input_dim).where(c2, 0)
+          c3 = (p + 2 < input_dim).where(c3, 0)
+
+          # Normalize coeffs
+          total = c0 + c1 + c2 + c3
+          c0, c1, c2, c3 = c0 / (total + 1e-9), c1 / (total + 1e-9), c2 / (total + 1e-9), c3 / (total + 1e-9)
+
+        # Reshape and expand
+        expanded_indices = [y.clip(0, input_dim - 1).reshape(reshape).expand(expand) for y in [idx0, idx1, idx2, idx3]]
+        expanded_coeffs = [y.reshape(reshape).expand(expand) for y in [c0, c1, c2, c3]]
+
+        # Gather values and apply coefficients
+        gathered_values = [X.gather(i, idx) for idx in expanded_indices]
+        X = sum(v * c for v, c in zip(gathered_values, expanded_coeffs))
+    return X.permute(*argsort(perm))
+
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002
-    val, idx = X.topk(_resolve_const(K), axis, largest, sorted)
+    val, idx = X.topk(_resolve_const(K), axis, bool(largest), bool(sorted))
     return val, idx.cast(dtypes.int64)
 
   # ***** Neural Network Ops *****
@@ -784,7 +904,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     x = x.reshape(x.shape[0], num_groups, -1).layernorm(eps=epsilon).reshape(x.shape)
     return x * scale.reshape(1, -1, *[1] * (x.ndim-2)) + bias.reshape(1, -1, *[1] * (x.ndim-2))
   def InstanceNormalization(x:Tensor, scale:Tensor, bias:Tensor, epsilon:float=1e-05):
-    return GroupNormalization(x, scale, bias, num_groups=x.shape[1], epsilon=epsilon)
+    return GroupNormalization(x, scale, bias, num_groups=cast(int, x.shape[1]), epsilon=epsilon)
   def LayerNormalization(x:Tensor, scale:Tensor, bias:Tensor, axis:int=-1, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     axes = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
@@ -880,6 +1000,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
     batch_size, seq_len, _ = x.shape
+    assert num_heads is not None, "num_heads must be provided"
     q_head_size, k_head_size, v_head_size = (sz // num_heads for sz in qkv_hidden_sizes)
     q, k, v = (x.reshape(batch_size, seq_len, num_heads, hsz).transpose(1, 2) for x, hsz in zip((q, k, v), (q_head_size, k_head_size, v_head_size)))
 
@@ -893,6 +1014,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if mask_index is not None:
       assert 4 >= mask_index.ndim >= 1, f"{mask_index.ndim=}"
+      assert isinstance(batch_size, int)
       if mask_index.ndim != 1: mask = mask_index.bool()
       else:
         if mask_index.shape[0] == batch_size:
@@ -933,7 +1055,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       K = K.repeat((1, _q_heads // _kv_heads, 1, 1))
       V = V.repeat((1, _q_heads // _kv_heads, 1, 1))
 
-    effective_scale = scale if scale is not None else 1.0 / (Q.shape[-1] ** 0.5)
+    effective_scale = scale if scale is not None else 1.0 / (cast(int, Q.shape[-1]) ** 0.5)
     scores = (Q @ K.transpose(-1, -2)) * effective_scale
     qk_matmul_return_val = scores
 
@@ -972,11 +1094,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       X = X.reshape(*X.shape[:-1], num_heads, X.shape[-1] // num_heads)
 
     head_size = X.shape[-1]
-    rot_dim = rotary_embedding_dim or head_size
+    rot_dim = rotary_embedding_dim or cast(int, head_size)
     x_rotate, x_pass = X[..., :rot_dim], X[..., rot_dim:]
 
-    cos = cos_cache[position_ids] if position_ids is not None else cos_cache[:X.shape[1]]
-    sin = sin_cache[position_ids] if position_ids is not None else sin_cache[:X.shape[1]]
+    cos = cos_cache[position_ids] if position_ids is not None else cos_cache[:cast(int, X.shape[1])]
+    sin = sin_cache[position_ids] if position_ids is not None else sin_cache[:cast(int, X.shape[1])]
     cos = cos[..., :rot_dim//2].unsqueeze(2)
     sin = sin[..., :rot_dim//2].unsqueeze(2)
 
@@ -1034,7 +1156,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     if reduction == "none": return x.scatter(axis, indices, updates)
-    return x.scatter_reduce(axis, indices, updates, {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}.get(reduction))
+    reduction_ = cast(Literal["sum", "prod", "amin", "amax"], {"add": "sum", "mul": "prod", "min": "amin", "max": "amax"}[reduction])
+    return x.scatter_reduce(axis, indices, updates, reduction_)
   def GatherElements(x:Tensor, indices:Tensor, axis:int):
     indices = (indices < 0).where(x.shape[axis], 0) + indices
     return x.gather(axis, indices)
@@ -1050,7 +1173,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
-    elif output_dtype != 0: out_dtype = dtype_parse(output_dtype, "QuantizeLinear op")
+    elif output_dtype != 0: out_dtype = dtype_fallback(OnnxDataType(output_dtype).to_dtype(), "QuantizeLinear op")
     else: out_dtype = dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
@@ -1072,12 +1195,12 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-  def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor|int, w:Tensor, w_scale:Tensor, w_zero_point:Tensor|int, y_scale:Tensor,
-                  y_zero_point: Tensor|int, B:Tensor|None=None, **opts):
+  def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor, w:Tensor, w_scale:Tensor, w_zero_point:Tensor, y_scale:Tensor,
+                  y_zero_point:Tensor, B:Tensor|None=None, **opts):
     return _qlinearop_quantized(Conv, [x,w], [x_zero_point,w_zero_point], [x_scale,w_scale], y_scale, y_zero_point, **{"B":B, **opts})
 
-  def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor|int, b:Tensor, b_scale:Tensor, b_zero_point:Tensor|int, y_scale:Tensor,
-                    y_zero_point:Tensor|int) -> Tensor:
+  def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, y_scale:Tensor,
+                    y_zero_point:Tensor) -> Tensor:
     return _qlinearop_quantized(Tensor.matmul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], y_scale, y_zero_point)
 
   def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
@@ -1090,10 +1213,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     assert channels_last == 0, "TODO NHWC"
     return _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
 
-  def ConvInteger(x: Tensor, w: Tensor, x_zero_point: Tensor | int = 0, w_zero_point: Tensor | int = 0, B: Tensor | None = None, **opts) -> Tensor:
+  def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), B: Tensor | None = None, **opts) -> Tensor:
     return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **{"B":B, **opts})
 
-  def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor | int = 0, b_zero_point: Tensor | int = 0) -> Tensor:
+  def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor = Tensor(0), b_zero_point: Tensor = Tensor(0)) -> Tensor:
     return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
 
   # ***** Training Ops *****
