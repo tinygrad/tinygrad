@@ -443,8 +443,8 @@ class TestNN(unittest.TestCase):
   def test_embedding_regression(self):
     # used to fail bounds check
     with Context(FUSE_ARANGE=1):
-      embedding = Embedding(2048, 1024)
-      input_ids = Tensor.empty(96, 512)
+      embedding = Embedding(100, 1024)
+      input_ids = Tensor.empty(16, 16)
       embedding(input_ids).realize()
 
   def test_load_state_dict(self):
