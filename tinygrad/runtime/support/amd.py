@@ -67,13 +67,14 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
       if e.code == 404: continue
       raise
 
-    offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
-    bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
+    offsets = {k.replace("regMC", "regMMMC").replace("regVM", "regMMVM"):v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
+    bases = {k[:-len('_BASE_IDX')].replace("regMC", "regMMMC").replace("regVM", "regMMVM"):v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
 
     fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
     for field_name, field_mask in sh_masks.items():
       if not ('__' in field_name and field_name.endswith('_MASK')): continue
       reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
+      if reg_name.startswith('MC_') or reg_name.startswith('VM_'): reg_name = f"MM{reg_name}"
       fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
 
     # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
