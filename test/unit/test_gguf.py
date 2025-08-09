@@ -58,6 +58,32 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
   def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
+  def test_dequantization_mxfp4(self):
+      MXFP4 = 39
+      rng = np.random.default_rng(42)
+
+      def encode(nibbles, E):
+        packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
+        return np.array([E] + packed, dtype=np.uint8)
+
+      def decode(code, E):
+        sign = -1.0 if code & 0b1000 else 1.0
+        exp  = (code >> 1) & 0b11
+        mant = code & 0b1
+        val  = (1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant
+        scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
+        return sign * val * scale
+
+      blocks, expected = [], []
+      for _ in range(4):
+        E = rng.integers(0, 256)
+        codes = rng.integers(0, 16, size=32, dtype=np.uint8)
+        blocks.append(encode(codes, E))
+        expected.extend(decode(c, E) for c in codes)
+
+      tensor = Tensor(np.concatenate(blocks))
+      out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
+      self.assertListEqual(out.numpy().tolist(), np.array(expected, dtype=np.float32).tolist())
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
