@@ -81,5 +81,15 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
+  def test_flash_attention(self):
+    BS = 4
+    HEADS = 2
+    MATDIM = 16
+    EMB = 8
+    q = Tensor.empty(BS, HEADS, MATDIM, EMB)
+    k = Tensor.empty(BS, HEADS, MATDIM, EMB)
+    v = Tensor.empty(BS, HEADS, MATDIM, EMB)
+    q.scaled_dot_product_attention(k, v).realize()
+
 if __name__ == '__main__':
   unittest.main()
