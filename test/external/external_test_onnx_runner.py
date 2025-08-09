@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
-from extra.onnx import data_types
+from extra.onnx import OnnxDataType
 from tinygrad.frontend.onnx import OnnxRunner
 from hypothesis import given, strategies as st
 
@@ -86,8 +86,8 @@ class TestOnnxRunner(unittest.TestCase):
       output = runner({'inp': Tensor([1])})['output']
       np.testing.assert_equal(output.numpy(), weights + 1)
 
-all_dtypes = list(data_types.keys())
-device_supported_dtypes = {odt for odt, dtype in data_types.items() if is_dtype_supported(dtype)}
+all_dtypes = list(OnnxDataType)
+device_supported_dtypes = {odt for odt in OnnxDataType if is_dtype_supported(odt.to_dtype())}
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   """
@@ -95,7 +95,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
   External tensors (inputs) preserve their original dtype - user must ensure compatibility with device.
   """
   def _get_expected_dtype(self, onnx_dtype: int, is_input: bool):
-    true_dtype = data_types[onnx_dtype]
+    true_dtype = OnnxDataType(onnx_dtype).to_dtype()
     # inputs always preserve their true dtype.
     if is_input:
       return true_dtype
