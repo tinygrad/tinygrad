@@ -127,6 +127,7 @@ class TestNN(unittest.TestCase):
 
   def test_conv1d(self): self._test_conv(Conv1d, torch.nn.Conv1d, BS=4, C1=16, DIMS=[224//4], C2=64, K=7, S=2, P=1)
   def test_conv2d(self): self._test_conv(Conv2d, torch.nn.Conv2d, BS=4, C1=16, DIMS=[224//4, 224//4], C2=64, K=7, S=2, P=1)
+  def test_conv3d(self): self._test_conv(Conv2d, torch.nn.Conv3d, BS=4, C1=16, DIMS=[224//4, 224//4, 224//4], C2=64, K=(7,7,7), S=2, P=1)
 
   def test_conv1d_same_padding(self):
     self._test_conv(Conv1d, torch.nn.Conv1d, BS=8, C1=3, DIMS=[32], C2=16, K=3, S=1, P='same')
@@ -136,6 +137,8 @@ class TestNN(unittest.TestCase):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[28, 33], C2=32, K=9, S=1, P='same')
   def test_conv2d_same_padding_with_dilation(self):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 28], C2=32, K=3, S=1, P='same', D=3)
+  def test_conv3d_same_padding(self):
+    self._test_conv(Conv2d, torch.nn.Conv3d, BS=8, C1=3, DIMS=[32, 32, 32], C2=16, K=(3,3,3), S=1, P='same')
 
   def test_conv2d_same_padding_invalid_stride(self):
     self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')
@@ -183,6 +186,8 @@ class TestNN(unittest.TestCase):
     self._test_conv(ConvTranspose1d, torch.nn.ConvTranspose1d, BS=4, C1=16, DIMS=[224//4], C2=64, K=7, S=2, P=1)
   def test_conv_transpose2d(self):
     self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose2d, BS=4, C1=16, DIMS=[224//4, 224//4], C2=64, K=7, S=2, P=1)
+  def test_conv_transpose3d(self):
+    self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose3d, BS=4, C1=16, DIMS=[224//4, 224//4, 224//4], C2=32, K=(7,7,7), S=2, P=1)
 
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3
