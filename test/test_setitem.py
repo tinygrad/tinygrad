@@ -119,17 +119,17 @@ class TestSetitem(unittest.TestCase):
 
   def test_simple_jit_setitem(self):
     @TinyJit
-    def f(t:Tensor, a:Tensor):
+    def f(t, a):
       t[2:4, 3:5] = a
-      return t.realize()
+      return t
+
     for i in range(1, 6):
       t = Tensor.zeros(6, 6).contiguous()
-      a = Tensor.full((2, 2), fill_value=i, dtype=dtypes.float).contiguous()
-      f(t, a)
-
+      a = Tensor.full((2, 2), i).contiguous()
+      out = f(t, a).realize()
       n = np.zeros((6, 6))
-      n[2:4, 3:5] = np.full((2, 2), i)
-      np.testing.assert_allclose(t.numpy(), n)
+      n[2:4, 3:5] = i
+      np.testing.assert_allclose(out.numpy(), n)
 
   def test_jit_setitem_variable_offset(self):
     with Context(IGNORE_OOB=1):
