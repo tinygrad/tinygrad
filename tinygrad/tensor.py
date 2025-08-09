@@ -1123,46 +1123,39 @@ class Tensor(MathTrait):
 
   @staticmethod
   def _expand_indices(indices, ndim, shape, device):
-      parsed = Tensor._parse_indices(indices, ndim, shape, device)
-      axes, dim_it = [], 0
-      for spec in parsed:
-          idx = spec["index"]
-          if idx is None:
-              continue
-          dim_sz = shape[dim_it]
+    parsed = Tensor._parse_indices(indices, ndim, shape, device)
+    axes, dim_it = [], 0
+    for spec in parsed:
+      idx = spec["index"]
+      if idx is None: continue
+      dim_sz = shape[dim_it]
 
-          if isinstance(idx, slice):
-              # normalize start/stop/step like Python does
-              s0, s1, st = idx.indices(int(dim_sz))
-              k = int(spec["size"])            # already computed by the parser
-              if k == 0:
-                  ax = Tensor([], device=device, dtype=dtypes.int)
-              else:
-                  i = Tensor.arange(k, device=device, dtype=dtypes.int)
-                  ax = i.mul(st).add(s0)       # start + i*step  (handles st<0 too)
+      if isinstance(idx, slice):
+        s0, s1, st = idx.indices(int(dim_sz))
+        k = int(spec["size"])  # already computed by the parser
+        if k == 0:
+          ax = Tensor([], device=device, dtype=dtypes.int)
+        else:
+          i = Tensor.arange(k, device=device, dtype=dtypes.int)
+          ax = i.mul(st).add(s0)  # start + i*step  (handles st<0 too)
 
-          elif isinstance(idx, (int, UOp)):
-              pos = spec["boundary"][0]        # normalized into [0, dim_sz)
-              # 1-element device tensor, no host copy, no arange
-              ax = Tensor.full((1,), pos, device=device, dtype=dtypes.int)
+      elif isinstance(idx, (int, UOp)):
+        pos = spec["boundary"][0]  # normalized into [0, dim_sz)
+        ax = Tensor.full((1,), pos, device=device, dtype=dtypes.int)
 
-          elif isinstance(idx, (list, tuple)):
-              # lists/tuples: keep behavior but fix negatives on device
-              ax = Tensor(idx, device=device, dtype=dtypes.int)
-              ax = (ax < 0).where(ax + dim_sz, ax)
+      elif isinstance(idx, (list, tuple)):
+        ax = Tensor(idx, device=device, dtype=dtypes.int)
+        ax = (ax < 0).where(ax + dim_sz, ax)
 
-          elif isinstance(idx, Tensor):
-              ax = idx.to(device).cast(dtypes.int)
+      elif isinstance(idx, Tensor):
+        ax = idx.to(device).cast(dtypes.int)
 
-          else:
-              raise IndexError(f"unsupported index {idx!r}")
-
-          axes.append(ax)
-          dim_it += 1
-
-      if not axes: return ()
-      grids = Tensor.meshgrid(*axes, indexing="ij")
-      return tuple(grids)
+      else: raise IndexError(f"unsupported index {idx!r}")
+      axes.append(ax)
+      dim_it += 1
+    if not axes: return ()
+    grids = Tensor.meshgrid(*axes, indexing="ij")
+    return tuple(grids)
   # ***** movement high level ops *****
   @staticmethod
   def _parse_indices(indices, ndim, shape, device):
@@ -1317,21 +1310,19 @@ class Tensor(MathTrait):
     if self.requires_grad or v.requires_grad:
       raise NotImplementedError("setitem with requires_grad is not supported")
 
-    # Try the built-in advanced setitem path in _getitem (already builds mask lazily)
     res = self._getitem(indices, v)
     if res.shape == self.shape and res.uop is not self.uop:
       self.replace(res)
       return
-
     # Otherwise, convert basic indices to advanced lazily and reuse the same mechanism.
     adv = Tensor._expand_indices(indices, self.ndim, self.shape, self.device)
-    if adv == ():  # zero real dims selected -> nothing to do
+    if adv == ():
       return
     rhs = v.cast(self.dtype)
     if rhs.ndim < len(adv):
-      rhs = rhs.reshape((1,)*(len(adv)-rhs.ndim) + rhs.shape)
-    rhs = rhs._broadcast_to(adv[0].shape)  # length-N index values
-    res = self._getitem(adv, rhs)          # advanced setitem returns full-tensor expression
+      rhs = rhs.reshape((1,) * (len(adv) - rhs.ndim) + rhs.shape)
+    rhs = rhs._broadcast_to(adv[0].shape)
+    res = self._getitem(adv, rhs)
     self.replace(res)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
