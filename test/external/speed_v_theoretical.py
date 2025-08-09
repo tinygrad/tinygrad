@@ -14,7 +14,7 @@ class TestKernelSpeed(unittest.TestCase):
       if DEBUG >= 1:
         print(f"{tm=:.6f}")
         print(f"{tflops=:.6f}")
-        print(f"{gbs=:.3f}")
+        print(f"gb/s={gbs:.3f}")
 
       if Device.DEFAULT == "NV":
         if nv_tflops is not None:
