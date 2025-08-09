@@ -103,7 +103,7 @@ class CStyleLanguage(Renderer):
     Ops.ADD: lambda a,b,dtype: f"({a}+{b})", Ops.SUB: lambda a,b,dtype: f"({a}-{b})", Ops.MUL: lambda a,b,dtype: f"({a}*{b})",
     Ops.MOD: lambda a,b,dtype: f"({a}%{b})", Ops.IDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a,b,dtype: f"({a}<{b})",
-    Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})" }
+    Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
@@ -146,7 +146,7 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
+        r[u] = f"data{u.arg}_{u.dtype.size}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
         continue
 
@@ -158,7 +158,7 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg[0]
-      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg}"
+      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg[0]}" if isinstance(u.arg, tuple) else f"ridx{u.arg}"
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.PRECAST: "precast",

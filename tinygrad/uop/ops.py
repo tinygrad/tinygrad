@@ -136,7 +136,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
-    if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
+    if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER}: return None
+    if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
@@ -182,6 +183,19 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
+  # determine what ranges this is in
+  @functools.cached_property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None}
+    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE}:
+      ret = self.src[0].ranges
+      for s in self.src[1:]:
+        if s in ret: del ret[s]
+    else:
+      ret = {}
+      for s in self.src: ret.update(s.ranges)
+    return ret
+
   # *** uop evaluation ***
 
   def simplify(self):
@@ -219,7 +233,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
-  def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def index(self, *srcs:UOp|None): return UOp(Ops.INDEX, self.dtype, (self,)+tuple([x for x in srcs if x is not None]))
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
@@ -275,7 +289,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
-  def contiguous(self): return self.alu(Ops.CONTIGUOUS)
+  def contiguous(self, **kwargs): return self.alu(Ops.CONTIGUOUS, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
