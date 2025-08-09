@@ -2,7 +2,7 @@ from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternM
 from tinygrad.helpers import all_int, prod, unwrap, dedup, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, FUSE_CONV_BW
 from tinygrad.shape.shapetracker import ShapeTracker
 
-ALWAYS_CONTIGUOUS = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
