@@ -169,22 +169,24 @@ async function renderProfiler() {
       data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
     // position shapes on the canvas and scale to fit fixed area
-    const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
-    else div.style.cursor = "pointer";
-    if (k === focusedDevice) {
-      // expand memory graph for the focused device
-      area = maxArea*4;
-      data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
-    }
-    const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
-    for (const [i,e] of mem.shapes.entries()) {
-      const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-      const y0 = e.y.map(yscale);
-      const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-      const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-      data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+    else {
+      const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
+      div.style.cursor = "pointer";
+      if (k === focusedDevice) {
+        // expand memory graph for the focused device
+        area = maxArea*4;
+        data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
+      }
+      const yscale = d3.scaleLinear().domain([0, mem.peak]).range([startY+area, startY]);
+      for (const [i,e] of mem.shapes.entries()) {
+        const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
+        const y0 = e.y.map(yscale);
+        const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+        const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+        data.shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+      }
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
@@ -514,34 +516,37 @@ async function main() {
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
-      const usage = {};
-      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
+      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
         tr.className = "main-row code-row";
-        for (const d of Object.values(r.data)) appendTd(tr, d);
-        const segmentsTd = tr.appendChild(document.createElement("td"));
-        segmentsTd.className = "pct-row";
-        const usageBar = segmentsTd.appendChild(document.createElement("div"));
-        for (const [k, {width, value}] of Object.entries(r.segs)) {
-          const seg = usageBar.appendChild(document.createElement("div"));
-          seg.style.width = width+"%";
-          seg.title = `${ret.segments[k]} ${value}`;
-          seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-          if (!(k in usage)) usage[k] = 0;
-          usage[k] += value;
+        for (const [i,value] of r.entries()) {
+          // string format scalar values
+          if (!Array.isArray(value)) appendTd(tr, value);
+          // display arrays in a bar graph
+          else {
+            const segmentsTd = tr.appendChild(document.createElement("td"));
+            segmentsTd.className = "pct-row";
+            const usageBar = segmentsTd.appendChild(document.createElement("div"));
+            for (const [k, v, width] of value) {
+              const seg = usageBar.appendChild(document.createElement("div"));
+              seg.style.width = width+"%";
+              seg.title = `${ret.cols[i].labels[k]} ${v}`;
+              seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+            }
+          }
         }
       }
       const summary = metadata.appendChild(document.createElement("table"));
-      for (const [i,s] of ret.segments.entries()) {
+      for (const s of ret.summary) {
         const tr = summary.appendChild(document.createElement("tr"));
         tr.className = "main-row";
         const td = tr.appendChild(document.createElement("td"));
         const div = td.appendChild(document.createElement("div"));
         div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
-        div.appendChild(document.createElement("p")).textContent = s;
-        appendTd(tr, usage[i] ?? 0);
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
+        div.appendChild(document.createElement("p")).textContent = s.label;
+        appendTd(tr, s.value);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);
