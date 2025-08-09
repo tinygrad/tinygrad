@@ -123,7 +123,7 @@ class AddBufferContext:
 def add_store(ctx:AddBufferContext, x:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
-  buf = UOp(Ops.DEFINE_GLOBAL if prod(shape) > 2000 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
+  buf = UOp(Ops.DEFINE_GLOBAL if prod(shape) > 65536 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
   ctx.map[buf] = (buf.op, ctx.dg)
   ctx.dg += 1
   return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
