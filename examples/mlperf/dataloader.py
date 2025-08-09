@@ -511,6 +511,35 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       # happens with BENCHMARK set
       pass
 
+# stable diffusion callbacks to match mlperf ref; declared here because they're pickled
+def filter_dataset(sample:dict): return {k:v for k,v in sample.items() if k in {'npy', 'txt'}}
+def collate(batch:list[dict], device:str|None=None):
+  # mlperf ref uses torch.utils.data.default_collate
+  ret = {"npy": [], "txt": [], "__key__": []}
+  for sample in batch:
+    for k,v in sample.items():
+      ret[k].append(v)
+  return ret
+def collate_fn(batch): return batch
+
+# Reference (code): https://github.com/mlcommons/training/blob/2f4a93fb4888180755a8ef55f4b977ef8f60a89e/stable_diffusion/ldm/data/webdatasets.py, Line 55
+# Reference (params): https://github.com/mlcommons/training/blob/ab4ae1ca718d7fe62c369710a316dff18768d04b/stable_diffusion/configs/train_01x08x08.yaml, Line 107
+def batch_load_train_stable_diffusion(BS:int, device:str|None=None):
+  # TODO: replace webdataset with pure python (tarfile, etc.); would need to replicate reservoir sampling across all shards
+  # webdataset depends on torch.utils.data.DataLoader
+  import webdataset
+  # TODO: add code for downloading/caching dataset, in extra/datasets/laion
+  dataset = webdataset.WebDataset(urls=f'{os.getenv("BASEDIR")}/datasets/laion-400m/webdataset-moments-filtered/{{00000..00000}}.tar', resampled=True,
+                                  cache_size=-1, cache_dir=None)
+  dataset = dataset.shuffle(size=1000)
+  dataset = dataset.decode()
+  dataset = dataset.map(filter_dataset)
+  dataset = dataset.batched(BS, partial=False, collation_fn=functools.partial(collate, device=device))
+  dataset = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=1, persistent_workers=True, collate_fn=collate_fn)
+
+  for x in dataset:
+    yield x
+
 # llama3
 
 class BinIdxDataset:
