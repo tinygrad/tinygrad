@@ -21,7 +21,7 @@ if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
 
   model = Model()
-  opt = nn.optim.Adam(nn.state.get_parameters(model))
+  opt = (nn.optim.Adam if not getenv("MUON") else nn.optim.Muon)(nn.state.get_parameters(model))
 
   @TinyJit
   @Tensor.train()
