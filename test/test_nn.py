@@ -440,6 +440,13 @@ class TestNN(unittest.TestCase):
       result = layer(a)
       self.assertEqual(result.shape, shp + (embed_size,))
 
+  def test_embedding_regression(self):
+    # used to fail bounds check
+    with Context(FUSE_ARANGE=1):
+      embedding = Embedding(30522, 1024)
+      input_ids = Tensor.empty(96, 512)
+      embedding(input_ids).realize()
+
   def test_load_state_dict(self):
     layer = Conv2d(3, 5, kernel_size=3)
 
