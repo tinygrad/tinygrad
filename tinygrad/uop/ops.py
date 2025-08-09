@@ -183,6 +183,19 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
+  # determine what ranges this is in
+  @functools.cached_property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None}
+    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE}:
+      ret = self.src[0].ranges
+      for s in self.src[1:]:
+        if s in ret: del ret[s]
+    else:
+      ret = {}
+      for s in self.src: ret.update(s.ranges)
+    return ret
+
   # *** uop evaluation ***
 
   def simplify(self):

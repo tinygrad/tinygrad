@@ -1,7 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.helpers import argsort, getenv
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, AxisType
+from tinygrad.helpers import argsort, getenv, prod
 
 @dataclass
 class RangeifyContext:
@@ -20,7 +20,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       continue
     if idx is not None: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
-      ranges.append(UOp.range(dtypes.int, s, ctx.idx))
+      ranges.append(UOp.range(dtypes.int, s, (ctx.idx, AxisType.LOOP)))
       new_ranges.append(ranges[-1])
       ctx.idx += 1
     else:
@@ -80,7 +80,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   new_ranges = []
   for i,s in enumerate(red.src[0].shape):
     if i in red.arg[1]:
-      rngs[i] = UOp.range(dtypes.int, s, ctx.idx)
+      rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
       ctx.idx += 1
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
@@ -100,8 +100,7 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple([((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+
-                   tuple([a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)]))),
+   lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 
@@ -111,4 +110,40 @@ pm_rangeify = PatternMatcher([
 
   # CONST can't have axes
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c),
+
+  # CONST should not have sources
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+])
+
+@dataclass
+class AddBufferContext:
+  dg:int = 0
+  map:dict = field(default_factory=dict)
+
+def add_store(ctx:AddBufferContext, x:UOp):
+  rngs = x.src[1:]
+  shape = tuple([r.vmax+1 for r in rngs])
+  buf = UOp(Ops.DEFINE_GLOBAL if prod(shape) > 2000 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
+  ctx.map[buf] = (buf.op, ctx.dg)
+  ctx.dg += 1
+  return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
+
+def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
+  if b not in ctx.map:
+    ctx.map[b] = (Ops.DEFINE_GLOBAL, ctx.dg)
+    ctx.dg += 1
+  return UOp(ctx.map[b][0], dtype=x.dtype.ptr(size=b.arg), arg=ctx.map[b][1]).index(idx).load()
+
+def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
+  rngs = x.src[1:]
+  shape = tuple([r.vmax+1 for r in rngs])
+  return st.src[0].src[0].reshape(shape).index(*rngs).load(st)
+
+from tinygrad.schedule.rangeify import map_reshape
+
+pm_add_buffers = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, name="x"), add_store),
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
+  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
 ])

@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
+from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, pm_add_buffers, AddBufferContext
 from tinygrad.codegen.opt.swizzler import apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
@@ -335,39 +335,6 @@ rangeify_fixups = PatternMatcher([
   #(UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].contiguous().expand(x.arg).replace(tag=1) if x.tag is None else None),
 ])
 
-@dataclass
-class AddBufferContext:
-  dg:int = 0
-  map:dict = field(default_factory=dict)
-
-def add_store(ctx:AddBufferContext, x:UOp):
-  rngs = x.src[1:]
-  shape = tuple([r.vmax+1 for r in rngs])
-  buf = UOp(Ops.DEFINE_GLOBAL if prod(shape) > 2000 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
-  ctx.map[buf] = (buf.op, ctx.dg)
-  ctx.dg += 1
-  return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
-
-def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
-  if b not in ctx.map:
-    ctx.map[b] = (Ops.DEFINE_GLOBAL, ctx.dg)
-    ctx.dg += 1
-  return UOp(ctx.map[b][0], dtype=x.dtype.ptr(size=b.arg), arg=ctx.map[b][1]).index(idx).load()
-
-def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
-  rngs = x.src[1:]
-  shape = tuple([r.vmax+1 for r in rngs])
-  return st.src[0].src[0].reshape(shape).index(*rngs).load(st)
-
-from tinygrad.schedule.rangeify import map_reshape
-
-pm_add_buffers = PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), add_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
-  (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
-])
-
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
@@ -394,8 +361,10 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
   from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
   rsink = apply_rewrites(rsink, rewrites_for_linearizer)
-  from tinygrad import Device
-  src = Device.default.renderer.render(rsink.arg.lst)
+  from tinygrad.renderer.cstyle import CStyleLanguage
+  src = CStyleLanguage().render(rsink.arg.lst)
+  #from tinygrad import Device
+  #src = Device.default.renderer.render(rsink.arg.lst)
   print(src)
 
   # display the cleaned up tensor graph
