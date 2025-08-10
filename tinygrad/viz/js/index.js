@@ -125,7 +125,7 @@ async function renderProfiler() {
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
 
-  const loadingText = metadata.append("h3").text("Loading...");
+  const loadingText = metadata.append("h4").text("Loading... ");
   metadata.append("label").text("Show memory: ").insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
     .on("change", (e) => { showMemoryProf = e.currentTarget.checked; renderProfiler(); });
 
@@ -185,7 +185,7 @@ async function renderProfiler() {
         lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
 
         // add a shape for the current chunk
-        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:rx, y:ry, width:e.dur, height:levelHeight, arg, label, fillColor });
+        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:rx, y:ry, width:e.dur, height:levelHeight, arg, label, fillColor});
 
         // this block won't be displayed on higher LODs, create a proxy for it
         for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
