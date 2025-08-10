@@ -1,6 +1,5 @@
 import unittest
 from dataclasses import dataclass, field
-from tinygrad import dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, graph_rewrite, track_rewrites, Ops, UPat, GroupOp, RewriteNotReady
 
 # we could insert CHILDREN node
@@ -17,21 +16,19 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     if len(v) > 1: ctx.children[k] = list(v.keys())
 
 def mark_children(ctx:ChildrenContext, x:UOp):
-  found = False
   new_srcs = []
   for s in x.src:
     if s in ctx.children:
-      ret = UOp(Ops.CHILDREN, s.dtype, (s.replace(tag=1),), arg=len(ctx.children[s]))
+      ret = UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s]))
       ret = UOp(Ops.CHILD, s.dtype, src=(ret,), arg=ctx.children[s].index(x))
       new_srcs.append(ret)
-      found = True
     else:
       new_srcs.append(s)
-  return x.replace(src=tuple(new_srcs)) if found else None
+  return x.replace(src=tuple(new_srcs))
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILDREN}, name="x"), mark_children),
 ])
 
 def visit_child(ctx:ChildrenContext, x:UOp):
