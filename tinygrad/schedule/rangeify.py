@@ -93,26 +93,14 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
 def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
-  ctx.children = {}
-  for k,v in x.get_children_map().items():
-    if len(v) > 1 and k.op is not Ops.DEVICE: ctx.children[k] = list(v.keys())
-
+  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and k.op is not Ops.DEVICE}
 def mark_children(ctx:RangeifyContext, x:UOp):
-  new_srcs = []
-  for s in x.src:
-    if s in ctx.children:
-      ret = UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s]))
-      ret = UOp(Ops.CHILD, s.dtype, src=(ret,), arg=ctx.children[s].index(x))
-      new_srcs.append(ret)
-    else:
-      new_srcs.append(s)
+  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
-
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILDREN}, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
 ])
-
 
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
@@ -199,9 +187,9 @@ def visit_children(ctx:RangeifyContext, x:UOp):
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   print(f"visit CHILD {x.arg} bottom up")
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
-  ctx.seen_children[c][x.arg] = idx
+  ctx.seen_children[c][x.arg[0]] = idx
   # wait here until we have seen all the children
-  if len(ctx.seen_children[c]) != c.arg: raise RewriteNotReady
+  if len(ctx.seen_children[c]) != x.arg[1]: raise RewriteNotReady
 
   if c not in ctx.seen_child:
     all_rngs = zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()])
@@ -226,7 +214,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
 
 pm_rangeify = PatternMatcher([
   # if there are new ended children, tag the SINK
-  (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
   #(UPat(Ops.SINK, name="sink"), child_check),
   #(UPat(Ops.CHILD, name="x"), visit_child),
   #(UPat(Ops.CHILDREN, name="x"), visit_children),
