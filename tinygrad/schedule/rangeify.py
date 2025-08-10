@@ -42,8 +42,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     passthrough_idx.extend(sub.keys())
     new_ranges.extend(sub.values())
 
-  ret = x.src[0].index(*ranges).contiguous(arg=x.arg, tag=1)
-  ret = ret.replace(src=(ret.src[0],)+tuple(new_ranges))
+  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.shape, tag=1)
   return ret.index(*passthrough_idx) if idx is not None else ret
 
 def map_reshape(x:UOp, r:UOp):
@@ -94,7 +93,7 @@ def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
   ctx.children = {}
   for k,v in x.get_children_map().items():
-    if len(v) > 1 and k.op not in {Ops.DEVICE, Ops.CONST, Ops.VIEW}:
+    if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort()):
       ctx.children[k] = len(v)
 
 def mark_children(ctx:RangeifyContext, x:UOp):
@@ -107,7 +106,11 @@ rangeify_fixups = PatternMatcher([
   (UPat(GroupOp.All, name="x"), mark_children),
   # all contiguous on SINK
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op is not Ops.CONTIGUOUS else s for s in x.src]))),
-  #(UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
+
+  # const
+  (UPat(Ops.CONST, name="x"), lambda x:
+   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if len(x.src) and x.src[0].op is Ops.VIEW else None),
+
   # add contiguous to EXPAND
   #(UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].contiguous().expand(x.arg).replace(tag=1) if x.tag is None else None),
 ])
@@ -120,7 +123,7 @@ def record_child(ctx:RangeifyContext, c:UOp, idx:UOp):
     return idx.replace(src=(c.replace(tag=1),)+idx.src[1:])
   if len(ctx.indexed_child[c]) == c.arg:
     assert idx in ctx.indexed_child[c]
-    ec = UOp(Ops.ENDCHILD, dtype=c.dtype, src=(c.replace(tag=2),))
+    ec = UOp(Ops.ENDCHILD, dtype=c.dtype, src=(c,))
     if ec not in ctx.ended_child: ctx.ended_child[ec] = 1
     else: ctx.ended_child[ec] += 1
     print("creating endchild", ctx.ended_child[ec])
@@ -131,7 +134,7 @@ def record_child(ctx:RangeifyContext, c:UOp, idx:UOp):
         return c.src[0].index(*out_rngs)
       for i,nr in zip(idx_ranges, end_ranges):
         out_rngs[i] = nr
-      return ec.index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
+      return ec.index(*out_rngs).contiguous(*end_ranges, arg=ec.shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
     else:
       # heres where we can compute everything about mismatched ranges
       all_rngs = zip(*[x.src[1:] for x in ctx.indexed_child[c]])
@@ -146,11 +149,13 @@ def record_child(ctx:RangeifyContext, c:UOp, idx:UOp):
           ctx.idx += 1
           end_ranges.append(out_rngs[-1])
           idx_ranges.append(i)
-      ctx.seen_child[c] = (idx_ranges, end_ranges)
       if len(end_ranges) == 0:
+        # safe to remove child right away
+        #return c.src[0].index(*out_rngs)
         return ec.index(*out_rngs)
       else:
-        return ec.index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
+        ctx.seen_child[c] = (idx_ranges, end_ranges)
+        return ec.index(*out_rngs).contiguous(*end_ranges, arg=ec.shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
 def child_check(ctx:RangeifyContext, sink:UOp):
   subs = {}
@@ -188,8 +193,8 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
 
-  # CONST can't have axes
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c),
+  # CONST can't have axes. remove srcs when we idx
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c.replace(src=())),
 ])
 
 @dataclass
@@ -223,7 +228,4 @@ pm_add_buffers = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
-
-  # CONST should not have sources
-  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
