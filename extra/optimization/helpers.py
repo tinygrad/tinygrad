@@ -1,6 +1,6 @@
 # stuff needed to unpack a kernel
 from tinygrad import Variable
-from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -11,7 +11,7 @@ inf, nan = float('inf'), float('nan')
 UOps = Ops
 
 # kernel unpacker
-from tinygrad.opt.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Kernel
 def ast_str_to_ast(ast_str:str) -> UOp: return eval(ast_str)
 def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
@@ -103,7 +103,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
   return ret
 
 from tinygrad.device import Device, Buffer
-from tinygrad.opt.search import _ensure_buffer_alloc, _time_program
+from tinygrad.codegen.opt.search import _ensure_buffer_alloc, _time_program
 from tinygrad.helpers import to_function_name, CACHELEVEL, diskcache_get, diskcache_put
 
 def time_linearizer(lin:Kernel, rawbufs:list[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501

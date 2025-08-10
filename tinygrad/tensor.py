@@ -2845,12 +2845,11 @@ class Tensor(MathTrait):
     ```
     """
     x, dim = self, self._resolve_dim(dim)
+    if (orig_len:= x.shape[dim]) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
     # pad to power of 2
-    orig_len = x.shape[dim]
-    n_stages = math.ceil(math.log2(orig_len))
-    fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
+    n_stages = (orig_len-1).bit_length()
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x.pad(pads, value=fill_value).unflatten(dim, (2,)*n_stages)
+    x = x.pad(pads, value=dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
@@ -2868,7 +2867,7 @@ class Tensor(MathTrait):
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, s) for s in self.shape))
     # compute indices for sorted values
     idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
     idx = idx.expand(x.shape)
@@ -3507,15 +3506,16 @@ class Tensor(MathTrait):
     """
     return self * self.softplus().tanh()
 
-  def softplus(self, beta=1) -> Tensor:
+  def softplus(self, beta=1.0, threshold=20.0) -> Tensor:
     """
     Applies the Softplus function element-wise.
+    For numerical stability, the implementation folds into identity function when `self * beta > threshold`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
     ```
     """
-    return (1/beta) * (1 + (self*beta).exp()).log()
+    return (self * beta > threshold).where(self, (1/beta) * (1 + (self*beta).exp()).log())
 
   def softsign(self) -> Tensor:
     """

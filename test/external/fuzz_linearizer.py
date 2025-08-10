@@ -21,9 +21,9 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.kernel import Opt, OptOps
-from tinygrad.opt.search import get_kernel_actions, bufs_from_lin
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.uop.ops import UOp, Ops

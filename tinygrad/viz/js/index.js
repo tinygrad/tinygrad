@@ -109,7 +109,7 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#46acc2", "#1d2e62", "#63b0cd"],
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
@@ -211,11 +211,11 @@ async function renderProfiler() {
               height: e.h, fillColor: e.fillColor, arg:{ name:null, tooltipText:"merged cells, zoom in"}});
 
     // position shapes on the canvas and scale to fit fixed area
-    let area = !showMemoryProf || mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
-    if (showMemoryProf) {  
+    let area = mem.shapes.length === 0 || !showMemoryProf ? 0 : areaScale(mem.peak);
+    if (area === 0) div.style.pointerEvents = "none";
+    else {
       const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-      if (area === 0) div.style.pointerEvents = "none";
-      else div.style.cursor = "pointer";
+      div.style.cursor = "pointer";
       if (k === focusedDevice) {
         // expand memory graph for the focused device
         area = maxArea*4;
@@ -597,34 +597,37 @@ async function main() {
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
       const thead = asm.appendChild(document.createElement("thead"));
-      const usage = {};
-      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c;
+      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
         tr.className = "main-row code-row";
-        for (const d of Object.values(r.data)) appendTd(tr, d);
-        const segmentsTd = tr.appendChild(document.createElement("td"));
-        segmentsTd.className = "pct-row";
-        const usageBar = segmentsTd.appendChild(document.createElement("div"));
-        for (const [k, {width, value}] of Object.entries(r.segs)) {
-          const seg = usageBar.appendChild(document.createElement("div"));
-          seg.style.width = width+"%";
-          seg.title = `${ret.segments[k]} ${value}`;
-          seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-          if (!(k in usage)) usage[k] = 0;
-          usage[k] += value;
+        for (const [i,value] of r.entries()) {
+          // string format scalar values
+          if (!Array.isArray(value)) appendTd(tr, value);
+          // display arrays in a bar graph
+          else {
+            const segmentsTd = tr.appendChild(document.createElement("td"));
+            segmentsTd.className = "pct-row";
+            const usageBar = segmentsTd.appendChild(document.createElement("div"));
+            for (const [k, v, width] of value) {
+              const seg = usageBar.appendChild(document.createElement("div"));
+              seg.style.width = width+"%";
+              seg.title = `${ret.cols[i].labels[k]} ${v}`;
+              seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
+            }
+          }
         }
       }
       const summary = metadata.appendChild(document.createElement("table"));
-      for (const [i,s] of ret.segments.entries()) {
+      for (const s of ret.summary) {
         const tr = summary.appendChild(document.createElement("tr"));
         tr.className = "main-row";
         const td = tr.appendChild(document.createElement("td"));
         const div = td.appendChild(document.createElement("div"));
         div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, i);
-        div.appendChild(document.createElement("p")).textContent = s;
-        appendTd(tr, usage[i] ?? 0);
+        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
+        div.appendChild(document.createElement("p")).textContent = s.label;
+        appendTd(tr, s.value);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".profiler").replaceChildren(root);

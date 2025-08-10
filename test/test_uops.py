@@ -14,7 +14,7 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -414,6 +414,17 @@ class TestAssembly(unittest.TestCase):
     program = get_program(ast, Device[Device.DEFAULT].renderer)
     uops = program.uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+
+  def test_use_cmpeq(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    comp = l.ne(c).ne(True)
+    uops = to_uops_list([comp], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.CMPEQ, ops)
+    self.assertNotIn(Ops.CMPNE, ops)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
