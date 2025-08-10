@@ -4,10 +4,17 @@
 
 from typing import Any
 import unittest, onnx, tempfile
-from tinygrad import dtypes
+from tinygrad import dtypes, Tensor
 from tinygrad.frontend.onnx import OnnxRunner
 import numpy as np
 from extra.onnx_helpers import validate
+from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN
+MICROSOFT_CONTRIB_OPS_DOMAIN = "com.microsoft"
+# TODO: remove this once ORT supports 1.18.0
+from onnx.helper import VERSION_TABLE
+VERSION_MAP = {row[0]: row[1:] for row in VERSION_TABLE}
+IR_VERSION, ai_onnx, ai_onnx_ml, ai_onnx_training = VERSION_MAP["1.17.0"]
+
 
 class TestOnnxOps(unittest.TestCase):
   DOMAIN = None
@@ -16,7 +23,14 @@ class TestOnnxOps(unittest.TestCase):
     onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
     nodes = [onnx.helper.make_node(op, list(inps), list(outs), domain=self.DOMAIN, **opts)]
     graph = onnx.helper.make_graph(nodes, f"test_{op.lower()}", onnx_inputs, onnx_outputs)
-    model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    #model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}")
+    # TODO: remove this once ORT supports 1.18.0
+    opset_id = None
+    if type(self).__name__ == "TestMainOnnxOps": opset_id = ai_onnx
+    if type(self).__name__ == "TestTrainingOnnxOps": opset_id = ai_onnx_training
+    if type(self).__name__ == "TestContribOnnxOps": opset_id = 1
+    model = onnx.helper.make_model(graph, producer_name=f"test_{op.lower()}", ir_version=IR_VERSION,
+                                    opset_imports=[onnx.helper.make_opsetid(self.DOMAIN, opset_id)])
     return model
 
   def helper_test_single_op(self, op:str, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str], rtol=1e-3, atol=1e-6):
@@ -26,7 +40,7 @@ class TestOnnxOps(unittest.TestCase):
       validate(tmp.name, inps, rtol, atol)
 
 class TestMainOnnxOps(TestOnnxOps):
-  DOMAIN = ""
+  DOMAIN = ONNX_DOMAIN
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
@@ -86,7 +100,8 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"detect_negative":1, "detect_positive":1}
     outputs = ["y"]
     model = self.helper_build_model("IsInf", inputs, attributes, outputs)
-    outputs = OnnxRunner(model)(inputs)
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
+    outputs = runner(inputs)
     assert outputs["y"].dtype is dtypes.bool
 
   def test_quantize_linear(self):
@@ -195,8 +210,65 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_qlinearmatmul_2D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 2)
   def test_qlinearmatmul_3D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 3)
 
+class TestTrainingOnnxOps(TestOnnxOps):
+  # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
+  DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
+  def _validate_training(self, op:str, onnx_fxn, inps:dict[str, np.ndarray], opts:dict[str, Any], outs:list[str]):
+    model = self.helper_build_model(op, inps, opts, outs)
+    if op == "Momentum": del opts['mode']
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON"))
+    tiny_out = runner(inps)
+    onnx_out = onnx_fxn(**inps, **opts)
+    for (nm, t_out), o_out in  zip(tiny_out.items(), onnx_out):
+      np.testing.assert_allclose(t_out.numpy(), o_out, rtol=1e-3, atol=1e-6, err_msg=f"{nm} failed")
+
+  def test_adagrad_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adagrad import apply_adagrad
+    for t in [1, 3, 100]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = {"decay_factor": 0.1, "epsilon": 1e-6, "norm_coefficient": 0.01}
+      outputs = ["X_out", "H_out"]
+      self._validate_training("Adagrad", apply_adagrad, inputs, attributes, outputs)
+
+  def test_momentum_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.momentum import apply_momentum, apply_nesterov
+    for onnx_fxn, mode in ((apply_momentum, "standard"), (apply_nesterov, "nesterov")):
+      for t in [1, 3, 100]:
+        inputs = {
+          "r": np.array(0.01, dtype=np.float32),
+          "t": np.array(t, dtype=np.int32),
+          "x": np.random.randn(3, 3).astype(np.float32),
+          "g": np.random.randn(3, 3).astype(np.float32),
+          "v": np.random.randn(3, 3).astype(np.float32),
+        }
+        attributes = {"alpha": 0.9, "beta": 0.1, "mode": mode, "norm_coefficient": 0.01}
+        outputs = ["X_out", "V_out"]
+        self._validate_training("Momentum", onnx_fxn, inputs, attributes, outputs)
+
+  @unittest.expectedFailure  # TODO: regression from removing StrEnum in Domain
+  def test_adam_t_greater_than_zero(self):
+    from onnx.backend.test.case.node.adam import apply_adam
+    for t in [1, 3, 100]:
+      inputs = {
+        "r": np.array(0.01, dtype=np.float32),
+        "t": np.array(t, dtype=np.int32),
+        "x": np.random.randn(3, 3).astype(np.float32),
+        "g": np.random.randn(3, 3).astype(np.float32),
+        "v": np.random.randn(3, 3).astype(np.float32),
+        "h": np.random.randn(3, 3).astype(np.float32),
+      }
+      attributes = { "alpha": 0.9, "beta": 0.999, "epsilon": 1e-8, "norm_coefficient": 0.01, "norm_coefficient_post": 0.02 }
+      outputs = ["X_new", "V_new", "H_new"]
+      self._validate_training("Adam", apply_adam, inputs, attributes, outputs)
+
 class TestContribOnnxOps(TestOnnxOps):
-  DOMAIN = "com.microsoft"
+  DOMAIN = MICROSOFT_CONTRIB_OPS_DOMAIN
   def test_attention(self):
     batch_size, seq_len, input_hidden_size = 2, 8, 256
     num_heads, head_size = 4, 64

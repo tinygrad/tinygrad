@@ -26,14 +26,8 @@ struct WaveState {
     sds: HashMap<usize, VecDataStore>,
 }
 
-const SYNCS: [u32; 5] = [0xBF89FC07, 0xBFBD0000, 0xBC7C0000, 0xBF890007, 0xbFB60003];
-const BARRIERS: [[u32; 2]; 5] = [
-    [SYNCS[0], SYNCS[0]],
-    [SYNCS[0], SYNCS[1]],
-    [SYNCS[0], SYNCS[2]],
-    [SYNCS[3], SYNCS[1]],
-    [SYNCS[1], SYNCS[0]],
-];
+const SYNCS: [u32; 4] = [0xBF89FC07, 0xBC7C0000, 0xBF890007, 0xbFB60003];
+const S_BARRIER: u32 = 0xBFBD0000;
 impl<'a> WorkGroup<'a> {
     pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
         Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new() }
@@ -52,7 +46,7 @@ impl<'a> WorkGroup<'a> {
 
         let mut sync = false;
         for (i, x) in self.kernel.iter().enumerate() {
-            if i != 0 && BARRIERS.contains(&[*x, self.kernel[i - 1]]) {
+            if i != 0 && *x == S_BARRIER {
                 sync = true;
                 break;
             }
@@ -105,11 +99,11 @@ impl<'a> WorkGroup<'a> {
             if self.kernel[pc] == END_PRG {
                 break Ok(());
             }
-            if BARRIERS.contains(&[self.kernel[pc], self.kernel[pc + 1]]) && self.wave_state.get(&wave_id).is_none() {
+            if self.kernel[pc] == S_BARRIER && self.wave_state.get(&wave_id).is_none() {
                 self.wave_state.insert(wave_id, WaveState { scalar_reg, scc, vec_reg, vcc, exec, pc, sds });
                 break Ok(());
             }
-            if SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
+            if self.kernel[pc] == S_BARRIER || SYNCS.contains(&self.kernel[pc]) || self.kernel[pc] >> 20 == 0xbf8 || self.kernel[pc] == 0x7E000000 {
                 pc += 1;
                 continue;
             }

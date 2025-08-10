@@ -1,14 +1,14 @@
 import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv, round_up
+from tinygrad.helpers import DEBUG, to_mv, round_up, OSX
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, max_read_len:int=4096):
+  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
-    self.max_streams, self.max_read_len = max_streams, max_read_len
+    self.max_streams = max_streams
     self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
 
     if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
@@ -45,8 +45,10 @@ class USB3:
     self.buf_cmd = [(ctypes.c_uint8 * len(cmd_template))(*cmd_template) for _ in range(self.max_streams)]
     self.buf_stat = [(ctypes.c_uint8 * 64)() for _ in range(self.max_streams)]
     self.buf_data_in = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out = [(ctypes.c_uint8 * 0x1000)() for _ in range(self.max_streams)]
-    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x1000) for i in range(self.max_streams)]
+    self.buf_data_out = [(ctypes.c_uint8 * 0x80000)() for _ in range(self.max_streams)]
+    self.buf_data_out_mvs = [to_mv(ctypes.addressof(self.buf_data_out[i]), 0x80000) for i in range(self.max_streams)]
+
+    for slot in range(self.max_streams): struct.pack_into(">B", self.buf_cmd[slot], 3, slot + 1)
 
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
@@ -75,7 +77,6 @@ class USB3:
       slot, stream = idx % self.max_streams, (idx % self.max_streams) + 1
 
       # build cmd packet
-      struct.pack_into(">B", self.buf_cmd[slot], 3, stream)
       self.buf_cmd[slot][16:16+len(cdb)] = list(cdb)
 
       # cmd + stat transfers
@@ -83,7 +84,7 @@ class USB3:
       tr_window.append(self._prep_transfer(self.tr[self.ep_stat_in][slot], self.ep_stat_in, stream, self.buf_stat[slot], 64))
 
       if rlen:
-        if rlen > self.max_read_len: raise ValueError("read length > max_read_len per CDB")
+        if rlen > len(self.buf_data_in[slot]): self.buf_data_in[slot] = (ctypes.c_uint8 * round_up(rlen, 0x1000))()
         tr_window.append(self._prep_transfer(self.tr[self.ep_data_in][slot], self.ep_data_in, stream, self.buf_data_in[slot], rlen))
 
       if send_data is not None:
@@ -170,7 +171,7 @@ class ASM24Controller:
     if fmt_type == 0x60 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return []
 
     assert fmt_type >> 8 == 0 and size > 0 and size <= 4, f"Invalid fmt_type {fmt_type} or size {size}"
-    if DEBUG >= 3: print("pcie_request", hex(fmt_type), hex(address), value, size)
+    if DEBUG >= 5: print("pcie_request", hex(fmt_type), hex(address), value, size)
 
     masked_address, offset = address & 0xFFFFFFFC, address & 0x3
     assert size + offset <= 4 and (value is None or value >> (8 * size) == 0)
@@ -224,8 +225,8 @@ class ASM24Controller:
   def pcie_mem_write(self, address, values, size):
     ops = [self.pcie_prep_request(0x60, address + i * size, value, size) for i, value in enumerate(values)]
 
-    # Send in batches of 4
-    for i in range(0, len(ops), 4): self.exec_ops(list(itertools.chain.from_iterable(ops[i:i+4])))
+    # Send in batches of 4 for OSX and 16 for Linux (benchmarked values)
+    for i in range(0, len(ops), bs:=(4 if OSX else 16)): self.exec_ops(list(itertools.chain.from_iterable(ops[i:i+bs])))
 
 class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True):

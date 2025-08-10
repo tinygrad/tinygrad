@@ -93,6 +93,12 @@ impl<'a> Thread<'a> {
                                 sdst | (1 << (s0 & 0x1f))
                             }
                         }
+                        21 => {
+                            let s0 = s0 as i32;
+                            let ret = s0.abs();
+                            *self.scc = (ret != 0) as u32;
+                            ret as u32
+                        }
                         30 => {
                             let ret = !s0;
                             *self.scc = (ret != 0) as u32;
@@ -1240,7 +1246,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 531 | 537 | 540 | 551 | 567 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 531 | 537 | 540 | 551 | 567 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1251,6 +1257,7 @@ impl<'a> Thread<'a> {
                                         264 => s0 * s1,
                                         272 => f32::max(s0, s1),
                                         299 => f32::mul_add(s0, s1, f32::from_bits(self.vec_reg[vdst])),
+                                        426 => s0.recip(),
                                         531 => f32::mul_add(s0, s1, s2),
                                         537 => f32::min(f32::min(s0, s1), s2),
                                         540 => f32::max(f32::max(s0, s1), s2),
@@ -1396,9 +1403,10 @@ impl<'a> Thread<'a> {
 
             match op {
                 // load
-                54 | 118 | 255 => {
+                54 | 118 | 254 | 255 => {
                     let dwords = match op {
                         255 => 4,
+                        254 => 3,
                         118 => 2,
                         _ => 1,
                     };
@@ -1419,9 +1427,10 @@ impl<'a> Thread<'a> {
                     self.vec_reg.write64(vdst + 2, self.lds.read64(addr1));
                 }
                 // store
-                13 | 77 | 223 => {
+                13 | 77 | 222 | 223 => {
                     let dwords = match op {
                         223 => 4,
+                        222 => 3,
                         77 => 2,
                         _ => 1,
                     };
@@ -1686,6 +1695,7 @@ impl<'a> Thread<'a> {
             107 => self.scalar_reg[code as usize],
             EXEC => self.exec.value,
             NULL_SRC | 128 => 0,
+            253 => *self.scc as u32,
             255 => match self.simm {
                 None => {
                     let val = self.stream[self.pc_offset + 1];
@@ -3023,7 +3033,7 @@ mod test_vop3 {
 
     #[test]
     fn test_v_cndmask_b32_e64_neg() {
-        [[0.0f32, 0.0], [-0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
+        [[0.0f32, -0.0], [-0.0f32, 0.0], [1.0f32, -1.0], [-1.0f32, 1.0]].iter().for_each(|[input, ret]| {
             let mut thread = _helper_test_thread();
             thread.scalar_reg[0] = false as u32;
             thread.vec_reg[3] = input.to_bits();

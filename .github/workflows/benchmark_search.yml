@@ -1,0 +1,34 @@
+name: Benchmark with kernel search
+
+on:
+  push:
+    branches:
+      - update_benchmark_search
+  workflow_dispatch:
+
+jobs:
+  run_script_job:
+    runs-on: [self-hosted, Linux, tinybox]
+    if: github.repository_owner == 'tinygrad'
+    timeout-minutes: 100
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Remove amdgpu
+      run: sudo rmmod amdgpu || true
+    - name: Cleanup running AM processes
+      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Run SDXL with new search
+      # TODO: GCVM_L2_PROTECTION_FAULT_STATUS with llvm19
+      run: |
+        BENCHMARK_LOG=search_sdxl PYTHONPATH=. AMD=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 python examples/sdxl.py --noshow --timing --seed 0
+    - name: Run SDXL with cached search
+      run: |
+        BENCHMARK_LOG=search_sdxl_cached PYTHONPATH=. AMD=1 JITBEAM=2 python examples/sdxl.py --noshow --timing --seed 0
+    - name: Run winograd cifar with new search
+      run: |
+        BENCHMARK_LOG=search_wino_cifar WINO=1 DEFAULT_FLOAT=HALF JITBEAM=4 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 BS=1024 STEPS=500 python examples/hlb_cifar10.py
+    - name: Run winograd cifar with cached search
+      run: |
+        BENCHMARK_LOG=search_wino_cifar_cached WINO=1 DEFAULT_FLOAT=HALF JITBEAM=4 BS=1024 STEPS=500 python examples/hlb_cifar10.py

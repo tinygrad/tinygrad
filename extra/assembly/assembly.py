@@ -1,9 +1,9 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
-from tinygrad.codegen.kernel import Ops, MemOp, UOp
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.codegen.opt.kernel import Ops, MemOp, UOp
+from tinygrad.uop.ops import BinaryOps, UnaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
+from tinygrad.uop.ops import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
 from collections import defaultdict
@@ -156,7 +156,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [tmp], args))
       else:
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[x] for x in vin], args))
-    elif uop == Ops.DEFINE_ACC:
+    elif uop == Ops.DEFINE_REG:
       reg = lang.newreg(u, dtype=dtype)
       lang.ins.append(AssemblyInstruction(Ops.LOAD, reg, [], args))
     elif uop == Ops.SPECIAL:

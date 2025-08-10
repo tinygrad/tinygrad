@@ -7,6 +7,7 @@ from extra.models.llama import Transformer, convert_from_huggingface, convert_fr
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
+from extra.bench_log import BenchEvent, WallTimeEvent
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -156,7 +157,11 @@ MODEL_PARAMS = {
   "70B": {
     "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
     "files": 8
-  }
+  },
+  "405B": {
+    "args": {"dim": 16384, "n_heads": 128, "n_kv_heads": 8, "n_layers": 126, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 53248},
+    "files": 191
+  },
 }
 def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dtype=dtypes.float16, device=None, max_context=8192, load_weights=True):
   # build model
@@ -166,40 +171,42 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dt
   model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, embedding=embedding, max_context=max_context, jit=True)
 
   if not load_weights: return model
+
   # load weights
-  if model_path.is_dir():
-    if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
-    elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
-    else: weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
-  else:
-    weights = load(str(model_path))
-  if "model.embed_tokens.weight" in weights:
-    weights = convert_from_huggingface(weights, MODEL_PARAMS[model_size]["args"]["n_layers"], MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
-  elif "token_embd.weight" in weights:
-    weights = convert_from_gguf(weights, MODEL_PARAMS[model_size]["args"]["n_layers"])
-  weights = fix_bf16(weights)
+  with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+    if model_path.is_dir():
+      if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
+      elif (model_path / "model.safetensors").exists(): weights = load(str(model_path / "model.safetensors"))
+      else: weights = concat_weights([load(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(MODEL_PARAMS[model_size]["files"])], device[0] if isinstance(device, tuple) else device)
+    else:
+      weights = load(str(model_path))
+    if "model.embed_tokens.weight" in weights:
+      weights = convert_from_huggingface(weights, MODEL_PARAMS[model_size]["args"]["n_layers"], MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
+    elif "token_embd.weight" in weights:
+      weights = convert_from_gguf(weights, MODEL_PARAMS[model_size]["args"]["n_layers"])
+    weights = fix_bf16(weights)
 
-  with Context(BEAM=0):
-    # quantize
-    if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
-    elif quantize is not None:
-      weights = linear.quantize(weights, device, scale_dtype, quantize_embeds)
-      for _,v in weights.items(): v.realize()
+    with Context(BEAM=0):
+      # quantize
+      if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
+      elif quantize is not None:
+        weights = linear.quantize(weights, device, scale_dtype, quantize_embeds)
+        for _,v in weights.items(): v.realize()
 
-    # shard
-    if isinstance(device, tuple):
-      for k,v in nn.state.get_state_dict(model).items():
-        if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-        elif '.attention.' in k: v.shard_(device, axis=-1)
-        elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-        elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-        elif 'output.weight' in k: v.shard_(device, axis=0)
-        else: v.shard_(device, axis=None)
+      # shard
+      if isinstance(device, tuple):
+        for k,v in nn.state.get_state_dict(model).items():
+          if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+          elif '.attention.' in k: v.shard_(device, axis=-1)
+          elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+          elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+          elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+          elif 'output.weight' in k: v.shard_(device, axis=0)
+          else: v.shard_(device, axis=None)
 
-    # replace weights in model
-    load_state_dict(model, weights, strict=False, consume=True)
+      # replace weights in model
+      load_state_dict(model, weights, strict=False, consume=True)
   return model
 
 # default settings
@@ -230,12 +237,10 @@ def prefill(model, toks, start_pos=0):
   return start_pos
 
 if __name__ == "__main__":
-  Tensor.no_grad = True
-
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a model")
   parser.add_argument("--model", type=Path, help="Model path")
-  parser.add_argument("--size", choices=["1B", "8B", "70B"], default="1B", help="Model size")
+  parser.add_argument("--size", choices=["1B", "8B", "70B", "405B"], default="1B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
   parser.add_argument("--quantize", choices=["int8", "nf4", "float16"], help="Quantization method")
   parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
@@ -243,7 +248,7 @@ if __name__ == "__main__":
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
   parser.add_argument("--debug", action="store_true", help="Enable debug mode")
   parser.add_argument("--seed", type=int, help="Random seed")
-  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
+  parser.add_argument("--temperature", type=float, default=0.85, help="Temperature")
   parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data")
@@ -283,7 +288,7 @@ if __name__ == "__main__":
 
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   model = build_transformer(args.model, model_size=args.size, quantize=args.quantize, device=device)
-  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(model))
+  param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(model))
 
   if not args.no_api and not args.benchmark:
     from bottle import Bottle, request, response, HTTPResponse, abort, static_file
@@ -435,11 +440,12 @@ if __name__ == "__main__":
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
         with Timing("total ", on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
-          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
-            tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
-          tok = tok.item()
+          with WallTimeEvent(BenchEvent.STEP):
+            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None):
+              tok = model(Tensor([[last_tok]], device=device), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+            tok = tok.item()
       start_pos += 1
       last_tok = tok
       generated += tokenizer.decode([tok])

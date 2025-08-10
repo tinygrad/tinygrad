@@ -2,8 +2,8 @@ import unittest, itertools
 
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops
-from tinygrad.codegen.symbolic import simplify_valid
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.symbolic import simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -99,6 +99,11 @@ class TestValidIdxSimplification(unittest.TestCase):
     for v in itertools.permutations([v0,v1,v2,v3]):
       self.assertEqual(simplify_valid(v[0]&v[1]&v[2]&v[3]).render(), "False")
 
+  def test_simplify_valid_from_div(self):
+    x = Variable("x", -100, 100)
+    valid = ((x<0)&((100%x).cast(dtypes.bool)))
+    self.assertIsNone(simplify_valid(valid))
+
   @unittest.expectedFailure  # TODO: fix
   def test_from_merge_views(self):
     # taken from test_merges_from_fuzzer1
@@ -123,6 +128,18 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.check(load,
       "(((ridx0*2)+(ridx3*-1))+1)",
       "(ridx2<1)")
+
+  def test_load_in_valid(self):
+    # from FUSE_ARANGE=1 python test/test_ops.py TestOps.test_scatter_add
+    # can lead to OOB
+    ridx2 = Range(2, 4)
+    lidx0 = Special("lidx0", 3)
+    gidx0 = Special("gidx0", 2)
+    idx=(((lidx0+(gidx0*3))+(ridx2*5))+40)
+    valid = (lidx0+(gidx0*3)) < 5
+    val7 = get_gated_load_uop(valid, idx)
+    valid2 = valid & val7.cast(dtypes.bool).logical_not()
+    self.assertIsNone(simplify_valid(valid2))
 
   def test_valid_becomes_const1(self):
     # from DSP mobilenetv2

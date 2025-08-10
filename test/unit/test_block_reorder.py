@@ -1,6 +1,6 @@
 import unittest, random
 from tinygrad.dtype import dtypes
-from tinygrad.ops import print_uops, UOp, Ops
+from tinygrad.uop.ops import print_uops, UOp, Ops
 from tinygrad.codegen.linearize import block_reorder
 from tinygrad.renderer.cstyle import OpenCLRenderer
 
@@ -54,7 +54,7 @@ class TestBlockReorder(unittest.TestCase):
     sink = c.store(sum(loads)).sink()
 
     # determine golden order
-    golden = block_reorder(sink.toposort())
+    golden = block_reorder(list(sink.toposort()))
 
     # render for test
     print(self._test_render(golden))

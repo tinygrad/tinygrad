@@ -10,7 +10,6 @@ class BatchNorm:
   """
   Applies Batch Normalization over a 2D or 3D input.
 
-  - Described: https://paperswithcode.com/method/batch-normalization
   - Paper: https://arxiv.org/abs/1502.03167v3
 
   See: `Tensor.batchnorm`
@@ -182,7 +181,6 @@ class GroupNorm:
   """
   Applies Group Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/group-normalization
   - Paper: https://arxiv.org/abs/1803.08494v3
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -213,7 +211,6 @@ class InstanceNorm:
   """
   Applies Instance Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/instance-normalization
   - Paper: https://arxiv.org/abs/1607.08022v3
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -240,7 +237,6 @@ class LayerNorm:
   """
   Applies Layer Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/layer-normalization
   - Paper: https://arxiv.org/abs/1607.06450v1
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -287,7 +283,6 @@ class RMSNorm:
   """
   Applies Root Mean Square Normalization to input.
 
-  - Described: https://paperswithcode.com/method/rmsnorm
   - Paper: https://arxiv.org/abs/1910.07467
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -299,11 +294,15 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim:int, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, dim:int, eps=1e-6, elementwise_affine=True):
+    self.eps = eps
+    self.weight = Tensor.ones(dim) if elementwise_affine else None
 
   def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
-  def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
+  def __call__(self, x:Tensor) -> Tensor:
+    x = self._norm(x.float()).cast(x.dtype)
+    return x if self.weight is None else x * self.weight
 
 class Embedding:
   """

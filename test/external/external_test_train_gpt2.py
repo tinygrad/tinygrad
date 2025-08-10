@@ -1,12 +1,12 @@
 # ruff: noqa: E501
 import unittest
 
-from tinygrad.ops import UOp, Ops
-from tinygrad.engine.search import Opt, OptOps
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.codegen.opt.search import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Kernel
 
 from test.external.fuzz_linearizer import run_linearizer
 

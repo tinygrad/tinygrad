@@ -1,5 +1,13 @@
 import ctypes, subprocess
 import tinygrad.runtime.autogen.comgr as comgr
+assert comgr.AMD_COMGR_LANGUAGE_HIP == 4
+try:
+  comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
+  if major.value >= 3:
+    # in comgr 3 the values of enums in headers were changed: https://github.com/ROCm/llvm-project/issues/272
+    import tinygrad.runtime.autogen.comgr_3 as comgr # type: ignore[no-redef]
+    assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
+except AttributeError: pass  # ignore if ROCm isn't installed
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.ops_llvm import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
@@ -52,7 +60,7 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     check(comgr.amd_comgr_set_data_name(data_src, b"<null>"))
     check(comgr.amd_comgr_data_set_add(data_set_src, data_src))
     # -include hiprtc_runtime.h was removed
-    check(set_options(action_info, f"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch={arch} -I/opt/rocm/include -Xclang -disable-llvm-passes".encode())) # noqa: E501
+    check(set_options(action_info, f"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch={arch} -I/opt/rocm/include -Xclang -disable-llvm-passes -Xclang -aux-triple -Xclang x86_64-unknown-linux-gnu".encode())) # noqa: E501
     status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())

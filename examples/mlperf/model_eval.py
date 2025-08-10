@@ -1,65 +1,66 @@
-import time
+import time, math
 start = time.perf_counter()
 from pathlib import Path
 import numpy as np
 from tinygrad import Tensor, Device, dtypes, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
 from tinygrad.helpers import getenv
+from extra.bench_log import BenchEvent, WallTimeEvent
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
-  Tensor.no_grad = True
-  # Resnet50-v1.5
-  from extra.models.resnet import ResNet50
-  tlog("imports")
-  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
-  for x in GPUS: Device[x]
-  tlog("got devices")    # NOTE: this is faster with rocm-smi running
+  with WallTimeEvent(BenchEvent.FULL):
+    # Resnet50-v1.5
+    from extra.models.resnet import ResNet50
+    tlog("imports")
+    GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
+    for x in GPUS: Device[x]
+    tlog("got devices")    # NOTE: this is faster with rocm-smi running
 
-  class ResnetRunner:
-    def __init__(self, device=None):
-      self.mdl = ResNet50()
-      for x in get_parameters(self.mdl) if device else []: x.to_(device)
-      if (fn:=getenv("RESNET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
-      else: self.mdl.load_from_pretrained()
-      self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
-      self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
-    def __call__(self, x:Tensor) -> Tensor:
-      x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
-      x -= self.input_mean
-      x /= self.input_std
-      return self.mdl(x).log_softmax().argmax(axis=1).realize()
+    class ResnetRunner:
+      def __init__(self, device=None):
+        self.mdl = ResNet50()
+        for x in get_parameters(self.mdl) if device else []: x.to_(device)
+        if (fn:=getenv("RESNET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
+        else: self.mdl.load_from_pretrained()
+        self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
+        self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
+      def __call__(self, x:Tensor) -> Tensor:
+        x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
+        x -= self.input_mean
+        x /= self.input_std
+        return self.mdl(x).log_softmax().argmax(axis=1).realize()
 
-  mdl = TinyJit(ResnetRunner(GPUS))
-  tlog("loaded models")
+    mdl = TinyJit(ResnetRunner(GPUS))
+    tlog("loaded models")
 
-  # evaluation on the mlperf classes of the validation set from imagenet
-  from examples.mlperf.dataloader import batch_load_resnet
-  iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False, pad_first_batch=True)
-  def data_get():
-    x,y,cookie = next(iterator)
-    return x.shard(GPUS, axis=0).realize(), y, cookie
-  n,d = 0,0
-  proc = data_get()
-  tlog("loaded initial data")
-  st = time.perf_counter()
-  while proc is not None:
-    GlobalCounters.reset()
-    proc = (mdl(proc[0]), proc[1], proc[2])  # this frees the images
-    run = time.perf_counter()
-    # load the next data here
-    try: next_proc = data_get()
-    except StopIteration: next_proc = None
-    nd = time.perf_counter()
-    y = np.array(proc[1])
-    proc = (proc[0].numpy() == y) & (y != -1)  # this realizes the models and frees the cookies
-    n += proc.sum()
-    d += (y != -1).sum()
-    et = time.perf_counter()
-    tlog(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
-    st = et
-    proc, next_proc = next_proc, None
-  tlog("done")
+    # evaluation on the mlperf classes of the validation set from imagenet
+    from examples.mlperf.dataloader import batch_load_resnet
+    iterator = batch_load_resnet(getenv("BS", 128*6), val=getenv("VAL", 1), shuffle=False, pad_first_batch=True)
+    def data_get():
+      x,y,cookie = next(iterator)
+      return x.shard(GPUS, axis=0).realize(), y, cookie
+    n,d = 0,0
+    proc = data_get()
+    tlog("loaded initial data")
+    st = time.perf_counter()
+    while proc is not None:
+      GlobalCounters.reset()
+      proc = (mdl(proc[0]), proc[1], proc[2])  # this frees the images
+      run = time.perf_counter()
+      # load the next data here
+      try: next_proc = data_get()
+      except StopIteration: next_proc = None
+      nd = time.perf_counter()
+      y = np.array(proc[1])
+      proc = (proc[0].numpy() == y) & (y != -1)  # this realizes the models and frees the cookies
+      n += proc.sum()
+      d += (y != -1).sum()
+      et = time.perf_counter()
+      tlog(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+      st = et
+      proc, next_proc = next_proc, None
+    tlog("done")
 
 def eval_unet3d():
   # UNet3D
@@ -240,10 +241,37 @@ def eval_mrcnn():
   evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
   evaluate_predictions_on_coco(mask_output, iou_type='segm')
 
+def eval_llama3():
+  from extra.models.llama import Transformer
+  from examples.llama3 import MODEL_PARAMS
+  from tinygrad.helpers import tqdm
+
+  bs = 4
+  sequence_length = 512
+
+  model = Transformer(**(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}), max_context=sequence_length, jit=False, disable_kv_cache=True)
+
+  @TinyJit
+  def eval_step(model, tokens):
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten()
+
+  from examples.mlperf.dataloader import batch_load_llama3
+  iter = batch_load_llama3(bs, 5760, sequence_length, Path(getenv("BASEDIR", "/raid/datasets/c4/")), True)
+
+  losses = []
+  for tokens in tqdm(iter, total=5760//bs):
+    GlobalCounters.reset()
+    losses += eval_step(model, tokens).tolist()
+    tqdm.write(f"loss: {np.mean(losses)}")
+
+  log_perplexity = Tensor(losses).mean()
+  print(f"Log Perplexity: {log_perplexity.item()}")
+
 if __name__ == "__main__":
   # inference only
   Tensor.training = False
-  Tensor.no_grad = True
 
   models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
   for m in models:

@@ -1,0 +1,30 @@
+name: Run MLPerf Training
+
+on:
+  schedule:
+    - cron: '5 8 * * *'  # Runs at 08:05 UTC (12:05 AM Pacific Time)
+  push:
+    branches:
+      - update_mlperf
+  workflow_dispatch:
+
+jobs:
+  run_script_job:
+    runs-on: [self-hosted, Linux, tinybox]
+    if: github.repository_owner == 'tinygrad'
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Cleanup running AM processes
+      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Symlink datasets
+      run: |
+        mkdir -p extra/datasets
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: Run resnet
+      run: |
+        rm "~/.cache/tinygrad/cache_mlperf.db" || true
+        BENCHMARK_LOG=mlpert_train_resnet LOGMLPERF=0 CACHEDB="~/.cache/tinygrad/cache_mlperf.db" examples/mlperf/training_submission_v5.1/tinycorp/benchmarks/resnet/implementations/tinybox_red/run_and_time.sh
+        rm "~/.cache/tinygrad/cache_mlperf.db"

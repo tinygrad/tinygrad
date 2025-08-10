@@ -1,7 +1,7 @@
 from typing import Dict, Set
 import yaml
 from tinygrad.codegen.uops import UOpGraph, UOps, UOp
-from tinygrad.ops import BinaryOps
+from tinygrad.uop.ops import BinaryOps
 from tinygrad.dtype import dtypes
 
 def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
@@ -15,8 +15,8 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
         u.vin = tuple(n if x == o else x for x in u.vin)
     # pointer indexing
     if u.uop in {UOps.LOAD, UOps.STORE} and u.vin[0].dtype.itemsize > 1:
-      val = UOp(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
-      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
+      val = UOp(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_at=uops.uops.index(u))
+      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_at=uops.uops.index(u))
       u.vin = (u.vin[0], ptr) + u.vin[2:]
   #uops.print()
 

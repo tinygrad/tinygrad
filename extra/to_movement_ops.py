@@ -4,9 +4,9 @@ from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.helpers import prod, tqdm
-from tinygrad.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.ops import sym_infer
+from tinygrad.uop.ops import sym_infer
 from tinygrad.tensor import Tensor
 
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
@@ -41,7 +41,7 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
     real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
     strides: List[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
     buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
-    if i: buffer_size = prod(st.views[i-1].shape) - real_offset
+    if i: buffer_size = prod(st.views[i-1].shape) - real_offset if real_shape else 1
     def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
     ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
     to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])

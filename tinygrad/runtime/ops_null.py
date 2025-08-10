@@ -1,5 +1,5 @@
 from tinygrad.device import Compiled, Compiler, Renderer, Allocator
-from tinygrad.ops import Ops
+from tinygrad.uop.ops import Ops
 from tinygrad.engine.jit import MultiGraphRunner
 
 class NullRenderer(Renderer):
