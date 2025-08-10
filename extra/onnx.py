@@ -434,6 +434,8 @@ class SubGraphOnnxRunner(OnnxRunner):
   def __init__(self, graph: dict, opset_imports: dict[Domain, int]): self._load_from_graph(graph, opset_imports)
 
 ####################
+##### ONNX OPS #####
+####################
 def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionType]]:
   # ***** helper functions *****
   def _resolve_const(x: Sequence[ConstType]|ConstType): return x if isinstance(x, get_args(ConstType)) else get_single_element(x)

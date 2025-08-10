@@ -173,12 +173,6 @@ backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
-# TODO: cubic not fully supported
-backend_test.exclude('test_resize_downsample_scales_cubic_antialias_cpu')
-backend_test.exclude('test_resize_downsample_sizes_cubic_antialias_cpu')
-backend_test.exclude('test_resize_upsample_scales_cubic_A_n0p5_exclude_outside_cpu')
-backend_test.exclude('test_resize_upsample_scales_cubic_asymmetric_cpu')
-
 # rest of the failing tests
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_axes_2_3_cpu') # tf_crop_and_resize not implemented
@@ -186,6 +180,9 @@ backend_test.exclude('test_resize_tf_crop_and_resize_axes_3_2_cpu') # tf_crop_an
 backend_test.exclude('test_resize_tf_crop_and_resize_extrapolation_value_cpu') # tf_crop_and_resize value not implemented
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_scales_cubic_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_sizes_cubic_antialias_cpu') # antialias not implemented
+
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 

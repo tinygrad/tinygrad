@@ -76,30 +76,30 @@ class TestMainOnnxOps(TestOnnxOps):
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
   # NOTE: resize OP is sensitive to numerical errors
-  def _test_resize(self, mode, scale_values, **kwargs):
+  def _test_resize_scales(self, scale_values, **kwargs):
     for sc in scale_values:
       for ct_mode in ["half_pixel", "align_corners", "asymmetric", "pytorch_half_pixel", "half_pixel_symmetric"]:
-        with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc, mode=mode, **kwargs):
+        with self.subTest(coordinate_transformation_mode=ct_mode, scale=sc, **kwargs):
           X = np.array([[[[1, 2, 3, 4],
                           [5, 6, 7, 8],
                           [9,10,11,12]]]], dtype=np.float32)
           scales = np.array([1.0, 1.0, sc, sc], dtype=np.float32)
           inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
-          attributes = {"mode": mode, "coordinate_transformation_mode": ct_mode, **kwargs}
+          attributes = {"coordinate_transformation_mode": ct_mode, **kwargs}
           outputs = ["out"]
           self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
   def test_resize_linear_mode(self):
-    self._test_resize("linear", [0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0])
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="linear")
 
   def test_resize_nearest_mode(self):
     # excluded 3.5 because some values divide into slight numerical differences, which when rounded gives wrong results
-    self._test_resize("nearest", [0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 20.0])
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 20.0], mode="nearest")
 
   def test_resize_cubic_mode(self):
     # NOTE: cubic mode is also sensitive to numerical errors
-    self._test_resize("cubic", [0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], exclude_outside=1)
-    self._test_resize("cubic", [0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], exclude_outside=0)
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=1)
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=0)
 
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-131
