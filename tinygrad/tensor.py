@@ -1318,6 +1318,8 @@ class Tensor(MathTrait):
     adv = Tensor._expand_indices(indices, self.ndim, self.shape, self.device)
     if adv == ():
       return
+    if any(s==0 for s in adv[0].shape):
+      return
     rhs = v.cast(self.dtype)
     if rhs.ndim < len(adv):
       rhs = rhs.reshape((1,) * (len(adv) - rhs.ndim) + rhs.shape)
