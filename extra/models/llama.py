@@ -185,8 +185,7 @@ class Transformer:
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    # TODO: remove .float()?
-    logits = self.output(self.norm(h)).float()
+    logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
     return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
