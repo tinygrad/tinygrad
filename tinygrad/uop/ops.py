@@ -189,7 +189,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
     if self.op in {Ops.CONTIGUOUS, Ops.REDUCE}:
-      ret = self.src[0].ranges
+      ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
         if s in ret: del ret[s]
     else:
