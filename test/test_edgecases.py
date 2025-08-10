@@ -62,7 +62,6 @@ class TestNaNEdgeCases(unittest.TestCase):
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  @unittest.expectedFailure
   def test_sort_empty(self):
     # Sorting an empty tensor works in PyTorch and should return empty
     # values and indices. tinygrad raises an error instead.

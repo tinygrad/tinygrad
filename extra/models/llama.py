@@ -181,13 +181,11 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
-
-    self.freqs_cis = self.freqs_cis.cast(h.dtype).contiguous()
-    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen, :, :, :]
+    freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h)).float()
+    logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
     return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)

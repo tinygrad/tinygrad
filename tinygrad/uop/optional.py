@@ -41,5 +41,6 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
       (UPat.cvar("c",vec=False)<UPat.var("x", dtypes.sints), lambda x,c: x.eq(c+1) if c.arg+1==x.vmax else None),
       (UPat.cvar("c",vec=False)>UPat.var("x", dtypes.sints), lambda x,c: x.eq(c-1) if c.arg-1==x.vmin else None)
     ]
+  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
