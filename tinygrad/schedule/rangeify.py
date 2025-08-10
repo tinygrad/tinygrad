@@ -11,6 +11,7 @@ class RangeifyContext:
   children: dict[UOp, int]|None = None
   indexed_child: dict[UOp, list[UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
+  ended_child: dict[UOp, int] = field(default_factory=dict)
 
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
   if x.tag == 1: return None
@@ -89,7 +90,6 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
-
 def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
   ctx.children = {}
@@ -99,7 +99,7 @@ def extract_children(ctx:RangeifyContext, x:UOp):
 
 def mark_children(ctx:RangeifyContext, x:UOp):
   if x in ctx.children and x.tag is None:
-    return UOp(Ops.CHILDREN, x.dtype, (x.replace(tag=1),), arg=ctx.children[x]).alu(Ops.ENDCHILD, arg=ctx.children[x])
+    return UOp(Ops.CHILDREN, x.dtype, (x.replace(tag=1),), arg=ctx.children[x])
   return None
 
 rangeify_fixups = PatternMatcher([
@@ -112,24 +112,28 @@ rangeify_fixups = PatternMatcher([
   #(UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].contiguous().expand(x.arg).replace(tag=1) if x.tag is None else None),
 ])
 
-def map_child(ctx:RangeifyContext, c:UOp, idx:UOp):
-  if c not in ctx.indexed_child:
-    ctx.indexed_child[c] = []
+def record_child(ctx:RangeifyContext, c:UOp, idx:UOp):
+  if c not in ctx.indexed_child: ctx.indexed_child[c] = []
+  print("record child", id(idx), len(ctx.indexed_child[c]))
   if idx not in ctx.indexed_child[c]:
     ctx.indexed_child[c].append(idx)
+    return idx.replace(src=(c.replace(tag=1),)+idx.src[1:])
   if len(ctx.indexed_child[c]) == c.arg:
+    assert idx in ctx.indexed_child[c]
+    ec = UOp(Ops.ENDCHILD, dtype=c.dtype, src=(c.replace(tag=2),))
+    if ec not in ctx.ended_child: ctx.ended_child[ec] = 1
+    else: ctx.ended_child[ec] += 1
+    print("creating endchild", ctx.ended_child[ec])
     if c in ctx.seen_child:
-      print("FOUND SECOND")
       out_rngs = list(idx.src[1:])
       idx_ranges, end_ranges = ctx.seen_child[c]
       if len(idx_ranges) == 0:
         return c.src[0].index(*out_rngs)
       for i,nr in zip(idx_ranges, end_ranges):
         out_rngs[i] = nr
-      return c.src[0].index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
-
+      return ec.index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
     else:
-      print("FOUND FIRST")
+      # heres where we can compute everything about mismatched ranges
       all_rngs = zip(*[x.src[1:] for x in ctx.indexed_child[c]])
       out_rngs = []
       end_ranges = []
@@ -144,38 +148,27 @@ def map_child(ctx:RangeifyContext, c:UOp, idx:UOp):
           idx_ranges.append(i)
       ctx.seen_child[c] = (idx_ranges, end_ranges)
       if len(end_ranges) == 0:
-        return c.src[0].index(*out_rngs)
+        return ec.index(*out_rngs)
       else:
-        return c.src[0].index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
-  return None
+        return ec.index(*out_rngs).contiguous(*end_ranges, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
-def record_child(ctx:RangeifyContext, c:UOp, idx:UOp):
-  if c not in ctx.indexed_child:
-    ctx.indexed_child[c] = []
-  if idx not in ctx.indexed_child[c]:
-    ctx.indexed_child[c].append(idx)
-    return idx.replace(src=(c.replace(tag=1),)+idx.src[1:])
-  #if len(ctx.indexed_child[c]) == c.arg:
-  #  return idx.replace(tag=1)
-  #return None
-
-def end_child(ctx:RangeifyContext, x:UOp):
-  child = x.src[0].src[0]
-  if child not in ctx.indexed_child: return None
-  print("HIT", len(ctx.indexed_child[child]))
-  if len(ctx.indexed_child[child]) == x.arg and len(x.src) == 1:
-    return x.replace(src=tuple(ctx.indexed_child[child]))
+def child_check(ctx:RangeifyContext, sink:UOp):
+  subs = {}
+  for x in ctx.ended_child:
+    if ctx.ended_child[x] == x.src[0].arg:
+      print("sub")
+      subs[x] = x.src[0].src[0]
+  ctx.ended_child.clear()
+  return sink.substitute(subs)
 
 pm_rangeify = PatternMatcher([
+  # if there are new ended children, tag the SINK
+  (UPat(Ops.INDEX, src=(UPat(Ops.CHILDREN, name="c"),), allow_any_len=True, name="idx"), record_child),
+  (UPat(Ops.SINK, name="sink"), child_check),
+
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
   (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
-
-  (UPat(Ops.INDEX, src=(UPat(Ops.CHILDREN, name="c"),), allow_any_len=True, name="idx"), record_child),
-  (UPat(Ops.ENDCHILD, name="x"), end_child),
-
-
-  #(UPat(Ops.INDEX, src=(UPat(Ops.CHILDREN, name="c"),), allow_any_len=True, name="idx"), map_child),
 
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
@@ -192,7 +185,7 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 
   # move MAP through elementwise ALU
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ENDCHILD})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
 
   # CONST can't have axes
