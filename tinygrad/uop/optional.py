@@ -30,7 +30,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
   if Ops.CMPLT in ops:
-    # These are late rewrites because simplex expects equalit to be a certain format
+    # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
       ((UPat.var("x", dtypes.sints) < UPat.cvar("c", dtypes.sints)).logical_not(), lambda x,c: c-1<x),
       ((UPat.cvar("c", dtypes.sints) < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
