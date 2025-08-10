@@ -703,54 +703,60 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return x.triu(k_) if upper else x.tril(k_)
 
   def Resize(X:Tensor, roi:list[float]|None=None, scales:list[float]|None=None, sizes:list[int]|None=None, antialias:int=0,
-            axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
-            extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
-    def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
-      if mode == "round_prefer_floor": index = (index - 0.5).ceil()
-      elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
-      elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
-      else: raise ValueError(f"invalid {nearest_mode=}")
-      return index.cast(dtypes.int32).clip(0, input_dim-1)
-    def _apply_transformation(index: Tensor, input_dim, scale_dim, mode):
-      # TODO: needs more testing, not confident in this
-      # NOTE: their reference implementation differ from the implementation in their reference docs
-      # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
-      # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
-      output_dim = scale_dim * input_dim
-      if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
-      elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
-      elif mode == "asymmetric": index = index / scale_dim
-      elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
-      elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / output_dim) + (index + 0.5) / scale_dim - 0.5
-      else: raise NotImplementedError(f"invalid {coordinate_transformation_mode=}")
-      return index.clip(0, input_dim-1)
+        axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
+        extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
+    def _apply_transformation(input_sz, output_sz, scale_dim, mode):
+      index = Tensor.arange(output_sz, requires_grad=False, device=X.device)
+      if mode == "half_pixel": return (index + 0.5) / scale_dim - 0.5
+      if mode == "align_corners": return index * (input_sz - 1) / (output_sz - 1) if output_sz != 1 else Tensor.zeros_like(index)
+      if mode == "asymmetric": return index / scale_dim
+      if mode == "pytorch_half_pixel": return ((index + 0.5) / scale_dim - 0.5) if output_sz != 1 else Tensor.zeros_like(index)
+      if mode == "half_pixel_symmetric":
+        output_dim_scaled = input_sz * scale_dim
+        return (input_sz / 2) * (1 - (output_sz / output_dim_scaled)) + (index + 0.5) / scale_dim - 0.5
+      raise ValueError(f"invalid {coordinate_transformation_mode=}")
 
-    scales, sizes = (None if scales is None else scales[2-(X.ndim-len(scales)):]), (None if sizes is None else sizes[2-(X.ndim-len(sizes)):])
-    # we pre permute the axes and permute back after resize
-    axes, input_shape, = (axes or list(range(X.ndim))), cast(tuple[int, ...], X.shape[2:]),
+    if antialias: raise NotImplementedError("antialias is not implemented")
+    axes = axes or list(range(X.ndim))
     perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+    # we pre-permute the axes and permute back after resize
+    # the permute aligns X's axes to scales, sizes, and roi
     X = X.permute(*perm)
 
+    input_shape = cast(tuple[int, ...], X.shape[2:])
+    if scales is not None: assert all(sc==1 for sc in scales[:-len(input_shape)]), "resizing batch_size dim or channel dim not supported"
+    if sizes is not None: assert tuple(sizes[:-2]) == tuple(X.shape[X.ndim-len(sizes):-2]),  "resizing batch_size dim or channel dim not supported"
+    assert (scales is not None) ^ (sizes is not None), "only provide one of `scales` or `sizes`"
+
+    scales, sizes = (None if scales is None else scales[-len(input_shape):]), (None if sizes is None else sizes[-len(input_shape):])
     if sizes is not None:
       if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
         scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
-        scales = [scale_fxn([sizes[i] / input_shape[i] for i in range(len(input_shape)) if i+2 in axes])] * 2
-        sizes = [int((scales[0] * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
-      else:
-        scales = [size / input_shape for size, input_shape in zip(sizes, input_shape)]
-    else:
-      sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
+        scale = scale_fxn(sz / sh for sz,sh in zip(sizes, input_shape))
+        sizes, scales = [int(scale * sh + 0.5) for sh in input_shape], [scale]*len(input_shape)
+      else: scales = [sz / sh for sz, sh in zip(sizes, input_shape)]
+    else: sizes = [int(sc * sh) for sc, sh in zip(scales, input_shape)]
 
-    # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
-    # in Tensor.interpolate, we use indexes without any transformation
+    # ORT does this
+    if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X.permute(*argsort(perm)) if perm else X
+
     indexes = []
-    for shape, size, scale in zip(input_shape, sizes, scales):
-      indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, coordinate_transformation_mode))
+    for input_sz, output_sz, scale in zip(input_shape, sizes, scales):
+      indexes.append(_apply_transformation(input_sz, output_sz, scale, coordinate_transformation_mode))
 
     if mode == "nearest":
-      indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
+      indexes = [idx.clip(0, sz-1) for idx, sz in zip(indexes, input_shape)]
+      mode_operations = {
+        "round_prefer_floor": lambda idx: (idx - 0.5).ceil(),
+        "round_prefer_ceil": lambda idx: (idx + 0.5).floor(),
+        "floor": lambda idx: idx.floor(),
+        "ceil": lambda idx: idx.ceil()
+      }
+      if nearest_mode not in mode_operations: raise ValueError(f"invalid {nearest_mode=}")
+      indexes = [mode_operations[nearest_mode](idx).int() for idx in indexes]
       X = X[(..., *Tensor.meshgrid(*indexes))]
     if mode == "linear":
+      indexes = [idx.clip(0, sz-1) for idx, sz in zip(indexes, input_shape)]
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         reshape, index = [1] * X.ndim, indexes[i]
