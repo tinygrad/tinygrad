@@ -247,32 +247,25 @@ async function renderProfiler() {
     if (data.axes.y != null) {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
-    // draw shapes
 
+    // group into rects
     const render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
-    const bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
-    const bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
+    const [xStart, xEnd] = xscale.domain();
+    const [bucketStart, bucketEnd] = [Math.floor(xStart/ timelineChunkLen), Math.ceil(xEnd / timelineChunkLen)];
     for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= render_threshold; lastLod++);
 
     for (let i = bucketStart; i <= bucketEnd; i++) {
       for (let lod = 0; lod <= lastLod; lod++) {
         if (spatialTimeline[i] == null || spatialTimeline[i][lod] == null) continue;
-        for (const e of spatialTimeline[i][lod]) {
-          const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-          if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-          render_rects.push(e);
-        }
+        for (const e of spatialTimeline[i][lod]) render_rects.push(e);
       }
 
       if (timelineProxies[i] == null || timelineProxies[i][lastLod] == null) continue;
-      for (const e of timelineProxies[i][lastLod]) {
-        const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-        render_rects.push(e);
-      }
+      for (const e of timelineProxies[i][lastLod]) render_rects.push(e);
     }
     for (const e of data.shapes) render_rects.push(e);
 
+    // draw shapes
     for (const e of render_rects) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
