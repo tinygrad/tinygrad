@@ -3606,6 +3606,13 @@ class Tensor(MathTrait):
       numerator, denominator = numerator.cast(dt), denominator.cast(dt)
       if rounding_mode == "trunc": return numerator.idiv(denominator)
       if rounding_mode == "floor":
+        # optimization: x // 1 = x always
+        def _is_const_one(uop):
+          if uop.op is Ops.CONST and uop.arg == 1: return True
+          if (uop.op is Ops.EXPAND and uop.src[0].op is Ops.RESHAPE and
+            uop.src[0].src[0].op is Ops.CONST and uop.src[0].src[0].arg == 1): return True
+          return False
+        if _is_const_one(denominator.uop): return numerator
         truncate_div, truncate_mod = numerator.idiv(denominator), numerator._apply_broadcasted_uop(UOp.mod, denominator)
         opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
         return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
