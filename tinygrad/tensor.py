@@ -2845,8 +2845,8 @@ class Tensor(MathTrait):
     ```
     """
     x, dim = self, self._resolve_dim(dim)
+    if (orig_len:= x.shape[dim]) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
     # pad to power of 2
-    orig_len = x.shape[dim]
     n_stages = math.ceil(math.log2(orig_len))
     fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
