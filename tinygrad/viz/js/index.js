@@ -177,7 +177,7 @@ async function renderProfiler() {
       }
       const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
 
-      var chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
+      const chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
       for (let i = chunkStart; i <= chunkEnd; i++) {
         for (var lodIdx = 0; lodIdx < timelineLODThresholds.length && Math.min(timelineChunkLen, e.dur) < timelineLODThresholds[lodIdx]; lodIdx++);
         lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
@@ -248,9 +248,9 @@ async function renderProfiler() {
     }
     // draw shapes
 
-    var render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
-    var bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
-    var bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
+    const render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
+    const bucketStart = Math.floor(zoomDomain != null ? zoomDomain[0] / timelineChunkLen : 0);
+    const bucketEnd = Math.ceil(zoomDomain != null ? zoomDomain[1] / timelineChunkLen : (et-st) / timelineChunkLen);
     for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= render_threshold; lastLod++);
 
     for (let i = bucketStart; i <= bucketEnd; i++) {
