@@ -129,7 +129,8 @@ backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
 # control flow uses AttributeProto.GRAPH
-backend_test.exclude('test_if_*')
+backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
+backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
 backend_test.exclude('test_loop*')
 backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires loop
 backend_test.exclude('test_affine_grid_2d_align_corners_expanded_cpu')

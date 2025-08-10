@@ -47,6 +47,7 @@ PB_INFOS: dict[str, dict] = {
     5: ("attribute", PBType.SUB, True, ("AttributeProto", lambda: {"floats": [], "ints": [], "strings": []}))},
   "AttributeProto": {1: ("name", PBType.STRING), 20: ("type", PBType.INT), 3: ("i", PBType.INT), 8: ("ints", PBType.INT, True),
     2: ("f", PBType.FLOAT), 7: ("floats", PBType.FLOAT, True), 4: ("s", PBType.BYTES), 9: ("strings", PBType.BYTES, True),
+    6: ("g", PBType.SUB, False, ("GraphProto", lambda: {"node": [], "initializer": [], "input": [], "output": [], "value_info": []})),
     5:("t", PBType.SUB, False, ("TensorProto", lambda: {"dims": [], "float_data": None, "int32_data": None, "string_data": None, "int64_data": None,
                                                         "double_data": None, "uint64_data": None, "raw_data": None}))},
   "ValueInfoProto": {1: ("name", PBType.STRING), 2: ("type", PBType.SUB, False, "TypeProto"), 3: ("doc_string", PBType.STRING)},
@@ -221,6 +222,7 @@ attribute_types: dict[int, Callable] = {
   2: lambda a: int(a.i),
   3: lambda a: a.s.data().tobytes().decode("utf8") if isinstance(a.s, Tensor) else a.s.decode("utf8"),
   4: lambda a: buffer_parse(a.t),
+  5: lambda a: a.g,
   6: lambda a: tuple(float(x) for x in a.floats),
   7: lambda a: tuple(int(x) for x in a.ints),
   8: lambda a: tuple(x.data().tobytes().decode("utf8") for x in a.strings)
@@ -345,22 +347,24 @@ class OnnxRunner:
   """
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = onnx_load(model_path)
-    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in model.graph.node)
+    self.opset_imports = {Domain.from_onnx(getattr(x, "domain", "")):x.version for x in model.opset_import}
+    self._load_from_graph(model.graph, self.opset_imports)
+
+  def _load_from_graph(self, graph: SimpleNamespace, opset_imports: dict[Domain, int]):
+    self.is_training = any(n.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in graph.node)
     self.old_training = Tensor.training
     Tensor.training = True if self.is_training else False
-    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in model.graph.initializer}}
-    self.graph_inputs = {x.name:type_parse(x.type) for x in model.graph.input if x.name not in self.graph_values}
-    self.graph_outputs = tuple(x.name for x in model.graph.output)
-    opset_imports = {Domain.from_onnx(getattr(x, "domain", "")):x.version for x in model.opset_import}
+    self.graph_values = {"": None, **{x.name:buffer_parse(x) for x in graph.initializer}}
+    self.graph_inputs = {x.name:type_parse(x.type) for x in graph.input if x.name not in self.graph_values}
+    self.graph_outputs = tuple(x.name for x in graph.output)
     self.graph_nodes = []
-    for num, n in enumerate(model.graph.node):
+    for num, n in enumerate(graph.node):
       domain = Domain.from_onnx(n.domain)
       opset_id = OpSetId(domain, opset_imports.get(domain, 1))
       self.graph_nodes.append(OnnxNode(num, n.op_type, opset_id, tuple(n.input), tuple(n.output), {x.name:attribute_parse(x) for x in n.attribute}))
     self.graph_nodes = tuple(self.graph_nodes)
-    self.variable_dims: dict[str, int] = {}
-
     self.onnx_ops = onnx_ops
+    self.variable_dims: dict[str, int] = {}
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -409,7 +413,8 @@ class OnnxRunner:
 
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
-      if node.op == "Gradient": opts['intermediate_tensors'] = self.graph_values
+      if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
+      if node.op == "If": opts['opset_imports'] = self.opset_imports
 
       if debug >= 1: print(f"{node.num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -424,6 +429,9 @@ class OnnxRunner:
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training = self.old_training
     return {name:self.graph_values[name] for name in self.graph_outputs}
+
+class SubGraphOnnxRunner(OnnxRunner):
+  def __init__(self, graph: dict, opset_imports: dict[Domain, int]): self._load_from_graph(graph, opset_imports)
 
 ####################
 ##### ONNX OPS #####
@@ -491,6 +499,19 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
+  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors:dict[str, Tensor], opset_imports:dict[Domain, int]):
+    else_graph, then_graph = SubGraphOnnxRunner(else_branch, opset_imports), SubGraphOnnxRunner(then_branch, opset_imports)
+    else_graph.graph_values.update(intermediate_tensors)
+    then_graph.graph_values.update(intermediate_tensors)
+    else_out = else_graph({k:intermediate_tensors[k] for k in else_graph.graph_inputs.keys()})
+    then_out = then_graph({k:intermediate_tensors[k] for k in then_graph.graph_inputs.keys()})
+    assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
+    # can use where op when output shape is the same
+    if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
+      return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
+    # otherwise, use condition to select the output in python
+    return tuple(t if condition.item() else e for t,e in zip(then_out.values(), else_out.values()))
+
   def Identity(x:Tensor): return x
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
               value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
