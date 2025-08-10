@@ -93,7 +93,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
 def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
-  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and k.op is not Ops.DEVICE}
+  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and k.op not in {Ops.DEVICE, Ops.CONST}}
 def mark_children(ctx:RangeifyContext, x:UOp):
   new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
@@ -209,8 +209,8 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     out_rngs = list(idx.src[1:])
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
-  if len(idx_ranges) == 0: return c.src[0].index(*out_rngs)
-  return c.src[0].index(*out_rngs).contiguous(*end_ranges, arg=c.src[0].shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
+  if len(idx_ranges) == 0: return c.index(*out_rngs)
+  return c.index(*out_rngs).contiguous(*end_ranges, arg=c.shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
 pm_rangeify = PatternMatcher([
   # if there are new ended children, tag the SINK
@@ -243,7 +243,7 @@ pm_rangeify = PatternMatcher([
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
 
   # CONST can't have axes. remove srcs when we idx
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST,name="c"),)), lambda c: c.replace(src=())),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
 ])
 
 @dataclass
