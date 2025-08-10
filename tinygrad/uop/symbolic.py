@@ -152,19 +152,17 @@ def fold_binary_numerator(d: UOp) -> UOp|None:
   if y.op is not Ops.CONST: return None  # TODO: handle variable denominator
   terms, factors, const = x.terms_factors_and_const
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
-    y1 = cmod(factors[0]*v.vmin+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, y.arg)
-    y2 = cmod(factors[0]*v.vmax+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, y.arg)
+    y1 = cmod(factors[0]*v.vmin+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, y.arg)  # type: ignore
+    y2 = cmod(factors[0]*v.vmax+const, y.arg) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, y.arg)  # type: ignore
     return (y2-y1)*(v-v.vmin) + y1
 
 def fold_divmod_congruence(d: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
   x,y = d.src
-  x_min = x.vmin
-  assert isinstance(x_min, int)
   if y.op is not Ops.CONST: return None  # TODO: handle variable denominator
   c = y.arg
   terms, factors, const = x.terms_factors_and_const
-  if not CORRECT_DIVMOD_FOLDING or x_min>=0:
+  if not CORRECT_DIVMOD_FOLDING or x.vmin>=0:
     # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
     rems = [min((r:=f%c), r-c, key=abs) for f in factors]
     if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
