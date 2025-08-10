@@ -338,6 +338,9 @@ if PROFILE:
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz
       launch_viz(PROFILE, fn)
+    elif getenv("PRINT_SQTT", 1):
+      from tinygrad.viz.decoder.sqtt import decode_sqtt_packets
+      decode_sqtt_packets(Compiled.profile_events)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:
