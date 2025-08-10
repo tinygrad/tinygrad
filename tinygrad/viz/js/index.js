@@ -270,7 +270,6 @@ async function renderProfiler() {
     for (const e of render_rects) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
-
       ctx.fillStyle = e.fillColor;
       // generic polygon
       if (e.width == null) {
