@@ -189,8 +189,9 @@ async function renderProfiler() {
         for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
           const ix = Math.floor((e.st-st) / timelineLODThresholds[jlod + 1]);
           const iy = offsetY+levelHeight*e.depth;
-          ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor };
-          tempProxiesBuilder[i][jlod][ix][iy].pct += e.dur / timelineLODThresholds[jlod + 1];
+          const proxy = ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor, fillVal:e.dur };
+          proxy.pct += e.dur / timelineLODThresholds[jlod + 1];
+          if (e.dur > proxy.fillVal) proxy.fillColor = fillColor; proxy.fillVal = e.dur;
         }
       }
     }
