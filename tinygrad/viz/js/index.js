@@ -115,7 +115,7 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = false;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = true;
 async function renderProfiler() {
   displayGraph("profiler");
   const metadata = d3.select(".metadata").html("");
