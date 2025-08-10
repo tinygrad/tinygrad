@@ -895,6 +895,7 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
+class RewriteNotReady(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
@@ -908,26 +909,33 @@ class RewriteContext:
       if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0:
-        # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-        if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
-        stack.append((n, 1, new_n))
-        for x in reversed(new_n.src): stack.append((x, 0, x))
-      elif stage == 1:
-        if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
-          # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
-            self.replace[n] = new_n
-            continue
+      try:
+        if stage == 0:
+          # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+          if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
+          stack.append((n, 1, new_n))
+          for x in reversed(new_n.src): stack.append((x, 0, x))
+        elif stage == 1:
+          try: replaced_srcs = [self.replace[x] for x in new_n.src]
+          except KeyError: raise RewriteNotReady
+          if (new_src:=tuple(replaced_srcs)) == new_n.src:
+            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
+            if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+              self.replace[n] = new_n
+              continue
+          else:
+            # if srcs changed from rewrites, construct a new UOp with the new srcs
+            new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
         else:
-          # if srcs changed from rewrites, construct a new UOp with the new srcs
-          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
-        # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
-        stack.append((n, 2, new_src_n))
-        stack.append((new_src_n, 0, new_src_n))
-      else:
-        # in stage 2, we link the result of new_n to the result of n
-        self.replace[n] = self.replace[new_n]
+          # in stage 2, we link the result of new_n to the result of n
+          try: self.replace[n] = self.replace[new_n]
+          except KeyError: raise RewriteNotReady
+      except RewriteNotReady:
+        # retry this later
+        stack.insert(0, (n, stage, new_n))
     return self.replace[root]
 
 @track_matches
