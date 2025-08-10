@@ -118,13 +118,12 @@ const cycleColors = (lst, i) => lst[i%lst.length];
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = false;
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").html("");
+  const metadata = d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
-  const meta = d3.select(".metadata").html("");
 
   loadingText = meta.append("h3");
   loadingText.text("Loading...");
