@@ -1,6 +1,6 @@
 import unittest
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import PatternMatcher, UOp, graph_rewrite, Ops, UPat, GroupOp, RewriteNotReady, track_rewrites
+from tinygrad.uop.ops import PatternMatcher, UOp, graph_rewrite, Ops, UPat, GroupOp, RewriteNotReady
 
 # we could insert CHILDREN node
 
@@ -47,7 +47,6 @@ pm_consts = PatternMatcher([
 ])
 
 class TestChildrenRewrite(unittest.TestCase):
-  @track_rewrites("test_not_ready")
   def test_not_ready(self):
     a = UOp.variable("a", 0, 10).exp2()
     b = a+2
