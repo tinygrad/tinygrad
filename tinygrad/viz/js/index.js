@@ -176,20 +176,21 @@ async function renderProfiler() {
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
       const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+      // offset y by depth
+      const [rx, ry] = [e.st-st, offsetY+levelHeight*e.depth];
 
-      const chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
-      for (let i = chunkStart; i <= chunkEnd; i++) {
+      const chunkStart = Math.floor(rx/timelineChunkLen), chunkEnd = Math.floor((rx+e.dur)/timelineChunkLen);
+      for (let i = chunkStart; i <= Math.floor((rx+e.dur)/timelineChunkLen); i++) {
         for (var lodIdx = 0; lodIdx < timelineLODThresholds.length && Math.min(timelineChunkLen, e.dur) < timelineLODThresholds[lodIdx]; lodIdx++);
         lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
 
         // add a shape for the current chunk
-        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:rx, y:ry, width:e.dur, height:levelHeight, arg, label, fillColor });
 
         // this block won't be displayed on higher LODs, create a proxy for it
         for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
-          const ix = Math.floor((e.st-st) / timelineLODThresholds[jlod + 1]);
-          const iy = offsetY+levelHeight*e.depth;
-          const proxy = ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[iy] ??= { x: e.st-st, y: iy, h: levelHeight, pct: 0, fillColor, fillVal:e.dur };
+          const ix = Math.floor(rx / timelineLODThresholds[jlod + 1]);
+          const proxy = ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[ry] ??= { x:rx, y:ry, h:levelHeight, pct:0, fillColor, fillVal:e.dur };
           proxy.pct += e.dur / timelineLODThresholds[jlod + 1];
           if (e.dur > proxy.fillVal) proxy.fillColor = fillColor; proxy.fillVal = e.dur;
         }
@@ -200,10 +201,10 @@ async function renderProfiler() {
     for (const [i, lods] of Object.entries(tempProxiesBuilder))
       for (const [lodIdx, rects] of Object.entries(lods))
         for (const [ix, ys] of Object.entries(rects))
-          for (const [iy, e] of Object.entries(ys))
-            ((timelineProxies[i] ??= {})[+lodIdx] ??= []).push({x: e.x, y: e.y,
-              width: timelineLODThresholds[+lodIdx+1] * Math.max(0.1, Math.min(e.pct, 1.0)),
-              height: e.h, fillColor: e.fillColor, arg:{ name:null, tooltipText:"merged cells, zoom in"}});
+          for (const [iy, e] of Object.entries(ys)) {
+            ((timelineProxies[i] ??= {})[+lodIdx] ??= []).push({x:e.x, y:e.y, width:timelineLODThresholds[+lodIdx+1]*Math.max(0.1, Math.min(e.pct, 1.0)),
+                                                                height:e.h, fillColor:e.fillColor, arg:{tooltipText:"merged cells, zoom in"}})
+          }
 
     // position shapes on the canvas and scale to fit fixed area
     let area = mem.shapes.length === 0 || !showMemoryProf ? 0 : areaScale(mem.peak);
