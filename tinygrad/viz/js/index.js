@@ -122,6 +122,8 @@ async function renderProfiler() {
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
+  // NOTE: scrolling via mouse can only zoom the graph
+  canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const meta = d3.select(".metadata").html("");
 
   loadingText = meta.append("h3");
@@ -129,11 +131,6 @@ async function renderProfiler() {
   meta.append("label").text("Show memory: ")
     .insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
     .on("change", function () { showMemoryProf = this.checked; renderProfiler(); });
-
-  canvas.addEventListener("wheel", (e) => {
-    if (!e.ctrlKey && Math.abs(e.deltaX) > 0) {
-      e.preventDefault(), e.stopPropagation(), d3.select(canvas).call(canvasZoom.translateBy, -e.deltaX / zoomLevel.k, 0);
-    } else if (e.ctrlKey) { e.preventDefault(), e.stopPropagation(); } }, { passive: false });
 
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
@@ -145,7 +142,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   const data = {shapes:[], axes:{}, gridlines:new Set()};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=20]);
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
 
   // Cells are divided into chunks of 30 seconds, each chunk can be rendered at a different level of detail.
   const timelineChunkLen = 30 * 1000000; // 30 seconds
@@ -181,7 +178,7 @@ async function renderProfiler() {
         const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
         ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
       }
-      const arg = { name:e.name, tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
 
       var chunkStart = Math.floor((e.st-st)/timelineChunkLen), chunkEnd = Math.floor(((e.st-st)+e.dur)/timelineChunkLen);
       for (let i = chunkStart; i <= chunkEnd; i++) {
@@ -388,7 +385,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  canvasZoom = d3.zoom().filter((e) => ((e.ctrlKey && e.type === "wheel") || e.type === "mousedown") && !e.button)
+  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
     .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
