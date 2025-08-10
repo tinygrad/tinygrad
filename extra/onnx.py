@@ -737,15 +737,15 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       else: scales = [sz / sh for sz, sh in zip(sizes, input_shape)]
     else: sizes = [int(sc * sh) for sc, sh in zip(scales, input_shape)]
 
-    # ORT does this
     if all(sz == sh for sz, sh in zip(sizes, input_shape)): return X.permute(*argsort(perm)) if perm else X
 
     indexes = []
     for input_sz, output_sz, scale in zip(input_shape, sizes, scales):
       indexes.append(_apply_transformation(input_sz, output_sz, scale, coordinate_transformation_mode))
 
+    if mode in ["nearest", "linear"]: indexes = [idx.clip(0, sz-1) for idx, sz in zip(indexes, input_shape)]
+
     if mode == "nearest":
-      indexes = [idx.clip(0, sz-1) for idx, sz in zip(indexes, input_shape)]
       mode_operations = {
         "round_prefer_floor": lambda idx: (idx - 0.5).ceil(),
         "round_prefer_ceil": lambda idx: (idx + 0.5).floor(),
@@ -756,7 +756,6 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       indexes = [mode_operations[nearest_mode](idx).int() for idx in indexes]
       X = X[(..., *Tensor.meshgrid(*indexes))]
     if mode == "linear":
-      indexes = [idx.clip(0, sz-1) for idx, sz in zip(indexes, input_shape)]
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         reshape, index = [1] * X.ndim, indexes[i]
