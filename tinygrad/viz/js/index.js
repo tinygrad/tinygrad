@@ -125,11 +125,9 @@ async function renderProfiler() {
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
 
-  loadingText = meta.append("h3");
-  loadingText.text("Loading...");
-  meta.append("label").text("Show memory: ")
-    .insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
-    .on("change", function () { showMemoryProf = this.checked; renderProfiler(); });
+  const loadingText = metadata.append("h3").text("Loading...");
+  metadata.append("label").text("Show memory: ").insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
+    .on("change", (e) => { showMemoryProf = e.currentTarget.checked; renderProfiler(); });
 
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
