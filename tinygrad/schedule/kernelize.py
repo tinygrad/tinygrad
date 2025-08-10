@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, pm_add_buffers, AddBufferContext
+from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, pm_add_buffers, AddBufferContext, rangeify_fixups
 from tinygrad.codegen.opt.swizzler import apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
@@ -327,14 +327,6 @@ new_fixups = mops_merge+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
 ])
 
-rangeify_fixups = PatternMatcher([
-  # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op is not Ops.CONTIGUOUS else s for s in x.src]))),
-  #(UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
-  # add contiguous to EXPAND
-  #(UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].contiguous().expand(x.arg).replace(tag=1) if x.tag is None else None),
-])
-
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
@@ -352,8 +344,10 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
-  rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, bottom_up=True, name="* contiguous")
-  rsink = graph_rewrite(rsink, pm_rangeify, bottom_up=True, ctx=RangeifyContext(), name="* rangeify")
+  rctx = RangeifyContext()
+  rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, ctx=rctx, bottom_up=True, name="* contiguous")
+  rsink = graph_rewrite(rsink, pm_rangeify, bottom_up=True, ctx=rctx, name="* rangeify")
+  rsink = graph_rewrite(rsink, pm_rangeify, bottom_up=True, ctx=rctx, name="* rangeify 2")
 
   rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
 
