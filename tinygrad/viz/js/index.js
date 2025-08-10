@@ -141,7 +141,7 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
-  const data = {shapes:[], axes:{}, gridlines:new Set()};
+  const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
 
   // Cells are divided into chunks of 30 seconds, each chunk can be rendered at a different level of detail.
@@ -229,9 +229,6 @@ async function renderProfiler() {
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
-
-    data.gridlines.add(offsetY + Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding-5);
-    div.style.borderBottom = `2px solid #252529`;
   }
   loadingText.text("");
 
@@ -360,14 +357,6 @@ async function renderProfiler() {
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
-    }
-    ctx.strokeStyle = "#252529";
-    ctx.lineWidth = 2;
-    for (const y of data.gridlines) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.clientWidth, y);
-      ctx.stroke();
     }
     ctx.restore();
   }
