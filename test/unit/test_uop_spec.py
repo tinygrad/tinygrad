@@ -34,17 +34,6 @@ class TestUOpSpec(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.void, (buf_0.view(ShapeTracker.from_shape((32, 1))), a+b))
     helper_test_verify_ast(store)
 
-  def test_exactly_one_full_shape(self):
-    dtype = dtypes.int
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), i) for i in range(6)]
-    a = UOp(Ops.LOAD, dtype, (bufs[2].view(ShapeTracker.from_shape((32, 1))),))
-    b = UOp(Ops.LOAD, dtype, (bufs[3].view(ShapeTracker.from_shape((32, 1))),))
-    st0 = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), a+b)
-    a = UOp(Ops.LOAD, dtype, (bufs[4].view(ShapeTracker.from_shape((32, 32))),))
-    b = UOp(Ops.LOAD, dtype, (bufs[5].view(ShapeTracker.from_shape((32, 32))),))
-    st1 = UOp.store(bufs[1].view(ShapeTracker.from_shape((32, 32))), a+b)
-    with self.assertRaises(InvalidASTException): helper_test_verify_ast(st0, st1)
-
   def test_no_implicit_broadcasting(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((4, 32))),))
@@ -72,14 +61,6 @@ class TestUOpSpec(unittest.TestCase):
     r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0].view(ShapeTracker.from_shape((32, 1))), r+a)
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
-
-  def test_buffer_uops_st(self):
-    a = Tensor.randn(4, 4)+2
-    helper_test_verify_ast(ast:=a.schedule()[-1].ast)
-    store_st = [u.st for u in ast.toposort() if u.op is Ops.STORE][0]
-    self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    const_st = [u.st for u in ast.toposort() if u.op is Ops.CONST][0]
-    self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)

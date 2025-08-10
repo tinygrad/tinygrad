@@ -14,7 +14,7 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -507,19 +507,6 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
     a = Tensor.ones((4, 4)).uop
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
-
-  def test_padded_const(self):
-    a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
-    ast = a.contiguous().schedule()[0].ast
-    valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
-    # the WHERE outputs a contiguous (3, 3)
-    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
-    valid, x, y = valid_ternary.src
-    # very notably, only the first source is padded
-    self.assertIsNotNone(valid.st.views[-1].mask)
-    assert x.st.views[-1].mask is y.st.views[-1].mask is None
-    assert all(s.shape == (3, 3) for s in valid_ternary.src)
 
   # NOTE: CONST ShapeTracker comes from its source
   def test_scalar_const(self):
