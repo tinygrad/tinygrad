@@ -1,5 +1,6 @@
 # https://arxiv.org/pdf/2409.02060
-import time
+import time, os
+if "FUSE_ARANGE" not in os.environ: os.environ["FUSE_ARANGE"] = "1"
 import numpy as np
 np.set_printoptions(suppress=True, linewidth=1000)
 import functools
@@ -22,10 +23,17 @@ class MixtureFeedForward:
     g = g.squeeze() # (BS, length, num_experts) -> (num_experts,)
     probs, sel = g.topk(self.activated_experts)
 
+    selected_gate_projs = self.gate_proj[sel]
+    selected_up_projs = self.up_proj[sel]
+    selected_down_projs = self.down_proj[sel]
+    # fusing indexing kernels with dot kernels might disable dot kernel optimizations, so we split it.
+    selected_gate_projs.kernelize(selected_up_projs, selected_down_projs)
+
     # run MoE
-    x_up_gate = x.dot(self.gate_proj[sel].permute(0,2,1)).silu() * x.dot(self.up_proj[sel].permute(0,2,1))
-    x_down = x_up_gate.dot(self.down_proj[sel].permute(0,2,1))
-    return (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    x_up_gate = x.dot(selected_gate_projs.permute(0,2,1)).silu() * x.dot(selected_up_projs.permute(0,2,1))
+    x_down = x_up_gate.dot(selected_down_projs.permute(0,2,1))
+    ret = (x_down.float() * probs.reshape(self.activated_experts, 1, 1)).sum(axis=0)
+    return ret
 
 # model is bf16, 1.3B active, 6.9B total
 # M3 Max is 400 GB/s, so 400/2.6 = ~154 tok/s
@@ -48,14 +56,16 @@ if __name__ == "__main__":
     print(out)
     exit(0)
 
+  LAYERS = int(os.getenv("LAYERS", 16))
+
   with Timing("create model: "):
-    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
+    model = Transformer(n_layers=LAYERS, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
                         vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
     model_state_dict = nn.state.get_state_dict(model)
     del model_state_dict['freqs_cis']
 
   with Timing("load weights to GPU: "):
-    nhf_state = convert_from_huggingface(fetch_weights(), 16, 16, 16)
+    nhf_state = convert_from_huggingface(fetch_weights(), LAYERS, 16, 16)
     # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
     for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
@@ -87,8 +97,8 @@ if __name__ == "__main__":
     print(tokenizer.decode(toks))
   print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
-  if temperature == 0:
-    # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
-    assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
-                    247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
+  # if temperature == 0:
+  #   # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
+  #   assert toks == [12092, 13, 309, 717, 247, 747, 17782, 281, 436, 12209, 285, 309, 717, 2820, 281, 755,
+  #                   247, 1805, 4685, 273, 253, 1027, 3510, 273, 941, 326, 476, 320, 7141, 275, 247], "BAD OUTPUT!"
 

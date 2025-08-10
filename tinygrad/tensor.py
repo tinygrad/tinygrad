@@ -2826,7 +2826,7 @@ class Tensor(MathTrait):
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-  def sort(self, dim:int=-1, descending:bool=False) -> tuple[Tensor, Tensor]:
+  def sort(self, dim:int=-1, descending:bool=False, stable:bool=True) -> tuple[Tensor, Tensor]:
     """
     Performs a bitonic sort on the tensor along the specified dimension.
 
@@ -2851,26 +2851,34 @@ class Tensor(MathTrait):
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
     x = x.pad(pads, value=dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
+    meow = 0
     for stage in range(1, n_stages+1):
       if stage != n_stages:
         # flip so arrows of green boxes point the same way as blue boxes
         crossover_dim = dim + n_stages - stage - 1
         blue_box, green_box = x.split(1, crossover_dim)
         flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
+        x = blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
       for substage in range(stage-1, -1, -1):
         partner_dim = dim + n_stages - substage - 1
         x_top, x_bottom = x.split(1, partner_dim)
         x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
-        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
+        x = x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
       if stage != n_stages:
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, s) for s in self.shape))
+        meow += 1
+        if meow % 4 == 0: x = x.contiguous()
+    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
     # compute indices for sorted values
     idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
     idx = idx.expand(x.shape)
+    if not stable: return x, ((x.unsqueeze(dim) == self.unsqueeze(dim+1)) * idx.unsqueeze(dim+1)).sum(dim)
     def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
@@ -2888,7 +2896,7 @@ class Tensor(MathTrait):
     """
     return self.sort(dim, descending)[1]
 
-  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
+  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True, stable:bool=True) -> tuple[Tensor, Tensor]:
     """
     Computes the top-k elements of the tensor along the specified `dim`.
 
@@ -2906,7 +2914,7 @@ class Tensor(MathTrait):
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
     if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
-    x, idx = self.sort(dim, descending=largest)
+    x, idx = self.sort(dim, descending=largest, stable=stable)
     shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
     return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
 
