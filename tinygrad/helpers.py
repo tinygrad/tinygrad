@@ -218,7 +218,7 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 21
+VERSION = 22
 _db_connection = None
 def db_connection():
   global _db_connection

@@ -1727,7 +1727,8 @@ class TestIndexing(unittest.TestCase):
       s = Tensor.schedule(*lst)
       lowered = [x[1] for x in lower_schedule(s.copy())]
       kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
-      if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
+      if FUSE_ARANGE and len(kernels) != cnt:
+        raise KernelCountException(f"{len(kernels)} != {cnt}")
       for ei in lowered: ei.run(do_update_stats=True)
     return s
 
@@ -1741,7 +1742,7 @@ class TestIndexing(unittest.TestCase):
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [1, 2]]
-    self.check_schedule(xt, 5)
+    self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
   def test_advanced_indexing(self):
@@ -1753,13 +1754,13 @@ class TestIndexing(unittest.TestCase):
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
-    self.check_schedule(xt, 6)
+    self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), 6)
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [1, 2]]
-    self.check_schedule(xt, 4)
+    self.check_schedule(xt, 2)
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)

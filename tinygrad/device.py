@@ -223,6 +223,7 @@ class Allocator(Generic[DeviceType]):
   def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
+    self.supports_copy_from_disk: bool = True
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"

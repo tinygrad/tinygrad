@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
