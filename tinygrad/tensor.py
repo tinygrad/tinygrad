@@ -1221,9 +1221,8 @@ class Tensor(MathTrait):
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
-    # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], (int, UOp))))
-
+    # Only inject slice/None dims here. Delay Tensor-index dims to the advanced-indexing path.
+    x = x.reshape(tuple(i['size'] for i in indices_parsed if not isinstance(i['index'], (int, UOp))))
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
@@ -1242,8 +1241,9 @@ class Tensor(MathTrait):
       # inject 1's for the extra dims added in create masks
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
       # sum reduce the extra dims introduced in create masks
-      x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
-
+      # x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
+      sum_axis = tuple(d + len(big_shape) for d in dims)
+      x = (x.reshape(reshape_arg) * mask).sum(sum_axis, dtype=x.dtype)
       # special permute case
       if dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1)):
         x = x.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), x.ndim))
@@ -1321,9 +1321,9 @@ class Tensor(MathTrait):
     if any(s==0 for s in adv[0].shape):
       return
     rhs = v.cast(self.dtype)
-    if rhs.ndim < len(adv):
-      rhs = rhs.reshape((1,) * (len(adv) - rhs.ndim) + rhs.shape)
-    rhs = rhs._broadcast_to(adv[0].shape)
+    # if rhs.ndim < len(adv):
+    #   rhs = rhs.reshape((1,) * (len(adv) - rhs.ndim) + rhs.shape)
+    # rhs = rhs._broadcast_to(adv[0].shape)
     res = self._getitem(adv, rhs)
     self.replace(res)
 
