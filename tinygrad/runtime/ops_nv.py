@@ -1,20 +1,20 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
 assert sys.platform != 'win32'
-from typing import cast, Union, ClassVar
+from typing import cast, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
 from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import System, PCIIfaceBase
+from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -71,11 +71,7 @@ class QMD:
     if self.ver < 4: self.write(**{f'constant_buffer_addr_upper_{i}':hi32(addr), f'constant_buffer_addr_lower_{i}':lo32(addr)})
     else: self.write(**{f'constant_buffer_addr_upper_shifted6_{i}':hi32(addr >> 6), f'constant_buffer_addr_lower_shifted6_{i}':lo32(addr >> 6)})
 
-class NVSignal(HCQSignal):
-  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
-    super().__init__(base_buf, **kwargs, timestamp_divider=1000, dev_t=NVDevice)
-
-class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
+class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
     self.active_qmd = None
     super().__init__()
@@ -94,12 +90,12 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
     if local_mem_tpc_bytes: self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(local_mem_tpc_bytes), 0xff)
     return self
 
-  def wait(self, signal:NVSignal, value:sint=0):
+  def wait(self, signal:HCQSignal, value:sint=0):
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value), (3 << 0) | (1 << 24)) # ACQUIRE | PAYLOAD_SIZE_64BIT
     self.active_qmd = None
     return self
 
-  def timestamp(self, signal:NVSignal): return self.signal(signal, 0)
+  def timestamp(self, signal:HCQSignal): return self.signal(signal, 0)
 
   def bind(self, dev:NVDevice):
     self.binded_device = dev
@@ -153,7 +149,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd, self.active_qmd_buf = qmd, qmd_buf
     return self
 
-  def signal(self, signal:NVSignal, value:sint=0):
+  def signal(self, signal:HCQSignal, value:sint=0):
     if self.active_qmd is not None:
       for i in range(2):
         if self.active_qmd.read(f'release{i}_enable') == 0:
@@ -180,7 +176,7 @@ class NVCopyQueue(NVCommandQueue):
       self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
-  def signal(self, signal:NVSignal, value:sint=0):
+  def signal(self, signal:HCQSignal, value:sint=0):
     self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(signal.value_addr), value)
     self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x14)
     return self
@@ -280,13 +276,12 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
+  @suppress_finalizing
   def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    try:
-      self.dev.synchronize()
-      self.dev.iface.free(opaque)
-    except AttributeError: pass
+    self.dev.synchronize()
+    self.dev.iface.free(opaque)
 
-  def map(self, buf:HCQBuffer): self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
 class GPFifo:
@@ -296,12 +291,11 @@ class GPFifo:
   token: int
   put_value: int = 0
 
-MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVKIface:
   root = None
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
-  gpus_info: Union[list, ctypes.Array] = []
+  gpus_info: list|ctypes.Array = []
 
   # TODO: Need a proper allocator for va addresses
   # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
@@ -366,7 +360,7 @@ class NVKIface:
     uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
     uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace)
 
-    for dev in cast(list[NVDevice], self.dev.devices):
+    for dev in cast(list[NVDevice], [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, NVDevice) and not d.is_nvd()]):
       try: uvm.enable_peer_access(self.fd_uvm, gpuUuidA=self.gpu_uuid, gpuUuidB=dev.iface.gpu_uuid)
       except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
 
@@ -387,14 +381,14 @@ class NVKIface:
     if made.params.status != 0: raise RuntimeError(f"_gpu_map_to_cpu returned {get_error_str(made.params.status)}")
     return fd_dev.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), 0)
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0) -> HCQBuffer:
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, cpu_addr=None) -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
     page_size = (4 << (12 if OSX else 10)) if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << (12 if OSX else 10)))
     size = round_up(size, page_size)
     va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
 
     if host:
-      va_addr = FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ | mmap.PROT_WRITE, MAP_FIXED | mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, 0)
+      va_addr = cpu_addr or FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
@@ -440,21 +434,23 @@ class NVKIface:
 
     # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     return HCQBuffer(va_base, size, meta=uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl.fd,
-      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs,
-      mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping),
-      view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None)
+      hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
+      has_cpu_mapping=has_cpu_mapping), view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
   def map(self, mem:HCQBuffer):
-    if self.gpu_uuid in mem.meta.mapped_gpu_ids: return
-    mem.meta.mapped_gpu_ids.append(self.gpu_uuid)
+    if mem.owner is not None and mem.owner._is_cpu():
+      if not any(x.device.startswith("NV") for x in mem.mapped_devs): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+      mem = mem.mappings[next(x for x in mem.mapped_devs if x.device.startswith("NV"))]
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
 class PCIIface(PCIIfaceBase):
+  gpus:ClassVar[list[str]] = []
+
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2684], bars=[0, 1], vram_bar=1,
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     System.reserve_hugepages(64)
 
@@ -466,7 +462,7 @@ class PCIIface(PCIIfaceBase):
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     # Setup classes for the GPU
-    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
@@ -479,15 +475,11 @@ class PCIIface(PCIIfaceBase):
   def setup_gpfifo_vm(self, gpfifo): pass
 
   def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
-  def rm_control(self, obj, cmd, params=None):
-    res = self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
-    return type(params).from_buffer_copy(res) if params is not None else None
+  def rm_control(self, obj, cmd, params=None): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root)
 
-class NVDevice(HCQCompiled[NVSignal]):
-  devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[HCQBuffer]] = []
-  signal_pool: ClassVar[list[HCQBuffer]] = []
+  def device_fini(self): self.dev_impl.fini()
 
+class NVDevice(HCQCompiled[HCQSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
@@ -535,7 +527,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
+                     functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
 
@@ -579,13 +571,13 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
-                    .signal(self.timeline_signal, self.timeline_value).submit(self)
+                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value)) \
-                                   .setup(copy_class=self.iface.dma_class) \
-                                   .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
+    NVCopyQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                 .setup(copy_class=self.iface.dma_class) \
+                 .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    self.timeline_value += 2
+    self.synchronize()
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return

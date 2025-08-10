@@ -1,7 +1,7 @@
 import ctypes, time, contextlib, importlib, functools
 from typing import Literal
 from tinygrad.runtime.autogen.am import am
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -33,7 +33,7 @@ class AM_GMC(AM_IP):
 
     # VM aperture
     self.vm_base = self.adev.mm.va_allocator.base
-    self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
+    self.vm_end = min(self.vm_base + (1 << self.adev.mm.va_bits) - 1, 0x7fffffffffff)
 
     # GFX11/GFX12 has 44-bit address space
     self.address_space_mask = (1 << 44) - 1
@@ -53,12 +53,12 @@ class AM_GMC(AM_IP):
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    if ip == "MM": self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
+    if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read() & 0x1, value=1, msg="mm flush_tlb timeout")
 
     self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
       invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
+    wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read() & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
     if ip == "MM":
       self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
@@ -169,14 +169,15 @@ class AM_SMU(AM_IP):
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
-  def _smu_cmn_send_msg(self, msg, param=0, debug=False):
+  def _smu_cmn_send_msg(self, msg:int, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
-  def _send_msg(self, msg, param, read_back_arg=False, timeout=10000, debug=False): # 10s
+  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
     self._smu_cmn_send_msg(msg, param, debug=debug)
-    self.adev.wait_reg(self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54, mask=0xFFFFFFFF, value=1, timeout=timeout)
+    wait_cond(lambda: (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read(), value=1, timeout_ms=timeout,
+      msg=f"SMU msg {msg:#x} timeout")
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
@@ -260,7 +261,7 @@ class AM_GFX(AM_IP):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
 
     self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1)
-    self.adev.wait_reg(self.adev.regRLC_SAFE_MODE, mask=0x1, value=0x0)
+    wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read() & 0x1, value=0, msg="RLC safe mode timeout")
 
     self.adev.regRLC_CGCG_CGLS_CTRL.update(cgcg_gfx_idle_threshold=0x36, cgcg_en=1, cgls_rep_compansat_delay=0xf, cgls_en=1)
 
@@ -411,14 +412,14 @@ class AM_PSP(AM_IP):
 
   def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
 
-  def _wait_for_bootloader(self): self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_35"), mask=0x80000000, value=0x80000000)
+  def _wait_for_bootloader(self): wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read() & 0x80000000, value=0x80000000, msg="BL not ready")
 
-  def _prep_msg1(self, data):
+  def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
     self.msg1_view[:len(data)+4] = bytes(data) + b'\x00' * 4
     self.adev.gmc.flush_hdp()
 
-  def _bootloader_load_component(self, fw, compid):
+  def _bootloader_load_component(self, fw:int, compid:int):
     if fw not in self.adev.fw.sos_fw: return 0
 
     self._wait_for_bootloader()
@@ -446,7 +447,7 @@ class AM_PSP(AM_IP):
       time.sleep(0.02)
 
     # Wait until the sOS is ready
-    self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_64"), mask=0x80000000, value=0x80000000)
+    wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x80000000, value=0x80000000, msg="sOS not ready")
 
     self.adev.wreg_pair(self.reg_pref, "_69", "_70", self.adev.paddr2mc(self.ring_paddr))
     self.adev.reg(f"{self.reg_pref}_71").write(self.ring_size)
@@ -455,9 +456,9 @@ class AM_PSP(AM_IP):
     # There might be handshake issue with hardware which needs delay
     time.sleep(0.02)
 
-    self.adev.wait_reg(self.adev.reg(f"{self.reg_pref}_64"), mask=0x8000FFFF, value=0x80000000)
+    wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
 
-  def _ring_submit(self, cmd):
+  def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
     msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()),
       cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
       fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
@@ -476,7 +477,7 @@ class AM_PSP(AM_IP):
 
     return resp
 
-  def _load_ip_fw_cmd(self, fw_types, fw_bytes):
+  def _load_ip_fw_cmd(self, fw_types:list[int], fw_bytes:memoryview):
     self._prep_msg1(fw_bytes)
     for fw_type in fw_types:
       if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
@@ -486,7 +487,7 @@ class AM_PSP(AM_IP):
       cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
       self._ring_submit(cmd)
 
-  def _tmr_load_cmd(self):
+  def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
@@ -494,7 +495,7 @@ class AM_PSP(AM_IP):
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
     return self._ring_submit(cmd)
 
-  def _load_toc_cmd(self, toc_size):
+  def _load_toc_cmd(self, toc_size:int) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_TOC)
     cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.msg1_addr)
     cmd.cmd.cmd_load_toc.toc_size = toc_size

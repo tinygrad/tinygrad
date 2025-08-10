@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import GlobalCounters, CI, Context, OSX
+from tinygrad.helpers import GlobalCounters, CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
@@ -108,105 +108,39 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, in_dim), in_dim, out_dim)
     _test_linear(Tensor.randn(BS, T, in_dim), in_dim, out_dim) # test with more dims
 
-  def test_conv1d(self):
-    BS, C1, W = 4, 16, 224//4
-    C2, K, S, P = 64, 7, 2, 1
-
+  def _test_conv(self, tiny_conv, torch_conv, BS, C1, DIMS, C2, K, S, P, D=1):
     # create in tinygrad
-    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
+    layer = tiny_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D)
 
     # create in torch
     with torch.no_grad():
-      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer = torch_conv(C1, C2, kernel_size=K, stride=S, padding=P, dilation=D).eval()
       torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
       torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
 
     # test
-    x = Tensor.uniform(BS, C1, W)
+    x = Tensor.uniform(BS, C1, *DIMS)
     z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  def test_conv2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
-    C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+  def test_conv1d(self): self._test_conv(Conv1d, torch.nn.Conv1d, BS=4, C1=16, DIMS=[224//4], C2=64, K=7, S=2, P=1)
+  def test_conv2d(self): self._test_conv(Conv2d, torch.nn.Conv2d, BS=4, C1=16, DIMS=[224//4, 224//4], C2=64, K=7, S=2, P=1)
 
   def test_conv1d_same_padding(self):
-    BS, C1, W = 8, 3, 32
-    C2, K, S, P = 16, 3, 1, 'same'
-
-    # create in tinygrad
-    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
-  def _run_conv2d_same_padding_test(self, BS, C1, C2, H, W, K, S, padding='same', D=1):
-    # create in tinygrad
-    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
+    self._test_conv(Conv1d, torch.nn.Conv1d, BS=8, C1=3, DIMS=[32], C2=16, K=3, S=1, P='same')
   def test_conv2d_same_padding_odd_input(self):
-    BS, C1, H, W = 16, 16, 29, 31
-    C2, K, S, P = 32, 5, 1, 'same'
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
-
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[29, 31], C2=32, K=5, S=1, P='same')
   def test_conv2d_same_padding_large_kernel(self):
-    BS, C1, H, W = 16, 16, 28, 33
-    C2, K, S, P = 32, 9, 1, 'same'
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
-
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[28, 33], C2=32, K=9, S=1, P='same')
   def test_conv2d_same_padding_with_dilation(self):
-    BS, C1, H, W = 16, 3, 28, 28
-    C2, K, S, P, D = 32, 3, 1, 'same', 3
-    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P, D)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 28], C2=32, K=3, S=1, P='same', D=3)
 
   def test_conv2d_same_padding_invalid_stride(self):
-    C1, C2, K, S, P = 16, 32, 2, 2, 'same'
-    self.assertRaises(ValueError, Conv2d, C1, C2, kernel_size=K, stride=S, padding=P)
-
+    self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')
   def test_conv2d_same_padding_invalid_padding_str(self):
-    C1, C2, K, S, P = 16, 32, 2, 1, 'not_same'
-    self.assertRaises(ValueError, Conv2d, C1, C2, kernel_size=K, stride=S, padding=P)
+    self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=1, padding='not_same')
 
   @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
@@ -229,12 +163,13 @@ class TestNN(unittest.TestCase):
     with Context(WINO=1):
       z = layer(x)
 
+    m = z.mean()
+    m.backward()
+
     torch_x = torch.tensor(x.numpy(), requires_grad=True)
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-    m = z.mean()
-    m.backward()
     gw = layer.weight.grad.realize()
     gb = layer.bias.grad.realize()
     gx = x.grad.realize()
@@ -245,46 +180,10 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv_transpose1d(self):
-    BS, C1, W = 4, 16, 224//4
-    C2, K, S, P = 64, 7, 2, 1
-
-    # create in tinygrad
-    layer = ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
+    self._test_conv(ConvTranspose1d, torch.nn.ConvTranspose1d, BS=4, C1=16, DIMS=[224//4], C2=64, K=7, S=2, P=1)
   def test_conv_transpose2d(self):
-    BS, C1, H, W = 4, 16, 224//4, 224//4
-    C2, K, S, P = 64, 7, 2, 1
+    self._test_conv(ConvTranspose2d, torch.nn.ConvTranspose2d, BS=4, C1=16, DIMS=[224//4, 224//4], C2=64, K=7, S=2, P=1)
 
-    # create in tinygrad
-    layer = ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P)
-
-    # create in torch
-    with torch.no_grad():
-      torch_layer = torch.nn.ConvTranspose2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
-
-    # test
-    x = Tensor.uniform(BS, C1, H, W)
-    z = layer(x)
-    torch_x = torch.tensor(x.numpy())
-    torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
-
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_groupnorm(self):
     BS, H, W, C, G = 20, 10, 10, 6, 3
 
@@ -311,7 +210,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_layernorm(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -338,7 +236,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_layernorm_2d(self):
     N, C, H, W = 20, 5, 10, 10
 
@@ -365,7 +262,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 10, 10, 10
 
@@ -392,7 +288,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_instancenorm_3d(self):
     N, C, D, H, W = 20, 10, 10, 10, 10
 
@@ -419,7 +314,6 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
   def test_rmsnorm(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
@@ -507,7 +401,7 @@ class TestNN(unittest.TestCase):
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
-  def test_embedding_one_kernel(self, ops=41410, kcount=3):
+  def test_embedding_one_kernel(self, ops=612000, kcount=2):
     GlobalCounters.reset()
     layer = Embedding(20, 30)
     layer.weight = Tensor.zeros_like(layer.weight).contiguous()
@@ -515,7 +409,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = result.schedule()
-    self.assertEqual(kcount, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes weight and embedding")
+    self.assertEqual(len([item for item in schedule if item.ast.op is Ops.SINK]), kcount, "first run realizes weight and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -545,6 +439,13 @@ class TestNN(unittest.TestCase):
       a = Tensor([3]).reshape(shp)
       result = layer(a)
       self.assertEqual(result.shape, shp + (embed_size,))
+
+  def test_embedding_regression(self):
+    # used to fail bounds check
+    with Context(FUSE_ARANGE=1):
+      embedding = Embedding(100, 1024)
+      input_ids = Tensor.empty(16, 16)
+      embedding(input_ids).realize()
 
   def test_load_state_dict(self):
     layer = Conv2d(3, 5, kernel_size=3)

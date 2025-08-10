@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, decimal, codecs
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import subprocess, ctypes
+from contextlib import redirect_stdout
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
-from tinygrad.uop.ops import TrackedGraphRewrite, TracingKey, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
+from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -14,7 +18,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
-               Ops.ALLREDUCE: "#ff40a0", Ops.GBARRIER: "#FFC14D", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0"}
+               Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D"}
 
 # VIZ API
 
@@ -24,8 +28,15 @@ ref_map:dict[Any, int] = {}
 def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(keys, contexts)):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc)} for s in v]
-    ret.append({"name":k.display_name, "fmt":k.fmt, "steps":steps})
+    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
+              "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
+    ret.append(r:={"name":k.display_name, "steps":steps})
+    # use the first key to get runtime profiling data about this context
+    if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
+    # program spec metadata
+    if isinstance(k.ret, ProgramSpec):
+      steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
+      r["fmt"] = k.ret.src
     for key in k.keys: ref_map[key] = i
   return ret
 
@@ -47,7 +58,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort()):
     # always exclude DEVICE/CONST/UNIQUE
-    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE}: excluded.add(u)
+    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
     # only exclude CONST VIEW source if it has no other children in the graph
     if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
       excluded.update(u.src)
@@ -94,13 +105,19 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
+device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
+def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
+
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[decimal.Decimal, decimal.Decimal|None, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st, e.en, e)
-    if isinstance(e, ProfilePointEvent): yield (e.st, None, e)
-    if isinstance(e, ProfileGraphEvent):
-      for ent in e.ents: yield (e.sigs[ent.st_id], e.sigs[ent.en_id], ent)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    elif isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
+    elif isinstance(e, ProfileGraphEvent):
+      cpu_ts = []
+      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
+      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
+      for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -112,12 +129,16 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    name, cat = e.name, None
-    if (ref:=ref_map.get(name)) is not None: name = ctxs[ref]["name"]
+    name, cat, info = e.name, None, None
+    if (ref:=ref_map.get(name)) is not None:
+      name = ctxs[ref]["name"]
+      # TODO: support symbolic by capturing var_vals in profile events
+      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and all(isinstance(es,int) for es in [p.estimates.ops, p.estimates.mem, p.estimates.lds]):
+        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat})
+    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -150,23 +171,62 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
-  devs = {e.device:(e.comp_tdiff, e.copy_tdiff if e.copy_tdiff is not None else e.comp_tdiff) for e in profile if isinstance(e,ProfileDeviceEvent)}
+  for ev in profile:
+    if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   min_ts:int|None = None
   max_ts:int|None = None
   for ts,en,e in flatten_events(profile):
-    time_diff = devs[e.device][e.__dict__.get("is_copy",False)] if e.device in devs else decimal.Decimal(0)
-    # ProfilePointEvent records perf_counter, offset other events by GPU time diff
-    st = int(ts) if isinstance(e, ProfilePointEvent) else int(ts+time_diff)
-    et = st if en is None else int(en+time_diff)
-    dev_events.setdefault(e.device,[]).append((st, et, 0. if en is None else float(en-ts), e))
+    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   for events in dev_events.values(): events.sort(key=lambda v:v[0])
   dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
   return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+
+def get_runtime_stats(key) -> list[dict]:
+  ret:list[dict] = []
+  for e in profile:
+    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
+      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
+  return ret
+
+# ** Assembly analyzers
+
+def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
+  target_args = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
+  # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
+  data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
+  cr = data["CodeRegions"][0]
+  resource_labels = data["TargetInfo"]["Resources"]
+  rows:list = [[instr] for instr in cr["Instructions"]]
+  # add scheduler estimates
+  for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
+  # map per instruction resource usage
+  instr_usage:dict[int, dict[int, int]] = {}
+  for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
+    instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
+    instr_usage[i][r] += d["ResourceUsage"]
+  # last row is the usage summary
+  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
+  max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
+  for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
+  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+
+def get_disassembly(ctx:list[str]):
+  if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
+  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
+  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
+  disasm_str = buf.getvalue()
+  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
+  if isinstance(compiler, LLVMCompiler):
+    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
+    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
+    ret = get_llvm_mca(disasm_str, mtriple, mcpu)
+  else: ret = {"src":disasm_str}
+  return json.dumps(ret).encode()
 
 # ** HTTP server
 
@@ -182,23 +242,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif url.path == "/ctxs":
-      if "ctx" in (query:=parse_qs(url.query)):
-        kidx, ridx = int(query["ctx"][0]), int(query["idx"][0])
-        try:
-          # stream details
-          self.send_response(200)
-          self.send_header("Content-Type", "text/event-stream")
-          self.send_header("Cache-Control", "no-cache")
-          self.end_headers()
-          for r in get_details(contexts[1][kidx][ridx]):
-            self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-            self.wfile.flush()
-          self.wfile.write("data: END\n\n".encode("utf-8"))
-          return self.wfile.flush()
-        # pass if client closed connection
-        except (BrokenPipeError, ConnectionResetError): return
-      ret, content_type = json.dumps(ctxs).encode(), "application/json"
+    elif (query:=parse_qs(url.query)):
+      if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
+      else: return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
+    elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
     else: status_code = 404
 
@@ -208,6 +255,19 @@ class Handler(BaseHTTPRequestHandler):
     self.send_header('Content-Length', str(len(ret)))
     self.end_headers()
     return self.wfile.write(ret)
+
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: END\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
 
 # ** main loop
 

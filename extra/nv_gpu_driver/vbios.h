@@ -29,6 +29,20 @@
 
 typedef struct
 {
+    NvU8 version;
+    NvU8 headerSize;
+    NvU8 entrySize;
+    NvU8 entryCount;
+} __attribute__((packed)) FALCON_APPLICATION_INTERFACE_HEADER_V1;
+
+typedef struct
+{
+    NvU32 id;
+    NvU32 dmemOffset;
+} __attribute__((packed)) FALCON_APPLICATION_INTERFACE_ENTRY_V1;
+
+typedef struct
+{
     NvU32 signature;
     NvU16 version;
     NvU16 size;

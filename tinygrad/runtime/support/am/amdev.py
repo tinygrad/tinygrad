@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, time, dataclasses, functools, os, hashlib
+import ctypes, collections, dataclasses, functools, os, hashlib
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -113,7 +113,7 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev(PCIDevImplBase):
-  Version = 0xA0000005
+  Version = 0xA0000006
 
   def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
@@ -163,8 +163,8 @@ class AMDev(PCIDevImplBase):
     self.smi_dev = smi_dev # During boot only boot memory can be allocated. This flag is to validate this.
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, pte_cnt=[512, 512, 512, 512],
-      pte_covers=[(1 << ((9 * (3-lv)) + 12)) for lv in range(4)], first_lv=am.AMDGPU_VM_PDB1, va_base=AMMemoryManager.va_allocator.base,
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
+      first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
       palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.fw = AMFirmware(self)
 
@@ -213,12 +213,6 @@ class AMDev(PCIDevImplBase):
   def indirect_wreg(self, reg:int, val:int):
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
-
-  def wait_reg(self, reg:AMRegister, value:int, mask=0xffffffff, timeout=10000) -> int:
-    start_time = int(time.perf_counter() * 1000)
-    while int(time.perf_counter() * 1000) - start_time < timeout:
-      if ((rval:=reg.read()) & mask) == value: return rval
-    raise RuntimeError(f'wait_reg timeout reg=0x{reg.addr:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.

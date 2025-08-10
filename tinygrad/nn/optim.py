@@ -76,8 +76,6 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
 
   `classic` is a boolean flag that determines whether to use the popular momentum update rule or the classic momentum update rule.
-
-  - Described: https://paperswithcode.com/method/sgd
   """
   return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
 
@@ -85,7 +83,6 @@ class LARS(Optimizer):
   """
   Layer-wise Adaptive Rate Scaling (LARS) optimizer with optional momentum and weight decay.
 
-  - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
   def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM):
@@ -119,7 +116,6 @@ def AdamW(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_dec
   """
   AdamW optimizer with optional weight decay.
 
-  - Described: https://paperswithcode.com/method/adamw
   - Paper: https://arxiv.org/abs/1711.05101v3
   """
   return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True, fused=fused)
@@ -127,7 +123,6 @@ def Adam(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, fused=FUSE_
   """
   Adam optimizer.
 
-  - Described: https://paperswithcode.com/method/adam
   - Paper: https://arxiv.org/abs/1412.6980
   """
   return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, fused=fused)
@@ -136,7 +131,6 @@ class LAMB(Optimizer):
   """
   LAMB optimizer with optional weight decay.
 
-  - Described: https://paperswithcode.com/method/lamb
   - Paper: https://arxiv.org/abs/1904.00962
   """
   def __init__(self, params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, fused=FUSE_OPTIM):

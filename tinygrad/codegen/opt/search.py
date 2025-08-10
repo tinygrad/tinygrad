@@ -1,15 +1,15 @@
-from typing import cast, Optional, Callable
+from typing import cast, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.opt.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
@@ -35,8 +35,8 @@ def get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, input_size / prod(test_global_size)
 
-def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:Optional[float]=None,
-                  allow_test_size:int=True, max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:float|None=None,
+                  allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
   if allow_test_size and p.global_size is not None and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
@@ -57,14 +57,14 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, Optional[tuple[ProgramSpec, bytes, float]]]:
+def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
-    p = x[1].to_program(name_override="test")
+    p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].opts)
     assert p.uops is not None, "uop list wasn't generated?"
     if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
@@ -83,7 +83,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
 
 # workers should not open devices and should ignore ctrl c and should not launch VIZ
 def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0, VIZ=0).__enter__()
+  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
@@ -97,7 +97,7 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
     if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
   # TODO: Nones are staying in here if buffers are optimized out!
   # TODO: add a test for this
-  rawbufs: list[Optional[Buffer]] = [None]*(max(bufsts)+1)
+  rawbufs: list[Buffer|None] = [None]*(max(bufsts)+1)
   for k,lx in bufsts.items():
     buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
     assert isinstance(dtype, (PtrDType, ImageDType))
@@ -108,9 +108,9 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
+def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
-  kernel_actions = actions.copy()
+  kernel_actions = (actions if candidates is None else candidates).copy()
 
   if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
     for i, action in enumerate(kernel_actions):
@@ -121,14 +121,16 @@ def get_kernel_actions(lin:Kernel, include_0=True) -> dict[int, Kernel]:
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
-      if ((ax:=lin.real_axis(a)) >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, ax, 0) in kernel_actions): continue
+      try: ax = lin.real_axis(a.op, a.axis)
+      except KernelOptError: continue
+      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, a.axis, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
       up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
-      for s,c in zip(lin2.full_shape, lin2.colors()):
-        if c in {"magenta", "yellow"}: up *= s
-        elif c in {"cyan", "green", "white"}: lcl *= s
+      for s,c in zip(lin2.full_shape, lin2.axis_types):
+        if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
+        elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s
       if up//tc_up > max_up or lcl > max_lcl:
         if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
         continue
@@ -178,7 +180,10 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
-        except RuntimeError: continue # for runtime issues
+        except Exception as e:
+          if BEAM_DEBUG: print(f"BEAM failed for opts: {acted_lins[i].applied_opts}\n{e}")
+          if isinstance(e, RuntimeError): continue
+          raise
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(list, p.uops)):5d} uops {time_to_str(compile_et, w=12)} compile/{time_to_str(timed_lins[-1][1], w=12)} run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {time_to_str(timed_lins[-1][1], w=12)}       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
