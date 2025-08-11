@@ -1605,6 +1605,7 @@ def train_stable_diffusion():
           batch = batch + [batch[-1]] * (EVAL_BS - unpadded_bs)
 
         captions = [row["caption"] for row in batch]
+        captions = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in captions], dim=0)
 
         x = Tensor.randn(EVAL_BS,4,64,64)
 
