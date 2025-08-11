@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.opt.swizzler import merge_views, view_left, view_right, fix_kernel_ops, apply_swizzle, swizzle_reduceop
+from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
 import sys
@@ -121,7 +121,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
   return buffer.assign(kernel).reshape(x.shape)
 
-DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI}
+DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI, Ops.BIND}
 def append_to_kernel(x:UOp):
   new_srcs: list[UOp] = []
   metadata = x.arg.metadata
@@ -149,6 +149,10 @@ create_kernels = PatternMatcher([
 
 # **** fix kernel AST
 
+def unbind_view(x:UOp):
+  if any(x.op is Ops.BIND for x in x.arg.vars()): return x.replace(arg=x.arg.unbind()[0])
+  return None
+
 replace_buffers = PatternMatcher([
   # replace ASSIGN with the target BUFFER
   (UPat(Ops.ASSIGN, src=(UPat((Ops.BUFFER, Ops.LOAD)), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
@@ -158,6 +162,21 @@ replace_buffers = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: UOp(Ops.DEFINE_GLOBAL, x.dtype.ptr(x.size), (), ctx.index(x)).load()),
   # no SINK for meta ops
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
+  # STORE (except for meta ops)
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)],
+            arg=sink.arg)),
+  # remove CONTIGUOUS/DEVICE from kernel AST
+  (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
+  (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
+  # passthrough ASSIGN (but let MSTACK process first)
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: x.src[1]),
+  # remove any BINDs from VIEWS
+  (UPat(Ops.VIEW, src=(UPat(), UPat((Ops.BIND, Ops.DEFINE_VAR))), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
+  # remove any BINDs from DEFINE_VARs
+  (UPat(Ops.BIND, name="x"), lambda x: x.src[0]),
+  # remove BINDs from ShapeTrackers
+  (UPat(Ops.VIEW, name="x"), unbind_view),
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
@@ -165,21 +184,22 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
+    if s.op is Ops.BIND: continue
     s = s.buf_uop
     # traverse back through MSELECT and MSTACK. HACK: 0 branch of MSTACK only
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
   # replace global memory ops with the BUFFER they write to
-  ast = graph_rewrite(k.arg.ast, replace_buffers, bufs, bottom_up=True, name="replace buffers")
-  if ast.op is Ops.SINK and not all_same([x.device for x in k.src]):
+  # NOTE: merge_views is needed to unbind the reshapes
+  ast = graph_rewrite(k.arg.ast, merge_views+replace_buffers, bufs, bottom_up=True, name="replace buffers")
+  if ast.op is Ops.SINK and not all_same([x.device for x in k.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
-  # TODO: move these to codegen
-  ast = graph_rewrite(ast, view_left, name="Main View Left")
-  ast = graph_rewrite(ast, view_right, name="Main View Right")
-  ast = graph_rewrite(ast, view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
 
-create_ast = PatternMatcher([(UPat(Ops.KERNEL, name="k"), fix_kernel_ast),])
+create_ast = PatternMatcher([
+  (UPat(Ops.KERNEL, name="k"), fix_kernel_ast),
+  (UPat(Ops.DEFINE_VAR, src=(UPat(),), allow_any_len=True, name="x"), lambda x: x.replace(src=())),
+])
 
 # ** add metadata of KERNEL outputs
 
@@ -237,8 +257,6 @@ def fuse_arange(root:UOp):
   for u in toposort:
     for s in u.src: local_children.setdefault(s, []).append(u)
   fuse_rep: dict[UOp, UOp] = {}
-  # skip if root depends on aranges with different ndims. This can be improved
-  if any(len(set(dims)) > 1 for dims in zip(*[r.src[0].shape for r in local_arange])): return
   for r in local_arange:
     # skip if already fused
     if len(r.arg) > 2: continue
@@ -278,6 +296,11 @@ def limit_bufs(root:UOp):
   if len(bufs)>=MAX_BUFS-1:
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
+def view_add_srcs(x:UOp):
+  if len(avars:=x.arg.vars()) and len(x.src) == 1:
+    return x.replace(src=x.src+tuple(avars))
+  return None
+
 finalize_contiguous = PatternMatcher([
   # if an op takes more than one input, check combined LOADs don't exceed device limits
   (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
@@ -285,6 +308,8 @@ finalize_contiguous = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONTIGUOUS),), name="x"), lambda x: x.src[0]),
   # simplify views
   (UPat(Ops.VIEW, src=(UPat.var('x')), name="v"), lambda x,v: x.view(new_st) if (new_st:=v.arg.simplify()) != v.arg else None),
+  # vars to views srcs
+  (UPat(Ops.VIEW, name="x"), view_add_srcs),
 ])
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])

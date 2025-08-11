@@ -1,6 +1,4 @@
-import functools
-import hashlib
-import os, random, pickle, queue, struct, math
+import os, random, pickle, queue, struct, math, functools, hashlib, time
 from typing import List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
@@ -532,21 +530,21 @@ class BinIdxDataset:
 
     start = self.idx.tell()
     end = start + self.count * dtypes.int32.itemsize
-    self.sizes = self.idx_t[start:end].bitcast(dtypes.int32)
+    self.sizes = self.idx_t[start:end].bitcast(dtypes.int32).numpy()
 
     start = end
     end = start + self.count * dtypes.int64.itemsize
-    self.pointers = self.idx_t[start:end].bitcast(dtypes.int64)
+    self.pointers = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
     start = end
     end = start + doc_count * dtypes.int64.itemsize
-    self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64)
+    self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
     # bin file
     self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin"))
 
   def _index(self, idx) -> tuple[int, int]:
-    return self.pointers[idx].item(), self.sizes[idx].item()
+    return int(self.pointers[idx]), int(self.sizes[idx])
 
   def get(self, idx, offset:int=0, length:int|None=None):
     ptr, size = self._index(idx)
@@ -566,10 +564,13 @@ class GPTDataset:
     # check for cache
     cache_hash = hashlib.sha256(f"{samples}:{seqlen}:{seed}:{shuffle}".encode()).hexdigest()
     cache_path = base_path.with_name(f"{base_path.name}.{cache_hash}.index_cache")
+    print(f"try loading GPTDataset from {cache_path}...")
     if cache_path.exists():
+      print("cache found, loading...")
       with open(cache_path, "rb") as f:
         self.doc_idx, self.sample_idx, self.shuffle_idx = pickle.load(f)
     else:
+      print("cache not found, building index...")
       self.doc_idx = self._build_doc_idx()
       self.sample_idx = self._build_sample_idx()
       self.shuffle_idx = self._build_shuffle_idx()
@@ -628,14 +629,20 @@ class GPTDataset:
 
   # https://github.com/NVIDIA/Megatron-LM/blob/94bd476bd840c2fd4c3ebfc7448c2af220f4832b/megatron/core/datasets/gpt_dataset.py#L558
   def _build_doc_idx(self):
-    doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.count][1]
-    doc_idx = doc_idx.reshape(-1)
+    print(f"building doc_idx for {self.num_epochs=}, {self.indexed_dataset.count=}")
+    st = time.perf_counter()
+    # doc_idx = np.mgrid[:self.num_epochs, :self.indexed_dataset.count][1]
+    doc_idx = np.arange(self.indexed_dataset.count).reshape(1, -1).repeat(self.num_epochs, axis=0).flatten()
     doc_idx = doc_idx.astype(np.int32)
+    at = time.perf_counter()
     if self.shuffle: self.rng.shuffle(doc_idx)
+    print(f"doc_idx built in {at - st:.3f}s, shuffled in {time.perf_counter() - at:.3f}s")
     return doc_idx
 
   def _build_sample_idx(self):
-    sample_idx = np.empty((self.samples + 1, 2), dtype=np.int32)
+    print(f"building sample_idx for {self.samples=}, {self.seqlen=}, {self.doc_idx.shape[0]=}")
+    sample_idx_max = max(self.doc_idx.shape[0], self.indexed_dataset.sizes.max())
+    sample_idx = np.empty((self.samples + 1, 2), dtype=np.int64 if sample_idx_max > dtypes.int32.max else np.int32)
 
     sample_idx_idx, doc_idx_idx, doc_offset = 0, 0, 0
     sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
@@ -645,7 +652,7 @@ class GPTDataset:
       remaining_seqlen = self.seqlen + 1
       while remaining_seqlen > 0:
         doc_idx = int(self.doc_idx[doc_idx_idx])
-        doc_len = self.indexed_dataset.sizes[doc_idx].item() - doc_offset
+        doc_len = int(self.indexed_dataset.sizes[doc_idx]) - doc_offset
         remaining_seqlen -= doc_len
         if remaining_seqlen <= 0:
           doc_offset += remaining_seqlen + doc_len - 1
@@ -654,7 +661,7 @@ class GPTDataset:
           if doc_idx_idx == len(self.doc_idx) - 1:
             assert sample_idx_idx == self.samples
             doc_idx = int(self.doc_idx[doc_idx_idx])
-            doc_offset = self.indexed_dataset.sizes[doc_idx].item() - 1
+            doc_offset = int(self.indexed_dataset.sizes[doc_idx]) - 1
             break
           doc_idx_idx += 1
           doc_offset = 0
@@ -665,13 +672,18 @@ class GPTDataset:
     return sample_idx
 
   def _build_shuffle_idx(self):
+    print(f"building shuffle_idx for {self.samples=}")
+    st = time.perf_counter()
     shuffle_idx = np.arange(self.samples, dtype=np.int32)
+    at = time.perf_counter()
     if self.shuffle: self.rng.shuffle(shuffle_idx)
+    print(f"shuffle_idx built in {at - st:.3f}s, shuffled in {time.perf_counter() - at:.3f}s")
     return shuffle_idx
 
 class BlendedGPTDataset:
   def __init__(self, paths:list[Path], weights:list[float], samples:int, seqlen:int, seed:int, shuffle:bool):
-    self.seed = seed
+    self.shuffle = shuffle
+    self.rng = np.random.RandomState(seed)
 
     # normalize weights
     total_weight = sum(weights)
@@ -683,9 +695,46 @@ class BlendedGPTDataset:
 
     self.datasets = [GPTDataset(path, samples_per_blend[i], seqlen, seed + i, shuffle) for i,path in enumerate(paths)]
 
+    # check for cache
+    cache_hash = hashlib.sha256(f"{samples}:{seqlen}:{seed}:{shuffle}".encode()).hexdigest()
+    cache_path = paths[0].with_name(f"{paths[0].name}.{cache_hash}.blend_cache")
+    print(f"try loading BlendedGPTDataset from {cache_path}...")
+    if cache_path.exists():
+      print("cache found, loading...")
+      with open(cache_path, "rb") as f:
+        self.dataset_idx, self.dataset_sample_idx = pickle.load(f)
+    else:
+      print("cache not found, building index...")
+      self.dataset_idx, self.dataset_sample_idx = self._build_blend_idx()
+      # save cache
+      with open(cache_path, "wb") as f:
+        pickle.dump((self.dataset_idx, self.dataset_sample_idx), f)
+
   def get(self, idx:int):
-    tokens = self.datasets[0][idx]
+    tokens = self.datasets[self.dataset_idx[idx]][self.dataset_sample_idx[idx]]
     return tokens
+
+  def _build_blend_idx(self):
+    dataset_idx = np.zeros(self.samples, dtype=np.int16)
+    dataset_sample_idx = np.zeros(self.samples, dtype=np.int64)
+
+    unspent_datasets = set(range(len(self.datasets)))
+    dataset_sample_counts = [0] * len(self.datasets)
+
+    for i in tqdm(range(self.samples)):
+      error_argmax, error_max = 0, 0.0
+      for di in unspent_datasets:
+        error = self.weights[di] * max(i, 1) - dataset_sample_counts[di]
+        if error > error_max:
+          error_max = error
+          error_argmax = di
+
+      dataset_idx[i] = error_argmax
+      dataset_sample_idx[i] = dataset_sample_counts[error_argmax]
+
+      dataset_sample_counts[error_argmax] += 1
+
+    return dataset_idx, dataset_sample_idx
 
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
   if val:
@@ -739,8 +788,8 @@ if __name__ == "__main__":
 
   def load_llama3(val):
     bs = 24
-    samples = 5760 if val else 1_200_000
-    seqlen = 512
+    samples = 5760 if val else 1_200_000 * 1152
+    seqlen = 8192
 
     max_, min_ = 0, math.inf
     for tokens in tqdm(batch_load_llama3(bs, samples, seqlen, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=5760, val=bool(val)), total=samples//bs):

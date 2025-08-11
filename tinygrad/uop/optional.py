@@ -1,36 +1,11 @@
-# should this merge with transcendental?
 from typing import Callable
 import functools
-from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import dtypes, promo_lattice
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 from tinygrad.helpers import getenv
-from tinygrad.uop.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES
-from tinygrad.renderer import Renderer
+from tinygrad.uop.transcendental import xexp2, xlog2, xsin, xpow, TRANSCENDENTAL_SUPPORTED_DTYPES, fast_idiv
 
 # ***** optional patterns *****
-
-@functools.lru_cache(None)
-def magicgu(vmax:int, d:int) -> tuple[int,int]:
-  # calculate m,s such that x//d == (x*m) >> s for all 0 <= x <= vmax, d>0; adapted from Hacker's Delight, Chapter 10
-  nc = (vmax+1)//(d) * d - 1
-  nbits = vmax.bit_length()
-  for s in range(0, 2*nbits + 1):
-    if 2**s > nc*(d - 1 - (2**s - 1) % d):
-      m = (2**s + d - 1 - (2**s - 1) % d)//d
-      return m, s
-  assert False
-
-def fast_idiv(ctx: Renderer|None, x: UOp, d: int) -> UOp|None:
-  # idiv is truncated division, but arithmetic shift is floored division, so can only do non-negative numbers!
-  if x.vmin<0: return None
-  sign = 1 if d > 0 else -1
-  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
-  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  # promo_lattice needs to return an unsigned type
-  if ctx is not None and dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, ctx.device):
-    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
-  return None
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
@@ -54,5 +29,16 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
+  if Ops.CMPLT in ops:
+    # These are late rewrites because simplex expects equalities to be a certain format
+    pat += [
+      ((UPat.var("x", dtypes.sints) < UPat.cvar("c", dtypes.sints)).logical_not(), lambda x,c: c-1<x),
+      ((UPat.cvar("c", dtypes.sints) < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
+      (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*UPat.cvar("c"), lambda x,y,c: y*(-c)<x),
+      (UPat.var("x", dtypes.sints)*-1 < UPat.cvar("c"), lambda x,c:-c<x),
+      ((UPat.cvar("c1",vec=False)<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2",vec=False)),
+        lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
+    ]
+  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
