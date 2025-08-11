@@ -4,6 +4,7 @@ import functools, itertools
 from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.muop import MUOp
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.codegen.opt.tc import TensorCore
@@ -56,6 +57,7 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
+  muops:list[MUOp]|None=None
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
@@ -126,3 +128,5 @@ class Renderer:
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  # TODO: shouldn't really be here
+  def to_muops(self, uops:list[UOp]) -> list[MUOp]: raise NotImplementedError("needs a lowerer to muop")

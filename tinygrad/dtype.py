@@ -95,6 +95,8 @@ class dtypes:
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
+  @functools.cache
+  def is_mask(x: DType) -> bool: return x.scalar() in dtypes.masks
   @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
@@ -145,6 +147,11 @@ class dtypes:
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
+  # mask dtypes, used in x86/arm64 backends
+  mask8: Final[DType] = DType.new(15, 1, "mask8", None)
+  mask16: Final[DType] = DType.new(16, 2, "mask16", None)
+  mask32: Final[DType] = DType.new(17, 4, "mask32", None)
+  mask64: Final[DType] = DType.new(18, 8, "mask64", None)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -162,8 +169,13 @@ class dtypes:
 
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
+  masks = (mask8, mask16, mask32, mask64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
+  ints8 = (uint8, int8)
+  ints16 = (uint16, int16)
+  ints32 = (uint32, int32)
+  ints64 = (uint64, int64)
   ints = uints + sints
   all = floats + ints + (bool,)
 
