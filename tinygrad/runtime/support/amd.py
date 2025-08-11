@@ -41,6 +41,7 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
   if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0)})
   elif ip in ['mp', 'smu']: version = _apply_ovrd({(14,0,3): (14,0,2)})
+  elif ip in ['gc']: version = _apply_ovrd({(9,5,0): (9,4,3)})
 
   return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 

@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools
+import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
+from dataclasses import replace
 from typing import Callable, Any
-from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.kernelize.kernelize import get_kernelize_map
-from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.engine.realize import get_program
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
+if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
+
+try:
+  from tinygrad.schedule.kernelize import get_kernelize_map
+  from tinygrad.renderer import Renderer, ProgramSpec
+  from tinygrad.engine.realize import get_program
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.codegen.opt.kernel import Opt
+  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
+  from tinygrad.device import Device
+except ImportError as e:
+  print(repr(e))
+  exit(int(ASSERT_DIFF))
 
 # *** process replay settings
 
@@ -20,12 +31,11 @@ early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
 def trunc_log(x):
-  if len(lines:=repr(x).splitlines()) > MAX_LINES: lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
+  if len(lines:=(x if isinstance(x, str) else repr(x)).splitlines()) > MAX_LINES:
+    lines = lines[:MAX_LINES]+[f"WARN: truncated string with {len(lines)} lines"]
   logging.info("\n".join(lines))
 
 # user config
-ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
-if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
@@ -40,10 +50,20 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
-  p2 = get_program(ast.replace(arg=KernelInfo(opts_to_apply=p.applied_opts, name=p.name)) if ast.arg is None else ast, renderer)
-  def to_str(ret:ProgramSpec) -> str: return ret.src
-  return to_str(p2), to_str(p), (p.ast, renderer, p.applied_opts)
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+  # NOTE: this always uses the opts_to_apply path
+  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
+  input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
+  # if no renderer was provided, open the device to get it
+  if renderer is None: renderer = Device[p.device].renderer
+  p2 = get_program(input_ast, renderer=renderer)
+  def to_str(ret:ProgramSpec) -> str:
+    # PYTHON renderer pickles UOps, first unpickle and decode here
+    if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
+    return ret.src
+  # properly color the name arg
+  ast_repr = codecs.decode(str(input_ast), "unicode_escape")
+  return to_str(p2), to_str(p), (ast_repr, renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
 
@@ -61,6 +81,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
       early_stop.set()
       break
+    name, loc = "", ""
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
@@ -77,7 +98,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
         warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
     except Exception as e:
       changed += 1
-      warnings.warn(e, ProcessReplayWarning)
+      warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
   conn.commit()
   cur.close()
 
@@ -110,5 +131,5 @@ if __name__ == "__main__":
   logging.info(f"running process replay with {ASSERT_DIFF=}")
   try: _pmap(replayers)
   except Exception as e:
-    logging.info("process replay err", e)
+    logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))

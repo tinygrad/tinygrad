@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, pickle, functools
+import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType
@@ -14,7 +14,7 @@ def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
   uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink())
-  rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
+  rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
   return rewritten_uop.render(simplify=False), rewritten_uop.vmin, rewritten_uop.vmax
 
 def uconst(val): return UOp.const(dtypes.int, val)
@@ -29,16 +29,17 @@ class TestSymbolicPickle(unittest.TestCase):
   def test_pickle_variable_times_2(self): self._test_pickle_unpickle(Variable("a", 3, 8)*2)
 
 class TestSymbolic(unittest.TestCase):
-  def helper_test_variable(self, v, n, m, s):
+  def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
     rendered, nmin, nmax = render(v)
     if isinstance(s, tuple): self.assertIn(rendered, s)
     else: self.assertEqual(rendered, s)
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
-    solver = z3.Solver()
-    z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
-    expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
-    self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
+    if test_z3:
+      solver = z3.Solver()
+      z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
+      expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
+      self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
@@ -168,6 +169,12 @@ class TestSymbolic(unittest.TestCase):
   def test_div_neg_min_max(self):
     self.helper_test_variable(Variable("a", 1, 7) // -2, -3, 0, "((a//2)*-1)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((a//2)*-1)")
+
+  def test_div_mod_zero(self):
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) // 0).simplify()
+    with self.assertRaises(ZeroDivisionError):
+      (Variable("a", 0, 7) % 0).simplify()
 
   def test_sum_div_remove(self):
     self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
@@ -636,7 +643,7 @@ class TestSymbolic(unittest.TestCase):
     # TODO: copied from render, render does not support cast
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
     uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
-    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
+    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
 
@@ -665,6 +672,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
     self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
+
+  def test_const_reciprocal(self):
+    a = Variable("a", 1, 10, dtypes.float)
+    # TODO: bounds for reciprocal
+    # TODO: should z3 work?
+    self.helper_test_variable(2*(2*a).reciprocal(), -math.inf, math.inf, "(1/a)", test_z3=False)
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

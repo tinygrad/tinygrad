@@ -13,5 +13,5 @@ GPU=1 python3 -m pytest test/test_tiny.py
 extra/optimization/extract_dataset.py
 sort -u /tmp/ops > /tmp/sops
 ls -lh /tmp/ops /tmp/sops
-# gzip -k /tmp/sops
+gzip -k /tmp/sops
 # mv /tmp/sops.gz extra/datasets/
