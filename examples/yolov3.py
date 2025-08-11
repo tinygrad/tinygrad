@@ -71,8 +71,8 @@ def bbox_iou(box1, box2):
   # get the coordinates of the intersection rectangle
   inter_rect_x1 = np.maximum(b1_x1, b2_x1)
   inter_rect_y1 = np.maximum(b1_y1, b2_y1)
-  inter_rect_x2 = np.maximum(b1_x2, b2_x2)
-  inter_rect_y2 = np.maximum(b1_y2, b2_y2)
+  inter_rect_x2 = np.minimum(b1_x2, b2_x2)
+  inter_rect_y2 = np.minimum(b1_y2, b2_y2)
   #Intersection area
   inter_area = np.clip(inter_rect_x2 - inter_rect_x1 + 1, 0, 99999) * np.clip(inter_rect_y2 - inter_rect_y1 + 1, 0, 99999)
   #Union Area
