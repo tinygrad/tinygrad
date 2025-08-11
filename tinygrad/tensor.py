@@ -2952,6 +2952,12 @@ class Tensor(MathTrait):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
+  def fuse_backward(self) -> Tensor:
+    """
+    Inserts a fuse operation in the backward pass.
+    """
+    return self._apply_uop(UOp.fuse_backward)
+
   def log(self) -> Tensor:
     """
     Computes the natural logarithm element-wise.
@@ -3919,7 +3925,7 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    return (qk.cast(self.dtype).softmax(-1).fuse_backward().dropout(dropout_p) @ value).contiguous_backward()
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
