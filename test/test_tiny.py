@@ -91,12 +91,12 @@ class TestTiny(unittest.TestCase):
   @unittest.skipIf(IMAGE>0 or (CI and Device.DEFAULT == "DSP"), "failing because of make things that can't be images not images")
   def test_mnist(self):
     layers = [
-      nn.Conv2d(1, 32, 5), Tensor.relu,
-      nn.Conv2d(32, 32, 5), Tensor.relu,
-      nn.BatchNorm(32), Tensor.max_pool2d,
-      nn.Conv2d(32, 64, 3), Tensor.relu,
-      nn.Conv2d(64, 64, 3), Tensor.relu,
-      nn.BatchNorm(64), Tensor.max_pool2d,
+      nn.Conv2d(1, 32, 5), Tensor.relu, Tensor.contiguous,
+      nn.Conv2d(32, 32, 5), Tensor.relu, Tensor.contiguous,
+      nn.BatchNorm(32), Tensor.max_pool2d, Tensor.contiguous,
+      nn.Conv2d(32, 64, 3), Tensor.relu, Tensor.contiguous,
+      nn.Conv2d(64, 64, 3), Tensor.relu, Tensor.contiguous,
+      nn.BatchNorm(64), Tensor.max_pool2d, Tensor.contiguous,
       lambda x: x.flatten(1), nn.Linear(576, 10)]
 
     # replace random weights with ones
