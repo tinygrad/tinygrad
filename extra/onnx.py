@@ -777,10 +777,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         idx0, idx1, idx2, idx3 = [p + i for i in [-1, 0, 1, 2]]
 
         # Calculate coefficients
+        # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py#L82-L89
         c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
-        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1.0
-        c2 = ((A + 2) * (1.0 - ratio) - (A + 3)) * (1.0 - ratio) * (1.0 - ratio) + 1.0
-        c3 = ((A * ((1.0 - ratio) + 1.0) - 5 * A) * ((1.0 - ratio) + 1.0) + 8 * A) * ((1.0 - ratio) + 1.0) - 4 * A
+        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1
+        c2 = ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1
+        c3 = ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
