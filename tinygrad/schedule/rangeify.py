@@ -81,7 +81,11 @@ def map_pad(x:UOp, r:UOp):
   # PAD is with 0
   return bigwhere.simplify().where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), UOp.const(r.dtype, 0))
 
+reduce_map = {}
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
+  # TODO: this should be in the cache
+  if red in reduce_map: return reduce_map[red]
+  #print(f"reduce {id(red)}")
   rngs = list(idx.src[1:])
   new_ranges = []
   for i,s in enumerate(red.src[0].shape):
@@ -89,7 +93,9 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
       rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
       ctx.idx += 1
       new_ranges.append(rngs[i])
-  return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
+  ret = UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
+  reduce_map[red] = ret
+  return ret
 
 def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
@@ -140,6 +146,13 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if len(idx_ranges) == 0: return c.index(*out_rngs)
   return c.index(*out_rngs).contiguous(*end_ranges, arg=c.shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
+def might_end_axes(x:UOp):
+  end_axes = []
+  for i,r in enumerate(x.src[1:]):
+    # NOTE: this is too specific to conv. you want to find any ranges that overlap
+    if r.op is Ops.ADD and r.src[0].op is Ops.RANGE and r.src[1].op is Ops.RANGE: end_axes.append(i)
+  return x.replace(src=(x.src[0].contiguous(arg=tuple(end_axes)),)+x.src[1:]) if end_axes else None
+
 pm_rangeify = PatternMatcher([
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -159,6 +172,9 @@ pm_rangeify = PatternMatcher([
    lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
+
+  # might end axes
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="x"), might_end_axes),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
