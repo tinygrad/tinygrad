@@ -9,6 +9,7 @@ from typing import Callable, Iterator, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import multiprocessing, threading, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
+import traceback
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable, sint
@@ -182,7 +183,10 @@ class RemoteHandler:
         key, value = hdr.split(':', 1)
         req_headers[key.lower()] = value.strip()
       req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
-      res_status, res_body = await self.handle(req_method, req_path, req_body)
+      try: res_status, res_body = await self.handle(req_method, req_path, req_body)
+      except Exception as e:
+        res_status, res_body = http.HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}".encode()
+        print(f"{traceback.format_exc()}", flush=True)
       writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
 
   async def ib_connect(self, ssession:SessionKey, dsession:SessionKey) -> IBConn|None:
@@ -415,8 +419,8 @@ class RemoteConnection:
       for conn,data in datas.items(): conn.conn.request("POST", "/batch", data)
       for conn in datas.keys():
         response = conn.conn.getresponse()
-        assert response.status == 200, f"POST /batch failed: {response}"
         resp = response.read()
+        assert response.status == 200, f"POST /batch failed: {resp.decode()}"
         if conn == self: ret = resp
         conn.req = BatchRequest()
     if take_q: RemoteConnection.q_lock.release()
