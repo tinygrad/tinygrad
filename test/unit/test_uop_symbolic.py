@@ -393,7 +393,8 @@ class TestSymbolic(unittest.TestCase):
     lidx1 = UOp.variable("lidx1", 0, 1)
     ridx1005 = UOp.variable("ridx1005", 0, 2)
     ridx1006 = UOp.variable("ridx1006", 0, 2)
-    self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -2, 20, "(((((lidx1+(((gidx1*18)+(ridx1005*18))+(lidx0*162)))+(gidx0*2))+(ridx1006*2))+-40)//18)")
+    self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -2, 20,
+      "(((((lidx1+(((gidx1*18)+(ridx1005*18))+(lidx0*162)))+(gidx0*2))+(ridx1006*2))+-40)//18)")
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
