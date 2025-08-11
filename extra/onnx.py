@@ -788,6 +788,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         # NOTE: ratio is within [0, 1)
         c0 = piecewise_fxn["1 <= x < 2"](ratio + 1)      # r+1
         c1 = piecewise_fxn["0 <= x < 1"](ratio)          # r
+        # `(r-1).abs()` is `1-r`
         c2 = piecewise_fxn["0 <= x < 1"](1 - ratio)      # r-1
         c3 = piecewise_fxn["1 <= x < 2"](2 - ratio)      # r-2
 
