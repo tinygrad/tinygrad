@@ -205,7 +205,11 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
   def _free(self, opaque:MetalBuffer, options):
     if msg is not None and libobjc is not None: msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+    # Transfers currently synchronize both devices. Otherwise, copies can sometimes lead to incorrect values.
+    # There is no real metal multidevice support for now, so transfer is used only for tests.
     dest_dev.synchronize()
+    src_dev.synchronize()
+
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
     encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
