@@ -9,6 +9,13 @@ class TestRangeify(unittest.TestCase):
     C = Tensor.empty(N, N)
     (A@B@C).realize()
 
+  def test_double_gemm_exp(self):
+    N = 1024
+    A = Tensor.empty(N, N)
+    B = Tensor.empty(N, N)
+    C = Tensor.empty(N, N)
+    (((A@B).exp()@C).exp()).realize()
+
   def test_double_gemm_relu(self):
     N = 1024
     A = Tensor.empty(N, N)

@@ -15,8 +15,10 @@ class RangeifyContext:
   #indexed_child: dict[UOp, list[UOp]] = field(default_factory=dict)
   #ended_child: dict[UOp, int] = field(default_factory=dict)
 
+reduce_map = {}
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
   if x.tag == 1: return None
+  if x in reduce_map: return reduce_map[x]
   ranges = []
   new_ranges = []
   passthrough_idx = []
@@ -45,7 +47,9 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     new_ranges.extend(sub.values())
 
   ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.shape, tag=1)
-  return ret.index(*passthrough_idx) if idx is not None else ret
+  ret = ret.index(*passthrough_idx) if idx is not None else ret
+  reduce_map[x] = ret
+  return ret
 
 def map_reshape(x:UOp, r:UOp):
   acc = 1
@@ -81,7 +85,6 @@ def map_pad(x:UOp, r:UOp):
   # PAD is with 0
   return bigwhere.simplify().where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), UOp.const(r.dtype, 0))
 
-reduce_map = {}
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   # TODO: this should be in the cache
   if red in reduce_map: return reduce_map[red]
@@ -153,6 +156,26 @@ def might_end_axes(x:UOp):
     if r.op is Ops.ADD and r.src[0].op is Ops.RANGE and r.src[1].op is Ops.RANGE: end_axes.append(i)
   return x.replace(src=(x.src[0].contiguous(arg=tuple(end_axes)),)+x.src[1:]) if end_axes else None
 
+def map_expand(r:UOp, x:UOp):
+  new_rngs = []
+  ending_ranges = []
+  axis_to_range = []
+  for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape):
+    axis_to_range.append([u.arg[0] for u in a.toposort() if u.op is Ops.RANGE])
+    if resolve(x!=y, False):
+      ending_ranges.extend(axis_to_range[-1])
+      new_rngs.append(a.const_like(0))
+    else: new_rngs.append(a)
+  earliest_ending_axis = min(ending_ranges)
+  to_end_axis = []
+  for i,a in enumerate(axis_to_range):
+    if any(x > earliest_ending_axis for x in a):
+      to_end_axis.append(i)
+  ret = r.src[0]
+  if to_end_axis and any(x.op is Ops.REDUCE_AXIS for x in ret.toposort()):
+    ret = ret.contiguous(arg=tuple(to_end_axis))
+  return ret.index(*new_rngs)
+
 pm_rangeify = PatternMatcher([
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -168,13 +191,15 @@ pm_rangeify = PatternMatcher([
    lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
   (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
+  #(UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"),
+  # lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
+  # lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
+  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 
   # might end axes
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="x"), might_end_axes),
+  #(UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="x"), might_end_axes),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
