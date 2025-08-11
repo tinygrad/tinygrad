@@ -3680,7 +3680,7 @@ class Tensor(MathTrait):
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
     # TODO: int pow
-    if not base.is_floating_point(): raise RuntimeError("base needs to be float")
+    if not base.is_floating_point() and not (isinstance(x, int) and x >= 0): raise RuntimeError("base needs to be float")
 
     ret = base._apply_uop(UOp.pow, exponent)
     # NOTE: pow(int, float) -> int
