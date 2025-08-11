@@ -40,6 +40,11 @@ class RemoteProperties:
   ib_gid: bytes|None
 
 @dataclass(frozen=True)
+class RemoteException(RemoteRequest):
+  exc: str
+  trace: str = ""
+
+@dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
 
 @dataclass(frozen=True)
@@ -122,7 +127,8 @@ class GraphExec(RemoteRequest):
 # for safe deserialization
 eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferIOVAS,
                                        BufferFree, CopyIn, CopyOut, Transfer, BatchTransfer, IBConnect, ProgramAlloc, ProgramFree, ProgramExec,
-                                       GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
+                                       GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes, RemoteException,
+                                       RuntimeError, IndexError, TypeError, ValueError, AttributeError, NotImplementedError, KeyError, AssertionError]}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -185,7 +191,7 @@ class RemoteHandler:
       req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
       try: res_status, res_body = await self.handle(req_method, req_path, req_body)
       except Exception as e:
-        res_status, res_body = http.HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(e).__name__}: {e}".encode()
+        res_status, res_body = http.HTTPStatus.INTERNAL_SERVER_ERROR, repr(RemoteException(e, traceback.format_exc())).encode()
         print(f"{traceback.format_exc()}", flush=True)
       writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
 
@@ -421,7 +427,11 @@ class RemoteConnection:
         response = conn.conn.getresponse()
         resp = response.read()
         conn.req = BatchRequest() # no matter what response, reset conn
-        assert response.status == 200, f"POST /batch failed: {resp.decode()}"
+        if response.status == http.HTTPStatus.INTERNAL_SERVER_ERROR:
+          exc_wrapper = safe_eval(ast.parse(resp.decode(), mode="eval").body)
+          exc_wrapper.exc.add_note(exc_wrapper.trace)
+          raise exc_wrapper.exc
+        assert response.status == http.HTTPStatus.OK, f"POST /batch failed: {resp.decode()}"
         if conn == self: ret = resp
     if take_q: RemoteConnection.q_lock.release()
     return ret
