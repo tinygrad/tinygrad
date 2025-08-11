@@ -1140,10 +1140,12 @@ class Tensor(MathTrait):
       size = 1 if index is None else self.shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
-        case list() | tuple() | Tensor():
-          if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
+        case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+        case list() | tuple():
+          if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
+          index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -2845,12 +2847,11 @@ class Tensor(MathTrait):
     ```
     """
     x, dim = self, self._resolve_dim(dim)
+    if (orig_len:= x.shape[dim]) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
     # pad to power of 2
-    orig_len = x.shape[dim]
-    n_stages = math.ceil(math.log2(orig_len))
-    fill_value = dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)
+    n_stages = (orig_len-1).bit_length()
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x.pad(pads, value=fill_value).unflatten(dim, (2,)*n_stages)
+    x = x.pad(pads, value=dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
@@ -2868,7 +2869,7 @@ class Tensor(MathTrait):
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, orig_len) if i == dim else None for i in range(x.ndim)))
+    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, s) for s in self.shape))
     # compute indices for sorted values
     idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
     idx = idx.expand(x.shape)

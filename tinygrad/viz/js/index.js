@@ -10,6 +10,16 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
+let timeout = null;
+const updateProgress = ({ show=true }) => {
+  clearTimeout(timeout);
+  const msg = document.getElementById("progress-message");
+  if (show) {
+    msg.innerText = "Rendering new graph...";
+    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  } else msg.style.display = "none";
+}
+
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -22,13 +32,10 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-let [workerUrl, worker, timeout] = [null, null, null];
+let [workerUrl, worker] = [null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
-  const progressMessage = document.querySelector(".progress-message");
-  progressMessage.innerText = "Rendering new graph...";
-  if (timeout != null) clearTimeout(timeout);
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
+  updateProgress({ show:true });
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -40,8 +47,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    progressMessage.style.display = "none";
-    clearTimeout(timeout);
+    updateProgress({ show:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -152,10 +158,7 @@ async function renderProfiler() {
     let colorKey, ref;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
-      if (!colorMap.has(colorKey)) {
-        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
-        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
-      }
+      if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
@@ -191,6 +194,7 @@ async function renderProfiler() {
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
+  updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
