@@ -755,6 +755,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       if nearest_mode not in mode_operations: raise ValueError(f"invalid {nearest_mode=}")
       indexes = [mode_operations[nearest_mode](idx).int() for idx in indexes]
       X = X[(..., *Tensor.meshgrid(*indexes))]
+
     if mode == "linear":
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
@@ -762,8 +763,18 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape[i] = expand[i] = sizes[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
+
     if mode == "cubic":
       A = cubic_coeff_a
+      def keys_kernel(x:Tensor):
+        # https://wikimedia.org/api/rest_v1/media/math/render/svg/7835668875c7c0284063c9f2eafc3b1022692e03
+        ax = x.abs()
+        ax2 = ax * ax
+        ax3 = ax2 * ax
+        w0_1 = (A + 2) * ax3 - (A + 3) * ax2 + 1
+        w1_2 = A * ax3 - 5 * A * ax2 + 8 * A * ax - 4 * A
+        return (ax <= 1).where(w0_1, (ax < 2).where(w1_2, 0))
+
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         input_sz = X.shape[i]
@@ -773,15 +784,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         p = index.floor().int()
         ratio = index - p
 
-        # Calculate indices
-        idx0, idx1, idx2, idx3 = [p + i for i in [-1, 0, 1, 2]]
+        # Neighbor indices (p-1, p, p+1, p+2)
+        idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
 
-        # Calculate coefficients
-        # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py#L82-L89
-        c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
-        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1
-        c2 = ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1
-        c3 = ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A
+        # Weights via the Keys kernel
+        c0 = keys_kernel(ratio + 1)
+        c1 = keys_kernel(ratio + 0)
+        c2 = keys_kernel(1 - ratio)
+        c3 = keys_kernel(2 - ratio)
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
