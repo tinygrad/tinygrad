@@ -766,13 +766,6 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if mode == "cubic":
       A = cubic_coeff_a
-      # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-      # impl is a factorized and simplified version of that piecewise function
-      # x is already assumed to be positive
-      piecewise_fxn = {
-        "1 <= x < 2": lambda x: ((A * (x - 5)) * x + 8 * A) * x - 4 * A,
-        "0 <= x < 1": lambda x: ((A + 2) * x - (A + 3)) * x * x + 1,
-      }
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         input_sz = X.shape[i]
@@ -785,12 +778,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         # Neighbor indices (p-1, p, p+1, p+2)
         idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
 
-        # NOTE: ratio is within [0, 1)
-        c0 = piecewise_fxn["1 <= x < 2"](ratio + 1)      # r+1
-        c1 = piecewise_fxn["0 <= x < 1"](ratio)          # r
-        # `(r-1).abs()` is `1-r`
-        c2 = piecewise_fxn["0 <= x < 1"](1 - ratio)      # r-1
-        c3 = piecewise_fxn["1 <= x < 2"](2 - ratio)      # r-2
+        # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py#L82-L89
+        c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
+        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1
+        c2 = ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1
+        c3 = ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
