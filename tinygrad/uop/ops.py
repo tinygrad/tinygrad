@@ -473,7 +473,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  @functools.cached_property
+  @property
   def terms_factors_and_const(self) -> tuple[tuple[UOp], tuple[int], int]:
     terms_factors = [(u.divides(f:=u.const_factor()),f) for u in split_uop(self, Ops.ADD)]
     consts, terms_factors= partition(terms_factors, lambda t: t[0].op is Ops.CONST)
