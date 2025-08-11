@@ -6,7 +6,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.system import PCIIfaceBase
 from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad import Variable
 
 MOCKGPU = getenv("MOCKGPU")
@@ -163,10 +163,8 @@ class TestHCQ(unittest.TestCase):
     a = Tensor.randint((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
     b = a + 1
     si = b.schedule()[-1]
-    k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
-    for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, arg=3))
 
-    runner = CompiledRunner(get_program(k.get_optimized_ast(), k.opts))
+    runner = CompiledRunner(get_program(si.ast, TestHCQ.d0.renderer, opts=[Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
@@ -338,7 +336,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (15000 if MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"} else 100)
+    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")

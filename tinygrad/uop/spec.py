@@ -1,5 +1,5 @@
 from typing import cast, Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -23,9 +23,11 @@ try:
     (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0]))),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0]))),
     (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", 0, x.src[0].arg-1, ctx[0]))),
-    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0]))),
+    (UPat(Ops.LOAD, dtypes.ints, name="x"),
+      lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0]))),
     (UPat(Ops.CONST, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx))),
-    (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
+    (UPat(Ops.CAST, dtype=dtypes.ints+(dtypes.bool,), src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
+    (UPat(Ops.CAST, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"cast{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0]))),
     (UPat(Ops.XOR, src=UPat(Ops.NOOP), name="x"),
       lambda x: UOp(Ops.NOOP, arg=z3.BV2Int(z3_alu[x.op](*(z3.Int2BV(s.arg, x.dtype.itemsize*8) for s in x.src))))),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
@@ -52,7 +54,7 @@ buffer_spec = PatternMatcher([
 
 assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -171,7 +173,7 @@ spec = PatternMatcher([
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
@@ -207,16 +209,7 @@ spec = PatternMatcher([
 
 # *** this is the UOp AST spec ***
 
-def verify_sink_dims(sink:UOp):
-  if not all_same([s.shape for s in sink.src]): return False
-  for dims in zip(*[x.shape for x in sink.toposort() if x.op is Ops.VIEW]):
-    if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
-      print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
-      return False
-
 ast_spec = PatternMatcher([
-  # shapes must have either 1 or n in each dimension
-  (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges
   (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
   (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),

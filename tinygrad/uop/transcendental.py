@@ -1,5 +1,6 @@
-import math
-from tinygrad.dtype import dtypes, DType
+import math, functools
+from tinygrad.dtype import dtypes, DType, promo_lattice
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import polyN
 from tinygrad.uop.ops import UOp
 
@@ -264,3 +265,27 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
     (exponent < 0).where(-exponent, exponent).cast_vec(dtypes.int32).mod(2).cast_vec(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
   # fix 0 ** 0 = 1
   return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
+
+# *** integer division ***
+
+@functools.lru_cache(None)
+def magicgu(vmax:int, d:int) -> tuple[int,int]:
+  # calculate m,s such that x//d == (x*m) >> s for all 0 <= x <= vmax, d>0; adapted from Hacker's Delight, Chapter 10
+  nc = (vmax+1)//(d) * d - 1
+  nbits = vmax.bit_length()
+  for s in range(0, 2*nbits + 1):
+    if 2**s > nc*(d - 1 - (2**s - 1) % d):
+      m = (2**s + d - 1 - (2**s - 1) % d)//d
+      return m, s
+  assert False
+
+def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
+  # idiv is truncated division, but arithmetic shift is floored division, so can only do non-negative numbers!
+  if x.vmin<0: return None
+  sign = 1 if d > 0 else -1
+  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
+  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
+  # promo_lattice needs to return an unsigned type
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, None if device=='' else device):
+    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+  return None

@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
+from tinygrad.codegen.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
 from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
 from tinygrad.device import Device, Buffer, is_dtype_supported
@@ -10,9 +10,12 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
-from tinygrad.opt.heuristic import hand_coded_optimizations
+from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
 from tinygrad.dtype import DType, dtypes, AddrSpace
+from tinygrad.codegen import apply_rewrites, rewrites_for_views
+
+def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
@@ -22,7 +25,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # now all input buffers in s[-1] should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
-  return s[-1].ast, bufs
+  return push_views(s[-1].ast), bufs
 
 def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
@@ -121,7 +124,7 @@ class TestLinearizer(unittest.TestCase):
     with Context(FUSE_ARANGE=1):
       sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
     real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
-    helper_linearizer_ast(sink, [dataset, idxs], wanna_output=[real_index])
+    helper_linearizer_ast(push_views(sink), [dataset, idxs], wanna_output=[real_index])
 
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -214,9 +217,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0)]).uops
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
@@ -227,9 +228,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0)]).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
@@ -238,10 +237,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
     accs = [u for u in uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
@@ -253,9 +249,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    k = Kernel(out.schedule()[-1].ast)
-    k.apply_opt(Opt(OptOps.LOCAL, axis=0, arg=4))
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(out.schedule()[-1].ast, opts=[Opt(OptOps.LOCAL, axis=0, arg=4)]).uops
     self.assertEqual(len(prg.src.split("for")), 5)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -265,10 +259,8 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    realized_ast = r.schedule()[-1].ast
     opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    program = get_program(r.schedule()[-1].ast, opts=opts_to_apply)
 
     stores = [u for u in program.uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
@@ -282,10 +274,7 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-
-    k = Kernel(r.schedule()[-1].ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0)]).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
@@ -295,16 +284,14 @@ class TestLinearizer(unittest.TestCase):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule()[-1].ast
-        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+        program = get_program(realized_ast, opts=[])
         local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule()[-1].ast
-      realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+      program = get_program(realized_ast, opts=[])
       local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
       self.assertEqual(local[0].dtype.base, expected_dtype)
 
@@ -341,7 +328,7 @@ class TestLinearizer(unittest.TestCase):
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       sched = r.schedule()
-      realized_ast = sched[-1].ast
+      realized_ast = push_views(sched[-1].ast)
       kernel = Kernel(realized_ast)
       kernel.apply_tensor_cores(1, axis=0, tc_select=-1, tc_opt=2)
       prg = get_program(kernel.get_optimized_ast(), kernel.opts)
@@ -423,7 +410,7 @@ class TestLinearizer(unittest.TestCase):
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
       # check that get_kernel_actions produces all 9 options
-      from tinygrad.opt.search import get_kernel_actions
+      from tinygrad.codegen.opt.search import get_kernel_actions
       tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
 
       available_tc = len([x for x in Device[Device.DEFAULT].renderer.tensor_cores if x.dtype_in == tc.dtype_in and x.dtype_out == tc.dtype_out])
@@ -762,11 +749,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=2))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
-
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
     assert TestFloat4.count_float4(uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU", "LLVM"} and AMX, "Only CPU with AMX upcasts float up to size 16")
@@ -777,10 +760,7 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      k = Kernel(s.ast)
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-      k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=shift))
-      return get_program(k.get_optimized_ast(), k.opts).uops
+      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
@@ -810,10 +790,7 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=4))
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=1, arg=2))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 2)
 
@@ -825,10 +802,7 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      k = Kernel(s.ast)
-      k.shift_to(1, 4, AxisType.UPCAST)  # manual trigger float4 dim
-      k.shift_to(1, shift, AxisType.UPCAST, insert_at=k.shape_len-1)
-      return get_program(k.get_optimized_ast(), k.opts).uops
+      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
@@ -846,9 +820,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UNROLL, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 0)
 
@@ -862,10 +834,7 @@ class TestFloat4(unittest.TestCase):
     # UPDATE: now we do this fusion
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=0))
-    k.apply_opt(Opt(op=OptOps.UNROLL, axis=0, arg=0))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
 
@@ -878,9 +847,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 1)
 
@@ -892,9 +859,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule()[0]
-    k = Kernel(s.ast)
-    k.apply_opt(Opt(op=OptOps.UPCAST, axis=0, arg=4))
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 
@@ -983,7 +948,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
 
     s = layer_2.schedule()[-1]
-    k = Kernel(s.ast)
+    k = Kernel(push_views(s.ast))
     k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
@@ -996,7 +961,7 @@ class TestHandCodedOpts(unittest.TestCase):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
 
     s = monster.schedule()[-1]
-    k = Kernel(s.ast)
+    k = Kernel(push_views(s.ast))
     k.apply_opts(hand_coded_optimizations(k))
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
@@ -1012,7 +977,7 @@ class TestHandCodedOpts(unittest.TestCase):
       wino_schedule = out.schedule()
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
-        k = Kernel(si.ast)
+        k = Kernel(push_views(si.ast))
         k.apply_opts(hand_coded_optimizations(k))
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
         if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
@@ -1024,7 +989,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
       backward_schedule = Tensor.schedule(x.grad, w.grad)
       for si in backward_schedule:
-        k = Kernel(si.ast)
+        k = Kernel(push_views(si.ast))
         k.apply_opts(hand_coded_optimizations(k))
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
