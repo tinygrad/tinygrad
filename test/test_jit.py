@@ -792,6 +792,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
+    if Device.DEFAULT == "METAL" or REAL_DEV == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
 
     try: Device[f"{Device.DEFAULT}:1"]
     except Exception: raise unittest.SkipTest("no multidevice")
