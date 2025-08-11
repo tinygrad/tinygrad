@@ -768,6 +768,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       A = cubic_coeff_a
 
       def W(x:Tensor):
+        # Keys weights
         # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
         x = x.abs()
         w0_1 = polyN(x, [A + 2, -(A + 3), 0, 1])
@@ -783,10 +784,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         p = index.floor().int()
         ratio = index - p
 
-        # Neighbor indices (p-1, p, p+1, p+2)
+        # Neighbor indices
         idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
-        # Keys weights
-        c0, c1, c2, c3 = [W(d - ratio) for d in [-1, 0, 1, 2]]
+        # Weights of distance from index and neighbor indices
+        c0, c1, c2, c3 = [W(ratio - d) for d in [-1, 0, 1, 2]]
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
