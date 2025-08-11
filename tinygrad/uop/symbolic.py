@@ -127,20 +127,21 @@ def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
     return x - q*y if d.op is Ops.MOD else d.const_like(q)
+  return None
 
 def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
   # remove nested mod in case the inner mod is a multiple of the outer mod
   # example: (a%4 + b)%2 -> (a+b)%2
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  new_x = []
+  new_xs = []
   something_changed = False
   for u in split_uop(x, Ops.ADD):
     if u.op is Ops.MOD:
       if u.src[1].divides(c) is not None:
         something_changed = True
         u = u.src[0]
-    new_x.append(u)
-  new_x = functools.reduce(operator.add, new_x)
+    new_xs.append(u)
+  new_x: UOp = functools.reduce(operator.add, new_xs)
   if new_x.vmin<0 or not something_changed: return None
   return new_x % y
 
@@ -152,6 +153,7 @@ def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
     y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)  # type: ignore
     y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)  # type: ignore
     return (y2-y1)*(v-v.vmin) + y1
+  return None
 
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
@@ -163,6 +165,7 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
     if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
       if d.op is Ops.MOD: return rem - rem.vmin//c*c
       return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
+  return None
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
@@ -180,6 +183,7 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   div = min([y.arg]+[f for f in factors if f > 1 and (c%f)==0])
   if (1 < div < c) and (newx:=(x//div).simplify()).op is not Ops.IDIV: return newx//(c//div)
+  return None
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and take out the quotient and see if it allows the numerator to be simplified
