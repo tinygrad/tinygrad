@@ -5,7 +5,7 @@ from typing import Any, Sequence, cast, Literal, Callable, get_args, NamedTuple
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum, os, struct
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 
@@ -766,6 +766,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if mode == "cubic":
       A = cubic_coeff_a
+
+      def W(x, A):
+        # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+        x = x.abs()
+        w0_1 = polyN(x, [A + 2, -(A + 3), 0.0, 1.0])
+        w1_2 = polyN(x, [A, -5 * A, 8 * A, -4 * A])
+        return (x <= 1).where(w0_1, (x < 2).where(w1_2, 0))
+
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         input_sz = X.shape[i]
@@ -778,11 +786,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         # Neighbor indices (p-1, p, p+1, p+2)
         idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
 
-        # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py#L82-L89
-        c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
-        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1
-        c2 = ((A + 2) * (1 - ratio) - (A + 3)) * (1 - ratio) * (1 - ratio) + 1
-        c3 = ((A * ((1 - ratio) + 1) - 5 * A) * ((1 - ratio) + 1) + 8 * A) * ((1 - ratio) + 1) - 4 * A
+        c0 = W(ratio + 1, A)
+        c1 = W(ratio, A)
+        c2 = W(1 - ratio, A)
+        c3 = W(2 - ratio, A)
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
