@@ -770,7 +770,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       def W(x, A):
         # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
         x = x.abs()
-        w0_1 = polyN(x, [A + 2, -(A + 3), 0.0, 1.0])
+        w0_1 = polyN(x, [A + 2, -(A + 3), 0, 1])
         w1_2 = polyN(x, [A, -5 * A, 8 * A, -4 * A])
         return (x <= 1).where(w0_1, (x < 2).where(w1_2, 0))
 
@@ -785,11 +785,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
         # Neighbor indices (p-1, p, p+1, p+2)
         idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
-
-        c0 = W(ratio + 1, A)
-        c1 = W(ratio, A)
-        c2 = W(1 - ratio, A)
-        c3 = W(2 - ratio, A)
+        # Keys weights
+        c0, c1, c2, c3 = [W(d - ratio, A) for d in [-1, 0, 1, 2]]
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)

@@ -97,7 +97,6 @@ class TestMainOnnxOps(TestOnnxOps):
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 20.0], mode="nearest")
 
   def test_resize_cubic_mode(self):
-    # NOTE: cubic mode is also sensitive to numerical errors
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=1)
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=0)
 
