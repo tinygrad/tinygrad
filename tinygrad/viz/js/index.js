@@ -121,6 +121,14 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
+const drawLine = (ctx, x, y) => {
+  ctx.beginPath();
+  ctx.moveTo(x[0], y[0]);
+  ctx.lineTo(x[1], y[1]);
+  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.stroke();
+}
+
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -259,20 +267,12 @@ async function renderProfiler() {
       }
     }
     // draw axes
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(canvas.clientWidth, 0);
-    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    drawLine(ctx, xscale.range(), [0, 0]);
     const ticks = xscale.ticks();
     for (const [i, tick] of ticks.entries()) {
-      ctx.beginPath();
       // tick line
       const x = xscale(tick);
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, tickSize);
-      ctx.stroke();
+      drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
@@ -280,16 +280,10 @@ async function renderProfiler() {
       ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
     }
     if (yscale != null) {
-      ctx.beginPath();
-      ctx.moveTo(0, yscale.range()[1]);
-      ctx.lineTo(0, yscale.range()[0]);
-      ctx.stroke();
+      drawLine(ctx, [0, 0], yscale.range());
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(tickSize, y);
-        ctx.stroke();
+        drawLine(ctx, [0, tickSize], [y, y]);
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
