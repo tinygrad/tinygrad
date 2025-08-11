@@ -766,15 +766,13 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
     if mode == "cubic":
       A = cubic_coeff_a
-      def keys_kernel(x:Tensor):
-        # https://wikimedia.org/api/rest_v1/media/math/render/svg/7835668875c7c0284063c9f2eafc3b1022692e03
-        ax = x.abs()
-        ax2 = ax * ax
-        ax3 = ax2 * ax
-        w0_1 = (A + 2) * ax3 - (A + 3) * ax2 + 1
-        w1_2 = A * ax3 - 5 * A * ax2 + 8 * A * ax - 4 * A
-        return (ax <= 1).where(w0_1, (ax < 2).where(w1_2, 0))
-
+      # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+      # impl is a factorized and simplified version of that piecewise function
+      # x is already assumed to be positive
+      piecewise_fxn = {
+        "1 <= x < 2": lambda x: ((A * (x - 5)) * x + 8 * A) * x - 4 * A,
+        "0 <= x < 1": lambda x: ((A + 2) * x - (A + 3)) * x * x + 1,
+      }
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
         input_sz = X.shape[i]
@@ -787,11 +785,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         # Neighbor indices (p-1, p, p+1, p+2)
         idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
 
-        # Weights via the Keys kernel
-        c0 = keys_kernel(ratio + 1)
-        c1 = keys_kernel(ratio + 0)
-        c2 = keys_kernel(1 - ratio)
-        c3 = keys_kernel(2 - ratio)
+        # NOTE: ratio is within [0, 1)
+        c0 = piecewise_fxn["1 <= x < 2"](ratio + 1)      # r+1
+        c1 = piecewise_fxn["0 <= x < 1"](ratio)          # r
+        c2 = piecewise_fxn["0 <= x < 1"](1 - ratio)      # r-1
+        c3 = piecewise_fxn["1 <= x < 2"](2 - ratio)      # r-2
 
         if exclude_outside:
           c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
