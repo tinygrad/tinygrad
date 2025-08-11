@@ -9,7 +9,7 @@ from typing import Callable, Iterator, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import multiprocessing, threading, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
-import traceback
+import traceback, builtins
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable, sint
@@ -125,7 +125,7 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
-eval_excs = [RuntimeError, IndexError, TypeError, ValueError, AttributeError, NotImplementedError, KeyError, AssertionError]
+eval_excs = [v for k,v in builtins.__dict__.items() if isinstance(v, type) and issubclass(v, Exception) and not k.endswith("Warning")]
 eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferIOVAS,
                                        BufferFree, CopyIn, CopyOut, Transfer, BatchTransfer, IBConnect, ProgramAlloc, ProgramFree, ProgramExec,
                                        GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes, RemoteException] + eval_excs}
