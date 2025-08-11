@@ -762,7 +762,42 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape[i] = expand[i] = sizes[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
-    if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
+    if mode == "cubic":
+      A = cubic_coeff_a
+      expand = list(X.shape)
+      for i in range(-len(sizes), 0):
+        input_sz = X.shape[i]
+        reshape, index = [1] * X.ndim, indexes[i]
+        reshape[i] = expand[i] = sizes[i]
+
+        p = index.floor().int()
+        ratio = index - p
+
+        # Calculate indices
+        idx0, idx1, idx2, idx3 = [p + i for i in [-1, 0, 1, 2]]
+
+        # Calculate coefficients
+        c0 = ((A * (ratio + 1) - 5 * A) * (ratio + 1) + 8 * A) * (ratio + 1) - 4 * A
+        c1 = ((A + 2) * ratio - (A + 3)) * ratio * ratio + 1.0
+        c2 = ((A + 2) * (1.0 - ratio) - (A + 3)) * (1.0 - ratio) * (1.0 - ratio) + 1.0
+        c3 = ((A * ((1.0 - ratio) + 1.0) - 5 * A) * ((1.0 - ratio) + 1.0) + 8 * A) * ((1.0 - ratio) + 1.0) - 4 * A
+
+        if exclude_outside:
+          c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
+          c1 = ((idx1 >= 0) & (idx1 < input_sz)).where(c1, 0)
+          c2 = ((idx2 >= 0) & (idx2 < input_sz)).where(c2, 0)
+          c3 = ((idx3 >= 0) & (idx3 < input_sz)).where(c3, 0)
+
+          total = c0 + c1 + c2 + c3
+          c0, c1, c2, c3 = c0 / (total + 1e-9), c1 / (total + 1e-9), c2 / (total + 1e-9), c3 / (total + 1e-9)
+
+        # Reshape and expand
+        expanded_indices = [y.clip(0, input_sz - 1).reshape(reshape).expand(expand) for y in [idx0, idx1, idx2, idx3]]
+        expanded_coeffs = [y.reshape(reshape).expand(expand) for y in [c0, c1, c2, c3]]
+
+        # Gather values and apply coefficients
+        gathered_values = [X.gather(i, idx) for idx in expanded_indices]
+        X = sum(v * c for v, c in zip(gathered_values, expanded_coeffs))
     return X.permute(*argsort(perm)) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
