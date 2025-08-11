@@ -182,7 +182,7 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   div = min([y.arg]+[f for f in factors if f > 1 and (c%f)==0])
-  if (1 < div < c) and (newx:=(x//div).simplify()).op is not Ops.IDIV: return newx//(c//div)
+  if (1 < div < c) and (newx:=(x//div).simplify()).op is not Ops.IDIV and x.vmin>=0 and newx.vmin>=0: return newx//(c//div)
   return None
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
