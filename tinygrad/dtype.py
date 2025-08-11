@@ -148,10 +148,10 @@ class dtypes:
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
   # mask dtypes, used in x86/arm64 backends
-  mask8: Final[DType] = DType.new(15, 1, "mask8", None)
-  mask16: Final[DType] = DType.new(16, 2, "mask16", None)
-  mask32: Final[DType] = DType.new(17, 4, "mask32", None)
-  mask64: Final[DType] = DType.new(18, 8, "mask64", None)
+  mask8: Final[DType] = DType.new(15, 1, "", None)
+  mask16: Final[DType] = DType.new(16, 2, "", None)
+  mask32: Final[DType] = DType.new(17, 4, "", None)
+  mask64: Final[DType] = DType.new(18, 8, "", None)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702

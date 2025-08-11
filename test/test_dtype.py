@@ -108,7 +108,7 @@ class TestDType(unittest.TestCase):
     fields = dtypes.fields()
     self.assertIn("float", fields)
     self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 26)
+    self.assertEqual(len(fields), 30)
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
 
