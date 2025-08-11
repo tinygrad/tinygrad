@@ -115,7 +115,7 @@ if __name__ == '__main__':
     x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
     prg, inp_sizes, out_sizes, state = export_model(model.decoder, Device.DEFAULT.lower(),
       x, Tensor.rand(1, 1500, embedding_dims), Variable("ctx", 1, model.decoder.max_tokens_to_sample*2-1).bind(2), model_name="decoder")
-
+    # print(out_sizes)
     (dirname / 'decoder.js').write_text(prg)
     safe_save(state, (dirname / 'decoder.safetensors'))
     return prg, inp_sizes, out_sizes, state

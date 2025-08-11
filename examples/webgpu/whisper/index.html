@@ -116,8 +116,8 @@
         const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
         const BASE_URL = '.';
-        // const AUDIO_PATH = 'RED_16k.wav';
-        const AUDIO_PATH = 'test.wav';
+        const AUDIO_PATH = 'RED_16k.wav';
+        // const AUDIO_PATH = 'test.wav';
         // const AUDIO_PATH = 'test2.wav';
         // const AUDIO_PATH = 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.webm';
 
@@ -362,6 +362,10 @@
                 log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
             }
 
+            // let res = await fetch(`${BASE_URL}/RED_16k.mel_f32`);
+            // log_specs_full = new Float32Array(await res.arrayBuffer());
+            // const audio_features_full = new Float32Array(await fetch(`${BASE_URL}/RED_16k.features`).then((res) => res.arrayBuffer()));
+
             const mapping = await fetch('./vocab.json').then(res => res.json());
 
             let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
@@ -443,6 +447,7 @@
             const NO_CONTEXT = true;
             let previous_context = [];
             let temperature = 0;
+            // for (let seek = 50 * MEL_SPEC_CHUNK_LENGTH; seek < 51*MEL_SPEC_CHUNK_LENGTH;) {
             for (let seek = 0; seek < log_specs_full.length;) {
                 // let next_speech_seek = next_speech(speech_segments, seek);
                 // if (next_speech_seek > seek + 80) {
@@ -458,6 +463,7 @@
                     log_spec = padded;
                 }
                 const [audio_features] = await nets.encoder(log_spec);
+                // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
                 const TOK_EOS = 50256, TOK_BEGIN_TRANSCRIPTION = 50257, TOK_NO_TIMESTAMPS = 50362;
                 const TOK_STARTOFPREV = 50360;
                 const TOK_TRANSCRIBE = 50358;
@@ -593,6 +599,7 @@
         const getDevice = async () => {
             if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
+            // console.log(adapter.limits);
             let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
             let maxBufferSize = adapter.limits.maxBufferSize;
             let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
