@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-from typing import Any, Literal, cast
+from typing import Any, cast
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, split_uop
@@ -175,7 +175,7 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  terms, factors, const = x.terms_factors_and_const
+  _, factors, _ = x.terms_factors_and_const
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   div = min([y.arg]+[f for f in factors if f > 1 and (c%f)==0])
