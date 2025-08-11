@@ -1593,7 +1593,10 @@ def train_stable_diffusion():
       else: uncond_tokens.to_(GPUS[0])
       uc = jit_context_step(uncond_tokens)
 
-      for batch_idx in range(0, len(eval_inputs), EVAL_BS):
+      import globvars as gv
+
+      #for batch_idx in range(0, len(eval_inputs), EVAL_BS):
+      for batch_idx in range(0, EVAL_BS, EVAL_BS):
         t0 = time.perf_counter()
         GlobalCounters.reset()
 
@@ -1607,7 +1610,8 @@ def train_stable_diffusion():
         captions = [row["caption"] for row in batch]
         captions = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in captions], dim=0)
 
-        x = Tensor.randn(EVAL_BS,4,64,64)
+        #x = Tensor.randn(EVAL_BS,4,64,64)
+        x = gv.images['init_latent']
 
         for t in (x, captions):
           if len(GPUS) > 1: t.shard_(GPUS, axis=0)
@@ -1631,6 +1635,10 @@ def train_stable_diffusion():
           x_x = Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64).shard(GPUS, axis=0)
           x = denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
 
+        gv.md(gv.images['sample'], x.to("CPU"))
+        #diff.abs().mean(): 0.0005498887039721012
+        #a.abs().mean(): 0.5661840438842773
+        #diff.abs().max(): 0.00865793228149414
         x = decode(x)
         inception_activation = jit_inception(x)
         inception_activations.append(inception_activation.squeeze(3).squeeze(2).to("CPU").realize()[0:unpadded_bs].realize())
@@ -1648,14 +1656,34 @@ def train_stable_diffusion():
         clip_scores.append(clip_score.to("CPU").realize()[0:unpadded_bs].realize())
         elapsed = time.perf_counter() - t0
         print(f"elapsed:{elapsed:0.3f}, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS")
+        gv.md(gv.inception['inception_activation'], inception_activations[0])
+        #diff.abs().mean(): 0.002458753762766719
+        #a.abs().mean(): 0.36962890625
+        #diff.abs().max(): 0.023907601833343506
+
+        gv.md(gv.clip['clip_score'].squeeze(1), clip_score.to("CPU"))
+        #diff.abs().mean(): 0.002298298291862011
+        #a.abs().mean(): 0.0477294921875
+        #diff.abs().max(): 0.004003409296274185
 
       final_clip_score = Tensor.cat(*clip_scores).mean().item()
-      inception_activations = Tensor.cat(*inception_activations)
-      EVAL_CKPT_DIR = getenv("EVAL_CKPT_DIR", "")
-      if EVAL_CKPT_DIR:
-        to_save = {"clip_scores": Tensor.cat(*clip_scores), "inception_activations": inception_activations}
-        safe_save(to_save, f"{EVAL_CKPT_DIR}/eval_results.safetensors")
+      gv.md(gv.clip['clip_score'].squeeze(1).mean(), Tensor.cat(*clip_scores).mean())
+      #diff.abs().mean(): 0.0015869673807173967
+      #a.abs().mean(): 0.0477294921875
+      #diff.abs().max(): 0.0015869673807173967
+
+      inception_activations = gv.fid['fid_scores']
+      #inception_activations = Tensor.cat(*inception_activations).realize()
+      #EVAL_CKPT_DIR = getenv("EVAL_CKPT_DIR", "")
+      #if EVAL_CKPT_DIR:
+        #to_save = {"clip_scores": Tensor.cat(*clip_scores), "inception_activations": inception_activations}
+        #safe_save(to_save, f"{EVAL_CKPT_DIR}/eval_results.safetensors")
       fid_score = inception.compute_score(inception_activations, str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz"))
+      gv.md(gv.fid['fid_value'], Tensor(fid_score, dtype=dtypes.float64, device="CPU").realize())
+      #diff.abs().mean(): 7.06614571299724e-07
+      #a.abs().mean(): 146.45987514905977
+      #diff.abs().max(): 7.06614571299724e-07
+
       print(f"clip_score: {final_clip_score}")
       print(f"fid_score: {fid_score}")
 
