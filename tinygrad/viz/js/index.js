@@ -125,7 +125,7 @@ const drawLine = (ctx, x, y) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
   ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5"; ctx.lineWidth = 1;
+  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
   ctx.stroke();
 }
 
@@ -270,7 +270,6 @@ async function renderProfiler() {
     drawLine(ctx, xscale.range(), [0, 0]);
     const ticks = xscale.ticks();
     for (const [i, tick] of ticks.entries()) {
-      ctx.beginPath();
       // tick line
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize])
