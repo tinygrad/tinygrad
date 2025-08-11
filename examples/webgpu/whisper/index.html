@@ -345,10 +345,10 @@
                 return segments;
             }
 
-            const vad_probabilities = await vad_go_brrr(samples);
+            // const vad_probabilities = await vad_go_brrr(samples);
 
-            let speech_segments = segment_speech(vad_probabilities);
-            console.log(speech_segments);
+            // let speech_segments = segment_speech(vad_probabilities);
+            // console.log(speech_segments);
 
             let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
             for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
@@ -442,11 +442,11 @@
             const NO_CONTEXT = true;
             let previous_context = [];
             for (let seek = 0; seek < log_specs_full.length;) {
-                let next_speech_seek = next_speech(speech_segments, seek);
-                if (next_speech_seek > seek + 80) {
-                    // seek = next_speech_seek;
-                    // continue;
-                }
+                // let next_speech_seek = next_speech(speech_segments, seek);
+                // if (next_speech_seek > seek + 80) {
+                //     // seek = next_speech_seek;
+                //     // continue;
+                // }
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
