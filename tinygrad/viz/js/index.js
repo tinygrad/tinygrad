@@ -10,6 +10,16 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
+let timeout = null;
+const updateProgress = ({ show=true }) => {
+  clearTimeout(timeout);
+  const msg = document.getElementById("progress-message");
+  if (show) {
+    msg.innerText = "Rendering new graph...";
+    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  } else msg.style.display = "none";
+}
+
 // ** UOp graph
 
 function intersectRect(r1, r2) {
@@ -22,13 +32,10 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-let [workerUrl, worker, timeout] = [null, null, null];
+let [workerUrl, worker] = [null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
-  const progressMessage = document.querySelector(".progress-message");
-  progressMessage.innerText = "Rendering new graph...";
-  if (timeout != null) clearTimeout(timeout);
-  timeout = setTimeout(() => {progressMessage.style.display = "block"}, 2000);
+  updateProgress({ show:true });
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -40,8 +47,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    progressMessage.style.display = "none";
-    clearTimeout(timeout);
+    updateProgress({ show:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -115,6 +121,14 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
+const drawLine = (ctx, x, y) => {
+  ctx.beginPath();
+  ctx.moveTo(x[0], y[0]);
+  ctx.lineTo(x[1], y[1]);
+  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.stroke();
+}
+
 var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = true;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -124,11 +138,8 @@ async function renderProfiler() {
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
-
-  const loadingText = metadata.append("h4").text("Loading... ");
   metadata.append("label").text("Show memory: ").insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
     .on("change", (e) => { showMemoryProf = e.currentTarget.checked; renderProfiler(); });
-
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -163,10 +174,7 @@ async function renderProfiler() {
     let colorKey, ref;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
-      if (!colorMap.has(colorKey)) {
-        const colors = colorScheme[k] ?? colorScheme.DEFAULT;
-        colorMap.set(colorKey, colors[colorMap.size%colors.length]);
-      }
+      if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
       const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
       const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
       if (e.ref != null) ref = {ctx:e.ref, step:0};
@@ -229,8 +237,7 @@ async function renderProfiler() {
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
-  loadingText.text("");
-
+  updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -313,20 +320,12 @@ async function renderProfiler() {
       }
     }
     // draw axes
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(canvas.clientWidth, 0);
-    ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    drawLine(ctx, xscale.range(), [0, 0]);
     const ticks = xscale.ticks();
     for (const [i, tick] of ticks.entries()) {
-      ctx.beginPath();
       // tick line
       const x = xscale(tick);
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, tickSize);
-      ctx.stroke();
+      drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
       ctx.textAlign = i === ticks.length-1 ? "right" : "left";
@@ -334,16 +333,10 @@ async function renderProfiler() {
       ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
     }
     if (yscale != null) {
-      ctx.beginPath();
-      ctx.moveTo(0, yscale.range()[1]);
-      ctx.lineTo(0, yscale.range()[0]);
-      ctx.stroke();
+      drawLine(ctx, [0, 0], yscale.range());
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(tickSize, y);
-        ctx.stroke();
+        drawLine(ctx, [0, tickSize], [y, y]);
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
