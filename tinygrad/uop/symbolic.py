@@ -132,7 +132,7 @@ def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
   # remove nested mod in case the inner mod is a multiple of the outer mod
   # example: (a%4 + b)%2 -> (a+b)%2
-  if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1) or x.vmin<0: return None
   new_xs = []
   something_changed = False
   for u in split_uop(x, Ops.ADD):
@@ -142,8 +142,8 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
         u = u.src[0]
     new_xs.append(u)
   new_x: UOp = functools.reduce(operator.add, new_xs)
-  if new_x.vmin<0 or not something_changed: return None
-  return new_x % y
+  if something_changed and new_x.vmin>=0: return new_x % y
+  return None
 
 def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
