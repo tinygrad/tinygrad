@@ -40,7 +40,7 @@ class RemoteProperties:
   ib_gid: bytes|None
 
 @dataclass(frozen=True)
-class RemoteException(RemoteRequest):
+class RemoteException:
   exc: Exception
   trace: str = ""
 
