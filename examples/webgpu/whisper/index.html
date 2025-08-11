@@ -437,10 +437,12 @@
                 return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
             }
 
-            const DECODER_OUTPUTS_TOKENS = true;
+            const DECODER_OUTPUTS_TOKENS = false;
+            const DECODER_OUTPUTS_LOGITS = true;
             const NO_TIMESTAMPS = true;
             const NO_CONTEXT = true;
             let previous_context = [];
+            let temperature = 0;
             for (let seek = 0; seek < log_specs_full.length;) {
                 // let next_speech_seek = next_speech(speech_segments, seek);
                 // if (next_speech_seek > seek + 80) {
@@ -520,23 +522,54 @@
                     let one_before_last_token_index = i - 1;
 
                     let [decoder_output] = await nets.decoder(context, audio_features, [i]);
-                    let nextLogits = decoder_output;
-                    if (!DECODER_OUTPUTS_TOKENS) decoder_output = argsort(decoder_output);
-                    // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-                    decoder_output = handle_timestamp_tokens(decoder_output, context, token_count, last_token_index, one_before_last_token_index);
-
-                    context.push(decoder_output[0]);
-                    if (!DECODER_OUTPUTS_TOKENS) {
-                        segment_cumlogprob += nextLogits[decoder_output[0]];
-                        pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), segment_cumlogprob / (i-offset+1), seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                    let nextLogprobs;
+                    let nextTokens;
+                    let max;
+                    if (DECODER_OUTPUTS_TOKENS) {
+                        nextTokens = decoder_output;
                     } else {
-                        pendingText = context.slice(offset).map(j => mapping[j]).join('');
+                        if (DECODER_OUTPUTS_LOGITS) {
+                            if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
+                            [nextLogprobs, max] = logSoftmax(decoder_output);
+                        } else {
+                            nextLogprobs = decoder_output;
+                        }
+                        nextTokens = argsort(nextLogprobs);
                     }
-                    if (decoder_output[0] == TOK_EOS) {
+                    // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
+                    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
+                    let nextTokenIndex = 0;
+                    if (temperature > 0) {
+                        // let sortedSampledIndex = sample(normalize(nextLogprobs));
+                        let dist = normalize(softmax(decoder_output));
+                        let s = [];
+                        for (let i = 0; i < 2; ++i) {
+                            s.push(nextTokens.indexOf(sample(dist)));
+                        }
+                        nextTokenIndex = Math.min(...s);
+                        // nextTokenIndex = nextTokens.indexOf(sample(dist));
+                    }
+
+                    context.push(nextTokens[nextTokenIndex]);
+                    if (DECODER_OUTPUTS_TOKENS) {
+                        pendingText = context.slice(offset).map(j => mapping[j]).join('');
+                    } else {
+                        var avg_logprob = segment_cumlogprob / (i-offset+1);
+                        segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
+                        pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                    }
+                    if (nextTokens[nextTokenIndex] == TOK_EOS) {
                         break;
                     } else if (i + 1 >= max_range) {
                         context[context.length-1] = TOK_EOS;
                     }
+                }
+                if (avg_logprob < -1 || segment_cumlogprob > -2 || (context.length-offset) < 14) {
+                    temperature += 0.2/5;
+                    console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length-offset}`);
+                    continue;
+                } else {
+                    temperature = 0;
                 }
                 previous_context = context.slice();
 
