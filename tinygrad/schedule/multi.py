@@ -2,8 +2,30 @@ from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
+from tinygrad.device import Device
 
 # *** allreduce implementation ***
+def handle_allreduce_multirank(buf:UOp, red:UOp) -> UOp|None:
+  if not isinstance(buf.device, tuple): return None
+
+  # Group buffers
+  groups: dict[int|None, list[UOp]] = {}
+  for i,dev in enumerate(buf.device):
+    groups.setdefault(Device[dev].group_id, []).append(buf.mselect(i))
+
+  # Skip if only one group or if every group has only one buffer
+  if len(groups) <= 1 or not any(len(g) > 1 for g in groups.values()): return None
+
+  # Reduce inside each group
+  inner = [UOp(Ops.MSTACK, buf.dtype, tuple(bufs)).allreduce(red.arg, (cast(str, bufs[0].device),)).mselect(0) for bufs in groups.values()]
+
+  # Allreduce across groups
+  outer = UOp(Ops.MSTACK, buf.dtype, tuple(inner)).allreduce(red.arg, tuple(buf.device for buf in inner))
+
+  # Broadcast back to all devices in the group
+  gid2bid = {Device[device].group_id: i for i,device in enumerate(outer.device)}
+  return outer.mselect(gid2bid[Device[red.device].group_id]).copy_to_device(red.device) if not isinstance(red.device, tuple) else \
+         UOp(Ops.MSTACK, buf.dtype, tuple(outer.mselect(gid2bid[Device[device].group_id]).copy_to_device(device) for device in red.device))
 
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
@@ -84,6 +106,7 @@ def mstack_early_shrink(view:UOp, ms:UOp):
   return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:

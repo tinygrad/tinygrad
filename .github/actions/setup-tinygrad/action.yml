@@ -112,7 +112,16 @@ runs:
         fi
 
     # ******************* apt *******************
+    - name: Setup apt
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      shell: bash
+      run: |
+        sudo chown -R $USER:$USER /var/cache/apt/archives
 
+        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' | sudo tee -a /etc/apt/apt.conf.d/99keep-debs
+    
     - name: Add OpenCL Repo
       if: inputs.opencl == 'true' && runner.os == 'Linux'
       shell: bash
@@ -135,14 +144,11 @@ runs:
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
-    - name: apt-get update + install
+    - name: Compute Package List + Hash
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      id: apt-pkgs
       shell: bash
       run: |
-        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt -qq update || true
-
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
@@ -153,7 +159,7 @@ runs:
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
-          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev"
+          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libibverbs-dev libc6-dev"
         fi
         # **** CUDA ****
         if [[ "${{ inputs.cuda }}" == "true" ]]; then
@@ -168,14 +174,31 @@ runs:
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
           pkgs+=" libllvm20 clang-20 lld-20"
         fi
+        
+        echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
+        echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+    - name: Cache apt
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives/
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}
+
+    - name: Run apt Update + Install
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      shell: bash
+      run: |
+        sudo apt -qq update || true
+        
         # ******** do install ********
-        if [[ -n "$pkgs" ]]; then
-          sudo apt-get -y --allow-unauthenticated --no-install-recommends install $pkgs
+        if [[ -n "${{ steps.apt-pkgs.outputs.pkgs }}" ]]; then
+          sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}
         fi
-
+        
+        sudo chown -R $USER:$USER /var/cache/apt/archives/
+    
     # **** AMD ****
-
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
@@ -228,7 +251,7 @@ runs:
       shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || ''}}lib/
+        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || '' }}lib/
 
     # **** WebGPU ****
 

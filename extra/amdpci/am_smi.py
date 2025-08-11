@@ -284,8 +284,8 @@ if __name__ == "__main__":
           while True:
             try: pid = subprocess.check_output(['sudo', 'lsof', '-t', dev]).decode('utf-8').split('\n')[0]
             except subprocess.CalledProcessError: break
-            if stopped_pids[pid] > 0: time.sleep(0.5)
-            if stopped_pids[pid] == 10:
+            if stopped_pids[pid] > 0: time.sleep(0.1)
+            if stopped_pids[pid] == 64:
               print(f"{dev[8:-5]}: can't stop process {pid}, exitting")
               exit(1)
 
