@@ -1,8 +1,8 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -45,9 +45,6 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
       t.uop = ns
 
 # **** Tensor helper functions ****
-
-# this tracks the tensor.py METADATA
-_METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -4375,6 +4372,16 @@ class Tensor(MathTrait):
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+# this tracks the tensor.py METADATA, contextvars.ContextVar was switched to this due to thread safety issues
+class _ContextVar(Generic[T]):
+  def __init__(self, default:T): self.state:T = default
+  def get(self) -> T: return self.state
+  def set(self, x:T) -> T:
+    ret, self.state = self.state, x
+    return ret
+_METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
+
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
     if _METADATA.get() is not None: return fn(*args, **kwargs)
@@ -4403,7 +4410,7 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
     token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
     ret = fn(*args, **kwargs)
-    _METADATA.reset(token)
+    _METADATA.set(token)
     return ret
   return _wrapper
 
