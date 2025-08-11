@@ -420,9 +420,9 @@ class RemoteConnection:
       for conn in datas.keys():
         response = conn.conn.getresponse()
         resp = response.read()
+        conn.req = BatchRequest() # no matter what response, reset conn
         assert response.status == 200, f"POST /batch failed: {resp.decode()}"
         if conn == self: ret = resp
-        conn.req = BatchRequest()
     if take_q: RemoteConnection.q_lock.release()
     return ret
 
