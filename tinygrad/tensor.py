@@ -1,8 +1,8 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref, contextvars
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -45,9 +45,6 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
       t.uop = ns
 
 # **** Tensor helper functions ****
-
-# this tracks the tensor.py METADATA
-_METADATA: contextvars.ContextVar[Metadata|None] = contextvars.ContextVar("_METADATA", default=None)
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
@@ -1140,10 +1137,12 @@ class Tensor(MathTrait):
       size = 1 if index is None else self.shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
-        case list() | tuple() | Tensor():
-          if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
+        case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index.to(self.device) < 0).where(index+size, index)  # treat negative index values
+          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+        case list() | tuple():
+          if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
+          index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -2869,11 +2868,11 @@ class Tensor(MathTrait):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, s) for s in self.shape))
     # compute indices for sorted values
-    idx = Tensor.arange(orig_len, requires_grad=False, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
-    idx = idx.expand(x.shape)
-    def compute_counts(t:Tensor): return ((idx.unsqueeze(dim) <= idx.unsqueeze(dim+1)) & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
+    mask = Tensor.ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
+    def compute_counts(t:Tensor): return (mask & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
+    idx = Tensor.arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
     idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
     return x, idx
 
@@ -4373,6 +4372,16 @@ class Tensor(MathTrait):
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+# this tracks the tensor.py METADATA, contextvars.ContextVar was switched to this due to thread safety issues
+class _ContextVar(Generic[T]):
+  def __init__(self, default:T): self.state:T = default
+  def get(self) -> T: return self.state
+  def set(self, x:T) -> T:
+    ret, self.state = self.state, x
+    return ret
+_METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
+
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
     if _METADATA.get() is not None: return fn(*args, **kwargs)
@@ -4401,7 +4410,7 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
     token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
     ret = fn(*args, **kwargs)
-    _METADATA.reset(token)
+    _METADATA.set(token)
     return ret
   return _wrapper
 
