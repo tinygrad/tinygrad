@@ -41,7 +41,7 @@ class RemoteProperties:
 
 @dataclass(frozen=True)
 class RemoteException(RemoteRequest):
-  exc: str
+  exc: Exception
   trace: str = ""
 
 @dataclass(frozen=True)
