@@ -102,8 +102,11 @@ class MUOpX86(MUOp):
   # REX methods
   def RM(opstr, opcode, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, prefix=prefix, w=w)
   def R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
+  def _R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, prefix=prefix, w=w)
   def RM_R(opstr, opcode, rm, reg, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
+  def R_I(opstr, opcode, reg, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (imm,), GPR, ((),), reg, prefix=prefix, w=w, imm=imm)
   def RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (imm,), GPR, ((),), reg, rm, prefix=prefix, w=w, imm=imm)
+  def _RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
   def R_RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
   # VEX methods
   def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, ((),), reg, rm, pp, sel, w, l)
@@ -162,6 +165,9 @@ class MUOpX86(MUOp):
     if self.opstr == "": return b'' # fake MUOp
     if self.opcode == 0xC3: return self.opcode.to_bytes() # ret
     if self.opcode in (0x50, 0x58) and not self.map_select: return int(self.opcode + self.ins[0].index).to_bytes((self.opcode.bit_length() + 7) // 8) # push/pop
+    if self.opcode == 0xB8: # 64bit imm load
+      return ((0b0100 << 4) | (self.w << 3) | ((int(self.out.index > 7) & 0b1) << 2) | 0b00).to_bytes() + \
+        int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little')
     if self.opcode in (0x0F8C, 0x0F84): # jumps
       inst.extend(self.opcode.to_bytes(2))
       inst.extend(self.ins[0].value.to_bytes(self.ins[0].size, 'little', signed=True))

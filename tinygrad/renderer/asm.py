@@ -47,8 +47,11 @@ x86_matcher = PatternMatcher([
    lambda a,b,x: x.replace(dtype=dtypes.mask32, src=(a, b.cast(dtypes.int32).mul(-1).bitcast(dtypes.mask32)))),
   # convert bool to mask in float/packed where
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b: m.cast(dtypes.int32).mul(-1).bitcast(dtypes.mask32).where(a, b)),
-  # mask is converted to bool in cast
-  (UPat.var("y", dtypes.masks).cast(dtypes.ints+dtypes.floats, name="x"), lambda y,x: y.bitcast(x.dtype).mul(-1)),
+  # convert mask to bool in scalar int where
+  (UPat.var("m", dtypes.mask32).where(UPat.var("a", dtypes.int32), UPat.var("b")), lambda m,a,b: m.bitcast(a.dtype).ne(0).where(a, b)),
+  # cast from mask is 1 if True, 0 if False
+  (UPat.var("y", dtypes.masks).cast(dtypes.ints, name="x"), lambda y,x: y.bitcast(x.dtype).mul(-1)),
+  (UPat.var("y", dtypes.masks).cast(dtypes.floats, name="x"), lambda y,x: y.where(x.const_like(1), x.const_like(0))),
   # mask is converted to bool in store
   (UPat.var("a").store(UPat.var("b", dtypes.mask32), allow_any_len=True), lambda a,b: a.store(b.bitcast(dtypes.int32).cast(dtypes.bool))),
   # no cmplt for packed ints, y < x => x > y
@@ -61,6 +64,8 @@ x86_matcher = PatternMatcher([
   # some ops can't take imm in srcs
   (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE, Ops.STORE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
+  # TODO: cmpne, add shouldn't have consts on the left to begin with
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.ADD), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # *** CASTS ***
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
@@ -221,6 +226,14 @@ x86_vec_lowerer = PatternMatcher([
   (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.V_VM("vmovups", 0x10, ctx[x], (ctx[x.src[0]],), 0, 1), MUOpX86.V_V_VM("vfmadd213ps", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]),
   (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.V_VM("vmovupd", 0x10, ctx[x], (ctx[x.src[0]],), 1, 1), MUOpX86.V_V_VM("vfmadd213pd", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]),
   # float moves TODO: can share with scalar pm
+  (UPat.var("a").load(UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float32.vec(2), name="x"), lambda ctx,a,b,m,x:
+   [MUOpX86.V_VM("vmovq", 0x7E, ctx[x], ctx[b], 2, 1), MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
+    MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)),
+    MUOpX86.V_VM("vmovq", 0x7E, ctx[x], Memory(ctx[x].size, ctx[a]), 2, 1), MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]),
+  (UPat.var("a").load(UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float32.vec(4), name="x"), lambda ctx,a,b,m,x:
+   [MUOpX86.V_VM("vmovups", 0x10, ctx[x], ctx[b], 0, 1), MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
+    MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)),
+    MUOpX86.V_VM("vmovups", 0x10, ctx[x], Memory(ctx[x].size, ctx[a]), 0, 1), MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]),
   (UPat.var("a").load(dtype=dtypes.float32.vec(2), name="x"), lambda ctx,a,x: MUOpX86.V_VM("vmovq", 0x7E, ctx[x], Memory(ctx[x].size, ctx[a]), 2, 1)),
   (UPat.var("a").load(dtype=dtypes.float32.vec(4), name="x"), lambda ctx,a,x: MUOpX86.V_VM("vmovups", 0x10, ctx[x], Memory(ctx[x].size, ctx[a]), 0, 1)),
   (UPat.var("a").load(dtype=dtypes.float64.vec(2), name="x"), lambda ctx,a,x: MUOpX86.V_VM("vmovupd", 0x10, ctx[x], Memory(ctx[x].size, ctx[a]), 1, 1)),
@@ -252,16 +265,16 @@ x86_lowerer = PatternMatcher([
    [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), MUOpX86.RM_I(*x86_imm_ops[x.dtype][x.op], ctx[x], Immediate(c.arg, 1), *x86_pre(x))]),
   # cmp
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x:
-   [MUOpX86.RM_I(*x86_imm_ops[a.dtype][x.op], ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(a)), x86_flag(ctx, x)]),
+   [MUOpX86._RM_I(*x86_imm_ops[a.dtype][x.op], ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(a)), x86_flag(ctx, x)]),
   # rest
   (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints8+(dtypes.bool,)), UPat.cvar("c")), name="x"), lambda ctx,a,c,x:
    [MUOpX86.R_RM("mov", 0x8A, ctx[x], ctx[a]), MUOpX86.RM_I(*x86_imm_ops[x.dtype][x.op], ctx[x], Immediate(c.arg, 1))]),
   (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x:
    [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), MUOpX86.RM_I(*x86_imm_ops[x.dtype][x.op], ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(x))]),
   # int binary with register/memory
-  # cmp TODO: cmp has no out
+  # cmp
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x:
-   [MUOpX86.R_RM(*x86_ops[a.dtype][x.op], ctx[a], ctx[b], *x86_pre(a)), x86_flag(ctx, x)]),
+   [MUOpX86._R_RM(*x86_ops[a.dtype][x.op], ctx[a], ctx[b], *x86_pre(a)), x86_flag(ctx, x)]),
   # rest
   (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints8+(dtypes.bool,)), UPat.var("b")), name="x"), lambda ctx,a,b,x:
    [MUOpX86.R_RM("mov", 0x8A, ctx[x], ctx[a]), MUOpX86.R_RM(*x86_ops[x.dtype][x.op], ctx[x], ctx[b])]),
@@ -269,15 +282,17 @@ x86_lowerer = PatternMatcher([
    [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), MUOpX86.R_RM(*x86_ops[x.dtype][x.op], ctx[x], ctx[b], *x86_pre(x))]),
   # int ternary TODO: shouldn't need to set the flag everytime
   (UPat.var("m").where(UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x:
-   [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), MUOpX86.RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
+   [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
     MUOpX86.R_RM("cmove", 0x0F44, ctx[x], ctx[b], *x86_pre(x))]),
-  # immediate load TODO: add float64
+  # immediate loads
   (UPat.cvar("c", dtypes.ints8+(dtypes.bool,)).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(c.arg, 1))),
   (UPat.cvar("c", dtypes.ints16).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 2), 0, 0x66)),
   (UPat.cvar("c", dtypes.ints32).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 4))),
-  (UPat.cvar("c", dtypes.ints64).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 4), 1)),
+  (UPat.cvar("c", dtypes.ints64).load(name="x"), lambda ctx,c,x: MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(c.arg, 8), 1)),
   (UPat.cvar("c", dtypes.float32).load(dtype=dtypes.int32, name="x"), lambda ctx,c,x:
    MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(int.from_bytes(struct.pack("<f", c.arg), "little"), 4))),
+  (UPat.cvar("c", dtypes.float64).load(dtype=dtypes.int64, name="x"), lambda ctx,c,x:
+   MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(int.from_bytes(struct.pack("<d", c.arg), "little"), 8), 1)),
   # int moves
   #(UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.int32, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=ctx[c]))),
   (UPat.var("a").load(dtype=dtypes.ints8+(dtypes.bool,), allow_any_len=True, name="x"), lambda ctx,a,x: MUOpX86.R_RM("mov", 0x8A, ctx[x], Memory(ctx[x].size, ctx[a]))),
@@ -351,7 +366,7 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.V_V_V("vmovsd", 0x10, ctx[x], ctx[x.src[0]], ctx[x.src[0]], 3, 1), MUOpX86.V_V_VM("vfmadd213sd", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]),
   # float moves, TODO: this could be vmaskmovps
   (UPat.var("a").load(UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float32, name="x"), lambda ctx,a,b,m,x:
-   [MUOpX86.V_V_V("vmovss", 0x10, ctx[x], ctx[b], ctx[b], 2, 1), MUOpX86.RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
+   [MUOpX86.V_V_V("vmovss", 0x10, ctx[x], ctx[b], ctx[b], 2, 1), MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
     MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)),
     MUOpX86.V_M("vmovss", 0x10, ctx[x], Memory(ctx[x].size, ctx[a]), 2, 1), MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]),
   (UPat.var("a").load(dtype=dtypes.float64, allow_any_len=True, name="x"), lambda ctx,a,x: MUOpX86.V_M("vmovsd", 0x10, ctx[x], Memory(ctx[x].size, ctx[a]), 3, 1)),
@@ -363,9 +378,8 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)),
   # range / endrange
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)), MUOpX86("", -1, Label(f".LOOP_{x.arg}:"))]),
-  # TODO: not quite right, cmp has no out
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c")), name="a"),)), lambda ctx,c,a:
-   [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), MUOpX86.RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, 4)),
+   [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, 4)),
     MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg}:"),), ins_con=((),))]),
 ])
 
@@ -380,6 +394,7 @@ class X86Renderer(Renderer):
 
   def __getitem__(self, x:UOp) -> str: # hacky helper
     # TODO: register size should probably come from MUOp not dtype?
+    assert x.op is not Ops.CONST, "const is an immediate"
     if x in self.virtuals: return self.virtuals[x]
     if x.op is Ops.NOOP: self.virtuals[x] = self.virtuals[x.src[0]]
     else: self.virtuals[x] = Register(f"v{len(self.virtuals)}", 0, x.dtype.itemsize if not isinstance(x.dtype, PtrDType) else 8)
