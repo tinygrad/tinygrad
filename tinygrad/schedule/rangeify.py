@@ -12,7 +12,7 @@ class RangeifyContext:
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
 
-def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
+def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.tag == 1: return None
   ranges = []
   new_ranges = []
@@ -22,7 +22,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       assert idx is not None, "partial contig requires index"
       ranges.append(idx.src[1+i])
       continue
-    if idx is not None: passthrough_idx.append(idx.src[1+i])
+    if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
       ranges.append(UOp.range(dtypes.int, s, (ctx.idx, AxisType.LOOP)))
       new_ranges.append(ranges[-1])
@@ -30,19 +30,8 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
 
-  # conv hack. we replace ranges
-  if idx is not None and getenv("CONVHACK"):
-    sub = {}
-    sub[UOp.range(dtypes.int, 3, 4)] = UOp.range(dtypes.int, 3, ctx.idx)
-    ctx.idx += 1
-    sub[UOp.range(dtypes.int, 3, 5)] = UOp.range(dtypes.int, 3, ctx.idx)
-    ctx.idx += 1
-    ranges = UOp.sink(*ranges).substitute(sub).src
-    passthrough_idx.extend(sub.keys())
-    new_ranges.extend(sub.values())
-
   ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
-  ret = ret.index(*passthrough_idx) if idx is not None else ret
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
   return ret
 
 def map_reshape(x:UOp, r:UOp):
@@ -105,7 +94,10 @@ pm_children = PatternMatcher([
 
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op is not Ops.CONTIGUOUS else s for s in x.src]))),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op is not Ops.INDEX else s for s in x.src]))),
+
+  # double contiguous merge
+  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
 
   # const
   (UPat(Ops.CONST, name="x"), lambda x:
@@ -173,13 +165,13 @@ pm_rangeify = PatternMatcher([
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
-  (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
+  #(UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
    lambda er: er.src[0].replace(src=(UOp(Ops.ENDRANGE, dtype=er.dtype, src=(er.src[0].src[0],)+er.src[1:]),))),
   # handle ENDRANGE on BUFFER
-  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
+  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.CONTIGUOUS)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
   # handle INDEXed ENDRANGE
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),

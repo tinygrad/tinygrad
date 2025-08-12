@@ -347,14 +347,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   rctx = RangeifyContext()
   rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, ctx=rctx, bottom_up=True, name="* contiguous")
   rsink = graph_rewrite(rsink, pm_children, ctx=rctx, bottom_up=True, name="* children")
-  print("rangeify 1")
   rsink = graph_rewrite(rsink, pm_rangeify, ctx=rctx, bottom_up=True, name="* rangeify")
-  print("rangeify 2")
-  rsink = graph_rewrite(rsink, pm_rangeify, bottom_up=True, ctx=rctx, name="* rangeify 2")
-  print("rangeify 3")
-  rsink = graph_rewrite(rsink, pm_rangeify, bottom_up=True, ctx=rctx, name="* rangeify 3")
-  print("rangeify done")
-
   rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
 
   from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
