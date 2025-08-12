@@ -798,7 +798,7 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
+def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       fn = key = func.__name__
@@ -812,7 +812,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
         e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
-      if getenv("CAPTURE_PROCESS_REPLAY"):
+      if getenv("CAPTURE_PROCESS_REPLAY") and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
@@ -897,19 +897,22 @@ class RewriteContext:
     self.bpm: PatternMatcher|None = bpm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+    self.skip_0: dict[UOp, None] = {}  # NOTE: this is needed for RewriteNotReady. it also detects some infinite loops
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
-      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       try:
         if stage == 0:
+          if n in self.skip_0: continue
           # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
           if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
           stack.append((n, 1, new_n))
           for x in reversed(new_n.src): stack.append((x, 0, x))
+          self.skip_0[n] = None
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
           except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
@@ -927,7 +930,7 @@ class RewriteContext:
         else:
           # in stage 2, we link the result of new_n to the result of n
           try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          except KeyError: raise RuntimeError("infinite loop in graph_rewrite (explicit)")  # pylint: disable=raise-missing-from
       except RewriteNotReady:
         # retry this later
         stack.insert(0, (n, stage, new_n))
