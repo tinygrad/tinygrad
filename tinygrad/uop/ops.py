@@ -887,7 +887,7 @@ class RewriteContext:
     self.bpm: PatternMatcher|None = bpm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
-    self.skip_0: set[UOp] = set()  # NOTE: this is needed for RewriteNotReady. it also detects some infinite loops
+    self.skip_0: dict[UOp, None] = {}  # NOTE: this is needed for RewriteNotReady. it also detects some infinite loops
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
@@ -902,7 +902,7 @@ class RewriteContext:
           if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
           stack.append((n, 1, new_n))
           for x in reversed(new_n.src): stack.append((x, 0, x))
-          self.skip_0.add(n)
+          self.skip_0[n] = None
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
           except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
