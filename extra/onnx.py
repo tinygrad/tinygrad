@@ -5,7 +5,7 @@ from typing import Any, Sequence, cast, Literal, Callable, get_args, NamedTuple
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, enum, os, struct
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element
+from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
 
@@ -755,6 +755,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       if nearest_mode not in mode_operations: raise ValueError(f"invalid {nearest_mode=}")
       indexes = [mode_operations[nearest_mode](idx).int() for idx in indexes]
       X = X[(..., *Tensor.meshgrid(*indexes))]
+
     if mode == "linear":
       expand = list(X.shape)
       for i in range(-len(sizes), 0):
@@ -762,7 +763,48 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         reshape[i] = expand[i] = sizes[i]
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
-    if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
+
+    if mode == "cubic":
+      A = cubic_coeff_a
+
+      def W(x:Tensor):
+        # Keys weights
+        # see piecewise function in: https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+        x = x.abs()
+        w0_1 = polyN(x, [A + 2, -(A + 3), 0, 1])
+        w1_2 = polyN(x, [A, -5 * A, 8 * A, -4 * A])
+        return (x <= 1).where(w0_1, (x < 2).where(w1_2, 0))
+
+      expand = list(X.shape)
+      for i in range(-len(sizes), 0):
+        input_sz = X.shape[i]
+        reshape, index = [1] * X.ndim, indexes[i]
+        reshape[i] = expand[i] = sizes[i]
+
+        p = index.floor().int()
+        ratio = index - p
+
+        # Neighbor indices
+        idx0, idx1, idx2, idx3 = [p + d for d in [-1, 0, 1, 2]]
+        # Weights of distance from index and neighbor indices
+        c0, c1, c2, c3 = [W(ratio - d) for d in [-1, 0, 1, 2]]
+
+        if exclude_outside:
+          c0 = ((idx0 >= 0) & (idx0 < input_sz)).where(c0, 0)
+          c1 = ((idx1 >= 0) & (idx1 < input_sz)).where(c1, 0)
+          c2 = ((idx2 >= 0) & (idx2 < input_sz)).where(c2, 0)
+          c3 = ((idx3 >= 0) & (idx3 < input_sz)).where(c3, 0)
+
+          total = c0 + c1 + c2 + c3
+          c0, c1, c2, c3 = c0 / (total + 1e-9), c1 / (total + 1e-9), c2 / (total + 1e-9), c3 / (total + 1e-9)
+
+        # Reshape and expand
+        expanded_indices = [y.clip(0, input_sz - 1).reshape(reshape).expand(expand) for y in [idx0, idx1, idx2, idx3]]
+        expanded_coeffs = [y.reshape(reshape).expand(expand) for y in [c0, c1, c2, c3]]
+
+        # Gather values and apply coefficients
+        gathered_values = [X.gather(i, idx) for idx in expanded_indices]
+        X = sum(v * c for v, c in zip(gathered_values, expanded_coeffs))
     return X.permute(*argsort(perm)) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
