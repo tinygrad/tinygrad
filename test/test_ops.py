@@ -700,10 +700,11 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
   def test_int_pow_const_int(self):
-    helper_test_op(None, lambda x: x**0, vals=[[-2,0,2]], forward_only=True)
-    helper_test_op(None, lambda x: x**1, vals=[[-2,0,2]], forward_only=True)
-    helper_test_op(None, lambda x: x**2, vals=[[-2,0,2]], forward_only=True)
-    helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True)
+    helper_test_op(None, lambda x: x**0, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**1, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**2, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**7, vals=[[11,12,13]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True, atol=0)
     self.helper_test_exception(None, lambda x: x**-2, vals=[[-2,0,2]], forward_only=True, expected=RuntimeError)
 
   @unittest.skip("not supported")
