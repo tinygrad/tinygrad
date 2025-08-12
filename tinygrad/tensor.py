@@ -3684,7 +3684,7 @@ class Tensor(MathTrait):
 
     ret = base._apply_uop(UOp.pow, exponent)
     # NOTE: pow(int, float) -> int
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) else ret
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
   def maximum(self, x:Tensor|ConstType) -> Tensor:
     """
