@@ -12,13 +12,8 @@ class RangeifyContext:
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
 
-  #indexed_child: dict[UOp, list[UOp]] = field(default_factory=dict)
-  #ended_child: dict[UOp, int] = field(default_factory=dict)
-
-reduce_map = {}
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
   if x.tag == 1: return None
-  if x in reduce_map: return reduce_map[x]
   ranges = []
   new_ranges = []
   passthrough_idx = []
@@ -46,9 +41,8 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     passthrough_idx.extend(sub.keys())
     new_ranges.extend(sub.values())
 
-  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.shape, tag=1)
+  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
   ret = ret.index(*passthrough_idx) if idx is not None else ret
-  reduce_map[x] = ret
   return ret
 
 def map_reshape(x:UOp, r:UOp):
@@ -87,7 +81,6 @@ def map_pad(x:UOp, r:UOp):
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   # TODO: this should be in the cache
-  if red in reduce_map: return reduce_map[red]
   #print(f"reduce {id(red)}")
   rngs = list(idx.src[1:])
   new_ranges = []
@@ -96,9 +89,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
       rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
       ctx.idx += 1
       new_ranges.append(rngs[i])
-  ret = UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
-  reduce_map[red] = ret
-  return ret
+  return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
 def extract_children(ctx:RangeifyContext, x:UOp):
   if ctx.children is not None: return
@@ -147,59 +138,24 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   if len(idx_ranges) == 0: return c.index(*out_rngs)
-  return c.index(*out_rngs).contiguous(*end_ranges, arg=c.shape, tag=1).index(*[idx.src[1+i] for i in idx_ranges])
-
-def might_end_axes(x:UOp):
-  end_axes = []
-  for i,r in enumerate(x.src[1:]):
-    # NOTE: this is too specific to conv. you want to find any ranges that overlap
-    if r.op is Ops.ADD and r.src[0].op is Ops.RANGE and r.src[1].op is Ops.RANGE: end_axes.append(i)
-  return x.replace(src=(x.src[0].contiguous(arg=tuple(end_axes)),)+x.src[1:]) if end_axes else None
+  return c.index(*out_rngs).contiguous(*end_ranges, arg=tuple(idx_ranges), tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
 def map_expand(r:UOp, x:UOp):
   new_rngs = []
   ending_ranges = []
   non_ending_ranges = []
-  #axis_to_ranges = []
   for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape):
     axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
-    #axis_to_ranges.append(axis_to_range)
     if resolve(x!=y, False):
       ending_ranges.extend(axis_to_range)
       new_rngs.append(a.const_like(0))
     else:
       non_ending_ranges.extend(axis_to_range)
       new_rngs.append(a)
-  ret = r.src[0]
   ending_ranges = [x for x in ending_ranges if x not in non_ending_ranges]
+  ret = r.src[0]
   ret = UOp(Ops.ENDRANGE, dtype=ret.dtype, src=(ret,)+tuple(ending_ranges)) if len(ending_ranges) else ret
   return ret.index(*new_rngs)
-
-  """
-  ret = r.src[0]
-  if len(ending_ranges):
-    earliest_ending_axis = min(ending_ranges)
-    to_end_axis = []
-    for i,a in enumerate(axis_to_ranges):
-      if any(x > earliest_ending_axis for x in a):
-        to_end_axis.append(i)
-    if to_end_axis and any(x.op is Ops.REDUCE_AXIS for x in ret.toposort()):
-      ret = ret.contiguous(arg=tuple(to_end_axis))
-  return ret.index(*new_rngs)
-  """
-
-"""
-def handle_endrange(er:UOp, idx:UOp):
-  ended = er.src[1:]
-  to_end_axis = []
-  for i,a in enumerate(idx[1:]):
-    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
-    if any(x in axis_to_range for x in ended):
-      to_end_axis.append(i)
-  if to_end_axis:
-    ret = idx.src[0].contiguous(arg=tuple(to_end_axis))
-  return ret.index(*idx.src[1:])
-"""
 
 def indexed_endrange(er:UOp, idx:UOp):
   ended = er.src[1:]
@@ -244,9 +200,6 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
-
-  # might end axes
-  #(UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="x"), might_end_axes),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
