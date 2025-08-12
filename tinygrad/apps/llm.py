@@ -116,7 +116,7 @@ class TransformerBlock:
 
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
-    gated  = (self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)) #.contiguous(arg=(1,))
+    gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):

@@ -159,22 +159,57 @@ def might_end_axes(x:UOp):
 def map_expand(r:UOp, x:UOp):
   new_rngs = []
   ending_ranges = []
-  axis_to_range = []
+  non_ending_ranges = []
+  #axis_to_ranges = []
   for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape):
-    axis_to_range.append([u.arg[0] for u in a.toposort() if u.op is Ops.RANGE])
+    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
+    #axis_to_ranges.append(axis_to_range)
     if resolve(x!=y, False):
-      ending_ranges.extend(axis_to_range[-1])
+      ending_ranges.extend(axis_to_range)
       new_rngs.append(a.const_like(0))
-    else: new_rngs.append(a)
-  earliest_ending_axis = min(ending_ranges)
-  to_end_axis = []
-  for i,a in enumerate(axis_to_range):
-    if any(x > earliest_ending_axis for x in a):
-      to_end_axis.append(i)
+    else:
+      non_ending_ranges.extend(axis_to_range)
+      new_rngs.append(a)
   ret = r.src[0]
-  if to_end_axis and any(x.op is Ops.REDUCE_AXIS for x in ret.toposort()):
-    ret = ret.contiguous(arg=tuple(to_end_axis))
+  ending_ranges = [x for x in ending_ranges if x not in non_ending_ranges]
+  ret = UOp(Ops.ENDRANGE, dtype=ret.dtype, src=(ret,)+tuple(ending_ranges)) if len(ending_ranges) else ret
   return ret.index(*new_rngs)
+
+  """
+  ret = r.src[0]
+  if len(ending_ranges):
+    earliest_ending_axis = min(ending_ranges)
+    to_end_axis = []
+    for i,a in enumerate(axis_to_ranges):
+      if any(x > earliest_ending_axis for x in a):
+        to_end_axis.append(i)
+    if to_end_axis and any(x.op is Ops.REDUCE_AXIS for x in ret.toposort()):
+      ret = ret.contiguous(arg=tuple(to_end_axis))
+  return ret.index(*new_rngs)
+  """
+
+"""
+def handle_endrange(er:UOp, idx:UOp):
+  ended = er.src[1:]
+  to_end_axis = []
+  for i,a in enumerate(idx[1:]):
+    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
+    if any(x in axis_to_range for x in ended):
+      to_end_axis.append(i)
+  if to_end_axis:
+    ret = idx.src[0].contiguous(arg=tuple(to_end_axis))
+  return ret.index(*idx.src[1:])
+"""
+
+def indexed_endrange(er:UOp, idx:UOp):
+  ended = er.src[1:]
+  earliest_ending_axis = min([x.arg[0] for x in ended])
+  to_end_axis = []
+  for i,a in enumerate(idx.src[1:]):
+    if any(x.arg[0] > earliest_ending_axis for x in a.toposort() if x.op is Ops.RANGE):
+      to_end_axis.append(i)
+  if to_end_axis: return idx.replace(src=(er.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:])
+  return idx.replace(src=(er.src[0],)+idx.src[1:])
 
 pm_rangeify = PatternMatcher([
   # if there are new ended children, tag the SINK
@@ -183,6 +218,18 @@ pm_rangeify = PatternMatcher([
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
   (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
+
+  # handle ENDRANGE on movement
+  (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
+   lambda er: er.src[0].replace(src=(UOp(Ops.ENDRANGE, dtype=er.dtype, src=(er.src[0].src[0],)+er.src[1:]),))),
+  # handle ENDRANGE on BUFFER
+  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
+  # handle INDEXed ENDRANGE
+  (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
+        allow_any_len=True, name="idx"), indexed_endrange),
+
+  #(UPat(Ops.ENDRANGE, name="er", allow_any_len=True,
+  #      src=(UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), name="idx", allow_any_len=True),)), handle_endrange),
 
   # this is like the definitions of these
   (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
@@ -238,6 +285,7 @@ from tinygrad.schedule.rangeify import map_reshape
 
 pm_add_buffers = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
+  (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
