@@ -129,15 +129,17 @@ const drawLine = (ctx, x, y) => {
   ctx.stroke();
 }
 
-var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var profileRet, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity, showMemoryProf = true;
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").html("");
+  const metadata = d3.select(".metadata").html("");
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
+  metadata.append("label").text("Show memory: ").insert("input",":first-child").attr("type", "checkbox").property("checked", showMemoryProf)
+    .on("change", (e) => { showMemoryProf = e.currentTarget.checked; renderProfiler(); });
   if (profileRet == null) profileRet = await (await fetch("/get_profile")).json()
   const { layout, st, et } = profileRet;
   // place devices on the y axis and set vertical positions
@@ -149,6 +151,12 @@ async function renderProfiler() {
   const colorMap = new Map();
   const data = {shapes:[], axes:{}};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
+
+  // Cells are divided into chunks of 30 seconds, each chunk can be rendered at a different level of detail.
+  const timelineChunkLen = 30 * 1000000; // 30 seconds
+  const timelineLODThresholds = [30e9, 5e9, 1e9, 300e6, 80e6, 20e6, 1e6, 500e3, 200e3, 120e3, 80e3, 50e3, 30e3, 20e3, 10e3, 5e3]; // 30s to 5us
+  const spatialTimeline = {}, tempProxiesBuilder = {}, timelineProxies = {};
+
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
@@ -177,10 +185,37 @@ async function renderProfiler() {
       }
       const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
       // offset y by depth
-      data.shapes.push({x:e.st-st, y:offsetY+levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+      const [rx, ry] = [e.st-st, offsetY+levelHeight*e.depth];
+
+      const chunkStart = Math.floor(rx/timelineChunkLen), chunkEnd = Math.floor((rx+e.dur)/timelineChunkLen);
+      for (let i = chunkStart; i <= Math.floor((rx+e.dur)/timelineChunkLen); i++) {
+        for (var lodIdx = 0; lodIdx < timelineLODThresholds.length && Math.min(timelineChunkLen, e.dur) < timelineLODThresholds[lodIdx]; lodIdx++);
+        lodIdx = Math.min(lodIdx, timelineLODThresholds.length-1); // cap at the last LOD
+
+        // add a shape for the current chunk
+        ((spatialTimeline[i] ??= {})[lodIdx] ??= []).push({x:rx, y:ry, width:e.dur, height:levelHeight, arg, label, fillColor});
+
+        // this block won't be displayed on higher LODs, create a proxy for it
+        for (let jlod = lodIdx - 1; jlod >= 0; jlod--) {
+          const ix = Math.floor(rx / timelineLODThresholds[jlod + 1]);
+          const proxy = ((((tempProxiesBuilder[i] ??= {})[jlod]) ??= {})[ix] ??= {})[ry] ??= { x:rx, y:ry, h:levelHeight, pct:0, fillColor, fillVal:e.dur };
+          proxy.pct += e.dur / timelineLODThresholds[jlod + 1];
+          if (e.dur > proxy.fillVal) proxy.fillColor = fillColor; proxy.fillVal = e.dur;
+        }
+      }
     }
+
+    // finalize proxies into displayed blocks.
+    for (const [i, lods] of Object.entries(tempProxiesBuilder))
+      for (const [lodIdx, rects] of Object.entries(lods))
+        for (const [ix, ys] of Object.entries(rects))
+          for (const [iy, e] of Object.entries(ys)) {
+            ((timelineProxies[i] ??= {})[+lodIdx] ??= []).push({x:e.x, y:e.y, width:timelineLODThresholds[+lodIdx+1]*Math.max(0.1, Math.min(e.pct, 1.0)),
+                                                                height:e.h, fillColor:e.fillColor, arg:{tooltipText:"merged cells, zoom in"}})
+          }
+
     // position shapes on the canvas and scale to fit fixed area
-    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
+    let area = mem.shapes.length === 0 || !showMemoryProf ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
     else {
       const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
@@ -220,8 +255,26 @@ async function renderProfiler() {
     if (data.axes.y != null) {
       yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
     }
+
+    // group into rects
+    const render_rects = [], render_threshold = (8.0 * (et-st)) / zoomLevel.k / canvas.clientWidth;
+    const [xStart, xEnd] = xscale.domain();
+    const [bucketStart, bucketEnd] = [Math.floor(xStart/ timelineChunkLen), Math.ceil(xEnd / timelineChunkLen)];
+    for (var lastLod = 0; lastLod < timelineLODThresholds.length && timelineLODThresholds[lastLod] >= render_threshold; lastLod++);
+
+    for (let i = bucketStart; i <= bucketEnd; i++) {
+      for (let lod = 0; lod <= lastLod; lod++) {
+        if (spatialTimeline[i] == null || spatialTimeline[i][lod] == null) continue;
+        for (const e of spatialTimeline[i][lod]) render_rects.push(e);
+      }
+
+      if (timelineProxies[i] == null || timelineProxies[i][lastLod] == null) continue;
+      for (const e of timelineProxies[i][lastLod]) render_rects.push(e);
+    }
+    for (const e of data.shapes) render_rects.push(e);
+
     // draw shapes
-    for (const e of data.shapes) {
+    for (const e of render_rects) {
       const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
       if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
       ctx.fillStyle = e.fillColor;
