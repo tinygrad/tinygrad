@@ -68,6 +68,8 @@ backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
 backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 # tested in external_test_onnx_ops.py::TestMainOnnxOps.test_resize_downsample_scales_linear_align_corners
 backend_test.exclude('test_resize_downsample_scales_linear_align_corners_cpu')
+# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_resize_downsample_scales_cubic_align_corners
+backend_test.exclude('test_resize_downsample_scales_cubic_align_corners_cpu')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
@@ -168,10 +170,6 @@ backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
 backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
-backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to implement cubic
-backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
 # rest of the failing tests
@@ -181,6 +179,8 @@ backend_test.exclude('test_resize_tf_crop_and_resize_axes_3_2_cpu') # tf_crop_an
 backend_test.exclude('test_resize_tf_crop_and_resize_extrapolation_value_cpu') # tf_crop_and_resize value not implemented
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_scales_cubic_antialias_cpu') # antialias not implemented
+backend_test.exclude('test_resize_downsample_sizes_cubic_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
