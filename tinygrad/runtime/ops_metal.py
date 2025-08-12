@@ -68,8 +68,6 @@ class MetalDevice(Compiled):
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: list[Any] = []
-    self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
-    self.timeline_value = 0
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -204,26 +202,6 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options):
     if msg is not None and libobjc is not None: msg("release")(opaque.buf)
-  def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
-    dest_dev.synchronize()
-    src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
-    encoder = msg("blitCommandEncoder", objc_instance)(src_command_buffer)
-    msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
-        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
-    msg("endEncoding")(encoder)
-    if src_dev != dest_dev:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
-      msg("commit")(dest_command_buffer)
-      dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
-    msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
-    msg("commit")(src_command_buffer)
-    src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-    # Transfers currently synchronize the completion. Otherwise, copies can sometimes lead to incorrect values.
-    # There is no real metal multidevice support for now, so transfer is used only for tests.
-    src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
