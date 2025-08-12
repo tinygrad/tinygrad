@@ -542,6 +542,8 @@ jobs:
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
         run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
+      - name: Test llama 3 training
+        run: MAX_BUFFER_SIZE=0 PYTHONPATH="." DEV=NULL SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=8 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -975,6 +977,7 @@ jobs:
         with:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
+          pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV

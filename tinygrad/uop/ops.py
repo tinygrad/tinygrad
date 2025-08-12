@@ -248,7 +248,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def alu(self, op, *src:UOp, **kwargs):
     out_dtype = (self, *src)[-1].dtype
-    if op in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(op, out_dtype, (self,)+src, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
@@ -562,7 +562,7 @@ python_alu: dict[Ops, Callable]  = {
   Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
+  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
@@ -880,39 +880,50 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
+class RewriteNotReady(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+    self.skip_0: dict[UOp, None] = {}  # NOTE: this is needed for RewriteNotReady. it also detects some infinite loops
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
-      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0:
-        # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-        if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
-        stack.append((n, 1, new_n))
-        for x in reversed(new_n.src): stack.append((x, 0, x))
-      elif stage == 1:
-        if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
-          # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
-            self.replace[n] = new_n
-            continue
+      try:
+        if stage == 0:
+          if n in self.skip_0: continue
+          # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+          if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
+          stack.append((n, 1, new_n))
+          for x in reversed(new_n.src): stack.append((x, 0, x))
+          self.skip_0[n] = None
+        elif stage == 1:
+          try: new_src = tuple([self.replace[x] for x in new_n.src])
+          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          if new_src == new_n.src:
+            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
+            if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
+              self.replace[n] = new_n
+              continue
+          else:
+            # if srcs changed from rewrites, construct a new UOp with the new srcs
+            new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
         else:
-          # if srcs changed from rewrites, construct a new UOp with the new srcs
-          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
-        # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
-        stack.append((n, 2, new_src_n))
-        stack.append((new_src_n, 0, new_src_n))
-      else:
-        # in stage 2, we link the result of new_n to the result of n
-        self.replace[n] = self.replace[new_n]
+          # in stage 2, we link the result of new_n to the result of n
+          try: self.replace[n] = self.replace[new_n]
+          except KeyError: raise RuntimeError("infinite loop in graph_rewrite (explicit)")  # pylint: disable=raise-missing-from
+      except RewriteNotReady:
+        # retry this later
+        stack.insert(0, (n, stage, new_n))
     return self.replace[root]
 
 @track_matches

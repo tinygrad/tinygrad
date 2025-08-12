@@ -699,6 +699,14 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
+  def test_int_pow_const_int(self):
+    helper_test_op(None, lambda x: x**0, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**1, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**2, vals=[[-2,0,2]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**7, vals=[[11,12,13]], forward_only=True, atol=0)
+    helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True, atol=0)
+    self.helper_test_exception(None, lambda x: x**-2, vals=[[-2,0,2]], forward_only=True, expected=RuntimeError)
+
   @unittest.skip("not supported")
   def test_pow_int(self):
     def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True)
@@ -1093,6 +1101,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
   def test_sort(self):
+    for shape in [(0,), (0,5), (1,), (1,5)]:
+      helper_test_op([shape], lambda x: x.sort(0).values, lambda x: x.sort(0)[0], forward_only=True)
+      helper_test_op([shape], lambda x: x.sort(0).indices.type(torch.int32), lambda x: x.sort(0)[1], forward_only=True)
     for dim in [-1, 0, 1]:
       for descending in [True, False]:
         helper_test_op([(8,8,6)], lambda x: x.sort(dim, descending).values, lambda x: x.sort(dim, descending)[0], forward_only=True)
@@ -2739,10 +2750,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[[0]]], lambda x: x[[[0]]])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[0],b,c,d,:], lambda x: x[[0],j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[[[0]]],b,c,d,[[1]]], lambda x: x[[[[0]]],j,k,o,[[1]]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1,0],b,c,d,:], lambda x: x[[1,0],j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1,0,-1],b,c,d,:], lambda x: x[[1,0,-1],j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[1,2,3],...], lambda x: x[i,j,k,[1,2,3],...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[[1],[2],[3]],...], lambda x: x[i,j,k,[[1],[2],[3]],...])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[2,1,0],e], lambda x: x[i,[2,1,0],k,[2,1,0],p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[-2,1,0],e], lambda x: x[i,[2,1,0],k,[-2,1,0],p])
 
   def test_slice_fancy_indexing_tuple_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
@@ -2765,10 +2776,14 @@ class TestOps(unittest.TestCase):
     a = Tensor.ones(10,11,12)
     # tensors used as indices must be int tensors
     with self.assertRaises(IndexError): a[Tensor(1.1)]
-    with self.assertRaises(IndexError): a[Tensor([True, True])]
+    with self.assertRaises(IndexError): a[[1.1]]
+    with self.assertRaises(IndexError): a[Tensor([True, False])]
+    with self.assertRaises(IndexError): a[[True, False]]
     # shape mismatch, cannot broadcast. either exception is okay
     with self.assertRaises((IndexError, ValueError)): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,4,4,1)]
     with self.assertRaises((IndexError, ValueError)): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1,1)]
+    # this is fine
+    helper_test_op([(5, 6)], lambda x: x[[True, False, 2]])
 
   def test_gather(self):
     # indices cannot have gradient
