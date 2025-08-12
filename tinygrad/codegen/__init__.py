@@ -82,15 +82,15 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   supported_ops = tuple(opts.code_for_op.keys())
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
-  # optional pre matcher
-  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
-
   # decompositions
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
   ret.append(RewriteStep(pm_decomp, name="decompositions"))
 
+  # optional pre matcher
+  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
+
   # final rules for the renderer (without sym)
-  pm_final_rewrite = symbolic_simple+pm_render+extra_matcher
+  pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # return the list (with optional linearizer)
