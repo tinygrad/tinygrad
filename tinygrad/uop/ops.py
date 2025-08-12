@@ -788,6 +788,20 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
+def process_replay(fxn:Callable[..., T]):
+  def wrapper(*args, **kwargs) -> T:
+    ret = fxn(*args, **kwargs)
+    if getenv("CAPTURE_PROCESS_REPLAY"):
+      # find the unittest frame we're capturing in
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+      # capture global context vars and all the args passed in
+      with Context(PICKLE_BUFFERS=0):
+        inputs = (fxn.__name__, args, kwargs, ContextVar._cache)
+        replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
+    return ret
+
 def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
@@ -802,15 +816,6 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
         e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
-      if getenv("CAPTURE_PROCESS_REPLAY"):
-        # find the unittest frame we're capturing in
-        frm = sys._getframe(1)
-        while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-        loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-        # capture global context vars and all the args passed in
-        with Context(PICKLE_BUFFERS=0):
-          inputs = (fn, args, kwargs, ContextVar._cache)
-          replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
       return ret
     return __wrapper
   return _decorator

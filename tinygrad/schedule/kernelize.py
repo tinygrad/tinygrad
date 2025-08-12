@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.ops import track_rewrites, _substitute, process_replay
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
@@ -315,6 +315,7 @@ finalize_contiguous = PatternMatcher([
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}")
+@process_replay
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
   Function to transform the Tensor UOp graph into a version with Ops.KERNEL
