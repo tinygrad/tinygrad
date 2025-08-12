@@ -1,5 +1,4 @@
 # mypy: disable-error-code="misc, list-item, assignment, operator, index, arg-type"
-# as
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, get_args
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
