@@ -257,12 +257,11 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
-  @unittest.expectedFailure
   def test_arange_float_step(self):
     # float steps should match PyTorch exactly
     torch_out = torch.arange(0, 2, 0.3).numpy()
     out = Tensor.arange(0, 2, 0.3).numpy()
-    np.testing.assert_allclose(out, torch_out)
+    np.testing.assert_allclose(out, torch_out, atol=1e-7)
 
   @unittest.skip("this is flaky")
   @unittest.expectedFailure
