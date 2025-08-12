@@ -281,11 +281,14 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
 
 def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
   # idiv is truncated division, but arithmetic shift is floored division, so can only do non-negative numbers!
-  if x.vmin<0: return None
-  sign = 1 if d > 0 else -1
-  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
-  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  # promo_lattice needs to return an unsigned type
+  is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
+  assert d>0, "Sign should have been taken out of divisor"
+  vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
+  m,s = magicgu(max(vmax, abs(vmin)), d)
+  if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
+    return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
+  # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, None if device=='' else device):
-    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+    if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
+      return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
