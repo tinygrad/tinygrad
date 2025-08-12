@@ -16,7 +16,7 @@ def _do_reset_device(pci_bus): System.pci_reset(pci_bus)
 def _is_module_loaded(name: str) -> bool: return os.path.isdir(f"/sys/module/{name}")
 
 def cmd_remove_module(args):
-  modules = ["nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia"] if args.backend == "nv" else ["amdgpu"]
+  modules = ["nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia", "ast"] if args.backend == "nv" else ["amdgpu"]
   to_unload = [m for m in modules if _is_module_loaded(m)]
   if not to_unload: print("Kernel modules are not loaded")
   else:

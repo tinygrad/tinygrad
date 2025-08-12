@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
 
 T = TypeVar("T")
@@ -131,7 +131,7 @@ JIT_BATCH_SIZE = ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, TC_SEARCH_OVER_SHAPE, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("TC_SEARCH_OVER_SHAPE", 1), ContextVar("NOLOCALS", 0)
-FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 1), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 PICKLE_BUFFERS, PROFILE, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ")), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
@@ -196,7 +196,6 @@ class Profiling(contextlib.ContextDecorator):
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[str, ...]=()                # optional keys to search for related traces
-  fmt:str|None=None                      # optional detailed formatting
   cat:str|None=None                      # optional category to color this by
   ret:Any=None
 
@@ -204,6 +203,9 @@ class ProfileEvent: pass
 
 @dataclass
 class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+
+@dataclass(frozen=True)
+class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
@@ -219,7 +221,7 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 21
+VERSION = 22
 _db_connection = None
 def db_connection():
   global _db_connection

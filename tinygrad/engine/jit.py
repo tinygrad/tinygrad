@@ -21,24 +21,24 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: list[ExecItem] = []
   current_batch: list[ExecItem] = []
-  current_device: Compiled|None = None
+  current_batch_devs: list[Compiled] = []
 
   def flush_batch():
-    nonlocal current_batch, current_device, max_batch_size
+    nonlocal current_batch, current_batch_devs, max_batch_size
     try:
-      if current_device is None: raise GraphException("no device for graph")
+      if len(current_batch_devs) == 0: raise GraphException("no device for graph")
       if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): raise GraphException("only one kernel doesn't graph")
-      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      graph_runner = current_batch_devs[0].graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Buffer|None], input_rawbuffers)))
       max_batch_size *= 2
-      if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
+      if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_batch_devs[0]}")
     except GraphException as e:
       graphed_jit_cache.extend(current_batch)
-      if DEBUG >= 2: print(f"JIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_device}: {e}")
+      if DEBUG >= 2: print(f"JIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_batch_devs[0]}: {e}")
     current_batch = []
-    current_device = None
+    current_batch_devs = []
 
   for ji in jit_cache:
     match ji.prg:
@@ -48,13 +48,18 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       case ViewOp(): continue # ViewOps are just ignored
       case _: ji_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
 
-    can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item(ji_graph_dev, ji)
-    is_multigraph = can_be_graphed and issubclass(graph_class(ji_graph_dev), MultiGraphRunner)
-    can_share_graph = can_be_graphed and (type(ji_graph_dev) is type(current_device) if is_multigraph else ji_graph_dev == current_device)
+    # Check if this jit item can be graphed at all, so check if a new graph supports the current item.
+    can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item([ji_graph_dev], ji)
+
+    # Check if the current batch can be extended with this item.
+    can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and \
+                      graph_class(current_batch_devs[0]).supports_exec_item(dedup(current_batch_devs + [ji_graph_dev]), ji)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
+
+    # Flush the current batch if any, since it can't be extended or is full.
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
     (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
-    current_device = ji_graph_dev if can_be_graphed else None
+    current_batch_devs = dedup(current_batch_devs + [ji_graph_dev]) if can_be_graphed else []
 
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
@@ -127,12 +132,14 @@ class GraphRunner(Runner):
     return list({id(x):x for x in wait_nodes}.values())
 
   @staticmethod
-  def supports_exec_item(dev, ei:ExecItem) -> bool: return isinstance(ei.prg, CompiledRunner)
+  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool: return isinstance(ei.prg, CompiledRunner) and len(dedup(devs)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
-  def supports_exec_item(dev, ei:ExecItem) -> bool: return isinstance(ei.prg, (CompiledRunner, BufferXfer))
+  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
+    # Devices must be the same type
+    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) and len(dedup([type(Device[b.device]) for b in ei.bufs if b]+[type(d) for d in devs]))==1
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]

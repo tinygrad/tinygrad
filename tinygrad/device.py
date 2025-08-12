@@ -1,10 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, time
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, \
-                             colored, Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent, dedup
+                             colored, Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -54,9 +54,6 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
   device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
-
-@dataclass(frozen=True)
-class ProfilePointEvent(ProfileEvent): device:str; name:str; st:decimal.Decimal; ref:int; arg:dict=field(default_factory=dict) # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
@@ -223,6 +220,7 @@ class Allocator(Generic[DeviceType]):
   def __init__(self, dev:DeviceType):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
+    self.supports_copy_from_disk: bool = True
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
