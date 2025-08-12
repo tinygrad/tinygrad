@@ -775,7 +775,6 @@ jobs:
     timeout-minutes: 20
     env:
       IGNORE_OOB: 0
-      PYTHONFAULTHANDLER: 1
 
     steps:
     - name: Checkout Code
