@@ -273,6 +273,30 @@ def diskcache(func:Callable[..., T]):
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
 
+# *** process replay
+
+if getenv("CAPTURE_PROCESS_REPLAY"):
+  replay_capture: dict[str, bytes] = {}
+  import atexit
+  @atexit.register
+  def save_to_diskcache():
+    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+
+def process_replay(fxn:Callable[..., T]):
+  def wrapper(*args, **kwargs) -> T:
+    ret = fxn(*args, **kwargs)
+    if getenv("CAPTURE_PROCESS_REPLAY"):
+      # find the unittest frame we're capturing in
+      frm = sys._getframe(1)
+      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+      # capture global context vars and all the args passed in
+      with Context(PICKLE_BUFFERS=0):
+        inputs = (fxn.__name__, args, kwargs, ContextVar._cache)
+        replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
+    return ret
+  return wrapper
+
 # *** http support ***
 
 def _ensure_downloads_dir() -> pathlib.Path:

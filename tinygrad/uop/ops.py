@@ -7,7 +7,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, to_function_name, cpu_profile, TracingKey
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -780,27 +780,6 @@ class TrackedGraphRewrite:
 tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
-
-if getenv("CAPTURE_PROCESS_REPLAY"):
-  replay_capture: dict[str, bytes] = {}
-  import atexit
-  @atexit.register
-  def save_to_diskcache():
-    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
-
-def process_replay(fxn:Callable[..., T]):
-  def wrapper(*args, **kwargs) -> T:
-    ret = fxn(*args, **kwargs)
-    if getenv("CAPTURE_PROCESS_REPLAY"):
-      # find the unittest frame we're capturing in
-      frm = sys._getframe(1)
-      while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
-      loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
-      # capture global context vars and all the args passed in
-      with Context(PICKLE_BUFFERS=0):
-        inputs = (fxn.__name__, args, kwargs, ContextVar._cache)
-        replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
-    return ret
 
 def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
   def _decorator(func):
