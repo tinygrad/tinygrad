@@ -109,7 +109,6 @@ class TestProfiler(unittest.TestCase):
       assert evs[0].is_copy, "kernel should be copy"
 
   def test_profile_multidev_transfer(self):
-    if not hasattr(TestProfiler.d0.allocator, '_transfer'): self.skipTest("device is not supported (no transfers)")
     d1 = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
