@@ -218,7 +218,6 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
-  @unittest.expectedFailure
   def test_assign_broadcast(self):
     # broadcasting during assign should behave like PyTorch
     torch_tensor = torch.zeros(3, 5)
