@@ -276,11 +276,11 @@ def diskcache(func:Callable[..., T]):
 # *** process replay
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
-  replay_capture: dict[str, bytes] = {}
+  replay_capture: list[bytes] = []
   import atexit
   @atexit.register
   def save_to_diskcache():
-    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+    for i,v in enumerate(replay_capture): diskcache_put("process_replay", str(i), v, prepickled=True)
 
 def process_replay(fxn:Callable[..., T]):
   def wrapper(*args, **kwargs) -> T:
@@ -291,9 +291,7 @@ def process_replay(fxn:Callable[..., T]):
       while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
       loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
       # capture global context vars and all the args passed in
-      with Context(PICKLE_BUFFERS=0):
-        inputs = (fxn.__name__, args, kwargs, ContextVar._cache)
-        replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
+      with Context(PICKLE_BUFFERS=0): replay_capture.append(pickle.dumps((fxn.__name__, args, kwargs, ContextVar._cache, loc, ret)))
     return ret
   return wrapper
 
