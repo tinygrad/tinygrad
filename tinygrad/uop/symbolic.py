@@ -297,6 +297,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # mod folding
   (UPat.var("x") % UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.MOD)),
   (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <=0 else None),
+  (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
