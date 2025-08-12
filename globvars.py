@@ -13,15 +13,25 @@ def md(a:Tensor, b:Tensor):
   print()
   return mean_diff.item(), a.abs().mean().item(), max_diff.item()
 
-clip = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_clip.safetensors")
-fid = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_fid_score.safetensors")
-images = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_images.safetensors")
-inception = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_inception.safetensors")
-for d in (clip, fid, images, inception):
+base = "/home/hooved/stable_diffusion/checkpoints"
+unet = safe_load(f"{base}/train0_init_unet.safetensors")
+
+#clip = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_clip.safetensors")
+#fid = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_fid_score.safetensors")
+#images = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_images.safetensors")
+#inception = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_inception.safetensors")
+#for d in (clip, fid, images, inception):
+t0 = safe_load(f"{base}/train0.safetensors")
+t1 = safe_load(f"{base}/train1.safetensors")
+for d in (t0, t1):
   for v in get_parameters(d):
     v.to_("CPU").realize()
 
-with open("/home/hooved/stable_diffusion/checkpoints/val2_prompts.txt") as f:
-  prompts = f.read().split("\n")
+prompts = []
+fns = (f"{base}/train0_prompt0.txt", f"{base}/train0_prompt1.txt")
+for fn in fns:
+  with open(fn) as f:
+    p = f.read()
+    prompts.append(p)
 
 pause = 1

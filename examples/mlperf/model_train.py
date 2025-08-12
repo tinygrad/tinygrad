@@ -1463,6 +1463,10 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
+  #TODO: delete
+  import globvars as gv
+  load_state_dict(unet, gv.unet)
+
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
@@ -1490,7 +1494,9 @@ def train_stable_diffusion():
   def train_step(mean_logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
                  lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
-    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
+    #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
+    import globvars as gv
+    timestep = gv.t0['t'].cat(gv.t1['t']).cast(dtypes.int)
 
     for t in (mean_logvar, tokens, timestep):
       if len(GPUS) > 1: t.shard_(GPUS, axis=0)
@@ -1499,8 +1505,11 @@ def train_stable_diffusion():
     # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
     mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * Tensor.randn(mean.shape, device=std.device)).cast(dtypes.half) * 0.18215
-    noise = Tensor.randn_like(latent)
+    #latent = (mean + std * Tensor.randn(mean.shape, device=std.device)).cast(dtypes.half) * 0.18215
+    #noise = Tensor.randn_like(latent)
+    latent_randn = gv.t0['latent_randn'].cat(gv.t1['latent_randn']).shard(GPUS,axis=0)
+    latent = (mean + std * latent_randn).cast(dtypes.half) * 0.18215
+    noise = gv.t0['noise'].cat(gv.t1['noise']).shard(GPUS,axis=0)
 
     sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
     sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
@@ -1515,6 +1524,22 @@ def train_stable_diffusion():
     del out, v_true, context
     loss.backward()
     for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
+
+    Tensor.realize(*[p.grad for p in optimizer.params])
+    ref1 = ((gv.t0["out.2.weight"] + gv.t1["out.2.weight"]) / 2).to(GPUS).realize()
+    ref2 = ((gv.t0["out.2.bias"] + gv.t1["out.2.bias"]) / 2).to(GPUS).realize()
+    gv.md(ref1, unet.out[2].weight.grad)
+    # diff.abs().mean(): 1.84640030056471e-05
+    # a.abs().mean(): 0.08126243203878403
+    # diff.abs().max(): 0.0003662109375
+
+    #gv.md(ref1.isfinite().where(ref1, 0), ref1.isfinite().where(unet.out[2].weight.grad, 0))
+
+    gv.md(ref2, unet.out[2].bias.grad)
+    # diff.abs().mean(): 7.62939453125e-06
+    # a.abs().mean(): 0.37818145751953125
+    # diff.abs().max(): 3.0517578125e-05
+
     loss = loss.detach() / grad_scaler.scale
 
     # skip the optimizer step if non-finite grads are detected
@@ -1668,8 +1693,10 @@ def train_stable_diffusion():
       t0 = time.perf_counter()
       GlobalCounters.reset()
 
-      mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
-      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
+      #mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
+      #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
+      mean_logvar = gv.t0['batch_npy'].squeeze(0).cat(gv.t1['batch_npy'].squeeze(0)).realize()
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in gv.prompts], dim=0).realize()
       loss = train_step(mean_logvar, tokens, unet, optimizer, grad_scaler, lr_scheduler)
 
       elapsed = time.perf_counter() - t0
