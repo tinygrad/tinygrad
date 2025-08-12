@@ -1,6 +1,6 @@
 import unittest
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import PatternMatcher, UOp, graph_rewrite, Ops, UPat, GroupOp, RewriteNotReady, track_rewrites
+from tinygrad.uop.ops import PatternMatcher, UOp, graph_rewrite, Ops, UPat, GroupOp, RewriteNotReady
 
 # we could insert CHILDREN node
 
@@ -57,7 +57,6 @@ pm_consts = PatternMatcher([
 ])
 
 class TestChildrenRewrite(unittest.TestCase):
-  @track_rewrites()
   def test_not_ready_double_simple(self):
     global_a = UOp.variable("a", 0, 10).exp2()
     inter = (global_a+global_a).exp2()
