@@ -2,11 +2,11 @@
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, get_args
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
+from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
 from tinygrad.device import is_dtype_supported, Device
-from tinygrad.nn.state import TensorIO
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
