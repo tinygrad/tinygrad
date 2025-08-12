@@ -139,7 +139,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
+    shapes.append({"label":[name], "ref":ref, "x":st, "height":1, "width":dur, "y":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -183,9 +183,12 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
-  return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+  tracks:list[dict] = []
+  for k,events in dev_events.items():
+    events.sort(key=lambda v:v[0])
+    tracks.append({"name":k, **timeline_layout(events)})
+    #tracks.append({"name":f"{k} memory", **mem_layout(v)})
+  return json.dumps({"tracks":tracks, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
