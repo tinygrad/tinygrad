@@ -11,7 +11,7 @@ from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
-from tinygrad.uop.optional import get_late_rewrite_patterns
+from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
