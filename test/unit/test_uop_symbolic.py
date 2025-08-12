@@ -296,7 +296,7 @@ class TestSymbolic(unittest.TestCase):
   def test_neg_mod(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((-a)%4, -3, 0, "((a%4)*-1)")
-    self.helper_test_variable(a%-4, 0, 3, "(a%-4)")
+    self.helper_test_variable(a%-4, 0, 3, "(a%4)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
