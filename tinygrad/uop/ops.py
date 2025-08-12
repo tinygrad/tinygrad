@@ -356,7 +356,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
-    if self.op not in (Ops.REDUCE_AXIS, Ops.WMMA) and self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
