@@ -149,6 +149,30 @@ class TestOnnxModel(unittest.TestCase):
 
 @unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "METAL", "only run on METAL")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls._old_max_buffer_size = os.environ.get("MAX_BUFFER_SIZE")
+    os.environ["MAX_BUFFER_SIZE"] = "0"
+    # clear tinygrad.helpers.getenv cache so runtime picks up new env
+    try:
+      from tinygrad.helpers import getenv
+      getenv.cache_clear()
+    except Exception:
+      pass
+
+  @classmethod
+  def tearDownClass(cls):
+    if cls._old_max_buffer_size is None:
+      os.environ.pop("MAX_BUFFER_SIZE", None)
+    else:
+      os.environ["MAX_BUFFER_SIZE"] = cls._old_max_buffer_size
+    # clear cache again after restoring environment
+    try:
+      from tinygrad.helpers import getenv
+      getenv.cache_clear()
+    except Exception:
+      pass
+
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
