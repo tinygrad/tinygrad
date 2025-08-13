@@ -1,4 +1,4 @@
-from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, get_args
+from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from io import BufferedReader
 from tinygrad.nn.state import TensorIO
