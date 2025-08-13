@@ -129,6 +129,19 @@ const drawLine = (ctx, x, y) => {
   ctx.stroke();
 }
 
+const createPolygons = (source, area) => {
+  const shapes = [];
+  const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
+  for (const [i,e] of source.shapes.entries()) {
+    const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
+    const y0 = e.y.map(yscale);
+    const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
+    const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
+    shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+  }
+  return shapes;
+}
+
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -148,7 +161,7 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
-  data = {tracks:new Map(), axes:{}};
+  data = {tracks:new Map(), axes:{}, st, et};
   const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
   for (const [k, { timeline, mem }] of Object.entries(layout)) {
     if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
@@ -157,17 +170,19 @@ async function renderProfiler() {
     div.style.padding = `${padding}px`;
     div.onclick = () => { // TODO: make this feature more visible
       const prevScroll = profiler.node().scrollTop;
-      // only re-scale this track
-      const key = `${focusedDevice} memory`
-      if (k === focusedDevice) {
-        // reset to default scale
-        data.axes.y = null;
-        focusedDevice = null;
-      } else {
-        // otherwise expand memory graph for the focused device
-        area = maxArea*4;
-        data.axes.y = { domain:[0, mem.peak], range:[startY+area, startY], fmt:"B" };
-        focusedDevice = k;
+      let newOffset = null;
+      for (const [track, v] of data.tracks) {
+        if (track === `${k} memory`)  {
+          const pick = [areaScale(mem.peak), maxArea*4];
+          const [newArea, prevArea] = k === focusedDevice ? pick : pick.reverse();
+          data.axes.y = k == focusedDevice ? null : { domain:[0, mem.peak], range:[v.offsetY+newArea, v.offsetY], fmt:"B" };
+          focusedDevice = k === focusedDevice ? null : k;
+          v.shapes = createPolygons(mem, newArea);
+          newOffset = newArea-prevArea;
+          v.div.style.height = rect(v.div).height+newOffset+"px";
+        } else if (newOffset != null) {
+          v.offsetY += newOffset;
+        }
       }
       d3.select(canvas).call(canvasZoom.transform, zoomLevel);
       if (prevScroll) profiler.node().scrollTop = prevScroll;
@@ -176,7 +191,7 @@ async function renderProfiler() {
     const levelHeight = baseHeight-padding;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [];
-    data.tracks.set(k, { shapes, offsetY })
+    data.tracks.set(k, { shapes, offsetY });
     let colorKey, ref;
     for (const e of timeline.shapes) {
       if (e.depth === 0) colorKey = e.cat ?? e.name;
@@ -193,27 +208,18 @@ async function renderProfiler() {
       // offset y by depth
       shapes.push({x:e.st-st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
     }
-    div.style.height = Math.max(levelHeight*timeline.maxDepth, baseHeight)+padding+"px";
     // position shapes on the canvas and scale to fit fixed area
     let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
     if (area === 0) div.style.pointerEvents = "none";
     else {
-      const shapes = [];
       const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-      data.tracks.set(`${k} memory`, { shapes, offsetY:startY });
+      data.tracks.set(`${k} memory`, { shapes:createPolygons(mem, area), offsetY:startY, div });
       div.style.cursor = "pointer";
-      const yscale = d3.scaleLinear().domain([0, mem.peak]).range([area, 0]);
-      for (const [i,e] of mem.shapes.entries()) {
-        const x = e.x.map((i,_) => (mem.timestamps[i] ?? et)-st);
-        const y0 = e.y.map(yscale);
-        const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-        const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-        shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
-      }
     }
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
+
   updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
