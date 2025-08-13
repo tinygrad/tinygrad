@@ -159,15 +159,6 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     cls._ctx.__exit__()
 
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
-    import warnings
-    if DOWNLOADS_DIR.exists():
-      for item in DOWNLOADS_DIR.rglob("*"):
-        if item.is_file():
-          warnings.warn(f"{item.relative_to(DOWNLOADS_DIR)} ({item.stat().st_size/1e6:.2f}M)")
-        elif item.is_dir():
-          warnings.warn(f"{item.relative_to(DOWNLOADS_DIR)}/")
-    else:
-      warnings.warn("Directory does not exist")
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
