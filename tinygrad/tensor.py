@@ -3143,7 +3143,7 @@ class Tensor(MathTrait):
     print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
     ```
     """
-    return self.cast(dtypes.int32).cast(self.dtype)
+    return self._apply_uop(UOp.trunc)
 
   def ceil(self: Tensor) -> Tensor:
     """
