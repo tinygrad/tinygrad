@@ -234,7 +234,7 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.int, name='x'),
     lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   (UPat(Ops.ADD, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[0].op is not Ops.ADD and \
-          (x.src[1].op is Ops.ADD or (x.src[0].order_add > x.src[1].order_add)) else None),  # a+(b+c) -> (b+c)+a, chain is always on the left hand side
+          (x.src[1].op is Ops.ADD or (x.src[0].order_add > x.src[1].order_add)) else None),  # a+(b+c) -> (b+c)+a, chain is always on the left
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
