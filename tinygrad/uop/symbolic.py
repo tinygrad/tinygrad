@@ -163,24 +163,22 @@ def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  if not CORRECT_DIVMOD_FOLDING or x.vmin>=0:
-    x,const = x.pop_const()
-    terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
-    # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
-    rems = [min((r:=f%c), r-c, key=abs) for f in factors]
-    if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
-      if d.op is Ops.MOD: return rem - rem.vmin//c*c
-      return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
+  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  x,const = x.pop_const()
+  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
+  # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+  rems = [min((r:=f%c), r-c, key=abs) for f in factors]
+  if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
+    if d.op is Ops.MOD: return rem - rem.vmin//c*c
+    return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
   return None
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
-  if (gcd := math.gcd(c, const, *factors)) == 1: return None
-  ret = UOp(d.op, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, terms)) + const//gcd, y.const_like(y.arg//gcd)))
+  if (gcd := math.gcd(c, *factors)) == 1: return None
+  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
   return ret*gcd if d.op is Ops.MOD else ret
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
@@ -189,6 +187,7 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   factors = [u.const_factor() for u in split_uop(x.pop_const()[0], Ops.ADD)]
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
+  # TODO: add same optimization for mod
   div = min([y.arg]+[f for f in factors if f > 1 and (c%f)==0])
   if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
   return None
