@@ -2,13 +2,38 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, AxisType, RewriteNotReady
-from tinygrad.helpers import argsort, getenv, prod, all_same
+from tinygrad.helpers import argsort, prod, all_same
+
+@dataclass
+class ChildrenContext:
+  children: dict[UOp, list[UOp]]|None = None
+
+def extract_children(ctx:ChildrenContext, x:UOp):
+  if ctx.children is not None: return
+  # REDUCE_AXIS is fine here, should go to contig only (gate)
+  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
+def mark_children(ctx:ChildrenContext, x:UOp):
+  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
+  return x.replace(src=tuple(new_srcs))
+pm_children = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), extract_children),
+  (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
+])
+
+rangeify_fixups = PatternMatcher([
+  # all contiguous on SINK
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op is not Ops.INDEX else s for s in x.src]))),
+  # double contiguous merge
+  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
+  # const
+  (UPat(Ops.CONST, name="x"), lambda x:
+   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if len(x.src) and x.src[0].op is Ops.VIEW else None),
+])
 
 @dataclass
 class RangeifyContext:
   idx: int = 0
   regs: int = 0
-  children: dict[UOp, int]|None = None
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
 
@@ -80,29 +105,6 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
-def extract_children(ctx:RangeifyContext, x:UOp):
-  if ctx.children is not None: return
-  # REDUCE_AXIS is fine here, should go to contig only (gate)
-  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
-def mark_children(ctx:RangeifyContext, x:UOp):
-  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
-  return x.replace(src=tuple(new_srcs))
-pm_children = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
-])
-
-rangeify_fixups = PatternMatcher([
-  # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op is not Ops.INDEX else s for s in x.src]))),
-
-  # double contiguous merge
-  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
-
-  # const
-  (UPat(Ops.CONST, name="x"), lambda x:
-   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if len(x.src) and x.src[0].op is Ops.VIEW else None),
-])
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   #print(f"visit CHILD {x.arg} bottom up")
@@ -165,7 +167,6 @@ pm_rangeify = PatternMatcher([
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
-  #(UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
@@ -176,9 +177,6 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),
 
-  #(UPat(Ops.ENDRANGE, name="er", allow_any_len=True,
-  #      src=(UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), name="idx", allow_any_len=True),)), handle_endrange),
-
   # this is like the definitions of these
   (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
@@ -186,11 +184,11 @@ pm_rangeify = PatternMatcher([
    lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
   (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
-  #(UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"),
-  # lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
-  # lambda r,x: r.src[0].index(*[a.const_like(0) if resolve(x!=y, False) else a for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape)])),
+  # expand needs to end ranges
   (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
+  # reshape does a lot of symbolic stuff
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
@@ -234,6 +232,7 @@ pm_add_buffers = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+  (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
   # HACK: ignore copy
-  (UPat(Ops.COPY, name="x"), lambda x: x.src[0])
+  (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
 ])

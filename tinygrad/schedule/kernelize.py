@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, pm_add_buffers, AddBufferContext, rangeify_fixups, pm_children
+from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, ChildrenContext, pm_add_buffers, AddBufferContext, rangeify_fixups, pm_children
 from tinygrad.codegen.opt.swizzler import apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
@@ -344,10 +344,9 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
-  rctx = RangeifyContext()
-  rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, ctx=rctx, bottom_up=True, name="* contiguous")
-  rsink = graph_rewrite(rsink, pm_children, ctx=rctx, bottom_up=True, name="* children")
-  rsink = graph_rewrite(rsink, pm_rangeify, ctx=rctx, bottom_up=True, name="* rangeify")
+  rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, bottom_up=True, name="* contiguous")
+  rsink = graph_rewrite(rsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="* children")
+  rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
   rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
 
   from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
