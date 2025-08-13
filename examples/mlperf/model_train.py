@@ -1464,10 +1464,6 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
-  #TODO: delete
-  #import globvars as gv
-  load_state_dict(unet, gv.unet)
-
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
