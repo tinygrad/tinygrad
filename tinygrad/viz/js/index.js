@@ -33,7 +33,7 @@ function intersectRect(r1, r2) {
 }
 
 function addTags(root) {
-  root.selectAll("circle").data(d => [d]).join("circle");
+  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
