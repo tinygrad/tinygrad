@@ -1492,27 +1492,12 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def train_step(mean, logvar, tokens:Tensor, timestep, latent_randn, noise, unet:UNetModel, optimizer:LAMB, grad_scaler:GradScaler,
-                 lr_scheduler:LambdaLR) -> Tensor:
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep:Tensor, latent_randn:Tensor, noise:Tensor, unet:UNetModel,
+                 optimizer:LAMB, grad_scaler:GradScaler, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
-    #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device="CPU")
-    #import globvars as gv
-    #timestep = gv.t0['t'].cat(gv.t1['t']).cast(dtypes.int)
 
-    #for t in (mean_logvar, tokens, timestep):
-      #if len(GPUS) > 1: t.shard_(GPUS, axis=0)
-      #else: t.to_(GPUS[0])
-
-    # sample latent from VAE-generated distribution (NOTE: mlperf ref. starts from mean/logvar loaded from disk, as done here)
-    #mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    #latent = (mean + std * Tensor.randn(mean.shape, device=std.device)).cast(dtypes.half) * 0.18215
-    #noise = Tensor.randn_like(latent)
-    #latent_randn = gv.t0['latent_randn'].cat(gv.t1['latent_randn']).shard(GPUS,axis=0)
-
     latent = (mean + std * latent_randn).cast(dtypes.half) * 0.18215
-
-    #noise = gv.t0['noise'].cat(gv.t1['noise']).shard(GPUS,axis=0)
 
     sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
     sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
@@ -1680,41 +1665,19 @@ def train_stable_diffusion():
       t0 = time.perf_counter()
       GlobalCounters.reset()
 
-      #mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
-      #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
-      #mean_logvar = gv.t0['batch_npy'].squeeze(0).cat(gv.t1['batch_npy'].squeeze(0)).realize()
-      step_idx = Tensor([i - 1], device="CPU")
-      mean_logvar = gv.data["mean_logvar"][step_idx]
-      mean_logvar = mean_logvar.cat(mean_logvar)
+      mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
       mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
-      #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in gv.prompts], dim=0).realize()
-      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in [gv.prompts[i-1]]*2], dim=0)
-
-      timestep = gv.data["timestep"][step_idx]
-      timestep = timestep.cat(timestep).cast(dtypes.int).to("AMD:0")
-      latent_randn = gv.data['latent_randn'][step_idx]
-      latent_randn = latent_randn.cat(latent_randn).to("AMD:0")
-      noise = gv.data["noise"][step_idx]
-      noise = noise.cat(noise).to("AMD:0")
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
+      timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+      latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+      noise = Tensor.randn(*mean.shape, device=GPUS[0])
 
       for t in (mean, logvar, tokens, timestep, latent_randn, noise):
         t.shard_(GPUS,axis=0)
 
-      #loss = train_step(mean_logvar, tokens, unet, optimizer, grad_scaler, lr_scheduler, step_idx)
       loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, grad_scaler, lr_scheduler)
 
       elapsed = time.perf_counter() - t0
-      if i == 20:
-        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
-        # diff.abs().mean(): 1.326568195569866e-12
-        # a.abs().mean(): 1.2747265465407054e-08
-        # diff.abs().max(): 2.467270832084978e-10
-
-        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
-        # diff.abs().mean(): 7.949196856316121e-13
-        # a.abs().mean(): 1.6649142509095327e-08
-        # diff.abs().max(): 1.1119993814645568e-12
-        pause = 1
       print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
     loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS,
     mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
