@@ -105,7 +105,7 @@ rangeify_fixups = PatternMatcher([
 ])
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
-  print(f"visit CHILD {x.arg} bottom up")
+  #print(f"visit CHILD {x.arg} bottom up")
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
   ctx.seen_children[c][x.arg[0]] = idx
   # wait here until we have seen all the children
@@ -234,4 +234,6 @@ pm_add_buffers = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+  # HACK: ignore copy
+  (UPat(Ops.COPY, name="x"), lambda x: x.src[0])
 ])
