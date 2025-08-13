@@ -8,6 +8,20 @@ from tinygrad.helpers import _ensure_downloads_dir
 DOWNLOADS_DIR = _ensure_downloads_dir() / "models"
 from tinygrad.helpers import tqdm
 
+def snapshot_download_with_retry(*, repo_id: str, allow_patterns: list[str]|tuple[str, ...]|None=None, cache_dir: str|Path|None=None,
+                                 tries: int=2, **kwargs) -> Path:
+  for attempt in range(tries):
+    try:
+      return Path(snapshot_download(
+        repo_id=repo_id,
+        allow_patterns=allow_patterns,
+        cache_dir=str(cache_dir) if cache_dir is not None else None,
+        **kwargs
+      ))
+    except Exception as e:
+      if attempt == tries-1: raise
+      time.sleep(1)
+
 # Constants for filtering models
 HUGGINGFACE_URL = "https://huggingface.co"
 SKIPPED_FILES = [
@@ -127,14 +141,14 @@ class HuggingFaceONNXManager:
       try:
         # Download ONNX model files
         allow_patterns = [file_info["file"] for file_info in model_data["files"]]
-        root_path = Path(snapshot_download(
+        root_path = snapshot_download_with_retry(
           repo_id=model_id,
           allow_patterns=allow_patterns,
           cache_dir=str(self.models_dir)
-        ))
+        )
 
         # Download config files (usually small)
-        snapshot_download(
+        snapshot_download_with_retry(
           repo_id=model_id,
           allow_patterns=["*config.json"],
           cache_dir=str(self.models_dir)

@@ -3,7 +3,6 @@ import os
 import time
 import unittest
 import numpy as np
-from pathlib import Path
 try:
   import onnx
 except ModuleNotFoundError:
@@ -14,9 +13,8 @@ from tinygrad.device import Device
 from tinygrad.helpers import CI, fetch, temp, Context
 
 try:
-  import huggingface_hub
   from extra.onnx_helpers import validate
-  from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR
+  from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
   HUGGINGFACE_AVAILABLE = True
 except ModuleNotFoundError:
   HUGGINGFACE_AVAILABLE = False
@@ -159,11 +157,11 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     cls._ctx.__exit__()
 
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
-    onnx_model_path = Path(huggingface_hub.snapshot_download(
+    onnx_model_path = snapshot_download_with_retry(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
       cache_dir=str(DOWNLOADS_DIR)
-    ))
+    )
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
     print(f"Validating model: {repo_id}/{model_file} ({file_size/1e6:.2f}M)")
