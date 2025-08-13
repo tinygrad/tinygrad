@@ -87,6 +87,9 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
+  # TODO: is BITCAST always Elementwise if it's shape changing?
+  Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
+
   Defines = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}

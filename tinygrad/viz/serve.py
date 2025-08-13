@@ -75,13 +75,13 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if x in excluded:
         if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
         else: label += f"\n{x.op.name}{idx} {x.arg}"
-    try:
-      if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
+    if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
+      try:
         label += f"\n{shape_to_str(u.shape)}"
-      elif len(rngs:=u.ranges):
-        label += f"\n{str(sorted([x.arg[0] for x in rngs]))}"
-    except Exception:
-      label += "\n<ISSUE GETTING SHAPE>"
+      except Exception:
+        label += "\n<ISSUE GETTING SHAPE>"
+    elif len(rngs:=u.ranges):
+      label += f"\n{str(sorted([x.arg for x in rngs]))}"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)

@@ -187,7 +187,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
-    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE}:
+    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE, Ops.STORE}:
       ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
         if s in ret: del ret[s]
@@ -243,9 +243,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType):
+    # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
+    if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
     if self.dtype == dtype: return self
     return UOp(Ops.CAST, dtype, (self,))
-  def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:tuple[int, ...]|int):
     if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
