@@ -47,11 +47,6 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
-def split_uop(x:UOp, sep:Ops):
-  if x.op is sep:
-    for s in x.src: yield from split_uop(s, sep)
-  else: yield x
-
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
@@ -473,11 +468,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  @property
-  def terms_factors_and_const(self) -> tuple[tuple[UOp], tuple[int], int]:
-    terms_factors = [(u.divides(f:=u.const_factor()),f) for u in split_uop(self, Ops.ADD)]
-    consts, terms_factors= partition(terms_factors, lambda t: t[0].op is Ops.CONST)
-    return *zip(*terms_factors), sum(f for _,f in consts)
+  def pop_const(self) -> tuple[UOp, int]: return (self.src[0], self.src[1].arg) if self.op is Ops.ADD and self.src[1].op is Ops.CONST else (self, 0)
   @property
   def vmin(self) -> ConstType: return self._min_max[0]
   @property

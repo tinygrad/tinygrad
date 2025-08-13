@@ -2,12 +2,17 @@
 from typing import Any, cast
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, split_uop
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
 from tinygrad.uop.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
+
+def split_uop(x:UOp, sep:Ops):
+  if x.op is sep:
+    for s in x.src: yield from split_uop(s, sep)
+  else: yield x
 
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.arg < 0: return x.reciprocal().pow(-c)
@@ -148,7 +153,8 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
 def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  terms, factors, const = x.terms_factors_and_const
+  x,const = x.pop_const()
+  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
     y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)  # type: ignore
     y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)  # type: ignore
@@ -158,8 +164,9 @@ def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  terms, factors, const = x.terms_factors_and_const
   if not CORRECT_DIVMOD_FOLDING or x.vmin>=0:
+    x,const = x.pop_const()
+    terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
     # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
     rems = [min((r:=f%c), r-c, key=abs) for f in factors]
     if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
@@ -170,7 +177,8 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  terms, factors, const = x.terms_factors_and_const
+  x,const = x.pop_const()
+  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
   if (gcd := math.gcd(c, const, *factors)) == 1: return None
   ret = UOp(d.op, x.dtype, src=(sum(f//gcd * v for f,v in zip(factors, terms)) + const//gcd, y.const_like(y.arg//gcd)))
   return ret*gcd if d.op is Ops.MOD else ret
@@ -178,7 +186,7 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  _, factors, _ = x.terms_factors_and_const
+  factors = [u.const_factor() for u in split_uop(x.pop_const()[0], Ops.ADD)]
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   div = min([y.arg]+[f for f in factors if f > 1 and (c%f)==0])
@@ -188,7 +196,8 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and take out the quotient and see if it allows the numerator to be simplified
   if (y.op is not Ops.CONST) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  terms, factors, const = x.terms_factors_and_const
+  x_no_const,const = x.pop_const()
+  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x_no_const, Ops.ADD)])
   quotients, remainders = zip(*[divmod(f, c) for f in factors])
   gcd = math.gcd(c, *remainders)  # gcd without const!
   if const%c==const and gcd==1 and not any(r==0 or (r!=f and d.op is Ops.MOD) for r,f in zip(remainders, factors)): return None
