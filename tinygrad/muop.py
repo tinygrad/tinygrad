@@ -79,8 +79,8 @@ def assemble(src:list[MUOp]) -> bytes:
   return bytes(bin)
 
 # *** X86 ***
-GPR = tuple(Register(name, i, 8) for i,name in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,16)]))
-VEC = tuple(Register(name, i, 16) for i,name in enumerate(["xmm"+str(i) for i in range(0,16)]))
+GPR = tuple(Register(name, i, 8) for i,name in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,10)]))
+VEC = tuple(Register(name, i, 16) for i,name in enumerate(["xmm"+str(i) for i in range(0,4)]))
 #https://wiki.osdev.org/X86-64_Instruction_Encoding
 @dataclass(frozen=True)
 class MUOpX86(MUOp):
