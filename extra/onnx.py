@@ -404,7 +404,7 @@ class OnnxRunner:
     self._init_from_graph(model["graph"])
 
   def _init_from_graph(self, graph: dict):
-    self.is_training = any("domain" in n and n["domain"] in {"ai.onnx.training", "ai.onnx.preview.training"} for n in graph["node"])
+    self.is_training = any("domain" in n and n["domain"] in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in graph["node"])
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
