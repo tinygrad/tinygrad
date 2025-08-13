@@ -1127,6 +1127,10 @@ class Tensor(MathTrait):
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     x, indices = self, list(indices)
 
+    if v is not None:
+      # for setitem, promote int indices to Tensor indices to use the fancy indexing path, which handles lazy updates correctly.
+      indices = [Tensor([i], device=self.device, requires_grad=False) if isinstance(i, int) else i for i in indices]
+
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
@@ -1261,22 +1265,11 @@ class Tensor(MathTrait):
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
-    if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self.realize()._getitem(indices).assign(v)
-      return
-    # NOTE: check that setitem target is valid first
     if not unwrap(self.uop.st).contiguous: raise RuntimeError("setitem target needs to be contiguous")
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+    self.replace(self._getitem(indices, v))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
