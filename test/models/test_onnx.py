@@ -167,7 +167,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
         elif item.is_dir():
           print(f"  {item.relative_to(DOWNLOADS_DIR)}/")
     else:
-      print(f"  Directory does not exist")
+      print("  Directory does not exist")
     onnx_model_path = Path(huggingface_hub.snapshot_download(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
