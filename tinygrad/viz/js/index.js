@@ -121,14 +121,6 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-const drawLine = (ctx, x, y) => {
-  ctx.beginPath();
-  ctx.moveTo(x[0], y[0]);
-  ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
-  ctx.stroke();
-}
-
 const createPolygons = (source, area) => {
   const shapes = [];
   const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
@@ -142,10 +134,19 @@ const createPolygons = (source, area) => {
   return shapes;
 }
 
+const drawLine = (ctx, x, y) => {
+  ctx.beginPath();
+  ctx.moveTo(x[0], y[0]);
+  ctx.lineTo(x[1], y[1]);
+  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.stroke();
+}
+
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
+  // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
   const deviceList = profiler.append("div").attr("id", "device-list").node();
@@ -173,16 +174,17 @@ async function renderProfiler() {
       let newOffset = null;
       for (const [track, v] of data.tracks) {
         if (track === `${k} memory`)  {
+          // expand the y axis or reset to default size
           const pick = [areaScale(mem.peak), maxArea*4];
-          const [newArea, prevArea] = k === focusedDevice ? pick : pick.reverse();
-          data.axes.y = k == focusedDevice ? null : { domain:[0, mem.peak], range:[v.offsetY+newArea, v.offsetY], fmt:"B" };
-          focusedDevice = k === focusedDevice ? null : k;
+          const expand = k !== focusedDevice;
+          const [newArea, prevArea] = expand ? pick.reverse() : pick;
+          focusedDevice = expand ? k : null;
+          data.axes.y = expand ? { domain:[0, mem.peak], range:[v.offsetY+newArea, v.offsetY], fmt:"B" } : null;
+          // either way update all offsets
           v.shapes = createPolygons(mem, newArea);
           newOffset = newArea-prevArea;
           v.div.style.height = rect(v.div).height+newOffset+"px";
-        } else if (newOffset != null) {
-          v.offsetY += newOffset;
-        }
+        } else if (newOffset != null) v.offsetY += newOffset;
       }
       d3.select(canvas).call(canvasZoom.transform, zoomLevel);
       if (prevScroll) profiler.node().scrollTop = prevScroll;
@@ -219,7 +221,6 @@ async function renderProfiler() {
     // lastly, adjust device rect by number of levels
     div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
-
   updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -503,7 +504,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
