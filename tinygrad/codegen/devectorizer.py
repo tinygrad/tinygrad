@@ -319,12 +319,14 @@ pm_reduce_collapse = PatternMatcher([
   ((UPat.var("x")+UPat.var("y"))+UPat.var("c"),
     lambda x,y,c: (y+c)+x if c.op not in (Ops.CONST, Ops.VCONST) and (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) else None),
   # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) else None),
+  ((UPat.var("x")+UPat.var("y")) < UPat.var("c"),
+    lambda x,y,c: (x < (c-y)) if (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) else None),
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) and y.vmin > 0 else None),
   # lift x+y out of reduce on ne
-  ((UPat.var("x")+UPat.var("y")) != UPat.var("c"), lambda x,y,c: (x != (c-y)) if (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) else None),
+  ((UPat.var("x")+UPat.var("y")) != UPat.var("c"),
+    lambda x,y,c: (x != (c-y)) if (ri_x:=max_range_idx(x)>max_range_idx(y)) and ri_x>max_range_idx(c) else None),
   # fold the range
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
