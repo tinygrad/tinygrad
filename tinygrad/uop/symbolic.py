@@ -1,6 +1,6 @@
 # all of symbolic lives here now
 from typing import Any, Literal, cast
-import math, operator, struct, functools
+import math, operator, struct, functools, heapq
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
@@ -224,10 +224,17 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
 ])
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.int, name='x'),
+    lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.ADD, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[0].op is not Ops.ADD and \
+          (x.src[1].op is Ops.ADD or (x.src[0].order_add > x.src[1].order_add)) else None),  # a+(b+c) -> (b+c)+a, chain is always on the left hand side
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -305,6 +312,12 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  # swap terms if they are out of order (a+c)+b -> (a+b)+c
+  (UPat(Ops.ADD, dtype=dtypes.int, src=(UPat(Ops.ADD, name="chain"), UPat(name="b"))),
+    lambda chain,b: chain_insert(chain,b,Ops.ADD) if b.order_add < chain.src[1].order_add else None),
+  # merge/flatten two add chains, (a+c)+(b+d) -> a+b+c+d
+  (UPat(Ops.ADD, dtype=dtypes.int, src=(UPat(Ops.ADD, name='a'), UPat(Ops.ADD, name='b'))), lambda a,b:
+    sum(heapq.merge(split_uop(a, Ops.ADD), split_uop(b, Ops.ADD), key=lambda u: u.order_add))),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
