@@ -480,6 +480,7 @@ class OnnxRunner:
     return {name:self.graph_values[name] for name in self.graph_outputs}
 
 class SubGraphOnnxRunner(OnnxRunner):
+  """Usage: https://onnx.ai/onnx/intro/concepts.html#subgraphs-tests-and-loops"""
   def __init__(self, graph: dict): self._init_from_graph(graph)
 
 ####################
@@ -548,7 +549,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
-  def If(condition:Tensor, else_branch, then_branch, intermediate_tensors):
+  def If(condition:Tensor, else_branch:dict, then_branch:dict, intermediate_tensors:dict[str, Tensor]):
     else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
     else_graph.graph_values.update(intermediate_tensors)
     then_graph.graph_values.update(intermediate_tensors)
