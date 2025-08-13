@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
-from tinygrad.uop.transcendental import xpow
+from tinygrad.uop.decompositions import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
@@ -71,6 +71,19 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
+  # rules for threefry
+  ((UPat.var('x', dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast_vec(dtypes.uint32)&0xFFFFFFFF), # TODO: why is the and needed?
+  (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
+  (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
+  # hacks for threefry long removal when padded (TODO: genericize)
+  (UPat.var('x', dtypes.uint32).cast(dtypes.uint64) * UPat.var('y').where(UPat.const(dtypes.uint64, 1<<32), UPat.const(dtypes.uint64, 0)),
+   lambda x,y: y.where(x, 0).cast_vec(dtypes.uint64) * (1<<32)),
+  ((UPat.var('x', dtypes.uint64)&(UPat.var('y').where(UPat.const(dtypes.uint64, 0xFFFFFFFF), UPat.const(dtypes.uint64, 0)))).cast(dtypes.uint32),
+   lambda x,y: y.where(x.cast_vec(dtypes.uint32), 0)),
+  # new decomp rules for threefry
+  (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
+  (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32, lambda x: x),
+  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0))
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
@@ -378,22 +391,6 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
-# ***** threefry *****
-
-def threefry2x32(x: UOp, key: UOp):
-  # split x and key from uint64 to two uint32
-  x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
-
-  rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
-  xr = [x0 + ks[-1], x1 + ks[0]]
-  for i in range(5):
-    for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
-    xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
-
-  return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
-
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
 def reduce_mul_chain(r:UOp):
@@ -428,16 +425,6 @@ sym = symbolic_flat+PatternMatcher([
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),
-  # threefry + remove longs
-  (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
-  ((UPat.var('x', dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast(dtypes.uint32)),  # cast does truncation
-  (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
-  (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
-  # hacks for threefry long removal when padded (TODO: genericize)
-  (UPat.var('x', dtypes.uint32).cast(dtypes.uint64) * UPat.var('y').where(UPat.const(dtypes.uint64, 1<<32), UPat.const(dtypes.uint64, 0)),
-   lambda x,y: y.where(x, UOp.const(dtypes.uint32, 0)).cast(dtypes.uint64) * (1<<32)),
-  ((UPat.var('x', dtypes.uint64)&(UPat.var('y').where(UPat.const(dtypes.uint64, 0xFFFFFFFF), UPat.const(dtypes.uint64, 0)))).cast(dtypes.uint32),
-   lambda x,y: y.where(x.cast(dtypes.uint32), UOp.const(dtypes.uint32, 0))),
   # ** self folding **
   # x!=0 -> (bool)x
   (UPat.var("x")!=0, lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
