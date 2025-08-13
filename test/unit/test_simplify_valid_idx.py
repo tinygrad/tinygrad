@@ -58,7 +58,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "(((lidx0+(gidx0*4))<19)!=True)")
+      "((((gidx0*4)+lidx0)<19)!=True)")
 
   def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
@@ -290,7 +290,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((alu4+1530)%1536, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2))
 
     load = get_load_image_uop(shape, valid, idx)
-    self.check(load, None, "((((idx1*48)+(ridx2*6))+ridx0)+-6)", "(((idx2*2)+ridx1)+-1)")
+    self.check(load, None, "((((idx1*48)+ridx0)+(ridx2*6))+-6)", "(((idx2*2)+ridx1)+-1)")
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py

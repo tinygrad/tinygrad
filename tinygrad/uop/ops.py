@@ -130,7 +130,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, -self.arg if self.op is Ops.RANGE else self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   @functools.cached_property
   def order_add(self:UOp) -> tuple:
