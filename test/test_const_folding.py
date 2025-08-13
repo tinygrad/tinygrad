@@ -290,17 +290,12 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t + zero).numpy(), np.arange(16))
     np.testing.assert_equal((t * zero).numpy(), [0] * 16)
     np.testing.assert_equal((t * one).numpy(), np.arange(16))
-
-  def test_multi_todo_pow(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
-    zero = Tensor.zeros(16).to(ds).realize()
-    one = Tensor.ones(16).to(ds).realize()
-
-    # TODO: fix pow folding
     _check_ast_count(0, t ** zero)
     _check_ast_count(0, t ** one)
     _check_ast_count(0, one ** t)
+    np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
+    np.testing.assert_equal((t ** one).numpy(), np.arange(16))
+    np.testing.assert_equal((one ** t).numpy(), [1] * 16)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
