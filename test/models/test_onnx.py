@@ -11,7 +11,7 @@ except ModuleNotFoundError:
 from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
-from tinygrad.helpers import CI, fetch, temp, getenv
+from tinygrad.helpers import CI, fetch, temp, Context
 
 try:
   import huggingface_hub
@@ -151,17 +151,12 @@ class TestOnnxModel(unittest.TestCase):
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls._old_max_buffer_size = os.environ.get("MAX_BUFFER_SIZE")
-    os.environ["MAX_BUFFER_SIZE"] = "0"
-    # clear tinygrad.helpers.getenv cache so runtime picks up new env
-    getenv.cache_clear()
+    cls._ctx = Context(MAX_BUFFER_SIZE=0)
+    cls._ctx.__enter__()
 
   @classmethod
   def tearDownClass(cls):
-    if cls._old_max_buffer_size is None: os.environ.pop("MAX_BUFFER_SIZE", None)
-    else: os.environ["MAX_BUFFER_SIZE"] = cls._old_max_buffer_size
-    # clear cache again after restoring environment
-    getenv.cache_clear()
+    cls._ctx.__exit__()
 
   def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
     onnx_model_path = Path(huggingface_hub.snapshot_download(
