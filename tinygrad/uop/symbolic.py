@@ -336,14 +336,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.MOD, dtypes.sints, name="m", src=(UPat.var("x"), UPat.var("y"))), remove_nested_mod),
   (UPat((Ops.IDIV), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), nest_div_by_smallest_factor),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), simplify_remainder),
-  # (UPat.var("x", dtypes.sints) // UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.IDIV)),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),
   ((UPat.var("x", dtypes.sints)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
   # ** mod **
   # mod folding
-  # (UPat.var("x") % UPat.var("y"), lambda x,y: div_and_mod_folding(x,y,Ops.MOD)),
   (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
 ])+gep_pushing
