@@ -531,7 +531,8 @@ def batch_load_train_stable_diffusion(BS:int, device:str|None=None):
   # webdataset depends on torch.utils.data.DataLoader
   import webdataset
   # TODO: add code for downloading/caching dataset, in extra/datasets/laion
-  dataset = webdataset.WebDataset(urls=f'{os.getenv("BASEDIR")}/datasets/laion-400m/webdataset-moments-filtered/{{00000..00000}}.tar', resampled=True,
+  #dataset = webdataset.WebDataset(urls=f'{os.getenv("BASEDIR")}/datasets/laion-400m/webdataset-moments-filtered/{{00000..00000}}.tar', resampled=True,
+  dataset = webdataset.WebDataset(urls=f'{os.getenv("DATADIR")}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', resampled=True,
                                   cache_size=-1, cache_dir=None)
   dataset = dataset.shuffle(size=1000)
   dataset = dataset.decode()
