@@ -298,17 +298,17 @@ def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
 
 def threefry2x32(x: UOp, key: UOp):
   # split x and key from uint64 to two uint32
-  x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
-  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  x0, x1 = (x & 0xffffffff).cast_vec(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast_vec(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast_vec(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast_vec(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
   ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
-  xr = [x0 + ks[-1], x1 + ks[0]]
+  xr:list[UOp] = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
     for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
     xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
 
-  return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
+  return xr[1].cast_vec(dtypes.uint64) * 2**32 | xr[0].cast_vec(dtypes.uint64)
 
 # ***** decomposition patterns *****
 
