@@ -9,11 +9,6 @@ from tinygrad.uop.transcendental import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
-def split_uop(x:UOp, sep:Ops):
-  if x.op is sep:
-    for s in x.src: yield from split_uop(s, sep)
-  else: yield x
-
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.arg < 0: return x.reciprocal().pow(-c)
   if c.arg == 0: return x.const_like(1)
@@ -79,6 +74,11 @@ symbolic_simple = PatternMatcher([
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
+
+def split_uop(x:UOp, sep:Ops):
+  if x.op is sep:
+    for s in x.src: yield from split_uop(s, sep)
+  else: yield x
 
 def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   # div pattern in unrolled arange
