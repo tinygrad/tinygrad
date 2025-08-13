@@ -6,9 +6,9 @@ from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfilePointEvent, Device
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
@@ -115,7 +115,7 @@ DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
     if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
-    elif isinstance(e, ProfilePointEvent): yield (e.st, e.st, e)
+    elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
@@ -152,19 +152,19 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.ref] = temp[e.ref] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.st))
+      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
+      timestamps.append(int(e.ts))
       step += 1
       mem += e.arg["nbytes"]
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.st))
+      timestamps.append(int(e.ts))
       step += 1
-      mem -= (removed:=temp.pop(e.ref))["arg"]["nbytes"]
+      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
-        if k > e.ref:
+        if k > e.key:
           v["x"] += [step, step]
           v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
   for v in temp.values():
