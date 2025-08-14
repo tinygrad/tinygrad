@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
 
 T = TypeVar("T")
@@ -139,7 +139,7 @@ DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
 DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
 QUANTIZE, VALIDATE_WITH_CPU = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
-ALLOW_DEVICE_USAGE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("AMD_LLVM", 1)
+ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0), ContextVar("AMD_LLVM", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -203,6 +203,9 @@ class ProfileEvent: pass
 
 @dataclass
 class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+
+@dataclass(frozen=True)
+class ProfilePointEvent(ProfileEvent): device:str; name:str; ts:decimal.Decimal; key:int; arg:dict=field(default_factory=dict) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager

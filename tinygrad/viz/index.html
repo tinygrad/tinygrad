@@ -73,7 +73,6 @@
     user-select: auto;
   }
   g.tag circle {
-    r: 5;
     fill: #FFD700;
     stroke: #B8860B;
     stroke-width: 0.8;
@@ -81,10 +80,9 @@
   g.tag text {
     text-anchor: middle;
     font-size: 6px;
-    fill: black;
+    fill: #08090e;
   }
   .label :is(text, p) {
-    color: #08090e;
     font-weight: 350;
   }
   .edgePath {
@@ -209,7 +207,7 @@
     max-height: 30vh;
     padding: 8px;
   }
-  .progress-message {
+  #progress-message {
     position: absolute;
     z-index: 2;
     left: 50%;
@@ -321,7 +319,7 @@
         </svg>
       </button>
     </div>
-    <div class="progress-message"></div>
+    <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view profiler"></div>
     <div class="view graph">

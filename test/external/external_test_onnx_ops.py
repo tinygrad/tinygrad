@@ -96,12 +96,25 @@ class TestMainOnnxOps(TestOnnxOps):
     # excluded 3.5 because some values divide into slight numerical differences, which when rounded gives wrong results
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 20.0], mode="nearest")
 
+  def test_resize_cubic_mode(self):
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=1)
+    self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=0)
+
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-131
     X = np.array([[[[1, 2, 3, 4], [5, 6, 7, 8]]]], dtype=np.float32)
     scales = np.array([1.0, 1.0, 0.6, 0.6], dtype=np.float32)
     inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
     attributes = {"mode": "linear", "coordinate_transformation_mode": "align_corners"}
+    outputs = ["out"]
+    self.helper_test_single_op("Resize", inputs, attributes, outputs)
+
+  def test_resize_downsample_scales_cubic_align_corners(self):
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-131
+    X = np.array([[[[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]]]], dtype=np.float32)
+    scales = np.array([1.0, 1.0, 0.8, 0.8], dtype=np.float32)
+    inputs = {"X": X, "roi": np.array([], dtype=np.float32), "scales": scales}
+    attributes = {"mode": "cubic", "coordinate_transformation_mode": "align_corners"}
     outputs = ["out"]
     self.helper_test_single_op("Resize", inputs, attributes, outputs)
 
@@ -281,7 +294,6 @@ class TestTrainingOnnxOps(TestOnnxOps):
         outputs = ["X_out", "V_out"]
         self._validate_training("Momentum", onnx_fxn, inputs, attributes, outputs)
 
-  @unittest.expectedFailure  # TODO: regression from removing StrEnum in Domain
   def test_adam_t_greater_than_zero(self):
     from onnx.backend.test.case.node.adam import apply_adam
     for t in [1, 3, 100]:

@@ -332,7 +332,7 @@ jobs:
         python3 -m ruff check extra/onnx.py
         python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
-      run: python -m pylint tinygrad/
+      run: python -m pylint tinygrad/ extra/onnx.py
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .
@@ -977,6 +977,7 @@ jobs:
         with:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
+          pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'cpu' && 'CPU=1' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV
