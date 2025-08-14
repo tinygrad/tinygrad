@@ -173,7 +173,8 @@ pm_rangeify = PatternMatcher([
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
    lambda er: er.src[0].replace(src=(UOp(Ops.ENDRANGE, dtype=er.dtype, src=(er.src[0].src[0],)+er.src[1:]),))),
   # handle ENDRANGE on BUFFER
-  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.CONTIGUOUS)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
+  # and CHILD: python3 test/test_schedule.py TestSchedule.test_cache_reduce_parent
+  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.CONTIGUOUS, Ops.CHILD)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
   # handle INDEXed ENDRANGE
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),

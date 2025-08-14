@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple, sym
-from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP, Timing
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
@@ -344,21 +344,22 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
-  rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, bottom_up=True, name="* contiguous")
-  rsink = graph_rewrite(rsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="* children")
-  rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
-  rsink = graph_rewrite(rsink, sym, name="* symbolic")
-  rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
+  with Timing("rangeify in"):
+    rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, bottom_up=True, name="* contiguous")
+    rsink = graph_rewrite(rsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="* children")
+    rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
+    rsink = graph_rewrite(rsink, sym, name="* symbolic")
+    rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
 
-  from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
-  rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
-  from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
-  rsink = apply_rewrites(rsink, rewrites_for_linearizer)
-  from tinygrad.renderer.cstyle import CStyleLanguage
-  src = CStyleLanguage().render(rsink.arg.lst)
-  #from tinygrad import Device
-  #src = Device.default.renderer.render(rsink.arg.lst)
-  print(src)
+    from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
+    rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
+    from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
+    rsink = apply_rewrites(rsink, rewrites_for_linearizer)
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    src = CStyleLanguage().render(rsink.arg.lst)
+    #from tinygrad import Device
+    #src = Device.default.renderer.render(rsink.arg.lst)
+    print(src)
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
