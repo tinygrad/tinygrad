@@ -280,7 +280,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
+def fast_cdiv(device: str, x: UOp, d: int) -> UOp|None:
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
   assert d>0, "Sign should have been taken out of divisor"
@@ -323,16 +323,17 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
   if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
+  if Ops.IDIV in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda ctx, x, d: x - d*(x//d))]
+  # if Ops.MOD not in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.var("y"), lambda x,y: x.alu(Ops.CMOD, y))
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    # no reason to check x<0 for uints
-    pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
-      c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
+    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not getenv("DISABLE_FAST_IDIV"):
-      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda ctx, x, d: x - d*f if (f:=fast_idiv(ctx, x, d.arg)) is not None else None)]
+      pat += [(UPat.var("x", dtypes.ints).alu(Ops.CDIV, UPat.cvar("d")), lambda ctx, x, d: fast_cdiv(ctx, x, d.arg))]
+  # rewrite floordiv to cdiv
+  if Ops.CDIV in ops: pat += [(UPat.var("x", dtypes.ints)//UPat.var("d"), lambda ctx, x, d: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
+    -d+1, 0)).alu(Ops.CDIV, d))]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
