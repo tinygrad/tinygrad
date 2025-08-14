@@ -1,5 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from tinygrad.dtype import DType, dtypes
+from tinygrad.uop import Ops
 
 @dataclass(frozen=True)
 class Register:
@@ -79,8 +81,8 @@ def assemble(src:list[MUOp]) -> bytes:
   return bytes(bin)
 
 # *** X86 ***
-GPR = tuple(Register(name, i, 8) for i,name in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,10)]))
-VEC = tuple(Register(name, i, 16) for i,name in enumerate(["xmm"+str(i) for i in range(0,4)]))
+GPR = tuple(Register(name, i, 8) for i,name in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,16)]))
+VEC = tuple(Register(name, i, 16) for i,name in enumerate(["xmm"+str(i) for i in range(0,16)]))
 #https://wiki.osdev.org/X86-64_Instruction_Encoding
 @dataclass(frozen=True)
 class MUOpX86(MUOp):
@@ -101,6 +103,7 @@ class MUOpX86(MUOp):
   imm: Immediate|Register|None = None
   # REX methods
   def RM(opstr, opcode, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, prefix=prefix, w=w)
+  def _RM(opstr, opcode, reg, rm, w=0, prefix=0, in_cons=GPR): return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, prefix=prefix, w=w)
   def R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
   def _R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, prefix=prefix, w=w)
   def RM_R(opstr, opcode, rm, reg, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
@@ -131,6 +134,31 @@ class MUOpX86(MUOp):
       return x
     return MUOpX86(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, _sub(self.reg), _sub(self.rm), self.pp, self.map_select, self.we,
                    self.l, _sub(self.vvvv), self.prefix, self.w, _sub(self.imm))
+  def i_ops(op:Ops, dt:DType):
+    if dt.itemsize == 1: return {Ops.ADD: ("add", 0x02), Ops.SUB: ("sub", 0x2A), Ops.AND: ("and", 0x22), Ops.OR: ("or", 0x0A),
+                                 Ops.XOR: ("xor", 0x32), Ops.CMPNE: ("cmp", 0x3A), Ops.CMPLT: ("cmp", 0x3A)}[op]
+    return {Ops.ADD: ("add", 0x03), Ops.SUB: ("sub", 0x2B), Ops.MUL: ("imul", 0x0FAF), Ops.AND: ("and", 0x23), Ops.OR: ("or", 0x0B),
+            Ops.XOR: ("xor", 0x33), Ops.CMPNE: ("cmp", 0x3B), Ops.CMPLT: ("cmp", 0x3B)}[op]
+  def imm_ops(op:Ops, dt:DType):
+    if dt.itemsize == 1:
+      if op is Ops.SHR: return ("shr", 0xC0, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC0, 7)
+      return {Ops.ADD: ("add", 0x80, 0), Ops.OR: ("or", 0x80, 1), Ops.AND: ("and", 0x80, 4), Ops.SUB: ("sub", 0x80, 5), Ops.XOR: ("xor", 0x80, 6),
+              Ops.SHL: ("shl", 0xC0, 4), Ops.CMPNE: ("cmp", 0x80, 7), Ops.CMPLT: ("cmp", 0x80, 7)}[op]
+    if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
+    return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
+            Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7)}[op]
+  def ivec_ops(op:Ops, sz:int):
+    if sz == 1: return {Ops.ADD: ("vpaddb", 0xFC), Ops.SUB: ("vpsubb", 0xF8), Ops.CMPGT: ("vpcmpgtb", 0x64), Ops.CMPEQ: ("vpcmpeqb", 0x74)}[op]
+    if sz == 2: return {Ops.ADD: ("vpaddw", 0xFD), Ops.SUB: ("vpsubw", 0xF9), Ops.MUL: ("vpmullw", 0xD5), Ops.CMPGT: ("vpcmpgtw", 0x65), Ops.CMPEQ: ("vpcmpeqw", 0x75)}[op]
+    if sz == 4: return {Ops.ADD: ("vpaddd", 0xFE), Ops.SUB: ("vpsubd", 0xFA), Ops.CMPGT: ("vpcmpgtd", 0x66), Ops.CMPEQ: ("vpcmpeqd", 0x76)}[op]
+    if sz == 8: return {Ops.ADD: ("vpaddq", 0xD4), Ops.SUB: ("vpsubq", 0xFB)}[op]
+  def f_ops(op:Ops, sz:int):
+    if sz == 4: return {Ops.ADD: ("vaddps", 0x58), Ops.SUB: ("vsubps", 0x5C), Ops.MUL: ("vmulps", 0x59), Ops.FDIV: ("vdivps", 0x5E)}[op]
+    if sz == 8: return {Ops.ADD: ("vaddpd", 0x58), Ops.SUB: ("vsubpd", 0x5C), Ops.MUL: ("vmulpd", 0x59), Ops.FDIV: ("vdivpd", 0x5E)}[op]
+  #def idiv(out:Register, in0:Register, in1:Register, is_signed:bool) -> MUOp:
+  #  in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
+  #  move = MUOpX86("mov", 0x8B, out, (in0,), (Register("rax", 0, 8),), (GPR,), out, in0, w=int(out.size == 8), prefix=int(out.size == 2))
+  #  extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
   def load(dest:Register, src:Memory) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
     if dest in GPR and dest.size == 2: return MUOpX86.R_RM("mov", 0x8B, dest, src, 0, 0x66)
@@ -164,9 +192,10 @@ class MUOpX86(MUOp):
     # *** EXCEPTIONS *** certain instructions have specific encodings
     if self.opstr == "": return b'' # fake MUOp
     if self.opcode == 0xC3: return self.opcode.to_bytes() # ret
-    if self.opcode in (0x50, 0x58) and not self.map_select: return int(self.opcode + self.ins[0].index).to_bytes((self.opcode.bit_length() + 7) // 8) # push/pop
+    if self.opcode == 0x99: # cwd/cdq/cqo
+      return ((0b0100 << 4) | (self.w << 3) | 0b000).to_bytes() + self.opcode.to_bytes()
     if self.opcode == 0xB8: # 64bit imm load
-      return ((0b0100 << 4) | (self.w << 3) | ((int(self.out.index > 7) & 0b1) << 2) | 0b00).to_bytes() + \
+      return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(self.out.index > 7) & 0b1)).to_bytes() + \
         int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little')
     if self.opcode in (0x0F8C, 0x0F84): # jumps
       inst.extend(self.opcode.to_bytes(2))
@@ -176,7 +205,7 @@ class MUOpX86(MUOp):
     r = int(isinstance(self.reg, Register) and self.reg.index > 7)
     # extends reg for index
     x = int(isinstance(self.rm, Memory) and self.rm.index is not None and self.rm.index.index > 7)
-    # extends reg for base in sib or extends rmop field
+    # extends reg for base in sib or extends rm field
     b = int(isinstance(self.rm, Memory) and self.rm.base.index > 7 or isinstance(self.rm, Register) and self.rm.index > 7)
     if self.map_select:
       # *** VEX prefix ***
@@ -208,7 +237,7 @@ class MUOpX86(MUOp):
     # specifies operand types
     mod = 0b11
     # TODO: support 8 bit displacement
-    #if isinstance(rmop, Memory): mod = 0b00 if rmop.disp.value == 0 else 0b01 if -128 <= rmop.disp.value < 128 else 0b10
+    #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp.value == 0 else 0b01 if -128 <= self.rm.disp.value < 128 else 0b10
     if isinstance(self.rm, Memory):
       if self.rm.disp.value == 0: mod = 0b01 if self.rm.base.name == "r13" else 0b00
       else: mod = 0b10
