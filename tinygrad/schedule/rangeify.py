@@ -6,7 +6,8 @@ from tinygrad.helpers import argsort, prod, all_same
 
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op not in {Ops.CONTIGUOUS, Ops.CONST} else s for s in x.src]))),
+  (UPat(Ops.SINK, name="x"),
+   lambda x: x.replace(src=tuple([s.contiguous().index() if s.op not in {Ops.INDEX, Ops.CONST} else s for s in x.src]))),
   # all contiguous on COPY
   (UPat(Ops.COPY, name="x"), lambda x: x.replace(tag=1).contiguous() if x.tag is None else None),
   # double contiguous merge
@@ -59,7 +60,7 @@ def map_reshape(x:UOp, r:UOp):
     else:
       ret.append(UOp.const(dtypes.int, 0))
   ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
-  return r.src[0].index(*ret)
+  return r.src[0].index(*ret, dtype=x.dtype)
 
 def map_pad(x:UOp, r:UOp):
   ret = list(x.src[1:])
@@ -110,7 +111,7 @@ pm_mops = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 ])
 
-def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
+def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.tag == 1: return None
   ranges = []
   new_ranges = []
@@ -120,7 +121,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       assert idx is not None, "partial contig requires index"
       ranges.append(idx.src[1+i])
       continue
-    if idx is not None: passthrough_idx.append(idx.src[1+i])
+    if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
       ranges.append(UOp.range(dtypes.int, s, ctx.idx))
       new_ranges.append(ranges[-1])
@@ -190,7 +191,7 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
-  (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
+  #(UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
@@ -238,12 +239,14 @@ def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
 def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
-  return st.src[0].src[0].shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=st.src[0].src[0].size)).load(st)
+  b = st.src[0].src[0]
+  assert b.op is Ops.BUFFER
+  return b.shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=b.size)).load(st)
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
   (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
+  #(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
   # CONST can't have axes. remove srcs when we idx

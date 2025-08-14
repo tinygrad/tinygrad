@@ -347,6 +347,11 @@ def maybe_copy(s:UOp):
   #b1 = s.src[1].src[0].src[0].src[0]
   #return UOp(Ops.COPY, src=(b0, b1))
 
+do_debuf = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.COPY, name="c"), lambda c: c.src[0]),
+])
+
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
   (UPat(Ops.LOAD, name="s"), split_load),
@@ -387,24 +392,30 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   with Timing("*** rangeify in "):
     tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, input_map=tensor_map, name="* contiguous")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
-    tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
-    tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
-    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
 
-    if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
+    #tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
+    #tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
+    #tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
+
+    rsink = tensor_map[sink]
+
+    my_ctx = []
+    rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
+    rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
+    rsink = graph_rewrite(rsink, do_debuf, ctx=my_ctx, name="* debuf")
+    #if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
     #rsink = graph_rewrite(rsink, sym, name="* symbolic")
 
     #from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
     #rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
 
-    """
     from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
     rsink = apply_rewrites(rsink, rewrites_for_linearizer)
     from tinygrad.renderer.cstyle import CStyleLanguage
     src = CStyleLanguage().render(rsink.arg.lst)
     print(src)
-    """
-    return tensor_map
+    return {}
+    #return tensor_map
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
