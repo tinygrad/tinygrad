@@ -1,7 +1,7 @@
 from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, AxisType, RewriteNotReady
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same
 
 rangeify_fixups = PatternMatcher([
@@ -29,6 +29,9 @@ def mark_children(ctx:ChildrenContext, x:UOp):
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
   (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
+
+  # hack for one kernel threefry
+  (UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
 ])
 
 @dataclass
