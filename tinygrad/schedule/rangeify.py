@@ -7,6 +7,8 @@ from tinygrad.helpers import argsort, prod, all_same
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op not in {Ops.CONTIGUOUS, Ops.CONST} else s for s in x.src]))),
+  # all contiguous on COPY
+  (UPat(Ops.COPY, name="x"), lambda x: x.replace(tag=1).contiguous() if x.tag is None else None),
   # double contiguous merge
   (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
   # const
@@ -201,10 +203,9 @@ pm_rangeify = pm_mops+PatternMatcher([
         allow_any_len=True, name="idx"), indexed_endrange),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
-
 
   # CONTIGUOUS on ASSIGN is STORE
   # TODO: tag in UPat?
@@ -237,7 +238,7 @@ def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
 def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
-  return st.src[0].src[0].shrink(((0,prod(shape)),)).reshape(shape).index(*rngs).load(st)
+  return st.src[0].src[0].shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=st.src[0].src[0].size)).load(st)
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
@@ -245,8 +246,6 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
-  # HACK: ignore copy
-  (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
   # CONST can't have axes. remove srcs when we idx
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
   # HACK: consts shouldn't have srcs by here

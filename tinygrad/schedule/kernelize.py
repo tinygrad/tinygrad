@@ -330,7 +330,8 @@ new_fixups = mops_merge+PatternMatcher([
 # *** store splitting
 
 def split_load(ctx:list[UOp], s:UOp):
-  if len(s.src) == 1 or s.src[0].src[0].op is not Ops.DEFINE_GLOBAL: return None
+  if len(s.src) == 1: return None
+  ctx.extend(s.src[1:])
   return s.replace(src=s.src[0:1])
 
 def debuf(ctx:list[int], b:UOp):
@@ -338,18 +339,25 @@ def debuf(ctx:list[int], b:UOp):
   ctx.append(b)
   return ret
 
+def maybe_copy(s:UOp):
+  if s.src[1].op is not Ops.COPY: return None
+  return UOp(Ops.COPY)
+  #b0 = s.src[0].src[0]
+  #b1 = s.src[1].src[0].src[0].src[0]
+  #return UOp(Ops.COPY, src=(b0, b1))
+
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
   (UPat(Ops.LOAD, name="s"), split_load),
+  (UPat(Ops.STORE, name="s"), maybe_copy),
 ])
 
 def split_store(x:UOp):
   shape = tuple([r.vmax+1 for r in x.src[2:]])
   name = "k_"+'_'.join([str(s) for s in shape])
-
   b = x.src[0].src[0]
   ctx = []
-  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split")
+  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split", bottom_up=True)
   ret = ret.sink(arg=KernelInfo(name=name))
   kernel = UOp(Ops.KERNEL, src=(b,)+tuple(ctx), arg=Kernel(ret, ()))
   return b.assign(kernel)
@@ -380,7 +388,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
-    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, bottom_up=True, input_map=tensor_map, name="* split kernels")
+    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
 
     if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
     #rsink = graph_rewrite(rsink, sym, name="* symbolic")
