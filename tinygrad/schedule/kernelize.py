@@ -285,7 +285,7 @@ DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
 def limit_bufs(root:UOp):
   # check if backend has a buffer limit
   device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
-  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 100))): return None
   # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
@@ -294,6 +294,7 @@ def limit_bufs(root:UOp):
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer
   if len(bufs)>=MAX_BUFS-1:
+    if MAX_BUFS==100: raise
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
 def view_add_srcs(x:UOp):
