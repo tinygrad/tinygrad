@@ -290,16 +290,14 @@ async function renderProfiler() {
     }
     // draw axes
     drawLine(ctx, xscale.range(), [0, 0]);
-    const ticks = xscale.ticks();
-    for (const [i, tick] of ticks.entries()) {
+    for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
-      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
-      const padding = i === ticks.length-1 ? -1 : 1;
-      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+      ctx.textAlign = "left";
+      ctx.fillText(formatTime(tick, et-st), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
       drawLine(ctx, [0, 0], yscale.range());

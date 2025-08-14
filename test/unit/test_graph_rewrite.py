@@ -303,8 +303,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
@@ -312,8 +312,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop_bottom_up(self):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)

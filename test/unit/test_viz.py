@@ -124,10 +124,10 @@ class TestViz(BaseTestViz):
 
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
-    b = a.replace(op=Ops.DEFINE_REG)
+    b = a.replace(op=Ops.CONST)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
