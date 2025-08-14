@@ -322,11 +322,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(((a*-1)%10)*-1)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 9, "(a%10)")  # TODO: tighter max
+    self.helper_test_variable(Variable("a", -20, 20)%10, 0, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 0)%10, 0, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 1)%10, 0, 9, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -9, 9, "(a%10)")  # TODO: tighter min
+    self.helper_test_variable(Variable("a", -1, 20)%10, 0, 9, "(a%10)")
 
   def test_ge_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
@@ -398,8 +398,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
-    self.helper_test_variable((Variable("a", 0, 5)-2)//4, 0, 0, "0")
-    self.helper_test_variable((Variable("a", 0, 5)-1)//4, 0, 1, "((a+-1)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "(((a+2)//4)+-1)")
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "(((a+3)//4)+-1)")
     self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
     self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")
@@ -436,8 +436,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("a", 0, 2))//7, 0, 0, "0")
 
   def test_cmod_const_evaluation(self):
-    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, -3, -3, "-3")
-    self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
+    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, 5, 5, "5")
+    self.helper_test_variable((-Variable("a", 10, 10))%7, 3, 3, "3")
 
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")

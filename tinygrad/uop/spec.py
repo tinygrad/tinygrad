@@ -6,11 +6,12 @@ from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
 
-  # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
+  # IDIV is floored division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
-  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
+  def z3_floordiv(a,b): return z3.If(0<b, a/b, ((a-(b+1))/b))
+  z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-(b*z3_floordiv(a,b)), Ops.IDIV: z3_floordiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
     Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
-    Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
+    Ops.MAX: lambda a,b: z3.If(a<b, b, a), Ops.CDIV: z3_cdiv}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
     solver.add(vmin <= s, s <= vmax)

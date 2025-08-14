@@ -66,6 +66,7 @@ class Ops(FastEnum):
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto() # noqa: E702
   XOR = auto(); OR = auto(); AND = auto() # noqa: E702
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+  CDIV = auto(); CMOD = auto() # noqa: E702  # these are for if IDIV is changed to be floored division, not used currently
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -82,7 +83,7 @@ class Ops(FastEnum):
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
-            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW}
+            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.CDIV}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 

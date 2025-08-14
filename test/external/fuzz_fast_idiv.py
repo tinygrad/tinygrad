@@ -3,7 +3,7 @@ import z3
 from tinygrad import dtypes
 from tinygrad.uop.spec import z3_renderer, z3_cdiv
 from tinygrad.uop.ops import UOp, graph_rewrite
-from tinygrad.uop.decompositions import fast_idiv
+from tinygrad.uop.decompositions import fast_cdiv
 random.seed(42)
 
 powers_of_two = [2**i for i in range(64)]
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     u = UOp.variable('x', random.randint(dt.min, 0), random.randint(1, dt.max), dtype=dt)
     d = random.randint(1, max(1, u.arg[2]))
     if d in powers_of_two: continue
-    expr = fast_idiv(None, u, d)
+    expr = fast_cdiv(None, u, d)
     if expr is None: continue
 
     solver = z3.Solver()
