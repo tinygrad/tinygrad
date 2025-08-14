@@ -332,7 +332,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
     if not getenv("DISABLE_FAST_IDIV"):
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("d"), lambda x, d: x-d*(x//d))]
+      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
