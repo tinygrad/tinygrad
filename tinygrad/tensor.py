@@ -2933,11 +2933,11 @@ class Tensor(MathTrait):
     """
     return self*-1 if self.dtype != dtypes.bool else self.logical_not()
 
-  def contiguous(self) -> Tensor:
+  def contiguous(self, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
     """
-    return self._apply_uop(UOp.contiguous)
+    return self._apply_uop(UOp.contiguous, **kwargs)
 
   def fuse(self) -> Tensor:
     """
@@ -3143,7 +3143,7 @@ class Tensor(MathTrait):
     print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
     ```
     """
-    return self.cast(dtypes.int32).cast(self.dtype)
+    return self._apply_uop(UOp.trunc)
 
   def ceil(self: Tensor) -> Tensor:
     """
@@ -4032,6 +4032,21 @@ class Tensor(MathTrait):
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+
+  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Tensor:
+    """
+    Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(4, 4)
+    print(t.newton_schulz(steps=5, params=(2,-1.5,0.5)).numpy())
+    ```
+    """
+    assert self.ndim > 1, "NS only works for two or more dims"
+    G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
+    G = G.transpose(-2, -1) if self.shape[-2] > self.shape[-1] else G
+    for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G) for i,p in enumerate(params))
+    return G.transpose(-2, -1) if self.shape[-2] > self.shape[-1] else G
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"

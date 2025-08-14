@@ -700,6 +700,10 @@ class TestSymbolic(unittest.TestCase):
     # TODO: should z3 work?
     self.helper_test_variable(2*(2*a).reciprocal(), -math.inf, math.inf, "(1/a)", test_z3=False)
 
+  def test_trunc_noop(self):
+    a = Variable("a", 1, 10, dtypes.int)
+    self.helper_test_variable(a.trunc(), 1, 10, "a", test_z3=False)
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     MIN, MAX = 0, 10
