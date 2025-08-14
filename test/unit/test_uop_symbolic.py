@@ -30,16 +30,16 @@ class TestSymbolicPickle(unittest.TestCase):
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    rendered, nmin, nmax = render(v)
-    if isinstance(s, tuple): self.assertIn(rendered, s)
-    else: self.assertEqual(rendered, s)
-    self.assertEqual(nmin, n)
-    self.assertEqual(nmax, m)
     if test_z3:
       solver = z3.Solver()
       z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
       expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
       self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
+    rendered, nmin, nmax = render(v)
+    if isinstance(s, tuple): self.assertIn(rendered, s)
+    else: self.assertEqual(rendered, s)
+    self.assertEqual(nmin, n)
+    self.assertEqual(nmax, m)
 
   def test_cmp_simple(self):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
@@ -266,6 +266,16 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(((5*Variable("a", 0, 31)) % 12) % 5, 0, 4, "(((a*5)%12)%5)")
     self.helper_test_variable((Variable("a", 0, 31) % 4) % 12, 0, 3, "(a%4)")
 
+  def test_mod_mod_wrong_sign(self):
+    v1=Variable("v1", 0, 128)
+    v3=Variable("v3", 0, 7)
+    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -4, 4, "(((((v1%2)*2)+((v3+-1)%5))+-2)%5)")
+
+  def test_mod_mod_wrong_sign2(self):
+    v2=Variable("v2", 0, 8)
+    v3=Variable("v3", 0, 4)
+    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -6, 6, "(((v2+((v3+3)%7))+-2)%7)")
+
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
 
@@ -374,6 +384,17 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
+
+  def test_div_drop_small_terms(self):
+    # from openpilot, shouldnt simplify
+    gidx0 = UOp.variable("gidx0", 0, 10)
+    gidx1 = UOp.variable("gidx1", 0, 10)
+    lidx0 = UOp.variable("lidx0", 0, 1)
+    lidx1 = UOp.variable("lidx1", 0, 1)
+    ridx1005 = UOp.variable("ridx1005", 0, 2)
+    ridx1006 = UOp.variable("ridx1006", 0, 2)
+    self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -2, 20,
+      "(((((lidx1+(((gidx1*18)+(ridx1005*18))+(lidx0*162)))+(gidx0*2))+(ridx1006*2))+-40)//18)")
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
