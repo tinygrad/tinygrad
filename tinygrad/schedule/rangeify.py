@@ -1,6 +1,6 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same
 
@@ -228,13 +228,11 @@ def add_store(ctx:AddBufferContext, x:UOp):
     buf = UOp(Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape), addrspace=AddrSpace.LOCAL), arg=ctx.dg)
   ctx.map[buf] = (buf.op, ctx.dg)
   ctx.dg += 1
-  return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
+  return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
 def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
-  if b not in ctx.map:
-    ctx.map[b] = (Ops.DEFINE_GLOBAL, ctx.dg)
-    ctx.dg += 1
-  return UOp(ctx.map[b][0], dtype=x.dtype.ptr(size=b.arg), arg=ctx.map[b][1]).index(idx).load()
+  if isinstance(x.dtype, PtrDType): return None
+  return x.replace(dtype=x.dtype.ptr(b.size)).load()
 
 def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
   rngs = x.src[1:]
@@ -244,7 +242,7 @@ def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
   (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
-  #(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
   # HACK: ignore copy

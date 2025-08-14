@@ -331,12 +331,11 @@ new_fixups = mops_merge+PatternMatcher([
 
 def split_load(ctx:list[UOp], s:UOp):
   if len(s.src) == 1 or s.src[0].src[0].op is not Ops.DEFINE_GLOBAL: return None
-  ctx.extend(s.src[1:])
   return s.replace(src=s.src[0:1])
 
 def debuf(ctx:list[int], b:UOp):
-  ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx[0])
-  ctx[0] += 1
+  ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=len(ctx))
+  ctx.append(b)
   return ret
 
 to_define_global = PatternMatcher([
@@ -349,10 +348,10 @@ def split_store(x:UOp):
   name = "k_"+'_'.join([str(s) for s in shape])
 
   b = x.src[0].src[0]
-  ctx = [0]
+  ctx = []
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split")
   ret = ret.sink(arg=KernelInfo(name=name))
-  kernel = UOp(Ops.KERNEL, src=(b,), arg=Kernel(ret, ()))
+  kernel = UOp(Ops.KERNEL, src=(b,)+tuple(ctx), arg=Kernel(ret, ()))
   return b.assign(kernel)
 
 split_kernels = PatternMatcher([
@@ -383,6 +382,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
     tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, bottom_up=True, input_map=tensor_map, name="* split kernels")
 
+    if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
     #rsink = graph_rewrite(rsink, sym, name="* symbolic")
 
     #from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
