@@ -329,23 +329,35 @@ new_fixups = mops_merge+PatternMatcher([
 
 # *** store splitting
 
-def split_load(ctx:list[UOp], s:UOp):
-  if len(s.src) == 1: return None
-  ctx.extend(s.src[1:])
-  return s.replace(src=s.src[0:1])
+@dataclass
+class LocalAddBufferContext:
+  dg:int = 0
+  map:dict = field(default_factory=dict)
 
-def debuf(ctx:list[int], b:UOp):
-  ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=len(ctx))
-  ctx.append(b)
-  return ret
+def debuf(ctx:LocalAddBufferContext, b:UOp): return UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx.map[b][1])
 
-def maybe_copy(s:UOp):
+def split_load(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if len(s.src) == 1:
+      lb = b
+    else:
+      assert len(s.src) == 2
+      lb = s.src[1]
+      assert b not in ctx.map or ctx.map[b][0] == lb
+    if b not in ctx.map:
+      ctx.map[b] = (lb, ctx.dg)
+      ctx.dg += 1
+  return s.replace(src=s.src[0:1]) if len(s.src) > 1 else None
+
+def handle_store(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if b not in ctx.map:
+      ctx.map[b] = (b, ctx.dg)
+      ctx.dg += 1
   if s.src[1].op is not Ops.COPY: return None
   return s.src[1]
-  #return UOp(Ops.COPY)
-  #b0 = s.src[0].src[0]
-  #b1 = s.src[1].src[0].src[0].src[0]
-  #return UOp(Ops.COPY, src=(b0, b1))
 
 do_debuf = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
@@ -355,17 +367,17 @@ do_debuf = PatternMatcher([
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
   (UPat(Ops.LOAD, name="s"), split_load),
-  (UPat(Ops.STORE, name="s"), maybe_copy),
+  (UPat(Ops.STORE, name="s"), handle_store),
 ])
 
 def split_store(x:UOp):
   shape = tuple([r.vmax+1 for r in x.src[2:]])
   name = "k_"+'_'.join([str(s) for s in shape])
   b = x.src[0].src[0]
-  ctx = []
+  ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split", bottom_up=True)
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
-  kernel = UOp(Ops.KERNEL, src=(b,)+tuple(ctx), arg=Kernel(ret, ()))
+  kernel = UOp(Ops.KERNEL, src=(b,)+tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
   return b.assign(kernel)
 
 split_kernels = PatternMatcher([
@@ -396,6 +408,10 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
     tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
+
+    # display the cleaned up tensor graph
+    if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
+
     return tensor_map
 
     """
@@ -418,8 +434,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     return {}
     #return tensor_map
 
-  # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
 
   # insert contiguous in places determined by the realize map
   realize_map = group_realizes(tensor_map[sink])
