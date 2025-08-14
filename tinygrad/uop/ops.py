@@ -487,6 +487,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def pop_const(self) -> tuple[UOp, int]: return (self.src[0], self.src[1].arg) if self.op is Ops.ADD and self.src[1].op is Ops.CONST else (self, 0)
   @property
   def vmin(self) -> ConstType: return self._min_max[0]
   @property
