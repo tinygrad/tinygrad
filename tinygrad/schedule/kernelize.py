@@ -341,7 +341,8 @@ def debuf(ctx:list[int], b:UOp):
 
 def maybe_copy(s:UOp):
   if s.src[1].op is not Ops.COPY: return None
-  return UOp(Ops.COPY)
+  return s.src[1]
+  #return UOp(Ops.COPY)
   #b0 = s.src[0].src[0]
   #b1 = s.src[1].src[0].src[0].src[0]
   #return UOp(Ops.COPY, src=(b0, b1))
@@ -358,7 +359,7 @@ def split_store(x:UOp):
   b = x.src[0].src[0]
   ctx = []
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split", bottom_up=True)
-  ret = ret.sink(arg=KernelInfo(name=name))
+  ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
   kernel = UOp(Ops.KERNEL, src=(b,)+tuple(ctx), arg=Kernel(ret, ()))
   return b.assign(kernel)
 
