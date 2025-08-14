@@ -162,7 +162,23 @@ def indexed_endrange(er:UOp, idx:UOp):
   if to_end_axis: return idx.replace(src=(er.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:])
   return idx.replace(src=(er.src[0],)+idx.src[1:])
 
-pm_rangeify = PatternMatcher([
+pm_mops = PatternMatcher([
+  # this is like the definitions of these
+  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
+  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
+  (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
+  # expand needs to end ranges
+  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
+  # reshape does a lot of symbolic stuff
+  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+  # pad adds min and max
+  (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
+])
+
+pm_rangeify = pm_mops+PatternMatcher([
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
 
@@ -178,20 +194,6 @@ pm_rangeify = PatternMatcher([
   # handle INDEXed ENDRANGE
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),
-
-  # this is like the definitions of these
-  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
-  # expand needs to end ranges
-  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
-  # reshape does a lot of symbolic stuff
-  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
-
-  (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE})),), allow_any_len=True, name="x"),
@@ -226,17 +228,16 @@ def add_load(ctx:AddBufferContext, x:UOp, b:UOp, idx:UOp):
 def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
-  return st.src[0].src[0].reshape(shape).index(*rngs).load(st)
+  return st.src[0].src[0].shrink(((0,prod(shape)),)).reshape(shape).index(*rngs).load(st)
 
-from tinygrad.schedule.rangeify import map_reshape
-
-pm_add_buffers = PatternMatcher([
+pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
   (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
   (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
   # HACK: ignore copy
   (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
+  # HACK: consts shouldn't have srcs by here
+  (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
 ])

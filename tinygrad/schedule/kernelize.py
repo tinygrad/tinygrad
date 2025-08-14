@@ -344,7 +344,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
-  with Timing("rangeify in"):
+  with Timing("*** rangeify in "):
     rsink = graph_rewrite(tensor_map[sink], rangeify_fixups, bottom_up=True, name="* contiguous")
     rsink = graph_rewrite(rsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="* children")
     rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
