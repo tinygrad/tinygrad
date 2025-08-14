@@ -48,6 +48,9 @@ class Domain(enum.Enum):
   AI_ONNX_TRAINING = "ai.onnx.training"
   AI_ONNX_PREVIEW_TRAINING = "ai.onnx.preview.training"
   MICROSOFT_CONTRIB_OPS = "com.microsoft"
+  MICROSOFT_NCHWC = "com.microsoft.nchwc"
+  MICROSOFT_EXPERIMENTAL = "com.microsoft.experimental"
+  PYTORCH_ATEN = "org.pytorch.aten"
   @classmethod
   def from_onnx(cls, domain: str | None) -> "Domain": return cls.ONNX if domain is None or domain == "" else cls(domain)
 
