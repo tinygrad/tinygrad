@@ -1284,7 +1284,6 @@ class Tensor(MathTrait):
       if len(self.shape) > 1:
         shape = [self.shape[0]] + [1] * (len(self.shape) - 1)
         condition = condition.reshape(shape)
-        
     self.uop = Tensor.where(condition, v, self).uop
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
