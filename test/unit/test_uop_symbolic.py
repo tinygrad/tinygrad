@@ -535,13 +535,17 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_mod_recombine(self):
     gidx = Variable("gidx", 0, 124)
+    lidx = Variable("lidx", 0, 124)
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
+    self.helper_test_variable(lidx+gidx%4+(gidx//4)*4, 0, 248, "(gidx+lidx)")
 
   def test_div_mod_recombine_remaining_div(self):
     gidx = Variable("gidx", 0, 124)
+    lidx = Variable("lidx", 0, 124)
     self.helper_test_variable(gidx%4+(gidx//4)*8, 0, 248, "(gidx+((gidx//4)*4))")
     self.helper_test_variable((gidx//4)*8+gidx%4, 0, 248, "(gidx+((gidx//4)*4))")
+    self.helper_test_variable(lidx+gidx%4+(gidx//4)*8, 0, 372, "((gidx+lidx)+((gidx//4)*4))")
 
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
