@@ -1270,20 +1270,43 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
+    rollcount = 0
+
     if isinstance(indices, tuple):
       condition = Tensor.ones(self.shape, dtype=dtypes.bool, device=self.device)
       for i, idx in enumerate(indices):
-        dim_indices = Tensor.arange(self.shape[i], device=self.device)
-        dim_condition = (dim_indices == idx)
-        shape = [1] * len(self.shape)
-        shape[i] = self.shape[i]
-        condition = condition & dim_condition.reshape(shape)
+        if isinstance(idx, int):
+          dim_indices = Tensor.arange(self.shape[i], device=self.device)
+          dim_condition = (dim_indices == idx)
+          shape = [1] * len(self.shape)
+          shape[i] = self.shape[i]
+          condition = condition & dim_condition.reshape(shape)
+          rollcount += idx * (self.shape[i])
+        elif isinstance(idx, slice): 
+          dim_indices = Tensor.arange(self.shape[i], device=self.device)
+          start, stop, step = idx.indices(self.shape[i])
+          dim_condition = Tensor.zeros(self.shape[i], dtype=dtypes.bool, device=self.device)
+          for j in range(start, stop, step):
+              dim_condition = dim_condition | (dim_indices == j)
+          shape = [1] * len(self.shape)
+          shape[i] = self.shape[i]
+          condition = condition & dim_condition.reshape(shape)
+          v = v.repeat_interleave(step)
+          rollcount -= int(self.shape[i] * step / 2)
+          rollcount += start * (self.shape[i])
     else:
       dim_indices = Tensor.arange(self.shape[0], device=self.device)
       condition = (dim_indices == indices)
       if len(self.shape) > 1:
         shape = [self.shape[0]] + [1] * (len(self.shape) - 1)
         condition = condition.reshape(shape)
+
+    print(rollcount)
+    v = v.pad((0, self.numel() - v.numel()))
+    v = v.roll(rollcount)
+    v = v.reshape(self.shape)
+    print(v.numpy())
+
     self.uop = Tensor.where(condition, v, self).uop
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
