@@ -1272,6 +1272,9 @@ class Tensor(MathTrait):
 
     rollcount = 0
 
+    if isinstance(v, ConstType):
+      v = Tensor([v])
+
     if isinstance(indices, tuple):
       condition = Tensor.ones(self.shape, dtype=dtypes.bool, device=self.device)
       for i, idx in enumerate(indices):
@@ -1301,11 +1304,11 @@ class Tensor(MathTrait):
         shape = [self.shape[0]] + [1] * (len(self.shape) - 1)
         condition = condition.reshape(shape)
 
-    print(rollcount)
+    if v.ndim == 0:
+      v = v.reshape((1,)) 
     v = v.pad((0, self.numel() - v.numel()))
     v = v.roll(rollcount)
     v = v.reshape(self.shape)
-    print(v.numpy())
 
     self.uop = Tensor.where(condition, v, self).uop
 
