@@ -393,16 +393,17 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, input_map=tensor_map, name="* contiguous")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
 
-    #tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
-    #tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
-    #tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
+    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
+    return tensor_map
 
+    """
     rsink = tensor_map[sink]
-
-    my_ctx = []
     rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
     rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
-    rsink = graph_rewrite(rsink, do_debuf, ctx=my_ctx, name="* debuf")
+    rsink = graph_rewrite(rsink, do_debuf, ctx=[], name="* debuf")
+    """
     #if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
     #rsink = graph_rewrite(rsink, sym, name="* symbolic")
 
