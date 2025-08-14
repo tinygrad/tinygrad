@@ -1,12 +1,12 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same
 
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op not in {Ops.INDEX, Ops.CONST} else s for s in x.src]))),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous() if s.op not in {Ops.CONTIGUOUS, Ops.CONST} else s for s in x.src]))),
   # double contiguous merge
   (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
   # const
@@ -108,7 +108,7 @@ pm_mops = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
 ])
 
-def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
+def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
   if x.tag == 1: return None
   ranges = []
   new_ranges = []
@@ -118,7 +118,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
       assert idx is not None, "partial contig requires index"
       ranges.append(idx.src[1+i])
       continue
-    if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
+    if idx is not None: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
       ranges.append(UOp.range(dtypes.int, s, ctx.idx))
       new_ranges.append(ranges[-1])
@@ -129,7 +129,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
   # if there's no open ranges, set arg to None so this uses a DEFINE_GLOBAL
   if len(ret.ranges) == 0: ret = ret.replace(arg=None)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.reshape(x.shape)
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -188,6 +188,7 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
+  (UPat(Ops.CONTIGUOUS, name="x"), map_contiguous),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
@@ -204,8 +205,6 @@ pm_rangeify = pm_mops+PatternMatcher([
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
-  # CONST can't have axes. remove srcs when we idx
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
 
   # CONTIGUOUS on ASSIGN is STORE
   # TODO: tag in UPat?
@@ -223,7 +222,10 @@ def add_store(ctx:AddBufferContext, x:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
-  buf = UOp(Ops.DEFINE_GLOBAL if x.arg is None or prod(shape) > 65536 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
+  if x.arg is None or prod(shape) > 65536:
+    buf = UOp.new_buffer(x.device, prod(shape), x.dtype)
+  else:
+    buf = UOp(Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape), addrspace=AddrSpace.LOCAL), arg=ctx.dg)
   ctx.map[buf] = (buf.op, ctx.dg)
   ctx.dg += 1
   return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
@@ -242,11 +244,13 @@ def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), add_store),
   (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
+  #(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
   (UPat(Ops.BIND, name="b"), lambda b: b.src[0]),
   # HACK: ignore copy
   (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
+  # CONST can't have axes. remove srcs when we idx
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
   # HACK: consts shouldn't have srcs by here
   (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
 ])

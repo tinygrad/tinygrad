@@ -141,6 +141,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
+    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
@@ -364,7 +365,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
-    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    if self.st is not None and self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
@@ -956,7 +957,7 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
                       input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   new_map: dict[UOp, UOp] = {}
-  for k in sink.toposort():
+  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
     new_map[k] = v = rewrite_ctx.unified_rewrite(k)
     if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:

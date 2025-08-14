@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.ops import track_rewrites, _substitute, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple, sym
 from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP, Timing
@@ -327,6 +327,38 @@ new_fixups = mops_merge+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
 ])
 
+# *** store splitting
+
+def split_load(ctx:list[UOp], s:UOp):
+  if len(s.src) == 1 or s.src[0].src[0].op is not Ops.DEFINE_GLOBAL: return None
+  ctx.extend(s.src[1:])
+  return s.replace(src=s.src[0:1])
+
+def debuf(ctx:list[int], b:UOp):
+  ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx[0])
+  ctx[0] += 1
+  return ret
+
+to_define_global = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.LOAD, name="s"), split_load),
+])
+
+def split_store(x:UOp):
+  shape = tuple([r.vmax+1 for r in x.src[2:]])
+  name = "k_"+'_'.join([str(s) for s in shape])
+
+  b = x.src[0].src[0]
+  ctx = [0]
+  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split")
+  ret = ret.sink(arg=KernelInfo(name=name))
+  kernel = UOp(Ops.KERNEL, src=(b,), arg=Kernel(ret, ()))
+  return b.assign(kernel)
+
+split_kernels = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), split_store)
+])
+
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
@@ -345,23 +377,25 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
   with Timing("*** rangeify in "):
-    rsink = tensor_map[sink]
-    rsink = graph_rewrite(rsink, rangeify_fixups, bottom_up=True, name="* contiguous")
-    rsink = graph_rewrite(rsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="* children")
-    rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
-    rsink = graph_rewrite(rsink, sym, name="* symbolic")
-    rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
+    tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, input_map=tensor_map, name="* contiguous")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
+    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, bottom_up=True, input_map=tensor_map, name="* split kernels")
 
-    from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
-    rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
+    #rsink = graph_rewrite(rsink, sym, name="* symbolic")
+
+    #from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
+    #rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
+
+    """
     from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
     rsink = apply_rewrites(rsink, rewrites_for_linearizer)
     from tinygrad.renderer.cstyle import CStyleLanguage
     src = CStyleLanguage().render(rsink.arg.lst)
-    #from tinygrad import Device
-    #src = Device.default.renderer.render(rsink.arg.lst)
     print(src)
-  return {sink:sink}
+    """
+    return tensor_map
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
