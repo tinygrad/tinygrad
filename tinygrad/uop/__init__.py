@@ -66,6 +66,7 @@ class Ops(FastEnum):
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto() # noqa: E702
   XOR = auto(); OR = auto(); AND = auto() # noqa: E702
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
+  CDIV = auto(); CMOD = auto() # noqa: E702  # these are for when IDIV is changed to be floored division, not used currently
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
