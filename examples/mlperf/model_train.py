@@ -1339,6 +1339,8 @@ def train_llama3():
       else:
         # attention_norm, ffn_norm, norm
         v.shard_(device, axis=None)
+      # prevents memory spike on device 0
+      v.realize()
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
