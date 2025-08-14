@@ -4,6 +4,17 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, AxisType, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same
 
+rangeify_fixups = PatternMatcher([
+  # all contiguous on SINK
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op not in {Ops.INDEX, Ops.CONST} else s for s in x.src]))),
+  # double contiguous merge
+  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
+  # const
+  (UPat(Ops.CONST, name="x"), lambda x:
+   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
+    len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
+])
+
 @dataclass
 class ChildrenContext:
   children: dict[UOp, list[UOp]]|None = None
@@ -20,45 +31,12 @@ pm_children = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
 ])
 
-rangeify_fixups = PatternMatcher([
-  # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op not in {Ops.INDEX, Ops.CONST} else s for s in x.src]))),
-  # double contiguous merge
-  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
-  # const
-  (UPat(Ops.CONST, name="x"), lambda x:
-   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
-    len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
-])
-
 @dataclass
 class RangeifyContext:
   idx: int = 0
   regs: int = 0
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
-
-def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
-  if x.tag == 1: return None
-  ranges = []
-  new_ranges = []
-  passthrough_idx = []
-  for i,s in enumerate(x.shape):
-    if x.arg is not None and i not in x.arg:
-      assert idx is not None, "partial contig requires index"
-      ranges.append(idx.src[1+i])
-      continue
-    if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
-    if resolve(s!=1):
-      ranges.append(UOp.range(dtypes.int, s, ctx.idx))
-      new_ranges.append(ranges[-1])
-      ctx.idx += 1
-    else:
-      ranges.append(UOp.const(dtypes.int, 0))
-
-  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
-  return ret
 
 def map_reshape(x:UOp, r:UOp):
   acc = 1
@@ -94,6 +72,63 @@ def map_pad(x:UOp, r:UOp):
   # PAD is with 0
   return bigwhere.simplify().where(UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret)), UOp.const(r.dtype, 0))
 
+def map_expand(r:UOp, x:UOp):
+  new_rngs = []
+  ending_ranges = []
+  non_ending_ranges = []
+  for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape):
+    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
+    if resolve(x!=y, False):
+      ending_ranges.extend(axis_to_range)
+      new_rngs.append(a.const_like(0))
+    else:
+      non_ending_ranges.extend(axis_to_range)
+      new_rngs.append(a)
+  ending_ranges = [x for x in ending_ranges if x not in non_ending_ranges]
+  ret = r.src[0]
+  ret = UOp(Ops.ENDRANGE, dtype=ret.dtype, src=(ret,)+tuple(ending_ranges)) if len(ending_ranges) else ret
+  return ret.index(*new_rngs)
+
+pm_mops = PatternMatcher([
+  # this is like the definitions of these
+  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
+  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
+  (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
+  # expand needs to end ranges
+  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
+  # reshape does a lot of symbolic stuff
+  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
+  # pad adds min and max
+  (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
+])
+
+def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
+  if x.tag == 1: return None
+  ranges = []
+  new_ranges = []
+  passthrough_idx = []
+  for i,s in enumerate(x.shape):
+    if x.arg is not None and i not in x.arg:
+      assert idx is not None, "partial contig requires index"
+      ranges.append(idx.src[1+i])
+      continue
+    if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
+    if resolve(s!=1):
+      ranges.append(UOp.range(dtypes.int, s, ctx.idx))
+      new_ranges.append(ranges[-1])
+      ctx.idx += 1
+    else:
+      ranges.append(UOp.const(dtypes.int, 0))
+
+  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
+  # if there's no open ranges, set arg to None so this uses a DEFINE_GLOBAL
+  if len(ret.ranges) == 0: ret = ret.replace(arg=None)
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
+  return ret
+
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   # TODO: this should be in the cache
   #print(f"reduce {id(red)}")
@@ -105,7 +140,6 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
       ctx.idx += 1
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
-
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   #print(f"visit CHILD {x.arg} bottom up")
@@ -135,23 +169,6 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if len(idx_ranges) == 0: return c.index(*out_rngs)
   return c.index(*out_rngs).contiguous(*end_ranges, arg=tuple(idx_ranges), tag=1).index(*[idx.src[1+i] for i in idx_ranges])
 
-def map_expand(r:UOp, x:UOp):
-  new_rngs = []
-  ending_ranges = []
-  non_ending_ranges = []
-  for a,x,y in zip(x.src[1:], r.src[0].shape, r.shape):
-    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
-    if resolve(x!=y, False):
-      ending_ranges.extend(axis_to_range)
-      new_rngs.append(a.const_like(0))
-    else:
-      non_ending_ranges.extend(axis_to_range)
-      new_rngs.append(a)
-  ending_ranges = [x for x in ending_ranges if x not in non_ending_ranges]
-  ret = r.src[0]
-  ret = UOp(Ops.ENDRANGE, dtype=ret.dtype, src=(ret,)+tuple(ending_ranges)) if len(ending_ranges) else ret
-  return ret.index(*new_rngs)
-
 def indexed_endrange(er:UOp, idx:UOp):
   ended = er.src[1:]
   earliest_ending_axis = min([x.arg for x in ended])
@@ -161,22 +178,6 @@ def indexed_endrange(er:UOp, idx:UOp):
       to_end_axis.append(i)
   if to_end_axis: return idx.replace(src=(er.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:])
   return idx.replace(src=(er.src[0],)+idx.src[1:])
-
-pm_mops = PatternMatcher([
-  # this is like the definitions of these
-  (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
-  # expand needs to end ranges
-  (UPat(Ops.INDEX, src=(UPat(Ops.EXPAND, name="r"),), allow_any_len=True, name="x"), map_expand),
-  # reshape does a lot of symbolic stuff
-  (UPat(Ops.INDEX, src=(UPat(Ops.RESHAPE, name="r"),), allow_any_len=True, name="x"), map_reshape),
-  # pad adds min and max
-  (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="x"), map_pad),
-])
 
 pm_rangeify = pm_mops+PatternMatcher([
   # if there are new ended children, tag the SINK
