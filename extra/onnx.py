@@ -265,7 +265,7 @@ class OnnxPBParser:
         case 3: obj["i"] = self.reader.read_int64()
         case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
         case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
-        case 6: obj["g"] = self._parse_GraphProto()
+        case 6: obj["g"] = SubGraphOnnxRunner(self._parse_GraphProto())
         case 7: obj["floats"].append(self.reader.read_float())
         case 8: obj["ints"].append(self.reader.read_int64())
         case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
@@ -448,8 +448,14 @@ class OnnxRunner:
 
   def to(self, device:str|None):
     self.graph_values = {k:v.to(device) if isinstance(v, Tensor) else v for k,v in self.graph_values.items()}
-    self.graph_nodes = tuple(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
-                                      {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}) for n in self.graph_nodes)
+    new_nodes = []
+    for n in self.graph_nodes:
+      if n.op == "If":
+        n.opts["else_branch"] = n.opts["else_branch"].to(device)
+        n.opts["then_branch"] = n.opts["then_branch"].to(device)
+      new_nodes.append(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
+                                {k:v.to(device) if isinstance(v, Tensor) else v for k,v in n.opts.items()}))
+    self.graph_nodes = tuple(new_nodes)
     return self
 
   def __call__(self, inputs:dict[str, Any], debug=debug):
@@ -549,12 +555,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
-  def If(condition:Tensor, else_branch:dict, then_branch:dict, intermediate_tensors:dict[str, Tensor]):
-    else_graph, then_graph = SubGraphOnnxRunner(else_branch), SubGraphOnnxRunner(then_branch)
-    else_graph.graph_values.update(intermediate_tensors)
-    then_graph.graph_values.update(intermediate_tensors)
-    else_out = else_graph({k:intermediate_tensors[k] for k in else_graph.graph_inputs.keys()})
-    then_out = then_graph({k:intermediate_tensors[k] for k in then_graph.graph_inputs.keys()})
+  def If(condition:Tensor, else_branch:SubGraphOnnxRunner, then_branch:SubGraphOnnxRunner, intermediate_tensors:dict[str, Tensor]):
+    else_branch.graph_values.update(intermediate_tensors)
+    then_branch.graph_values.update(intermediate_tensors)
+    else_out = else_branch({k:intermediate_tensors[k] for k in else_branch.graph_inputs.keys()})
+    then_out = then_branch({k:intermediate_tensors[k] for k in then_branch.graph_inputs.keys()})
     assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
     # can use where op when output shape is the same
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
