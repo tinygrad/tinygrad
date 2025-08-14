@@ -14,12 +14,12 @@ AM_DEBUG = getenv("AM_DEBUG", 0)
 class AMRegister(AMDReg):
   adev:AMDev
 
-  def read(self): return self.adev.rreg(self.addr)
-  def read_bitfields(self) -> dict[str, int]: return self.decode(self.read())
+  def read(self, inst=0): return self.adev.rreg(self.addrs[inst])
+  def read_bitfields(self, inst=0) -> dict[str, int]: return self.decode(self.read(inst=inst))
 
-  def write(self, _am_val:int=0, **kwargs): self.adev.wreg(self.addr, _am_val | self.encode(**kwargs))
+  def write(self, _am_val:int=0, xcc=0, **kwargs): self.adev.wreg(self.addrs(inst=inst), _am_val | self.encode(**kwargs))
 
-  def update(self, **kwargs): self.write(self.read() & ~self.fields_mask(*kwargs.keys()), **kwargs)
+  def update(self, inst=0, **kwargs): self.write(self.read(inst=inst) & ~self.fields_mask(*kwargs.keys()), inst=inst, **kwargs)
 
 class AMFirmware:
   def __init__(self, adev):
@@ -41,8 +41,16 @@ class AMFirmware:
     self.ucode_start: dict[str, int] = {}
     self.descs: list[tuple[list[int], memoryview]] = []
 
-    blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
-    self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
+    # SMU firmware
+    if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0):
+      blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
+      self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
+    else:
+      blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v2_1)
+      p2stables = (am.struct_smc_soft_pptable_entry * hdr.pptable_count).from_buffer(blob[hdr.pptable_entry_offset:])
+      for p2stable in p2stables:
+        if p2stable.id == (__P2S_TABLE_ID_X:=0x50325358):
+          self.descs += [self.desc(blob, p2stable.ppt_offset_bytes, p2stable.ppt_size_bytes, am.GFX_FW_TYPE_P2S_TABLE)]
 
     # SDMA firmware
     blob, hdr, hdr_v3 = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", am.struct_sdma_firmware_header_v2_0, am.struct_sdma_firmware_header_v3_0)
@@ -255,6 +263,5 @@ class AMDev(PCIDevImplBase):
       ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
 
     for prefix, hwip in mods:
-      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip][0])))
-    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP][0])))
-
+      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
+    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))

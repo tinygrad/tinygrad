@@ -148,11 +148,12 @@ class AM_SMU(AM_IP):
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
-    else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
-    time.sleep(0.5) # 500ms
+    pass
+    # if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
+    # if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
+    # elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    # else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
+    # time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
@@ -400,17 +401,16 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
     print(self.is_sos_alive())
-    
-    # if not self.is_sos_alive():
-      # print(self.adev.fw.sos_fw)
-    for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
-    while not self.is_sos_alive(): time.sleep(0.01)
+
+    if not self.is_sos_alive():
+      for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
+      while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
     if not self.boot_time_tmr or self.autoload_supported: self._tmr_init()
 
     # SMU fw should be loaded before TMR.
-    self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
+    if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
     if not self.boot_time_tmr or not self.autoload_supported: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
