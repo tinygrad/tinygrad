@@ -8,7 +8,7 @@ from tinygrad.runtime.support.usb import ASM24Controller
 @dataclass
 class AMDReg:
   name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:dict[int, tuple[int, ...]] # noqa: E702
-  def __post_init__(self): self.addr:dict[int, tuple[int, ...]] = { inst: bases[self.segment] + self.offset for inst, bases in self.bases.items() }
+  def __post_init__(self): self.addr:dict[int, int] = { inst: bases[self.segment] + self.offset for inst, bases in self.bases.items() }
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
