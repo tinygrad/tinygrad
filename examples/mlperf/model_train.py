@@ -1318,6 +1318,10 @@ def train_llama3():
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
+  if getenv("FAKEDATA"):
+    for v in get_parameters(model):
+      v = v.assign(Tensor.empty(v.shape))
+
   if (DP := getenv("DP", 1)) > 1:
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
     for v in get_parameters(model):
