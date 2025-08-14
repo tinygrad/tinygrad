@@ -22,12 +22,13 @@ pm_children = PatternMatcher([
 
 rangeify_fixups = PatternMatcher([
   # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op is not Ops.INDEX else s for s in x.src]))),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple([s.contiguous().index() if s.op not in {Ops.INDEX, Ops.CONST} else s for s in x.src]))),
   # double contiguous merge
   (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
   # const
   (UPat(Ops.CONST, name="x"), lambda x:
-   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if len(x.src) and x.src[0].op is Ops.VIEW else None),
+   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
+    len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
 ])
 
 @dataclass
@@ -49,7 +50,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
       continue
     if len(idx.src) > 1: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
-      ranges.append(UOp.range(dtypes.int, s, (ctx.idx, AxisType.LOOP)))
+      ranges.append(UOp.range(dtypes.int, s, ctx.idx))
       new_ranges.append(ranges[-1])
       ctx.idx += 1
     else:
@@ -67,7 +68,7 @@ def map_reshape(x:UOp, r:UOp):
     acc *= s
   mish = sum(to_sum)
   ret = []
-  for s in x.src[0].src[0].shape[::-1]:
+  for s in r.src[0].shape[::-1]:
     if resolve(s!=1):
       # this MOD should limit any ranges outside s
       ret.append(mish % s)
@@ -75,7 +76,7 @@ def map_reshape(x:UOp, r:UOp):
     else:
       ret.append(UOp.const(dtypes.int, 0))
   ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
-  return UOp(Ops.INDEX, r.dtype, src=(r.src[0],)+tuple(ret))
+  return r.src[0].index(*ret)
 
 def map_pad(x:UOp, r:UOp):
   ret = list(x.src[1:])
@@ -100,7 +101,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   new_ranges = []
   for i,s in enumerate(red.src[0].shape):
     if i in red.arg[1]:
-      rngs[i] = UOp.range(dtypes.int, s, (ctx.idx, AxisType.REDUCE))
+      rngs[i] = UOp.range(dtypes.int, s, ctx.idx)
       ctx.idx += 1
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
@@ -122,7 +123,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
       if all_same(r):
         out_rngs.append(r[0])
       else:
-        out_rngs.append(UOp.range(dtypes.int, c.shape[i], (ctx.idx, AxisType.LOOP)))
+        out_rngs.append(UOp.range(dtypes.int, c.shape[i], ctx.idx))
         ctx.idx += 1
         end_ranges.append(out_rngs[-1])
         idx_ranges.append(i)
@@ -153,10 +154,10 @@ def map_expand(r:UOp, x:UOp):
 
 def indexed_endrange(er:UOp, idx:UOp):
   ended = er.src[1:]
-  earliest_ending_axis = min([x.arg[0] for x in ended])
+  earliest_ending_axis = min([x.arg for x in ended])
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
-    if any(x.arg[0] > earliest_ending_axis for x in a.toposort() if x.op is Ops.RANGE):
+    if any(x.arg > earliest_ending_axis for x in a.toposort() if x.op is Ops.RANGE):
       to_end_axis.append(i)
   if to_end_axis: return idx.replace(src=(er.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:])
   return idx.replace(src=(er.src[0],)+idx.src[1:])
@@ -206,9 +207,11 @@ class AddBufferContext:
   map:dict = field(default_factory=dict)
 
 def add_store(ctx:AddBufferContext, x:UOp):
+  assert x.tag == 1
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
-  buf = UOp(Ops.DEFINE_GLOBAL if prod(shape) > 65536 or ctx.dg == 0 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
+  assert prod(shape) > 0, f"no zero sized buffers {shape}"
+  buf = UOp(Ops.DEFINE_GLOBAL if x.arg is None or prod(shape) > 65536 else Ops.DEFINE_LOCAL, dtype=x.dtype.ptr(size=prod(shape)), arg=ctx.dg)
   ctx.map[buf] = (buf.op, ctx.dg)
   ctx.dg += 1
   return buf.reshape(shape).index(*rngs).store(x.src[0], *rngs)
