@@ -1275,10 +1275,12 @@ class Tensor(MathTrait):
     if isinstance(v, ConstType):
       v = Tensor([v])
 
+    print(indices)
+
     if isinstance(indices, tuple):
       condition = Tensor.ones(self.shape, dtype=dtypes.bool, device=self.device)
       for i, idx in enumerate(indices):
-        if isinstance(idx, int):
+        if isinstance(idx, ConstType):
           dim_indices = Tensor.arange(self.shape[i], device=self.device)
           dim_condition = (dim_indices == idx)
           shape = [1] * len(self.shape)
@@ -1298,17 +1300,25 @@ class Tensor(MathTrait):
           rollcount -= int(self.shape[i] * step / 2)
           rollcount += start * (self.shape[i])
     else:
-      dim_indices = Tensor.arange(self.shape[0], device=self.device)
-      condition = (dim_indices == indices)
-      if len(self.shape) > 1:
-        shape = [self.shape[0]] + [1] * (len(self.shape) - 1)
-        condition = condition.reshape(shape)
+      if (self.ndim == 1):
+        dim_indices = Tensor.arange(self.numel(), device=self.device)
+        condition = (dim_indices == indices)
+      else:
+        dim_indices = Tensor.arange(self.ndim, device=self.device).reshape((self.ndim,1)).expand(self.shape)
+        condition = (dim_indices == indices)
+        
 
+
+    print(condition.tolist())
     if v.ndim == 0:
-      v = v.reshape((1,)) 
-    v = v.pad((0, self.numel() - v.numel()))
-    v = v.roll(rollcount)
-    v = v.reshape(self.shape)
+      v = v.reshape((1,))
+    elif v.ndim == 1:
+      v.expand(self.shape)
+    else: 
+      v = v.pad((0, self.numel() - v.numel()))
+      v = v.roll(rollcount)
+      v = v.reshape(self.shape)
+    print(v.tolist())
 
     self.uop = Tensor.where(condition, v, self).uop
 
