@@ -31,7 +31,7 @@ pm_children = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
 
   # hack for one kernel threefry
-  (UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
+  #(UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
 ])
 
 @dataclass
