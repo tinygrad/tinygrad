@@ -1387,7 +1387,7 @@ def train_stable_diffusion():
   from collections import namedtuple
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state
-  import csv, PIL
+  import csv, PIL, pickle
   import numpy as np
 
   config = {}
@@ -1407,7 +1407,8 @@ def train_stable_diffusion():
   # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
-  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
+  #CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = 4000
   print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
@@ -1518,11 +1519,17 @@ def train_stable_diffusion():
     return loss
 
   if getenv("RUN_EVAL", ""):
-    # load prompts for generating images for validation; 2 MB of data total
-    with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
-      reader = csv.DictReader(f, delimiter="\t")
-      eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
-    assert len(eval_inputs) == 30_000
+    if not getenv("EVAL_OVERFIT_SET", ""):
+      # load prompts for generating images for validation; 2 MB of data total
+      with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
+      assert len(eval_inputs) == 30_000
+    else:
+      with open("/home/hooved/stable_diffusion/checkpoints/overfit_set.pickle", "rb") as f:
+        eval_inputs = pickle.load(f)
+      eval_inputs = [{"caption": txt, "mean_logvar": npy} for txt,npy in zip(eval_inputs["txt"], eval_inputs["npy"])]
+
     # NOTE: the clip weights are the same between model.cond_stage_model and clip_encoder
     eval_timesteps = list(reversed(range(1, 1000, 20)))
 
@@ -1644,11 +1651,32 @@ def train_stable_diffusion():
 
       final_clip_score = Tensor.cat(*clip_scores).mean().item()
       inception_activations = Tensor.cat(*inception_activations).realize()
-      EVAL_CKPT_DIR = getenv("EVAL_CKPT_DIR", "")
-      if EVAL_CKPT_DIR:
-        to_save = {"clip_scores": Tensor.cat(*clip_scores), "inception_activations": inception_activations}
-        safe_save(to_save, f"{EVAL_CKPT_DIR}/eval_results.safetensors")
-      fid_score = inception.compute_score(inception_activations, str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz"))
+      #EVAL_CKPT_DIR = getenv("EVAL_CKPT_DIR", "")
+      #if EVAL_CKPT_DIR:
+        #to_save = {"clip_scores": Tensor.cat(*clip_scores), "inception_activations": inception_activations}
+        #safe_save(to_save, f"{EVAL_CKPT_DIR}/eval_results.safetensors")
+
+      if not getenv("EVAL_OVERFIT_SET", ""):
+        inception_stats_fn = str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz")
+        #"/home/hooved/stable_diffusion/datasets/coco2014/val2014_30k_stats.npz"
+      else:
+        inception_stats_fn = str(BASEDIR / "checkpoints" / "overfit_set_inceptions.npz")
+        #inception_stats_fn = "/home/hooved/stable_diffusion/checkpoints/overfit_set_inceptions.npz"
+        if not Path(inception_stats_fn).exists():
+          mean_logvar = Tensor.cat(*[Tensor(row["mean_logvar"], device="CPU") for row in eval_inputs], dim=0)
+          mean, logvar = Tensor.chunk(mean_logvar, 2, dim=1)
+          latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+          for t in (mean, logvar, latent_randn):
+            t.shard_(GPUS,axis=0)
+          std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+          latent = (mean + std * latent_randn) * 0.18215
+          img = decode(latent)
+          activations = jit_inception(img).squeeze(3).squeeze(2).to("CPU").realize()
+          mu = activations.mean(axis=0).numpy()
+          sigma = np.cov(activations.numpy(), rowvar=False)
+          np.savez_compressed(inception_stats_fn, mu=mu, sigma=sigma)
+
+      fid_score = inception.compute_score(inception_activations, inception_stats_fn)
       print(f"clip_score: {final_clip_score}")
       print(f"fid_score: {fid_score}")
 
@@ -1656,10 +1684,17 @@ def train_stable_diffusion():
 
   if not getenv("EVAL_ONLY", ""):
     # training loop
-    dl = batch_load_train_stable_diffusion(BS)
-    for i, batch in enumerate(dl, start=1):
+    seen_keys = []
+    #dl = batch_load_train_stable_diffusion(BS)
+    #for i, batch in enumerate(dl, start=1):
+    i = 0
+    with open("/home/hooved/stable_diffusion/checkpoints/overfit_set.pickle", "rb") as f:
+      batch = pickle.load(f)
+    while True:
+      i += 1
       t0 = time.perf_counter()
       GlobalCounters.reset()
+      seen_keys += batch["__key__"]
 
       mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
       mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
@@ -1680,7 +1715,7 @@ def train_stable_diffusion():
 
       if WANDB:
         wandb.log({"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed})
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i})
 
       if i % CKPT_STEP_INTERVAL == 0:
         # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
@@ -1694,11 +1729,22 @@ def train_stable_diffusion():
         fn = f"{UNET_CKPTDIR}/{i}.safetensors"
         print(f"saving training state checkpoint at {fn}")
         safe_save(get_training_state(unet, optimizer, lr_scheduler, grad_scaler), fn)
+        with open(f"{UNET_CKPTDIR}/{i}_seen_keys.pickle", "wb") as f:
+          pickle.dump(seen_keys, f)
 
         # Only checkpoint collection is required here; eval can be done offline
         # TODO: move eval to trigger after certain amount of training, and enable running eval only in separate process
         #clip_score, fid_score = eval_unet()
         #print(f"total images: {num_seen_images}, clip_score: {clip_score}, fid_score: {fid_score}")
+
+      if getenv("RUN_EVAL", ""):
+        EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
+        if i % EVAL_INTERVAL == 0:
+          clip, fid = eval_unet(unet)
+          print(f"step {i}: clip score: {clip}, fid score:{fid}")
+          if WANDB:
+            wandb.log({"eval/step": i, "eval/clip_score": clip, "eval/fid_score": fid})
+
   else:
     EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
     assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
