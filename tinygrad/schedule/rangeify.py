@@ -5,9 +5,19 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, R
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element
 
-earliest_rewrites = PatternMatcher([
+imported_rewrites = PatternMatcher([
+  # UOp with size 0 is zero
+  (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
+  # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # reduce of size 0 is the identity element
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
+   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+])
+
+earliest_rewrites = imported_rewrites+PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
   # non shape changing RESHAPE is NOOP
@@ -46,11 +56,7 @@ do_realize = PatternMatcher([
 add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"),
                                   lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
-
-early_cleanups = PatternMatcher([
-  (UPat(Ops.DETACH, name="x"), lambda x: x.src[0]),
-  (UPat().contiguous(name="c").contiguous(), lambda c: c),
-])
+early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
 
 # 2. mark all children
 
@@ -228,12 +234,14 @@ pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), lambda ctx,x: map_contiguous(ctx, x)),
 
+  # handle ENDRANGE on ENDRANGE
+  (UPat(Ops.ENDRANGE, src=(UPat(Ops.ENDRANGE, name="e1"),), allow_any_len=True, name="e2"), lambda e1,e2: e1.replace(src=e1.src+e2.src[1:])),
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
    lambda er: er.src[0].replace(src=(UOp(Ops.ENDRANGE, dtype=er.dtype, src=(er.src[0].src[0],)+er.src[1:]),))),
   # handle ENDRANGE on BUFFER
   # and CHILD: python3 test/test_schedule.py TestSchedule.test_cache_reduce_parent
-  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.BUFFERIZE, Ops.CHILD)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
+  (UPat(Ops.ENDRANGE, src=(UPat({Ops.BUFFER, Ops.CONST, Ops.BUFFERIZE, Ops.CHILD}),), allow_any_len=True, name="er"), lambda er: er.src[0]),
   # handle INDEXed ENDRANGE
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),
@@ -326,11 +334,6 @@ def handle_store(ctx:LocalAddBufferContext, s:UOp):
   if s.src[1].op is Ops.COPY: return s.src[1]
   return None
 
-do_debuf = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), debuf),
-  (UPat(Ops.COPY, name="c"), lambda c: c.src[0]),
-])
-
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
   (UPat(Ops.LOAD, name="s"), split_load),
@@ -348,7 +351,7 @@ def split_store(x:UOp):
   return kernel.src[0].assign(kernel)
 
 split_kernels = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), split_store)
+  (UPat(Ops.STORE, name="x"), split_store),
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
