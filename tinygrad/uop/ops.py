@@ -188,7 +188,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
-    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE, Ops.STORE}:
+    if self.op in {Ops.PCONTIGUOUS, Ops.REDUCE, Ops.STORE}:
       ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
         if s in ret: del ret[s]
@@ -298,6 +298,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
+  def pcontiguous(self, *args, **kwargs): return UOp(Ops.PCONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"

@@ -373,12 +373,11 @@ to_define_global = PatternMatcher([
 def split_store(x:UOp):
   shape = tuple([r.vmax+1 for r in x.src[2:]])
   name = "k_"+'_'.join([str(s) for s in shape])
-  b = x.src[0].src[0]
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split", bottom_up=True)
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
-  kernel = UOp(Ops.KERNEL, src=(b,)+tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
-  return b.assign(kernel)
+  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
+  return kernel.src[0].assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store)
@@ -395,14 +394,17 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   Returns:
     Map transforming each UOp in the sink to the Ops.KERNEL graph.
   """
-
   # multi + merge_views + simplify
   tensor_map = graph_rewrite_map(sink, new_fixups+multi_pm+do_fuse+kernelize_sym+replace_contiguous, ctx={}, name="merge_views")
 
   # testing
   # NOTE: graph_rewrite_map with bottom_up is broken
   with Timing("*** rangeify in "):
-    tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, input_map=tensor_map, name="* contiguous")
+    #tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, bottom_up=True, input_map=tensor_map, name="* remove tags")
+    forced_contig = [x.base for x in tensor_map[sink].src]
+    #for u in tensor_map[sink].toposort():
+    #  if u.op is Ops.COPY: forced_contig.append(u)
+    tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, ctx=forced_contig, input_map=tensor_map, name="* contiguous")
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
 
     tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")

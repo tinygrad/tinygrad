@@ -5,13 +5,12 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, R
 from tinygrad.helpers import argsort, prod, all_same
 
 rangeify_fixups = PatternMatcher([
-  # all contiguous on SINK
-  (UPat(Ops.SINK, name="x"),
-   lambda x: x.replace(src=tuple([s.contiguous() if s.op not in {Ops.CONTIGUOUS, Ops.CONST} else s for s in x.src]))),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.replace(tag=69).contiguous(tag=2).reshape(x.shape) if x in ctx and x.tag != 69 else None),
   # all contiguous on COPY
-  (UPat(Ops.COPY, name="x"), lambda x: x.replace(tag=1).contiguous() if x.tag is None else None),
+  #(UPat(Ops.COPY, name="x"), lambda x: x.replace(tag=69).contiguous(tag=2).reshape(x.shape) if x.tag != 69 else None),
   # double contiguous merge
-  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))), lambda c1,c2: c1 if c1.arg is None and c2.arg is None else None),
+  (UPat(Ops.CONTIGUOUS, name="c2", src=(UPat(Ops.CONTIGUOUS, name="c1"))),
+   lambda c1,c2: c1.replace(tag=2 if c2.tag == 2 or c1.tag == 2 else None) if c1.arg is None and c2.arg is None else None),
   # const
   #(UPat(Ops.CONST, name="x"), lambda x:
   # x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
@@ -98,10 +97,10 @@ def map_expand(r:UOp, x:UOp):
 
 pm_mops = PatternMatcher([
   # this is like the definitions of these
+  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
+   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)], dtype=x.dtype)),
   (UPat(Ops.INDEX, src=(UPat(Ops.PERMUTE, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: r.src[0].index(*[x.src[1+p] for p in argsort(x.src[0].arg)])),
-  (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="r"),), allow_any_len=True, name="x"),
-   lambda r,x: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(x.src[1:], r.arg)])),
   (UPat(Ops.INDEX, src=(UPat(Ops.FLIP, name="r"),), allow_any_len=True, name="x"),
    lambda r,x: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(x.src[1:], r.shape, r.arg)])),
   # expand needs to end ranges
@@ -129,11 +128,10 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
-
-  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg, tag=1)
+  ret = x.src[0].index(*ranges).pcontiguous(*new_ranges, arg=x.arg)
   # if there's no open ranges, set arg to None so this uses a DEFINE_GLOBAL
   if len(ret.ranges) == 0: ret = ret.replace(arg=None)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.reshape(x.shape)
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -174,7 +172,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   if len(idx_ranges) == 0: return c.index(*out_rngs)
-  return c.index(*out_rngs).contiguous(*end_ranges, arg=tuple(idx_ranges), tag=1).index(*[idx.src[1+i] for i in idx_ranges])
+  return c.index(*out_rngs).pcontiguous(*end_ranges, arg=tuple(idx_ranges)).index(*[idx.src[1+i] for i in idx_ranges])
 
 def indexed_endrange(er:UOp, idx:UOp):
   ended = er.src[1:]
@@ -186,9 +184,6 @@ def indexed_endrange(er:UOp, idx:UOp):
   if to_end_axis: return idx.replace(src=(er.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:])
   return idx.replace(src=(er.src[0],)+idx.src[1:])
 
-def get_sink_contig(ctx:RangeifyContext, s:UOp):
-  ctx.is_sink_contig = [x for x in s.src if x.op is Ops.CONTIGUOUS and x.tag is None]
-
 pm_rangeify = pm_mops+PatternMatcher([
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -197,9 +192,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, name="x"),), allow_any_len=True, name="idx"), map_contiguous),
 
   # sink contigs to kick it off
-  (UPat(Ops.SINK, name="s"), get_sink_contig),
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: map_contiguous(ctx, x) if x in ctx.is_sink_contig else None),
-  #(UPat(Ops.SINK, name="s"), lambda ctx,s: s.replace(src=tuple([map_contiguous(ctx,x) if x.op is Ops.CONTIGUOUS else x for x in s.src]))),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x: map_contiguous(ctx, x).reshape(x.shape) if x.tag == 2 else None),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
@@ -228,7 +221,6 @@ class AddBufferContext:
   map:dict = field(default_factory=dict)
 
 def add_store(ctx:AddBufferContext, x:UOp):
-  assert x.tag == 1
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
@@ -252,7 +244,7 @@ def add_load_on_store(ctx:AddBufferContext, x:UOp, st:UOp):
   return b.shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=b.size)).load(st)
 
 pm_add_buffers = pm_mops+PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), add_store),
+  (UPat(Ops.PCONTIGUOUS, name="x"), add_store),
   (UPat(Ops.ENDRANGE, name="x"), lambda x: x.src[0]),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
