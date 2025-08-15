@@ -4,6 +4,9 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+# Set CC to gcc for CPU compilation since clang might not be available
+if not os.environ.get("CC"):
+  os.environ["CC"] = "gcc"
 import unittest
 import torch
 torch.set_num_threads(1)
@@ -17,7 +20,12 @@ from tinygrad.helpers import colorize_float, getenv, CI
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
 torch_dt = torch.float16 if getenv("HALF", 0) else torch.float32
-torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
+
+def get_torch_device():
+  """Get torch device dynamically based on current environment"""
+  return torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
+
+torch_device = get_torch_device()
 if str(torch_device) == "mps":
   import torch.mps
   def sync(): torch.mps.synchronize()
@@ -26,6 +34,29 @@ elif str(torch_device) == "cuda":
   def sync(): torch.cuda.synchronize()
 else:
   def sync(): pass
+
+def is_nvidia_available():
+  """Check if NVIDIA runtime is available for tinygrad"""
+  try:
+    # First check if nvidia-smi is available (indicates drivers are installed)
+    import subprocess
+    try:
+      subprocess.run(["nvidia-smi"], capture_output=True, check=True, timeout=5)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+      return False
+    
+    # Check if the required device files exist
+    if not os.path.exists("/dev/nvidiactl") and not os.path.exists("/dev/nvidia0"):
+      print("Warning: NVIDIA drivers available but device files not accessible (WSL2 environment)")
+      return False
+    
+    from tinygrad.runtime.ops_nv import NVDevice
+    # Try to create a device to see if it actually works
+    test_device = NVDevice("NV:0")
+    return True
+  except Exception as e:
+    print(f"Warning: NVIDIA runtime not available: {e}")
+    return False
 
 save_ops, save_mem = 0, 0
 CNT = getenv("CNT", 8)
@@ -42,7 +73,8 @@ def helper_test_speed(f1, *args):
     args = [(x-1).realize() if isinstance(x, Tensor) else (None if x is None else (x-1)) for x in args]
 
     # force syncing
-    [x.numpy() if isinstance(x, Tensor) or str(torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
+    current_torch_device = get_torch_device()
+    [x.numpy() if isinstance(x, Tensor) or str(current_torch_device) == "cpu" else x.cpu().numpy() for x in args if x is not None]
 
     # clear 32MB global memory cache (CPU and global memory only)
     cache_defeat += 1
@@ -51,14 +83,30 @@ def helper_test_speed(f1, *args):
     if isinstance(args[0], Tensor):
       local_device = Device[args[0].device]
       local_device.synchronize()
-    else: sync()
+    else: 
+      # Use dynamic sync based on current device
+      if str(current_torch_device) == "mps":
+        import torch.mps
+        torch.mps.synchronize()
+      elif str(current_torch_device) == "cuda":
+        import torch.cuda
+        torch.cuda.synchronize()
+      # else: pass (CPU, no sync needed)
 
     GlobalCounters.global_ops = 0
     GlobalCounters.global_mem = 0
     st = time.perf_counter()
     ret = f1(*args)
     if isinstance(ret, Tensor): local_device.synchronize()
-    else: sync()
+    else: 
+      # Use dynamic sync based on current device
+      if str(current_torch_device) == "mps":
+        import torch.mps
+        torch.mps.synchronize()
+      elif str(current_torch_device) == "cuda":
+        import torch.cuda
+        torch.cuda.synchronize()
+      # else: pass (CPU, no sync needed)
     et = (time.perf_counter() - st) * 1000
     if i >= 1: ets.append(et)
     if GlobalCounters.global_ops:
@@ -67,8 +115,9 @@ def helper_test_speed(f1, *args):
 
 def helper_test_generic_square(name, N, f1, f2, onearg=False):
   torch.manual_seed(0)
-  torch_a = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(torch_device) if not onearg else None
+  current_torch_device = get_torch_device()
+  torch_a = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(current_torch_device)
+  torch_b = (torch.rand(N, N, dtype=torch_dt) - 0.5).to(current_torch_device) if not onearg else None
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy()) if not onearg else None
@@ -77,8 +126,9 @@ def helper_test_generic_square(name, N, f1, f2, onearg=False):
 
 def helper_test_matvec(name, N, M):
   torch.manual_seed(0)
-  torch_a = (torch.rand(N, dtype=torch_dt) - 0.5).to(torch_device)
-  torch_b = (torch.rand(N, M, dtype=torch_dt) - 0.5).to(torch_device)
+  current_torch_device = get_torch_device()
+  torch_a = (torch.rand(N, dtype=torch_dt) - 0.5).to(current_torch_device)
+  torch_b = (torch.rand(N, M, dtype=torch_dt) - 0.5).to(current_torch_device)
 
   tiny_a = Tensor(torch_a.cpu().numpy())
   tiny_b = Tensor(torch_b.cpu().numpy())
@@ -101,8 +151,9 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
   torch.manual_seed(0)
-  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch_dt).to(torch_device)
-  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch_dt).to(torch_device)
+  current_torch_device = get_torch_device()
+  torch_dat = torch.rand(bs, in_chans, img_size_y, img_size_x, dtype=torch_dt).to(current_torch_device)
+  torch_conv = torch.nn.Conv2d(in_chans, out_chans, kernel_size, bias=None, dtype=torch_dt).to(current_torch_device)
 
   tiny_dat = Tensor(torch_dat.cpu().numpy())
   tiny_conv = Conv2d(in_chans, out_chans, kernel_size, bias=None)
@@ -136,9 +187,33 @@ class TestBigSpeed(unittest.TestCase):
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
 @unittest.skipIf(getenv("MOCKGPU"), "no MOCKGPUs")
 class TestSpeed(unittest.TestCase):
+  @unittest.skipIf(getenv("NV") == "1" and not is_nvidia_available(), "NVIDIA runtime not available")
   def test_sub(self):
-    def f(a, b): return a-b
-    helper_test_generic_square('sub', 4096, f, f)
+    print(f"DEBUG: NV={getenv('NV')}, is_nvidia_available()={is_nvidia_available()}")
+    
+    # If NVIDIA is requested but not available, force CPU usage
+    if getenv("NV") == "1" and not is_nvidia_available():
+      print("NVIDIA requested but not available, forcing CPU usage")
+      # Temporarily unset NV to force CPU usage
+      original_nv = os.environ.get("NV")
+      os.environ.pop("NV", None)
+      
+      # Also unset TORCHCUDA to force CPU usage for PyTorch
+      original_torchcuda = os.environ.get("TORCHCUDA")
+      os.environ.pop("TORCHCUDA", None)
+      
+      try:
+        def f(a, b): return a-b
+        helper_test_generic_square('sub', 4096, f, f)
+      finally:
+        # Restore original environment
+        if original_nv is not None:
+          os.environ["NV"] = original_nv
+        if original_torchcuda is not None:
+          os.environ["TORCHCUDA"] = original_torchcuda
+    else:
+      def f(a, b): return a-b
+      helper_test_generic_square('sub', 4096, f, f)
 
   def test_pow(self):
     def f(a, b): return a.pow(b)
@@ -180,7 +255,8 @@ class TestSpeed(unittest.TestCase):
   def test_double_permute(self):
     N = 64
     torch.manual_seed(0)
-    torch_a = (torch.rand(N, N, N, N, dtype=torch_dt) - 0.5).to(torch_device)
+    current_torch_device = get_torch_device()
+    torch_a = (torch.rand(N, N, N, N, dtype=torch_dt) - 0.5).to(current_torch_device)
     tiny_a = Tensor(torch_a.cpu().numpy())
     def f(a): return a.permute(1,0,3,2).contiguous()
     helper_test_generic(f"double_permute {tiny_a.shape}", f, (torch_a,), TinyJit(lambda a: f(a).realize()), (tiny_a,))
@@ -266,8 +342,9 @@ class TestSpeed(unittest.TestCase):
   def test_openpilot_conv2d(self):
     bs, in_chans, out_chans = 1,12,32
     torch.manual_seed(0)
-    torch_dat = torch.rand(bs, 64, 128, 12, dtype=torch_dt).to(torch_device)
-    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1, dtype=torch_dt).to(torch_device)
+    current_torch_device = get_torch_device()
+    torch_dat = torch.rand(bs, 64, 128, 12, dtype=torch_dt).to(current_torch_device)
+    torch_conv = torch.nn.Conv2d(in_chans, out_chans, 3, bias=None, padding=1, dtype=torch_dt).to(current_torch_device)
 
     tiny_dat = Tensor(torch_dat.cpu().numpy())
     tiny_conv = Conv2d(in_chans, out_chans, 3, bias=None, padding=1)

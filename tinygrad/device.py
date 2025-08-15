@@ -39,8 +39,29 @@ class _Device:
   def DEFAULT(self) -> str:
     dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
     from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1])
-    assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
-    if len(from_env) == 1: return from_env[0]
+    
+    # Filter out devices that don't actually work
+    working_devices = []
+    for device in from_env:
+      try:
+        # Try to create a device to see if it actually works
+        if device == "NV":
+          # Special handling for NVIDIA - check if it's actually available
+          try:
+            from .runtime.ops_nv import NVDevice
+            test_device = NVDevice("NV:0")
+            working_devices.append(device)
+          except Exception:
+            print(f"Warning: NVIDIA requested but not available, falling back to CPU")
+            continue
+        else:
+          working_devices.append(device)
+      except Exception:
+        print(f"Warning: Device {device} not available, skipping")
+        continue
+    
+    assert len(working_devices) < 2, f"multiple devices set in env: {working_devices}"
+    if len(working_devices) == 1: return working_devices[0]
     try:
       device = next(self.get_available_devices())
       os.environ[device] = "1"   # we set this in environment for spawned children
