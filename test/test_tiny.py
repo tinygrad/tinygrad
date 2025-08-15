@@ -30,7 +30,7 @@ class TestTiny(unittest.TestCase):
   def test_gemm(self, N=64, out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
-    self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
+    self.assertListEqual((out:=a@b).contiguous().flatten().tolist(), [1.0]*(N*N))
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***
@@ -103,7 +103,7 @@ class TestTiny(unittest.TestCase):
     Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
 
     # run model inference
-    probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
+    probs = Tensor.empty(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
 
   # *** image ***

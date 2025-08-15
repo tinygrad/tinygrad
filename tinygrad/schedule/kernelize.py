@@ -1,17 +1,25 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.ops import track_rewrites, _substitute, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
-from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.uop.symbolic import symbolic_simple, sym
+from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP, Timing
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
+from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext, ChildrenContext, pm_add_buffers, AddBufferContext, rangeify_fixups, pm_children
+from tinygrad.codegen.opt.swizzler import apply_swizzle, swizzle_reduceop
 
 # creation can recurse a lot
 import sys
 sys.setrecursionlimit(10000)
+
+mops_merge = PatternMatcher([
+  # RESHAPE on RESHAPE is the second reshape
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
+  # non shape changing RESHAPE is NOOP
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
+])
 
 # **** schedule simplifier
 
@@ -48,7 +56,7 @@ def copy_reorder_view(copy:UOp, view:UOp, base:UOp):
   if prod(view.shape) < prod(base.shape): return view.contiguous().copy_to_device(copy.device)
   return base.copy_to_device(copy.device).view(view.arg)
 
-sym = symbolic_simple+PatternMatcher([
+kernelize_sym = symbolic_simple+PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
@@ -190,8 +198,7 @@ def fix_kernel_ast(k:UOp) -> UOp|None:
     while s.op in {Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
     bufs.append(s)
   # replace global memory ops with the BUFFER they write to
-  # NOTE: merge_views is needed to unbind the reshapes
-  ast = graph_rewrite(k.arg.ast, merge_views+replace_buffers, bufs, bottom_up=True, name="replace buffers")
+  ast = graph_rewrite(k.arg.ast, mops_merge+replace_buffers, bufs, bottom_up=True, name="replace buffers")
   if ast.op is Ops.SINK and not all_same([x.device for x in k.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in k.src)}")
   return k.replace(arg=Kernel(ast, k.arg.metadata))
@@ -314,6 +321,68 @@ finalize_contiguous = PatternMatcher([
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+new_fixups = mops_merge+PatternMatcher([
+  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).reshape(r.arg)),
+  # TODO: this should be BUFFER_VIEW
+  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
+])
+
+# *** store splitting
+
+@dataclass
+class LocalAddBufferContext:
+  dg:int = 0
+  map:dict = field(default_factory=dict)
+
+def debuf(ctx:LocalAddBufferContext, b:UOp): return UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx.map[b][1])
+
+def split_load(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if len(s.src) == 1:
+      lb = b
+    else:
+      assert len(s.src) == 2
+      lb = s.src[1]
+      assert b not in ctx.map or ctx.map[b][0] == lb
+    if b not in ctx.map:
+      ctx.map[b] = (lb, ctx.dg)
+      ctx.dg += 1
+  return s.replace(src=s.src[0:1]) if len(s.src) > 1 else None
+
+def handle_store(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if b not in ctx.map:
+      ctx.map[b] = (b, ctx.dg)
+      ctx.dg += 1
+  if s.src[1].op is not Ops.COPY: return None
+  return s.src[1]
+
+do_debuf = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.COPY, name="c"), lambda c: c.src[0]),
+])
+
+to_define_global = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.LOAD, name="s"), split_load),
+  (UPat(Ops.STORE, name="s"), handle_store),
+])
+
+def split_store(x:UOp):
+  shape = tuple([r.vmax+1 for r in x.src[2:]])
+  name = "k_"+'_'.join([str(s) for s in shape])
+  ctx = LocalAddBufferContext()
+  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="* kernel split", bottom_up=True)
+  ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
+  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
+  return kernel.src[0].assign(kernel)
+
+split_kernels = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), split_store)
+])
+
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
@@ -325,12 +394,48 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   Returns:
     Map transforming each UOp in the sink to the Ops.KERNEL graph.
   """
-
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, new_fixups+multi_pm+do_fuse+kernelize_sym+replace_contiguous, ctx={}, name="merge_views")
 
-  # display the cleaned up tensor graph
-  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
+  # testing
+  # NOTE: graph_rewrite_map with bottom_up is broken
+  with Timing("*** rangeify in "):
+    #tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, bottom_up=True, input_map=tensor_map, name="* remove tags")
+    forced_contig = [x.base for x in tensor_map[sink].src]
+    #for u in tensor_map[sink].toposort():
+    #  if u.op is Ops.COPY: forced_contig.append(u)
+    tensor_map = graph_rewrite_map(tensor_map[sink], rangeify_fixups, bottom_up=True, ctx=forced_contig, input_map=tensor_map, name="* contiguous")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="* children")
+
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="* rangeify")
+    tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, input_map=tensor_map, name="* buffer")
+    tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="* split kernels")
+
+    # display the cleaned up tensor graph
+    if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
+
+    return tensor_map
+
+    """
+    rsink = tensor_map[sink]
+    rsink = graph_rewrite(rsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="* rangeify")
+    rsink = graph_rewrite(rsink, pm_add_buffers, ctx=AddBufferContext(), bottom_up=True, name="* buffer")
+    rsink = graph_rewrite(rsink, do_debuf, ctx=[], name="* debuf")
+    """
+    #if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
+    #rsink = graph_rewrite(rsink, sym, name="* symbolic")
+
+    #from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
+    #rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="* remove reduce")
+
+    from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
+    rsink = apply_rewrites(rsink, rewrites_for_linearizer)
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    src = CStyleLanguage().render(rsink.arg.lst)
+    print(src)
+    return {}
+    #return tensor_map
+
 
   # insert contiguous in places determined by the realize map
   realize_map = group_realizes(tensor_map[sink])
