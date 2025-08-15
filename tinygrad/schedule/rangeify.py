@@ -119,7 +119,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
-  ret = x.src[0].index(*ranges).contiguous(*new_ranges, arg=x.arg)
+  ret = x.src[0].index(*ranges).bufferize(*new_ranges)
   # if there's no open ranges, set arg to None so this uses a DEFINE_GLOBAL
   if len(ret.ranges) == 0: ret = ret.replace(arg=None)
   ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
