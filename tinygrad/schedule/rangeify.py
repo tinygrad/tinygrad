@@ -82,7 +82,7 @@ class RangeifyContext:
   regs: int = 0
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
-  progress_children: dict[UOp, int] = field(default_factory=dict)
+  progress: int = 0
 
 def map_reshape(idx:UOp, r:UOp):
   acc = 1
@@ -181,14 +181,13 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
-  if c not in ctx.seen_children:
-    ctx.seen_children[c] = {}
-    ctx.progress_children[c] = 0
+  if c not in ctx.seen_children: ctx.seen_children[c] = {}
+  if x.arg[0] not in ctx.seen_children[c]: ctx.progress = 0
   ctx.seen_children[c][x.arg[0]] = idx
   # wait here until we have seen all the children
   if len(ctx.seen_children[c]) != x.arg[1]:
-    if ctx.progress_children[c] == len(ctx.seen_children[c]): raise RuntimeError("revisited child before visiting all children")
-    ctx.progress_children[c] = len(ctx.seen_children[c])
+    ctx.progress += 1
+    if ctx.progress > 1000: raise RuntimeError("children not making progress")
     raise RewriteNotReady
 
   if c not in ctx.seen_child:
