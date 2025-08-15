@@ -257,9 +257,9 @@ def bufferize_to_store(x:UOp):
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
   return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
-def add_load_on_buffer(x:UOp, b:UOp):
-  if isinstance(x.dtype, PtrDType): return None
-  return x.replace(dtype=x.dtype.ptr(b.size)).load()
+def add_load_on_buffer(idx:UOp, b:UOp):
+  if isinstance(idx.dtype, PtrDType): return None
+  return idx.replace(dtype=idx.dtype.ptr(b.size), arg=None).load()
 
 def add_load_on_store(x:UOp, st:UOp):
   if isinstance(x.dtype, PtrDType): return None
@@ -271,7 +271,7 @@ def add_load_on_store(x:UOp, st:UOp):
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="x"), add_load_on_buffer),
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
 ])
 
