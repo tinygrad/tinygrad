@@ -756,16 +756,6 @@ class PatternMatcher:
       if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
-  def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
-    # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
-    new_n: UOp|None = uop
-    seen = set()
-    while new_n is not None:
-      if new_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-      seen.add(new_n)
-      last_n, new_n = new_n, self.rewrite(new_n, ctx)
-    return last_n
-
 # *** non-blocking UOp tracker ***
 
 ucount = itertools.count()
@@ -921,7 +911,14 @@ class RewriteContext:
         if stage == 0:
           if n in self.skip_0: continue
           # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-          if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
+          if self.bpm is not None:
+            # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
+            test_n: UOp|None = n
+            seen = set()
+            while test_n is not None:
+              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+              seen.add(test_n)
+              new_n, test_n = test_n, self.bpm.rewrite(test_n, self.ctx)
           stack.append((n, 1, new_n))
           for x in reversed(new_n.src): stack.append((x, 0, x))
           self.skip_0[n] = None
