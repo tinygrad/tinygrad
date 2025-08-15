@@ -122,6 +122,7 @@ class MUOpX86(MUOp):
   def V_V_V(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
   def V_V_VM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
   def V_V_RM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, GPR), reg, rm, pp, sel, w, l, vvvv)
+  def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), GPR, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)

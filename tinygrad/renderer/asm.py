@@ -76,8 +76,8 @@ x86_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   # can't cast from float to int8/16 directly and vice versa
-  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast_vec(dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast_vec(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
   # int/float casts only for signed int
   (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
   # casting uint64 to float requires special handling if msb is 1
@@ -144,7 +144,7 @@ def x86_pre(x:UOp):
 
 #https://www.felixcloutier.com/x86/
 # NOTE: LEGACY prefix == VEX prefix
-# pp field: None == 0, 0x66 == 1, 0xF3 == 2, 0xF2 == 3
+# pp field: None == 0, 66 == 1, F3 == 2, F2 == 3
 # map select: 0F == 1, 0F38 == 2, 0F3A == 3
 x86_vec_lowerer = PatternMatcher([
   # int binary
@@ -200,6 +200,8 @@ x86_vec_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtps", 0x51, ctx[x], ctx[y], 0, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtpd", 0x51, ctx[x], ctx[y], 1, 1)),
   (UPat.var("y", dtypes.float32).reciprocal().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vrcpss", 0x53, ctx[x], ctx[y], 0, 1)),
+  (UPat(Ops.TRUNC, dtypes.float32, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundps", 0x08, ctx[x], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
+  (UPat(Ops.TRUNC, dtypes.float64, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundpd", 0x09, ctx[x], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
   # float cmp
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 0, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 0, 1)), # noqa: E501
@@ -336,6 +338,8 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtss", 0x51, ctx[x], ctx[y], ctx[y], 2, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtsd", 0x51, ctx[x], ctx[y], ctx[y], 3, 1)),
   (UPat.var("y", dtypes.float32).reciprocal().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vrcpss", 0x53, ctx[x], ctx[y], ctx[y], 2, 1)),
+  (UPat(Ops.TRUNC, dtypes.float32, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundss", 0x0A, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
+  (UPat(Ops.TRUNC, dtypes.float64, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundsd", 0x0B, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
   # float cmp
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltss", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 2, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqss", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 2, 1)), # noqa: E501
