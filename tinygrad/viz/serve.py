@@ -132,7 +132,7 @@ color_map = {}
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
-  height, colorKey, ref = 20, None, None
+  height, colorKey, curr_ref = 20, None, None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
@@ -149,8 +149,18 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     if depth == 0: colorKey = cat or name
+    # TODO: brighter by depth
     fillColor = color_map.setdefault(colorKey, cycle_colors(PROFILE_COLORS.get(e.device, PROFILE_COLORS["DEFAULT"]), len(color_map)))
-    arg = {"tooltipText":tooltip, "ref":ref}
+    arg = {"tooltipText":tooltip}
+    if ref is not None: curr_ref = {"ctx":ref, "step":0}
+    elif curr_ref is not None:
+      start, stepIdx = curr_ref["step"]+1 if curr_ref["step"]>0 else 0, None
+      for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]):
+        if i >= start and s["name"] == name:
+          stepIdx = i
+          break
+      curr_ref = None if stepIdx is None else {"ctx":curr_ref["ctx"], "step":stepIdx}
+    if curr_ref is not None: arg.update(curr_ref.items())
     shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "maxHeight":height*len(levels)}
 
