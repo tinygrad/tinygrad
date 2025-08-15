@@ -116,12 +116,6 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
-  DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
-  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
-const cycleColors = (lst, i) => lst[i%lst.length];
-
 const createPolygons = (source, area) => {
   const shapes = [];
   const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
@@ -185,10 +179,6 @@ async function renderProfiler() {
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
     const zoomDomain = transform != null ? xscale.domain() : null;
-    let yscale = null;
-    if (data.axes.y != null) {
-      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
-    }
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
@@ -247,16 +237,6 @@ async function renderProfiler() {
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
       ctx.fillText(formatTime(tick, et-st), x+ctx.lineWidth+2, tickSize);
-    }
-    if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
-      for (const tick of yscale.ticks()) {
-        const y = yscale(tick);
-        drawLine(ctx, [0, tickSize], [y, y]);
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
-      }
     }
     ctx.restore();
   }
