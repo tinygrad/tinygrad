@@ -143,13 +143,12 @@ class TestIndexingConstFolding(unittest.TestCase):
     _check_ast_count(1, t[:,:,Tensor(1)+2,:])
     _check_ast_count(1, t[:,:,Tensor(1),Tensor(0)])
 
-  @unittest.expectedFailure
   def test_const_tensor_index(self):
-    # TODO: implement const tensor folded indexing
+    # TODO: these can be 0, implement const tensor folded indexing
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
-    _check_ast_count(0, t[:,:,Tensor.ones(2,1),:])
-    _check_ast_count(0, t[:,:,Tensor.ones(1,2)+2,:])
-    _check_ast_count(0, t[:,:,Tensor.ones(1,1),Tensor.zeros(2,1,2)])
+    _check_ast_count(1, t[:,:,Tensor.ones(2,1,dtype=dtypes.int),:])
+    _check_ast_count(1, t[:,:,Tensor.ones(1,2,dtype=dtypes.int)+2,:])
+    _check_ast_count(1, t[:,:,Tensor.ones(1,1,dtype=dtypes.int),Tensor.zeros(2,1,2,dtype=dtypes.int)])
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
@@ -290,17 +289,12 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t + zero).numpy(), np.arange(16))
     np.testing.assert_equal((t * zero).numpy(), [0] * 16)
     np.testing.assert_equal((t * one).numpy(), np.arange(16))
-
-  def test_multi_todo_pow(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
-    zero = Tensor.zeros(16).to(ds).realize()
-    one = Tensor.ones(16).to(ds).realize()
-
-    # TODO: fix pow folding
     _check_ast_count(0, t ** zero)
     _check_ast_count(0, t ** one)
     _check_ast_count(0, one ** t)
+    np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
+    np.testing.assert_equal((t ** one).numpy(), np.arange(16))
+    np.testing.assert_equal((one ** t).numpy(), [1] * 16)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
