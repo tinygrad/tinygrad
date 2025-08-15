@@ -8,12 +8,32 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite
 
 # 1. add contiguous where we have to
 
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+
+def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
+
+def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
+  for s in rb.src:
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+
+do_realize = PatternMatcher([
+  # always realize SINK parents
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
+  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # realize parents of COPY, MSELECT, MSTACK
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
+])
+
 add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"),
                                   lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 early_cleanups = PatternMatcher([
-  (UPat(Ops.DETACH, name="x"), lambda x: x.src[0])
+  (UPat(Ops.DETACH, name="x"), lambda x: x.src[0]),
+  (UPat().contiguous(name="c").contiguous(), lambda c: c),
 ])
 
 # 2. mark all children
@@ -107,6 +127,8 @@ pm_mops = PatternMatcher([
 ])
 
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
+  if x.arg is None and idx is not None: return None
+  if x.arg is not None and idx is None: return None
   ranges = []
   new_ranges = []
   passthrough_idx = []
@@ -123,9 +145,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges)
-  # if there's no open ranges, set arg to None so this uses a DEFINE_GLOBAL
-  if len(ret.ranges) == 0: ret = ret.replace(arg=None)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret #.reshape(x.shape)
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -187,10 +207,10 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_contiguous),
 
   # CONST can't have axes. remove srcs when we idx
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c),
 
   # sink contigs to kick it off
-  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), lambda ctx,x: map_contiguous(ctx, x)), #.reshape(x.shape) if x.tag == 2 else None),
+  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), lambda ctx,x: map_contiguous(ctx, x)),
 
   # handle ENDRANGE on movement
   (UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Movement),), allow_any_len=True, name="er"),
@@ -256,8 +276,9 @@ pm_debuf = PatternMatcher([
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
+  realize_map = {}
+  graph_rewrite(sink, do_realize, ctx=realize_map, name="gather realize")
   tensor_map = {sink:sink}
-  realize_map = {x.base:None for x in sink.src}
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add_contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="finalize_contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
@@ -267,8 +288,8 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   rsink = tensor_map[sink]
   from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
   rsink = graph_rewrite(rsink, pm_add_buffers, name="buffer", bottom_up=True)
-  rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
   rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
+  rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
   from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
   rsink = apply_rewrites(rsink, rewrites_for_linearizer)
   from tinygrad.renderer.cstyle import CStyleLanguage
