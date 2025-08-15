@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv
+from tinygrad.uop.symbolic import symbolic_simple
 
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element
@@ -30,6 +31,8 @@ earliest_rewrites = imported_rewrites+PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda x:
    x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
+  # assign only to buffer
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}), UPat(name="x"))), lambda x: x),
 ])
 
 # 1. add contiguous where we have to
@@ -78,6 +81,9 @@ def mark_children(ctx:ChildrenContext, x:UOp):
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
   (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
+
+  # hack for one kernel threefry
+  #(UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
 ])
 
 # 3. rangeify
@@ -280,6 +286,9 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
+
+  # HACK
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None)
 ])
 
 # 5 (alt). create pointers
@@ -361,6 +370,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
+  tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
