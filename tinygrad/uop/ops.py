@@ -848,8 +848,8 @@ class TrackedPatternMatcher(PatternMatcher):
         continue
       match_stats[p][1] += 1
       try: ret = match(uop, ctx)
-      except Exception:
-        if TRACK_MATCH_STATS >= 2 and active_rewrites:
+      except Exception as e:
+        if TRACK_MATCH_STATS >= 2 and active_rewrites and not isinstance(e, RewriteNotReady):
           active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR, src=uop.src, arg=str(sys.exc_info()[1]))), p.location))
         raise
       if ret is not None and ret is not uop:
