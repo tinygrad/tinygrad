@@ -4,7 +4,8 @@ from tinygrad.dtype import dtypes, AddrSpace, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv
 
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite
+from tinygrad.schedule.kernelize import Kernel
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo
 
 # 1. add contiguous where we have to
 
@@ -145,7 +146,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret #.reshape(x.shape)
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.reshape(x.shape)
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -217,7 +218,7 @@ pm_rangeify = pm_mops+PatternMatcher([
    lambda er: er.src[0].replace(src=(UOp(Ops.ENDRANGE, dtype=er.dtype, src=(er.src[0].src[0],)+er.src[1:]),))),
   # handle ENDRANGE on BUFFER
   # and CHILD: python3 test/test_schedule.py TestSchedule.test_cache_reduce_parent
-  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.CONTIGUOUS, Ops.CHILD)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
+  (UPat(Ops.ENDRANGE, src=(UPat((Ops.BUFFER, Ops.CONST, Ops.BUFFERIZE, Ops.CHILD)),), allow_any_len=True, name="er"), lambda er: er.src[0]),
   # handle INDEXed ENDRANGE
   (UPat(Ops.INDEX, src=(UPat(Ops.ENDRANGE, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="er"),),
         allow_any_len=True, name="idx"), indexed_endrange),
@@ -242,11 +243,12 @@ def add_store(x:UOp):
   buf = UOp.new_buffer(x.device, prod(shape), x.dtype)
   return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
-def add_load(x:UOp, b:UOp, idx:UOp):
+def add_load_on_buffer(x:UOp, b:UOp):
   if isinstance(x.dtype, PtrDType): return None
   return x.replace(dtype=x.dtype.ptr(b.size)).load()
 
 def add_load_on_store(x:UOp, st:UOp):
+  if isinstance(x.dtype, PtrDType): return None
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   b = st.src[0].src[0]
@@ -255,11 +257,11 @@ def add_load_on_store(x:UOp, st:UOp):
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), add_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat(name="idx")), name="x"), add_load),
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="x"), add_load_on_buffer),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
 ])
 
-# 5. create pointers
+# 5 (alt). create pointers
 
 def debuf(ctx, b:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx[0])
@@ -272,22 +274,81 @@ pm_debuf = PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
   # no movement ops
   (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
+  # HACK: no copy
+  (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
+])
+
+# 5. split into kernels
+
+@dataclass
+class LocalAddBufferContext:
+  dg:int = 0
+  map:dict = field(default_factory=dict)
+
+def debuf(ctx:LocalAddBufferContext, b:UOp): return UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx.map[b][1])
+
+def split_load(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if len(s.src) == 1:
+      lb = b
+    else:
+      assert len(s.src) == 2
+      lb = s.src[1]
+      assert b not in ctx.map or ctx.map[b][0] == lb
+    if b not in ctx.map:
+      ctx.map[b] = (lb, ctx.dg)
+      ctx.dg += 1
+  return s.replace(src=s.src[0:1]) if len(s.src) > 1 else None
+
+def handle_store(ctx:LocalAddBufferContext, s:UOp):
+  b = s.src[0].src[0]
+  if b.op is Ops.BUFFER:
+    if b not in ctx.map:
+      ctx.map[b] = (b, ctx.dg)
+      ctx.dg += 1
+  if s.src[1].op is not Ops.COPY: return None
+  return s.src[1]
+
+do_debuf = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.COPY, name="c"), lambda c: c.src[0]),
+])
+
+to_define_global = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.LOAD, name="s"), split_load),
+  (UPat(Ops.STORE, name="s"), handle_store),
+])
+
+def split_store(x:UOp):
+  shape = tuple([r.vmax+1 for r in x.src[2:]])
+  name = "k_"+'_'.join([str(s) for s in shape])
+  ctx = LocalAddBufferContext()
+  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
+  ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
+  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
+  return kernel.src[0].assign(kernel)
+
+split_kernels = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), split_store)
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   realize_map = {}
-  graph_rewrite(sink, do_realize, ctx=realize_map, name="gather realize")
+  graph_rewrite(sink, do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = {sink:sink}
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add_contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="finalize_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
+  tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
+  # render
   rsink = tensor_map[sink]
   from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
-  rsink = graph_rewrite(rsink, pm_add_buffers, name="buffer", bottom_up=True)
   rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
   rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
   from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
@@ -296,4 +357,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   src = CStyleLanguage().render(rsink.arg.lst)
   print(src)
 
-  return {sink:sink}
+  tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
+  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
+  return tensor_map
