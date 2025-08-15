@@ -44,12 +44,12 @@ def is_nvidia_available():
       subprocess.run(["nvidia-smi"], capture_output=True, check=True, timeout=5)
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
       return False
-    
+
     # Check if the required device files exist
     if not os.path.exists("/dev/nvidiactl") and not os.path.exists("/dev/nvidia0"):
       print("Warning: NVIDIA drivers available but device files not accessible (WSL2 environment)")
       return False
-    
+
     from tinygrad.runtime.ops_nv import NVDevice
     # Try to create a device to see if it actually works
     test_device = NVDevice("NV:0")
@@ -83,7 +83,7 @@ def helper_test_speed(f1, *args):
     if isinstance(args[0], Tensor):
       local_device = Device[args[0].device]
       local_device.synchronize()
-    else: 
+    else:
       # Use dynamic sync based on current device
       if str(current_torch_device) == "mps":
         import torch.mps
@@ -98,7 +98,7 @@ def helper_test_speed(f1, *args):
     st = time.perf_counter()
     ret = f1(*args)
     if isinstance(ret, Tensor): local_device.synchronize()
-    else: 
+    else:
       # Use dynamic sync based on current device
       if str(current_torch_device) == "mps":
         import torch.mps
@@ -190,18 +190,18 @@ class TestSpeed(unittest.TestCase):
   @unittest.skipIf(getenv("NV") == "1" and not is_nvidia_available(), "NVIDIA runtime not available")
   def test_sub(self):
     print(f"DEBUG: NV={getenv('NV')}, is_nvidia_available()={is_nvidia_available()}")
-    
+
     # If NVIDIA is requested but not available, force CPU usage
     if getenv("NV") == "1" and not is_nvidia_available():
       print("NVIDIA requested but not available, forcing CPU usage")
       # Temporarily unset NV to force CPU usage
       original_nv = os.environ.get("NV")
       os.environ.pop("NV", None)
-      
+
       # Also unset TORCHCUDA to force CPU usage for PyTorch
       original_torchcuda = os.environ.get("TORCHCUDA")
       os.environ.pop("TORCHCUDA", None)
-      
+
       try:
         def f(a, b): return a-b
         helper_test_generic_square('sub', 4096, f, f)

@@ -39,7 +39,7 @@ class _Device:
   def DEFAULT(self) -> str:
     dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
     from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1])
-    
+
     # Filter out devices that don't actually work
     working_devices = []
     for device in from_env:
@@ -59,7 +59,7 @@ class _Device:
       except Exception:
         print(f"Warning: Device {device} not available, skipping")
         continue
-    
+
     assert len(working_devices) < 2, f"multiple devices set in env: {working_devices}"
     if len(working_devices) == 1: return working_devices[0]
     try:
