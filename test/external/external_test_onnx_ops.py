@@ -294,7 +294,6 @@ class TestTrainingOnnxOps(TestOnnxOps):
         outputs = ["X_out", "V_out"]
         self._validate_training("Momentum", onnx_fxn, inputs, attributes, outputs)
 
-  @unittest.expectedFailure  # TODO: regression from removing StrEnum in Domain
   def test_adam_t_greater_than_zero(self):
     from onnx.backend.test.case.node.adam import apply_adam
     for t in [1, 3, 100]:

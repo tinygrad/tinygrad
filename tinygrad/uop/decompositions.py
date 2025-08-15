@@ -1,8 +1,9 @@
+from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN
-from tinygrad.uop.ops import UOp
+from tinygrad.helpers import polyN, getenv
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
@@ -79,10 +80,10 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   intermediate_dtype = dtypes.float32.vec(d.dtype.count) if d.dtype.base.scalar() == dtypes.float16 else d.dtype
 
   f, e = frexp(d)
-  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast_vec(dtypes.uint64)
+  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
-  i = shr(e.cast_vec(dtypes.uint64), 5)
-  e = e.cast_vec(dtypes.int32) & 31
+  i = shr(e.cast(dtypes.uint64), 5)
+  e = e.cast(dtypes.int32) & 31
   offset = 32 - e
 
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
@@ -90,8 +91,8 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
     if count+offset < len(two_over_pi_f) - 1:
       an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _shl_lazy(x, y): return (x.cast_vec(dtypes.uint64) * pow2if(y, d.dtype).cast_vec(dtypes.uint64)).cast_vec(dtypes.uint32)
-  def _shr_lazy(x, y): return (x.cast_vec(dtypes.uint64) // pow2if(y, d.dtype).cast_vec(dtypes.uint64)).cast_vec(dtypes.uint32)
+  def _shl_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x:UOp, y:UOp): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
 
   a = [_take(UOp.const(dtypes.uint32.vec(d.dtype.count), 0), i) for i in range(4)]
   #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
@@ -100,12 +101,12 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   mi = _shl_lazy(a[1], e) | _shr_lazy(a[2], offset)
   lo = _shl_lazy(a[2], e) | _shr_lazy(a[3], offset)
 
-  def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast_vec(dtypes.uint64) * y.cast_vec(dtypes.uint64)
+  def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
   # compute x * 2/pi
   p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
 
   # round quotient to nearest
-  q = shr(p, 62).cast_vec(dtypes.int32)
+  q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
@@ -132,7 +133,7 @@ def cody_waite_reduction(d:UOp) -> tuple[UOp, UOp]:
       d = (qdh + q) * -PI_D + d
     elif x.dtype.scalar() == dtypes.float16:
       # [FIXME] when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
-      d = _reduce_d(x.cast_vec(dtypes.float32), q.cast_vec(dtypes.float32)).cast_vec(dtypes.float16)
+      d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
       # https://github.com/shibatch/sleef/blob/4e08851f59fc2b545f9c393c6a23dfd311a26308/src/libm/sleefsp.c#L464-L503
       d = q * -3.1414794921875 + x
@@ -142,9 +143,9 @@ def cody_waite_reduction(d:UOp) -> tuple[UOp, UOp]:
     return d
 
   m_1_pi = 0.318309886183790671537767526745028724
-  qdh = (d * (m_1_pi / 2.0**24)).cast_vec(dtypes.int64).cast(d.dtype) * (2.0**24)
+  qdh = (d * (m_1_pi / 2.0**24)).cast(dtypes.int64).cast(d.dtype) * (2.0**24)
   quadrant = rintk(d * m_1_pi -qdh) if d.dtype.base.scalar() == dtypes.float64 else rintk(d * m_1_pi)
-  return _reduce_d(d, quadrant.cast(d.dtype)), quadrant.cast_vec(dtypes.int32)
+  return _reduce_d(d, quadrant.cast(d.dtype)), quadrant.cast(dtypes.int32)
 
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64): return d * (polyN(d*d, coeff64) if d.dtype.scalar() == dtypes.float64 else polyN(d*d, coeff32))
@@ -223,7 +224,7 @@ def xlog2(d:UOp) -> UOp:
   """
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
   # TODO: float16 denormal need float32 to achieve precision
-  if d.dtype.scalar() == dtypes.float16: return xlog2(d.cast_vec(dtypes.float32)).cast_vec(dtypes.float16)
+  if d.dtype.scalar() == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
   FLT_MIN = d.const_like(1e-6 if d.dtype.scalar() == dtypes.float16 else 1e-4)
   is_denormal = d<FLT_MIN
   a = is_denormal.where(d * (2 ** 64), d)
@@ -260,9 +261,9 @@ def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
   # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
-  non_int = exponent != exponent.cast_vec(dtypes.int32).cast(exponent.dtype)
+  non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
   adj = non_int.where(ret.const_like(math.nan),
-    (exponent < 0).where(-exponent, exponent).cast_vec(dtypes.int32).mod(2).cast_vec(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
+    (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
   # fix 0 ** 0 = 1
   return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
 
@@ -280,12 +281,71 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
-  # idiv is truncated division, but arithmetic shift is floored division, so can only do non-negative numbers!
-  if x.vmin<0: return None
-  sign = 1 if d > 0 else -1
-  m,s = magicgu(vmax := min(x.vmax, dtypes.max(x.dtype)), abs(d))
-  if m * vmax <= dtypes.max(x.dtype): return sign * ((x*m) >> s)
-  # promo_lattice needs to return an unsigned type
+  # If d is a power of two this is not valid for signed ints!
+  is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
+  assert d>0, "Sign should have been taken out of divisor"
+  vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
+  m,s = magicgu(max(vmax, abs(vmin)), d)
+  if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
+    return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
+  # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, None if device=='' else device):
-    if m * vmax <= dtypes.max(next_dtype): return sign * ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
+    if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
+      return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
+
+# ***** threefry *****
+
+def threefry2x32(x: UOp, key: UOp):
+  # split x and key from uint64 to two uint32
+  x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
+
+  rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+  ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
+  xr:list[UOp] = [x0 + ks[-1], x1 + ks[0]]
+  for i in range(5):
+    for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
+    xr = [(xr[0] + ks[i % 3]), (xr[1] + ks[(i + 1) % 3] + i + 1)]
+
+  return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
+
+# ***** decomposition patterns *****
+
+powers_of_two = {2**i:i for i in range(64)}
+@functools.cache
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
+  pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
+           ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
+  # no real hardware supports THREEFRY
+  pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
+  # rewrite SQRT to xpow 0.5
+  if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
+  # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
+  if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
+  # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
+  if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+  if Ops.SHR in ops:
+    # no reason to check x<0 for uints
+    pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
+      c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
+    if not getenv("DISABLE_FAST_IDIV"):
+      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
+      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
+  if Ops.NEG in ops:
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
+    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
+  if Ops.CMPLT in ops:
+    # These are late rewrites because simplex expects equalities to be a certain format
+    pat += [
+      ((UPat.var("x", dtypes.sints) < UPat.cvar("c", dtypes.sints)).logical_not(), lambda x,c: c-1<x),
+      ((UPat.cvar("c", dtypes.sints) < UPat.var("x", dtypes.sints)).logical_not(), lambda x,c: x<c+1),
+      (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*UPat.cvar("c"), lambda x,y,c: y*(-c)<x),
+      (UPat.var("x", dtypes.sints)*-1 < UPat.cvar("c"), lambda x,c:-c<x),
+      ((UPat.cvar("c1",vec=False)<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2",vec=False)),
+        lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
+    ]
+  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
+  if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
+  return PatternMatcher(pat)
