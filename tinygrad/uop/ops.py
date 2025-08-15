@@ -136,10 +136,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
-    if self.op in GroupOp.Block or self.op is Ops.INDEX: return None
+    if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER}: return None
+    if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
+    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
@@ -158,7 +160,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
 
     # otherwise we get the shape from sources
-    if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
+    if not (src_sts := [x.st for x in self.src if x.st is not None and x.op is not Ops.INDEX]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
