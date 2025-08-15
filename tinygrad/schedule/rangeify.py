@@ -64,8 +64,14 @@ early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lamb
 class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
+  contigs = [c for c in x.toposort() if c.op is Ops.CONTIGUOUS]
+  if len(contigs) == 0:
+    ctx.children = {}
+    return
+  children_map = UOp.sink(*contigs).get_children_map()
   # REDUCE_AXIS is fine here, should go to contig only (gate)
-  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
+  ctx.children = {k:list(v.keys()) for k,v in children_map.items() \
+                  if len(v) > 1 and k not in contigs and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
 def mark_children(ctx:ChildrenContext, x:UOp):
   new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
