@@ -490,6 +490,8 @@ class OnnxRunner:
 
 class SubGraphOnnxRunner(OnnxRunner):
   """Usage: https://onnx.ai/onnx/intro/concepts.html#subgraphs-tests-and-loops"""
+  # TODO: hmmmmmmm maybe there's a better way to do this
+  # pylint: disable=W0231 # super-init-not-called
   def __init__(self, graph: dict): self._init_from_graph(graph)
 
 ####################
@@ -563,6 +565,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     then_branch.graph_values.update(intermediate_tensors)
     else_out = else_branch({k:intermediate_tensors[k] for k in else_branch.graph_inputs.keys()})
     then_out = then_branch({k:intermediate_tensors[k] for k in then_branch.graph_inputs.keys()})
+    for k in intermediate_tensors:
+      del else_branch.graph_values[k]
+      del then_branch.graph_values[k]
     assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
     # can use where op when output shape is the same
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
