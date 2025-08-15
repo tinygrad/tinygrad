@@ -49,10 +49,10 @@ class _Device:
           # Special handling for NVIDIA - check if it's actually available
           try:
             from .runtime.ops_nv import NVDevice
-            test_device = NVDevice("NV:0")
+            NVDevice("NV:0")  # Test if device can be created
             working_devices.append(device)
           except Exception:
-            print(f"Warning: NVIDIA requested but not available, falling back to CPU")
+            print("Warning: NVIDIA requested but not available, falling back to CPU")
             continue
         else:
           working_devices.append(device)

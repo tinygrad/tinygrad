@@ -21,11 +21,11 @@ class ClangJITCompiler(Compiler):
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
     arch = '-march=native' if platform.machine() in ('x86_64', 'AMD64') else '-mcpu=native'
-    
+
     # Get the compiler and set appropriate flags
     compiler = getenv("CC", 'clang')
     is_gcc = 'gcc' in compiler
-    
+
     if is_gcc:
       # GCC flags - simpler, no target specification needed
       args = [arch, '-O2', '-fPIC', '-fno-math-errno', '-nostdlib', '-fno-ident']
@@ -42,13 +42,13 @@ class ClangJITCompiler(Compiler):
         # Clean up temporary file
         try:
           os.unlink(tmp_path)
-        except:
+        except Exception:
           pass
     else:
       # Clang flags - include target specification
       args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
       arch_args = ['-ffixed-x18'] if target == 'arm64' else []
-      
+
       obj = subprocess.check_output([compiler, '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
       return jit_loader(obj)
 

@@ -52,7 +52,7 @@ def is_nvidia_available():
 
     from tinygrad.runtime.ops_nv import NVDevice
     # Try to create a device to see if it actually works
-    test_device = NVDevice("NV:0")
+    NVDevice("NV:0")  # Test if device can be created
     return True
   except Exception as e:
     print(f"Warning: NVIDIA runtime not available: {e}")
