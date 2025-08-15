@@ -239,6 +239,8 @@ pm_debuf = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
   # HACK: consts shouldn't have srcs by here
   (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
+  # no movement ops
+  (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
@@ -253,9 +255,9 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   rsink = tensor_map[sink]
   from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
-  rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
   rsink = graph_rewrite(rsink, pm_add_buffers, name="buffer", bottom_up=True)
   rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
+  rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
   from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
   rsink = apply_rewrites(rsink, rewrites_for_linearizer)
   from tinygrad.renderer.cstyle import CStyleLanguage
