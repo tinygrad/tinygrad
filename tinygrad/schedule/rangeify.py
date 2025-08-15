@@ -12,6 +12,10 @@ add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN},
                                   lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+early_cleanups = PatternMatcher([
+  (UPat(Ops.DETACH, name="x"), lambda x: x.src[0])
+])
+
 # 2. mark all children
 
 @dataclass
@@ -136,9 +140,13 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
-  ctx.seen_children[c][x.arg[0]] = idx
   # wait here until we have seen all the children
-  if len(ctx.seen_children[c]) != x.arg[1]: raise RewriteNotReady
+  if len(ctx.seen_children[c]) != x.arg[1]:
+    # NOTE: this is probably wrong, we just need to check for forward progress
+    if x.arg[0] in ctx.seen_children[c]: raise RuntimeError("revisited child before visiting all children")
+    ctx.seen_children[c][x.arg[0]] = idx
+    raise RewriteNotReady
+  ctx.seen_children[c][x.arg[0]] = idx
 
   if c not in ctx.seen_child:
     all_rngs = zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()])
@@ -177,6 +185,9 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_contiguous),
+
+  # CONST can't have axes. remove srcs when we idx
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
 
   # sink contigs to kick it off
   (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), lambda ctx,x: map_contiguous(ctx, x)), #.reshape(x.shape) if x.tag == 2 else None),
@@ -248,7 +259,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = {sink:sink}
   realize_map = {x.base:None for x in sink.src}
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add_contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="finalize_contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="finalize_contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
