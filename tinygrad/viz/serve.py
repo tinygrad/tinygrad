@@ -109,6 +109,10 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
+PROFILE_COLORS = {"TINY":["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+  "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"]}
+def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
+
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
 
@@ -124,10 +128,11 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
+color_map = {}
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
-  height = 20
+  height, colorKey, ref = 20, None, None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
@@ -143,8 +148,10 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+    if depth == 0: colorKey = cat or name
+    fillColor = color_map.setdefault(colorKey, cycle_colors(PROFILE_COLORS.get(e.device, PROFILE_COLORS["DEFAULT"]), len(color_map)))
     arg = {"tooltipText":tooltip, "ref":ref}
-    shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":"#2c2f3a", "arg":arg})
+    shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "maxHeight":height*len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
