@@ -48,12 +48,12 @@ do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
-add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"),
+add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
                                   lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
@@ -253,6 +253,8 @@ def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
+  if x.src[0].op is Ops.ASSIGN:
+    return x.src[0].src[0].replace(dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0].src[1], *rngs)
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
   return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
