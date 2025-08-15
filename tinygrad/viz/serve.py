@@ -73,7 +73,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
       if x in excluded:
-        if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}"
+        if x.op is Ops.CONST and dtypes.is_float(u.dtype): label += f"\nCONST{idx} {x.arg:g}" + (f" {x.src[0].op}" if len(x.src) else "")
         else: label += f"\n{x.op.name}{idx} {x.arg}"
     if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
       try:
