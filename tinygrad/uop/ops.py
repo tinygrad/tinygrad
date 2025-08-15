@@ -940,7 +940,7 @@ class RewriteContext:
         else:
           # in stage 2, we link the result of new_n to the result of n
           try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RuntimeError("infinite loop in graph_rewrite (explicit)")  # pylint: disable=raise-missing-from
+          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
       except RewriteNotReady:
         # retry this later
         stack.insert(0, (n, stage, new_n))

@@ -103,7 +103,6 @@ pm_mops = PatternMatcher([
 ])
 
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
-  if x.tag == 1: return None
   ranges = []
   new_ranges = []
   passthrough_idx = []
@@ -160,7 +159,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   if len(idx_ranges) == 0: return c.index(*out_rngs)
-  return c.index(*out_rngs).contiguous(*end_ranges, arg=tuple(idx_ranges)).index(*[idx.src[1+i] for i in idx_ranges])
+  return c.index(*out_rngs).bufferize(*end_ranges).index(*[idx.src[1+i] for i in idx_ranges])
 
 def indexed_endrange(er:UOp, idx:UOp):
   ended = er.src[1:]
@@ -212,4 +211,11 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
+
+  from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
+  rsink = apply_rewrites(tensor_map[sink], rewrites_for_linearizer)
+  from tinygrad.renderer.cstyle import CStyleLanguage
+  src = CStyleLanguage().render(rsink.arg.lst)
+  print(src)
+
   return {sink:sink}
