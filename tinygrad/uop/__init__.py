@@ -12,7 +12,7 @@ class Ops(FastEnum):
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto()  # noqa: E702
 
   # track children
-  CHILD = auto()
+  CHILD = auto(); CHILDREN = auto() # noqa: E702
 
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702

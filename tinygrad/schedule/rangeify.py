@@ -67,25 +67,22 @@ early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lamb
 class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
-  contigs = [c for c in x.toposort() if c.op is Ops.CONTIGUOUS]
-  if len(contigs) == 0:
-    ctx.children = {}
-    return
-  scontig = UOp.sink(*contigs)
-  children_map = scontig.get_children_map()
-  for k in children_map:
-    if scontig in children_map[k]:
-      del children_map[k][scontig]
-  # REDUCE_AXIS is fine here, should go to contig only (gate)
-  ctx.children = {k:list(v.keys()) for k,v in children_map.items() \
-                  if len(v) > 1 and k is not scontig and k not in contigs and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
+  children_map = x.get_children_map()
+  ctx.children = {}
+  for k,v in children_map.items():
+    non_sink_children = [u for u in v if u.op is not Ops.SINK]
+    if len(non_sink_children) <= 1: continue
+    if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()):
+      ctx.children[k] = non_sink_children
+
 def mark_children(ctx:ChildrenContext, x:UOp):
-  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
+  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
+                   arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN}, name="x"), mark_children),
 
   # hack for one kernel threefry
   #(UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
@@ -201,11 +198,13 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
   if x.arg[0] not in ctx.seen_children[c]: ctx.progress = 0
-  ctx.seen_children[c][x.arg[0]] = idx
+  #print("see child", id(c), x.arg[0])
   # wait here until we have seen all the children
   if len(ctx.seen_children[c]) != x.arg[1]:
     ctx.progress += 1
     if ctx.progress > 1000: raise RuntimeError("children not making progress")
+    # NOTE: we mark this here
+    ctx.seen_children[c][x.arg[0]] = idx
     raise RewriteNotReady
 
   if c not in ctx.seen_child:
@@ -229,6 +228,10 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if len(idx_ranges) == 0: return c.index(*out_rngs)
   return c.index(*out_rngs).bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
 
+def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
+  if len(ctx.seen_children[c]) != c.arg: raise RuntimeError("all children should have been seen by now")
+  return idx.replace(src=(idx.src[0].src[0],)+idx.src[1:])
+
 def might_end_axis(idx:UOp):
   if idx.arg is None: return None
   to_end_axis = []
@@ -244,6 +247,7 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CHILDREN, name="c"),), allow_any_len=True, name="idx"), children_gate),
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_contiguous),
