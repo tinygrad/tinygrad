@@ -116,19 +116,6 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const createPolygons = (source, area) => {
-  const shapes = [];
-  const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
-  for (const [i,e] of source.shapes.entries()) {
-    const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
-    const y0 = e.y.map(yscale);
-    const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-    const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-    shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
-  }
-  return shapes;
-}
-
 const drawLine = (ctx, x, y) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
@@ -138,7 +125,6 @@ const drawLine = (ctx, x, y) => {
 }
 
 const colorScheme = {
-  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -166,9 +152,9 @@ async function renderProfiler() {
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
     div.style.padding = `${padding}px`;
-    div.style.height = v.maxHeight+padding+"px";
+    div.style.height = v.height+padding+"px";
     const offsetY = rect(div).y-canvasTop+padding/2;
-    data.tracks.set(k, { shapes:v.shapes, offsetY })
+    data.tracks.set(k, { shapes:v.shapes, offsetY });
   }
   updateProgress({ "show":false });
   // cache label widths
@@ -208,11 +194,7 @@ async function renderProfiler() {
           ctx.fill();
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
-            let tooltipText = e.arg.tooltipText;
-            if (yscale != null && ((yaxisVal=yscale.invert(offsetY+e.y1[i]))>0)) {
-              tooltipText += `\nTotal: ${formatUnit(yaxisVal, data.axes.y.fmt)}`;
-            }
-            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:{...e.arg, tooltipText} });
+            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
           }
           continue;
         }

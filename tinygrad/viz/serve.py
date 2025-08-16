@@ -109,8 +109,11 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
-PROFILE_COLORS = {"TINY":["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
-  "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"]}
+profile_colors = {
+  "TINY":["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+  "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+}
 def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
 
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
@@ -150,7 +153,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     if depth == 0: colorKey = cat or name
     # TODO: brighter by depth
-    fillColor = color_map.setdefault(colorKey, cycle_colors(PROFILE_COLORS.get(e.device, PROFILE_COLORS["DEFAULT"]), len(color_map)))
+    fillColor = color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map)))
     arg = {"tooltipText":tooltip}
     if ref is not None: curr_ref = {"ctx":ref, "step":0}
     elif curr_ref is not None:
@@ -162,9 +165,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
       curr_ref = None if stepIdx is None else {"ctx":curr_ref["ctx"], "step":stepIdx}
     if curr_ref is not None: arg.update(curr_ref.items())
     shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
-  return {"shapes":shapes, "maxHeight":height*len(levels)}
+  return {"shapes":shapes, "height":height*len(levels)}
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts:int) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -190,7 +193,16 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  return {"shapes":list(shps.values()), "maxY":peak, "timestamps":timestamps}
+  timestamps.append(max_ts)
+  shapes:list[dict] = []
+  for i,n in enumerate(shps.values()):
+    shapes.append(shape:={})
+    shape["x"] = [timestamps[x]-min_ts for x in n["x"]]
+    shape["y0"] = n["y"]
+    shape["y1"] = [y+n["arg"]["nbytes"] for y in n["y"]]
+    shape["arg"] = {}
+    shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
+  return {"shapes":shapes, "height":peak}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -208,7 +220,7 @@ def get_profile(profile:list[ProfileEvent]):
   layout:dict[str, dict] = {}
   for device,events in dev_events.items():
     events.sort(key=lambda v:v[0])
-    layout.update(((device, timeline_layout(events, min_ts)),)) #(f"{device} memory", mem_layout(events))))
+    layout.update(((device, timeline_layout(events, min_ts)), (f"{device} memory", mem_layout(events, min_ts, max_ts))))
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
