@@ -393,6 +393,14 @@ function codeBlock(st, language, { loc, wrap }={}) {
   code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
+  if (st.length > 150) {
+    ret.style.position = "relative";
+    const copyBtn = ret.appendChild(document.createElement("button"));
+    copyBtn.textContent = "Copy";
+    copyBtn.className = "btn";
+    copyBtn.onclick = () => (navigator.clipboard.writeText(st), copyBtn.textContent = "Copied!", setTimeout(() => copyBtn.textContent = "Copy", 2000));
+    Object.assign(copyBtn.style, { position: "absolute", right: "1.5em", opacity: 0.5, border: "none" });
+  }
   if (wrap) ret.className = "wrap";
   if (loc != null) {
     const link = ret.appendChild(document.createElement("a"));
