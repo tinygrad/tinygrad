@@ -238,21 +238,7 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
-@dataclass
-class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
-def extract_children(ctx:ChildrenContext, x:UOp):
-  if ctx.children is not None: return
-  # REDUCE_AXIS is fine here, should go to contig only (gate)
-  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() \
-                  if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
-def mark_children(ctx:ChildrenContext, x:UOp, idx:UOp):
-  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
-  return idx.replace(src=(x.replace(src=tuple(new_srcs)),)+idx.src[1:])
-
 pm_rangeify = pm_mops+PatternMatcher([
-  (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.All-{Ops.CHILD}, name="x"),), allow_any_len=True, name="idx"), mark_children),
-
   # sink contigs to kick it off
   (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), map_contiguous),
 
@@ -303,7 +289,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
 
   # HACK
-  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+  #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
 # 5 (alt). create pointers
@@ -388,9 +374,9 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
-  #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
+  tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
-  tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
+  #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
