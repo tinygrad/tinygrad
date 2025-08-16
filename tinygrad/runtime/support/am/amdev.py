@@ -223,7 +223,7 @@ class AMDev(PCIDevImplBase):
 
     self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(tmr_offset, tmr_size)[:]))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
-    assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, f"signatures mismatch"
+    assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
 
     # Mapping of HW IP to Discovery HW IP
     hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
