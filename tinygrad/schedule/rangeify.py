@@ -197,15 +197,14 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
-  if x.arg[0] not in ctx.seen_children[c]: ctx.progress = 0
-  #print("see child", id(c), x.arg[0])
   # wait here until we have seen all the children
   if len(ctx.seen_children[c]) != x.arg[1]:
     ctx.progress += 1
-    if ctx.progress > 1000: raise RuntimeError("children not making progress")
+    if ctx.progress > 10000: raise RuntimeError("children not making progress")
     # NOTE: we mark this here
     ctx.seen_children[c][x.arg[0]] = idx
     raise RewriteNotReady
+  ctx.progress = 0
 
   if c not in ctx.seen_child:
     all_rngs = zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()])
