@@ -2,7 +2,7 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored
 from tinygrad.uop.symbolic import symbolic_simple
 
 from tinygrad.schedule.kernelize import Kernel
@@ -361,10 +361,13 @@ to_define_global = PatternMatcher([
 
 def split_store(x:UOp):
   if len(x.ranges): return None
-  shape = tuple([r.vmax+1 for r in x.src[2:]])
-  name = "k_"+'_'.join([str(s) for s in shape])
+  store_rngs = x.src[2:]
+
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
+  rng = [u for u in ret.toposort() if u.op is Ops.RANGE]
+  name = "k_"+colored('_', 'BLACK').join([colored(str(s.vmax+1), "blue") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
+
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
   kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()])+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
   return kernel.src[0].assign(kernel)
