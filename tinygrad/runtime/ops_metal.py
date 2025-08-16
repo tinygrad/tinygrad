@@ -63,13 +63,23 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
 
 class MetalDevice(Compiled):
+  _shared_devices: dict[str, tuple[Any, Any, Any, list[Any], list[int]]] = {}
+
   def __init__(self, device:str):
-    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
-    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: list[Any] = []
-    self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
-    self.timeline_value = 0
+    base_device = device.split(':')[0] if ':' in device else device
+    if ':' in device and base_device in MetalDevice._shared_devices:
+      (self.sysdevice, self.mtl_queue, self.timeline_signal,
+       self.mtl_buffers_in_flight, self._timeline_value_ref) = MetalDevice._shared_devices[base_device]
+    else:
+      self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
+      self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
+      if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
+      self.mtl_buffers_in_flight = []
+      self.timeline_signal = msg("newSharedEvent", objc_instance)(self.sysdevice)
+      self._timeline_value_ref = [0]
+      if ':' in device:
+        MetalDevice._shared_devices[base_device] = (self.sysdevice, self.mtl_queue, self.timeline_signal,
+                                                     self.mtl_buffers_in_flight, self._timeline_value_ref)
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -79,8 +89,14 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
 
+  @property
+  def timeline_value(self): return self._timeline_value_ref[0]
+  @timeline_value.setter
+  def timeline_value(self, value): self._timeline_value_ref[0] = value
+
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight:
+    buffers_to_sync = list(self.mtl_buffers_in_flight)
+    for cbuf in buffers_to_sync:
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
@@ -211,7 +227,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")(encoder, src.buf, ctypes.c_ulong(src.offset),
         dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
-    if src_dev != dest_dev:
+    if src_dev != dest_dev and src_dev.mtl_queue != dest_dev.mtl_queue:
       msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
       msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
