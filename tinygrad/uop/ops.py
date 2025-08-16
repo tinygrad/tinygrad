@@ -130,7 +130,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    #return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, () if self.arg is None else self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 
@@ -156,6 +157,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # hack for PTX, CASTing the ptr loses the shape
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
+    # on asm backends the cast is a noop
+    if self.op is Ops.NOOP and self.src[0].op is Ops.DEFINE_GLOBAL: return None
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None

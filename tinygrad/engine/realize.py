@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo
+from tinygrad.muop import assemble
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
@@ -40,11 +41,15 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
-  # print and render
+  # print, (optionally) lower to MUOp, and render
   if DEBUG >= 6: print_uops(uops)
-  src = renderer.render(uops)
+  muops = None
+  if renderer.device in ("X86",):
+    muops = renderer.to_muops(uops)
+    src = "\n".join(str(mu) for mu in muops)
+  else: src = renderer.render(uops)
 
-  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
+  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops, muops,
                      global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
@@ -66,7 +71,7 @@ class CompiledRunner(Runner):
     if precompiled is not None: self.lib = precompiled
     else:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,), cat="compiler"), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src)
+        self.lib = Device[p.device].compiler.compile_cached(p.src) if p.muops is None else assemble(p.muops)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
