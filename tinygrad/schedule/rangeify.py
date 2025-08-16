@@ -229,6 +229,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   if len(idx_ranges) == 0: return c.index(*out_rngs)
+  # NOTE: partial contigs can still come from here
   return c.index(*out_rngs).bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
