@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
+from tinygrad.helpers import time_to_str
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
@@ -108,6 +109,13 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
+profile_colors = {
+  "TINY":["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+  "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+}
+def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
+
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
 
@@ -123,26 +131,43 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+color_map:dict[str, str] = {}
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
+  height, colorKey, curr_ref = 20, "", None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
-    name, cat, info = e.name, None, None
+    name, cat, tooltip = e.name, None, f"{time_to_str(dur*1e-9).strip()}"
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       # TODO: support symbolic by capturing var_vals in profile events
       if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and all(isinstance(es,int) for es in [p.estimates.ops, p.estimates.mem, p.estimates.lds]):
-        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
+        tooltip += f"\n{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
-  return {"shapes":shapes, "maxDepth":len(levels)}
+    if depth == 0: colorKey = cat or str(name)
+    # TODO: brighter by depth
+    fillColor = color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map)))
+    arg:dict = {"tooltipText":tooltip}
+    if ref is not None: curr_ref = {"ctx":ref, "step":0}
+    elif curr_ref is not None:
+      start, stepIdx = curr_ref["step"]+1 if curr_ref["step"]>0 else 0, None
+      for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]):
+        if i >= start and s["name"] == name:
+          stepIdx = i
+          break
+      curr_ref = None if stepIdx is None else {"ctx":curr_ref["ctx"], "step":stepIdx}
+    if curr_ref is not None: arg.update(curr_ref.items())
+    shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
+  return {"shapes":shapes, "height":height*len(levels)}
+
+def yscale(x, peak, area): return area-(x/peak)*area
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   step, peak, mem = 0, 0, 0
@@ -172,6 +197,13 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     v["y"].append(v["y"][-1])
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
+class ScaleLinear:
+  def __init__(self, domain, range_):
+    self.d0, self.d1 = domain
+    self.r0, self.r1 = range_
+    self.m = (self.r1 - self.r0) / (self.d1 - self.d0)
+  def __call__(self, x): return self.r0 + (x - self.d0) * self.m
+
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   for ev in profile:
@@ -185,9 +217,31 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
-  return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+  layout:dict[str, dict] = {}
+  mem_layouts:dict[str, dict] = {}
+  peaks:list[int] = []
+  for device,events in dev_events.items():
+    events.sort(key=lambda v:v[0])
+    layout[device] = timeline_layout(events, min_ts)
+    if (dm:=mem_layout(events))["peak"] > 0:
+      mem_layouts[device] = dm
+      peaks.append(dm["peak"])
+  area_scale = ScaleLinear([min(peaks), max(peaks)], [32, 100])
+  for d,base in mem_layouts.items():
+    shapes:list[dict] = []
+    area = area_scale(peak:=base["peak"])
+    timestamps = base["timestamps"]
+    timestamps.append(max_ts)
+    yscale = ScaleLinear([0, peak], [area, 0])
+    for i,n in enumerate(base["shapes"]):
+      shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
+      shape["y0"] = [yscale(y) for y in n["y"]]
+      shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
+      shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
+      shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
+      shapes.append(shape)
+    layout[f"{d} memory"] = {"shapes":shapes, "height":area, "ydomain":[0, peak]}
+  return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
