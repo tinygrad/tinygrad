@@ -79,7 +79,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   f, e = frexp(d)
   ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
-  i = (e.cast(dtypes.uint64) >> 5)
+  i = e.cast(dtypes.uint64) >> 5
   e = e.cast(dtypes.int32) & 31
   offset = 32 - e
 
