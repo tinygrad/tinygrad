@@ -157,8 +157,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # hack for PTX, CASTing the ptr loses the shape
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
-    # on asm backends the cast is a noop
-    if self.op is Ops.NOOP and self.src[0].op is Ops.DEFINE_GLOBAL: return None
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None

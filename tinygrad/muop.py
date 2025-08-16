@@ -24,7 +24,7 @@ class Memory:
   base: Register
   index: Register|None = None
   scale: int = 1
-  disp: Immediate = Immediate(0, 1)
+  disp: Immediate = Immediate(0, 4)
 
   def __str__(self):
     si = f" + {self.index}*{self.scale}" if self.index is not None else ""
@@ -65,7 +65,7 @@ def assemble(src:list[MUOp]) -> bytes:
     if isinstance(mu.out, Label):
       targets[mu.out] = size
       continue
-    elif mu.ins and isinstance(mu.ins[0], Label):
+    if mu.ins and isinstance(mu.ins[0], Label):
       if mu.ins[0] in targets:
         mu = mu.replace(mu.out, (Immediate(targets[mu.ins[0]] - (size+6), 4),))
       else:
@@ -148,14 +148,6 @@ class MUOpX86(MUOp):
     if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
     return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
             Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7)}[op]
-  def ivec_ops(op:Ops, sz:int):
-    if sz == 1: return {Ops.ADD: ("vpaddb", 0xFC), Ops.SUB: ("vpsubb", 0xF8), Ops.CMPGT: ("vpcmpgtb", 0x64), Ops.CMPEQ: ("vpcmpeqb", 0x74)}[op]
-    if sz == 2: return {Ops.ADD: ("vpaddw", 0xFD), Ops.SUB: ("vpsubw", 0xF9), Ops.MUL: ("vpmullw", 0xD5), Ops.CMPGT: ("vpcmpgtw", 0x65), Ops.CMPEQ: ("vpcmpeqw", 0x75)}[op]
-    if sz == 4: return {Ops.ADD: ("vpaddd", 0xFE), Ops.SUB: ("vpsubd", 0xFA), Ops.CMPGT: ("vpcmpgtd", 0x66), Ops.CMPEQ: ("vpcmpeqd", 0x76)}[op]
-    if sz == 8: return {Ops.ADD: ("vpaddq", 0xD4), Ops.SUB: ("vpsubq", 0xFB)}[op]
-  def f_ops(op:Ops, sz:int):
-    if sz == 4: return {Ops.ADD: ("vaddps", 0x58), Ops.SUB: ("vsubps", 0x5C), Ops.MUL: ("vmulps", 0x59), Ops.FDIV: ("vdivps", 0x5E)}[op]
-    if sz == 8: return {Ops.ADD: ("vaddpd", 0x58), Ops.SUB: ("vsubpd", 0x5C), Ops.MUL: ("vmulpd", 0x59), Ops.FDIV: ("vdivpd", 0x5E)}[op]
   #def idiv(out:Register, in0:Register, in1:Register, is_signed:bool) -> MUOp:
   #  in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
   #  move = MUOpX86("mov", 0x8B, out, (in0,), (Register("rax", 0, 8),), (GPR,), out, in0, w=int(out.size == 8), prefix=int(out.size == 2))
@@ -240,7 +232,7 @@ class MUOpX86(MUOp):
     # TODO: support 8 bit displacement
     #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp.value == 0 else 0b01 if -128 <= self.rm.disp.value < 128 else 0b10
     if isinstance(self.rm, Memory):
-      if self.rm.disp.value == 0: mod = 0b01 if self.rm.base.name == "r13" else 0b00
+      if self.rm.disp.value == 0: mod = 0b10 if self.rm.base.name == "r13" else 0b00
       else: mod = 0b10
     inst.append((mod << 6) | (reg << 3) | rm)
     # *** SIB byte (optional) ***

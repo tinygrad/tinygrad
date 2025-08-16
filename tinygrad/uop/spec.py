@@ -131,7 +131,6 @@ index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
-  (UPat(Ops.DEFINE_GLOBAL, dtypes.uint64), lambda: True),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
@@ -206,8 +205,7 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  # ASM LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.uint64),), allow_any_len=True), lambda: True),
+  # ASM LOAD
   (UPat(Ops.LOAD, src=(UPat.cvar(),)), lambda: True),
 ])
 
