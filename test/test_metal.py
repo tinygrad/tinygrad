@@ -1,5 +1,6 @@
 import unittest
 from tinygrad.device import CompileError, Device, Compiler
+from tinygrad import Tensor
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -73,3 +74,50 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       MetalProgram(device, "r_5", compiled)
+
+@unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
+class TestMetalVirtualDevices(unittest.TestCase):
+  def test_virtual_device_shared_resources(self):
+    dev1, dev2 = Device["METAL:1"], Device["METAL:2"]
+    self.assertEqual(id(dev1.mtl_queue), id(dev2.mtl_queue))  # type: ignore
+    self.assertEqual(id(dev1.timeline_signal), id(dev2.timeline_signal))  # type: ignore
+    self.assertEqual(id(dev1.mtl_buffers_in_flight), id(dev2.mtl_buffers_in_flight))  # type: ignore
+
+  def test_virtual_device_sharding(self):
+    devices = tuple(f"METAL:{i}" for i in range(4))
+    x = Tensor.randn(256, 256)
+    x.shard_(devices, axis=0)
+    x.realize()
+    self.assertIsInstance(x.device, tuple)
+    self.assertEqual(len(x.device), 4)
+    self.assertEqual(set(x.device), {"METAL", "METAL:1", "METAL:2", "METAL:3"})
+
+  def test_virtual_device_computation(self):
+    for i in range(4):
+      a = Tensor.randn(64, 64, device=f"METAL:{i}")
+      b = Tensor.randn(64, 64, device=f"METAL:{i}")
+      c = a.matmul(b)
+      c.realize()
+      self.assertIsInstance(c.sum().item(), float)
+
+  def test_virtual_device_transfer(self):
+    import numpy as np
+    src = Tensor.randn(32, 32, device="METAL:0")
+    src.realize()
+    src_data = src.numpy()
+    for i in range(1, 4):
+      dest = src.to(f"METAL:{i}")
+      dest.realize()
+      np.testing.assert_allclose(src_data, dest.numpy(), rtol=1e-5, atol=1e-5)
+
+  def test_virtual_device_sharding_patterns(self):
+    devices = tuple(f"METAL:{i}" for i in range(4))
+    for axis in [0, 1, -1, None]:
+      tensor = Tensor.randn(128, 128)
+      tensor.shard_(devices, axis=axis)
+      tensor.realize()
+      self.assertIsInstance(tensor.device, tuple)
+      self.assertEqual(len(tensor.device), 4)
+      result = (tensor * 2.0).sum()
+      result.realize()
+      self.assertIsInstance(result.item(), float)
