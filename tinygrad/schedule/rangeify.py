@@ -71,13 +71,15 @@ def extract_children(ctx:ChildrenContext, x:UOp):
   if len(contigs) == 0:
     ctx.children = {}
     return
-  children_map = UOp.sink(*contigs).get_children_map()
+  scontig = UOp.sink(*contigs)
+  children_map = scontig.get_children_map()
   # REDUCE_AXIS is fine here, should go to contig only (gate)
   ctx.children = {k:list(v.keys()) for k,v in children_map.items() \
-                  if len(v) > 1 and k not in contigs and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
+                  if len(v) > 1 and k is not scontig and k not in contigs and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
 def mark_children(ctx:ChildrenContext, x:UOp):
   new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
+
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
   (UPat(GroupOp.All-{Ops.CHILD}, name="x"), mark_children),
@@ -288,7 +290,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
 
   # HACK
-  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None)
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
 # 5 (alt). create pointers
@@ -314,8 +316,12 @@ pm_debuf = PatternMatcher([
 class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
+  vars:dict = field(default_factory=dict)
 
 def debuf(ctx:LocalAddBufferContext, b:UOp): return UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx.map[b][1])
+def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
+  ctx.vars[b] = None
+  return b.src[0]
 
 def split_load(ctx:LocalAddBufferContext, s:UOp):
   b = s.src[0].src[0]
@@ -343,6 +349,7 @@ def handle_store(ctx:LocalAddBufferContext, s:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat(Ops.LOAD, name="s"), split_load),
   (UPat(Ops.STORE, name="s"), handle_store),
 ])
@@ -354,7 +361,7 @@ def split_store(x:UOp):
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
-  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()]), arg=Kernel(ret, ()))
+  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()])+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
   return kernel.src[0].assign(kernel)
 
 split_kernels = PatternMatcher([
