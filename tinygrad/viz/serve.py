@@ -131,11 +131,11 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-color_map = {}
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) -> dict:
+color_map:dict[str, str] = {}
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
-  height, colorKey, curr_ref = 20, None, None
+  height, colorKey, curr_ref = 20, "", None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
@@ -151,10 +151,10 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    if depth == 0: colorKey = cat or name
+    if depth == 0: colorKey = cat or str(name)
     # TODO: brighter by depth
     fillColor = color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map)))
-    arg = {"tooltipText":tooltip}
+    arg:dict = {"tooltipText":tooltip}
     if ref is not None: curr_ref = {"ctx":ref, "step":0}
     elif curr_ref is not None:
       start, stepIdx = curr_ref["step"]+1 if curr_ref["step"]>0 else 0, None
@@ -164,12 +164,12 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
           break
       curr_ref = None if stepIdx is None else {"ctx":curr_ref["ctx"], "step":stepIdx}
     if curr_ref is not None: arg.update(curr_ref.items())
-    shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
+    shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "height":height*len(levels)}
 
 def yscale(x, peak, area): return area-(x/peak)*area
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts, max_ts) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -200,12 +200,12 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts
   # TODO: scale this by other peaks
   area = 40
   for i,n in enumerate(shps.values()):
-    shapes.append(shape:={})
-    shape["x"] = [timestamps[x]-min_ts for x in n["x"]]
+    shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
     shape["y0"] = [yscale(y, peak, area) for y in n["y"]]
     shape["y1"] = [yscale(y+n["arg"]["nbytes"], peak, area) for y in n["y"]]
-    shape["arg"] = {}
+    shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
     shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
+    shapes.append(shape)
   return {"shapes":shapes, "height":area}
 
 def get_profile(profile:list[ProfileEvent]):
