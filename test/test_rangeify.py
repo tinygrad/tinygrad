@@ -89,7 +89,7 @@ class TestRangeify(unittest.TestCase):
     w2 = Tensor.empty(12, 8, 3, 3)
     x.conv2d(w1).contiguous().conv2d(w2).realize()
 
-  def test_transformer_ffn(self):
+  def test_ffn(self):
     from tinygrad.apps.llm import TransformerBlock
     from tinygrad import nn
     blk = TransformerBlock(1024, 4096, 1, 1, 1e-5)
