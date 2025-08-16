@@ -373,7 +373,7 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def bind(self, dev:AMDDevice):
-    if not getenv("AMD_SDMA_BIND", 0) or not dev.is_am(): return
+    if not getenv("AMD_SDMA_BIND", 1) or not dev.is_am(): return
 
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
