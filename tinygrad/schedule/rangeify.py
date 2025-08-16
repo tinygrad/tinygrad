@@ -273,13 +273,15 @@ pm_rangeify = pm_mops+PatternMatcher([
 
 # 4. remove bufferize
 
-def bufferize_to_store(x:UOp):
+def bufferize_to_store(ctx, x:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
   if x.src[0].op is Ops.ASSIGN:
     return x.src[0].src[0].replace(dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0].src[1], *rngs)
-  buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+  #buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+  buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=prod(shape)), arg=ctx[0])
+  ctx[0] += 1
   return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
 def add_load_on_buffer(idx:UOp, b:UOp):
@@ -291,8 +293,16 @@ def add_load_on_store(x:UOp, st:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   b = st.src[0].src[0]
-  assert b.op is Ops.BUFFER
+  #assert b.op is Ops.BUFFER
   return b.shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=b.size)).load(st)
+
+def shp(shp, rng):
+  acc = 1
+  ss = []
+  for s,r in list(zip(shp,rng))[::-1]:
+    ss.append(r*acc)
+    acc *= s
+  return sum(ss)
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
@@ -301,6 +311,10 @@ pm_add_buffers = pm_mops+PatternMatcher([
 
   # HACK
   #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+
+  (UPat(Ops.INDEX, name="idx").sink(),
+   lambda idx: UOp.new_buffer(idx.device, prod(idx.arg), idx.dtype).index(shp(idx.arg, idx.src[1:]),
+                                                                          dtype=idx.dtype.ptr(prod(idx.arg))).store(*idx.src).sink())
 ])
 
 # 5 (alt). create pointers
@@ -434,11 +448,16 @@ def td_elementwise(ctx, e:UOp):
     new_src = []
     for u in e.src:
       assert u.op is Ops.INDEX
-      out = u.src[0]
+      out = [u.src[0]]
       for i,idx in list(enumerate(u.src[1:]))[::-1]:
         if idx is not out_rng[i] and idx is not UOp.const(dtypes.int, 0):
-          out = UOp(Ops.MERGE, out.dtype, src=(out, idx, out_rng[i]))
-      new_src.append(out)
+          out.append(idx)
+          out.append(out_rng[i])
+          #out = UOp(Ops.MERGE, out.dtype, src=(out, idx, out_rng[i]))
+      if len(out) > 1:
+        new_src.append(UOp(Ops.MERGE, u.dtype, tuple(out)))
+      else:
+        new_src.append(out[0])
       #mm = []
       #for i,idx in enumerate(u.src[1:]):
       #  if idx is not out_rng[i] and idx is not UOp.const(dtypes.int, 0):
@@ -475,7 +494,7 @@ pm_td_rangeify = PatternMatcher([
 ])
 
 def remove_merge(m):
-  return UOp(Ops.BUFFERIZE, m.dtype, m.src[0:2], arg=m.device).index(m.src[2])
+  return UOp(Ops.BUFFERIZE, m.dtype, (m.src[0],)+tuple(m.src[1::2]), arg=m.device).index(*m.src[2::2])
 
 no_merge = PatternMatcher([
   (UPat(Ops.MERGE, name="m"), remove_merge),
@@ -528,8 +547,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
         rew[u] = k
     rsink = rsink.substitute(rew)
 
-  rsink = graph_rewrite(rsink, no_merge, name="remove merge")
-  rsink = graph_rewrite(rsink, pm_add_buffers, bottom_up=True, name="add buffers")
 
   """
   realize_map = {}
@@ -544,6 +561,9 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   #tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
   #if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
   if getenv("VIZ"): graph_rewrite(rsink, PatternMatcher([]), name="View Rangeify Graph")
+
+  rsink = graph_rewrite(rsink, no_merge, name="remove merge")
+  rsink = graph_rewrite(rsink, pm_add_buffers, ctx=[0], bottom_up=True, name="add buffers")
 
   # render
   if getenv("SRC") or True:

@@ -79,10 +79,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
         label += f"\n{shape_to_str(u.shape)}"
       elif len(rngs:=u.ranges):
-        if u.op is Ops.MERGE:
-          label += f"\n{str([x.arg for x in rngs])}"
-        else:
-          label += f"\n{str(sorted([x.arg for x in rngs]))}"
+        label += f"\n{str(sorted([x.arg for x in rngs]))}"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"

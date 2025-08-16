@@ -192,7 +192,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
-    #if self.op is Ops.MBLOCK: return {x.src[1]:None for x in self.src[1:]}
+    if self.op is Ops.MERGE:
+      ret = self.src[0].ranges.copy()
+      for s in self.src[1::2]:
+        if s in ret: del ret[s]
+      for s in self.src[2::2]:
+        ret.update(s.ranges)
+      return ret
     if self.op in {Ops.BUFFERIZE, Ops.REDUCE}:
       ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
