@@ -36,7 +36,8 @@ def main():
   reg_names = {}
   dev = PCIIface(None, 0)
   for x, y in dev.dev_impl.__dict__.items():
-    if isinstance(y, AMRegister): reg_names[y.addr] = x
+    if isinstance(y, AMRegister):
+      for inst, addr in y.addr.keys(): reg_names[addr] = f"{x}, xcc={inst}"
 
   with open(sys.argv[1], 'r') as f:
     log_content = log_content_them = f.read()
