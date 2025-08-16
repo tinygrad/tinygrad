@@ -381,6 +381,12 @@ split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
 ])
 
+pm_children_fixup = PatternMatcher([
+  # clone all movement ops
+  (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat(GroupOp.Movement, name="m"),)),), name="c"),
+    lambda c,m: UOp(m.op, m.dtype, (c.replace(src=(c.src[0].replace(src=(m.src[0],)),)),), m.arg)),
+])
+
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
@@ -389,6 +395,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
+  tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
