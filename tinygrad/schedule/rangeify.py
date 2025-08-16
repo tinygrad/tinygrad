@@ -365,7 +365,7 @@ def split_store(x:UOp):
 
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
-  rng = [u for u in ret.toposort() if u.op is Ops.RANGE]
+  rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
   name = "k_"+colored('_', 'BLACK').join([colored(str(s.vmax+1), "blue") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
 
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
@@ -400,7 +400,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     from tinygrad.renderer.cstyle import CStyleLanguage
     src = CStyleLanguage().render(rsink.arg.lst)
     print(src)
-    return {sink:sink}
 
   tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
 
