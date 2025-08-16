@@ -17,9 +17,6 @@ def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32:
 def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d.scalar()]
 
 # **** utils ****
-def shr(x:UOp, y:int) -> UOp: return x // (2**y)
-def shl(x:UOp, y:int) -> UOp: return x * (2**y)
-
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
   out_dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.vcount)
@@ -28,27 +25,27 @@ def rintk(d:UOp) -> UOp:
 def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   out_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype.scalar()}[q.dtype.scalar()].vec(q.dtype.vcount)
-  return shl(q + exponent_bias(out_dtype), mantissa_bits(out_dtype)).bitcast(out_dtype)
+  return ((q + exponent_bias(out_dtype)) << mantissa_bits(out_dtype)).bitcast(out_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.vcount))
   # -1 <= ilog2bk(d) <= 128
-  return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
+  return ((dint >> mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
   dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.count)
   m1 = d.bitcast(dtype)
-  m2 = shl(e.cast(dtype), mantissa_bits(d.dtype))
+  m2 = e.cast(dtype) << mantissa_bits(d.dtype)
   return (m1 + m2).bitcast(d.dtype).cast(d.dtype)
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
   assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in (dtypes.int16, dtypes.int32, dtypes.int64)
-  return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
+  return (d * pow2if(e >> 1, d.dtype)) * pow2if(e - (e >> 1), d.dtype)
 
 def frexp(v:UOp) -> tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent) assuming v != 0"""
@@ -57,7 +54,7 @@ def frexp(v:UOp) -> tuple[UOp, UOp]:
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype.scalar()]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype.scalar()]
   bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype.scalar()].vec(v.dtype.count))
-  exponent = shr(bits, mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
+  exponent = (bits >> mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
   exp = exponent - exponent_bias(v.dtype) + 1
@@ -82,7 +79,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   f, e = frexp(d)
   ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
-  i = shr(e.cast(dtypes.uint64), 5)
+  i = (e.cast(dtypes.uint64) >> 5)
   e = e.cast(dtypes.int32) & 31
   offset = 32 - e
 
@@ -103,10 +100,10 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
   # compute x * 2/pi
-  p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
+  p = (_hp_mul(ia, hi) << 32) + _hp_mul(ia, mi) + (_hp_mul(ia, lo) >> 32)
 
   # round quotient to nearest
-  q = shr(p, 62).cast(dtypes.int32)
+  q = (p >> 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
