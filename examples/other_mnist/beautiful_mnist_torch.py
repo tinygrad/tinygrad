@@ -27,10 +27,14 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
-    import tinygrad.frontend.torch  # noqa: F401
-    device = torch.device("tiny")
+    # Import only the torch.compile backend, not the full frontend
+    from extra.torch_backend.test_compile import tiny  # noqa: F401
+    # Use CPU for data and model - torch.compile will use tiny backend for compute
+    device = torch.device("cpu")
+    use_compile = True
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
+    use_compile = False
   if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -43,7 +47,6 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
@@ -52,6 +55,8 @@ if __name__ == "__main__":
     loss.backward()
     optimizer.step()
     return loss
+  
+  step = torch.compile(step, backend="tiny" if use_compile else "inductor")
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
