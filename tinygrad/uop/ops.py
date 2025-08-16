@@ -137,6 +137,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER, Ops.BUFFERIZE}: return None
+    if self.op is Ops.MBLOCK: return None
     if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
@@ -191,6 +192,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
+    if self.op is Ops.MBLOCK: return {x.src[1]:None for x in self.src[1:]}
     if self.op in {Ops.BUFFERIZE, Ops.REDUCE}:
       ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
