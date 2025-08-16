@@ -164,13 +164,17 @@ pm_mops = PatternMatcher([
 ])
 
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
-  if x.arg is None and idx is not None: return None
-  if x.arg is not None and idx is None: return None
+  # NOTE: partial contig is disabled for now
+  #arg = x.arg
+  arg = None
+  if arg is None and idx is not None: return None
+  if arg is not None and idx is None: return None
+
   ranges = []
   new_ranges = []
   passthrough_idx = []
   for i,s in enumerate(x.shape):
-    if x.arg is not None and i not in x.arg:
+    if arg is not None and i not in arg:
       assert idx is not None, "partial contig requires index"
       ranges.append(idx.src[1+i])
       continue
