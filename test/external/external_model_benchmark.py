@@ -17,6 +17,7 @@ MODELS = {
   # TODO: precision issue
   # "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
   "dm": "https://github.com/commaai/openpilot/raw/ba7f840a06dbc8ae3c45b3b4976c88a21895aed0/selfdrive/modeld/models/dmonitoring_model.onnx",
+  "sam2_hiear2_tiny": "https://github.com/haraschax/filedump/raw/refs/heads/master/sam2_hiear2_tiny.onnx",
 
   # broken in torch MPS
   # "zfnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/zfnet-512/model/zfnet512-9.onnx",
