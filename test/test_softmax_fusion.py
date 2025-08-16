@@ -117,6 +117,16 @@ class TestFuse(unittest.TestCase):
     c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
     self.assertListEqual(c.tolist(), [30]*16)
 
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "repro from METAL TC")
+  @unittest.expectedFailure
+  def test_tc_with_fuse_failure(self):
+    # NOTE: both Ops.FUSE and FUSE_ARANGE can cause this failure
+    # this is a small repro triggered by Ops.FUSE
+    A = Tensor.randn(8, 8, dtype=dtypes.float16).realize()
+    B = Tensor.randn(8, 8, dtype=dtypes.float16).realize()
+    C = Tensor(1).expand(6, 8, 8).pad(((1,1), None, None),).sum(-1)
+    (C + (A @ B)).fuse().realize() # assert all_same(tensor_core_opts)
+
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
