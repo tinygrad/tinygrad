@@ -167,6 +167,8 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], offsetX:int) 
     shapes.append({"name":name, "x":st-offsetX, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "height":height*len(levels)}
 
+def yscale(x, peak, area): return area-(x/peak)*area
+
 def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts:int) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
@@ -195,14 +197,16 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts
     v["y"].append(v["y"][-1])
   timestamps.append(max_ts)
   shapes:list[dict] = []
+  # TODO: scale this by other peaks
+  area = 40
   for i,n in enumerate(shps.values()):
     shapes.append(shape:={})
     shape["x"] = [timestamps[x]-min_ts for x in n["x"]]
-    shape["y0"] = n["y"]
-    shape["y1"] = [y+n["arg"]["nbytes"] for y in n["y"]]
+    shape["y0"] = [yscale(y, peak, area) for y in n["y"]]
+    shape["y1"] = [yscale(y+n["arg"]["nbytes"], peak, area) for y in n["y"]]
     shape["arg"] = {}
     shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
-  return {"shapes":shapes, "height":peak}
+  return {"shapes":shapes, "height":area}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
