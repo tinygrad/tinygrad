@@ -1408,7 +1408,7 @@ def train_stable_diffusion():
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
   #CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
-  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = 4000
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = 42000
   print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
@@ -1433,10 +1433,11 @@ def train_stable_diffusion():
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       #dtypes.default_float=dtypes.float32
-      if getenv("RUN_EVAL"):
+      #if getenv("RUN_EVAL"):
         # only needed for decoding denoised latents in eval
-        self.first_stage_model = AutoencoderKL()
+        #self.first_stage_model = AutoencoderKL()
       self.model=None
+      self.first_stage_model=None
 
 
   model = StableDiffusion()
@@ -1484,6 +1485,10 @@ def train_stable_diffusion():
     lr_scheduler.step()
     init_scale = 2.0**16
     grad_scaler = GradScaler(optimizer, init_scale)
+
+    # this is most but not all of the tensors that are used only in training, we will offload them to free up memory for eval
+    #train_only_tensors = get_parameters([model.cond_stage_model]) + optimizer.m + optimizer.v
+    train_only_tensors = optimizer.m + optimizer.v
 
   # TODO: if BS and EVAL_BS don't match, need to modify the jit setup and/or pad
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
@@ -1533,11 +1538,33 @@ def train_stable_diffusion():
     # NOTE: the clip weights are the same between model.cond_stage_model and clip_encoder
     eval_timesteps = list(reversed(range(1, 1000, 20)))
 
+    original_device = Device.DEFAULT
+    Device.DEFAULT="CPU" # init eval_only_tensors on CPU to prevent OOM when doing combined training + eval
     # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
     #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
     eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]])
 
     jit_context_step = TinyJit(model.cond_stage_model.embed_tokens)
+    inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+    jit_inception = TinyJit(inception)
+
+    # only needed for decoding denoised latents in eval
+    model.first_stage_model = AutoencoderKL()
+    vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
+    text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+    clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
+    loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
+    loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
+    load_state_dict(clip_encoder, loaded)
+    jit_clip_score = TinyJit(clip_encoder.get_clip_score)
+    Device.DEFAULT=original_device
+
+    eval_only_tensors = get_parameters(model.first_stage_model) + get_parameters(inception) + get_parameters(clip_encoder) + [eval_alphas_prev]
+    #if len(GPUS) > 1:
+      #for p in eval_only_weights:
+        #p.to_(GPUS)
+      #with Context(BEAM=0):
+        #Tensor.realize(*eval_only_weights)
     
     # Workaround because x.cat(x) doesn't work on multi: https://raw.githubusercontent.com/hooved/train-sd/refs/heads/master/multi_bug_2.txt
     @TinyJit
@@ -1563,24 +1590,6 @@ def train_stable_diffusion():
         x = model.first_stage_model.decoder(x)
         x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
         return x
-
-    inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-    jit_inception = TinyJit(inception)
-
-    vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
-    text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
-    clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
-    loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
-    loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-    load_state_dict(clip_encoder, loaded)
-    jit_clip_score = TinyJit(clip_encoder.get_clip_score)
-
-    if len(GPUS) > 1:
-      to_move = get_parameters(model.first_stage_model) + get_parameters(inception) + get_parameters(clip_encoder) + [eval_alphas_prev]
-      for p in to_move:
-        p.to_(GPUS)
-      with Context(BEAM=0):
-        Tensor.realize(*to_move)
 
     @Tensor.train(mode=False)
     def eval_unet(unet:UNetModel) -> tuple[float, float]:
@@ -1740,12 +1749,24 @@ def train_stable_diffusion():
       if getenv("RUN_EVAL", ""):
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
         if i % EVAL_INTERVAL == 0:
+          # prevent OOM
+          train_step.reset()
+          with Context(BEAM=0):
+            Tensor.realize(*[t.to_("CPU") for t in train_only_tensors])
+            Tensor.realize(*[t.to_(GPUS) for t in eval_only_tensors])
+
           clip, fid = eval_unet(unet)
           print(f"step {i}: clip score: {clip}, fid score:{fid}")
           if WANDB:
             wandb.log({"eval/step": i, "eval/clip_score": clip, "eval/fid_score": fid})
 
+          for jit in (denoise_step, jit_clip_score, jit_inception, jit_context_step, decode): jit.reset()
+          with Context(BEAM=0):
+            Tensor.realize(*[t.to_("CPU") for t in eval_only_tensors])
+            Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
+
   else:
+    with Context(BEAM=0): Tensor.realize(*[t.to_(GPUS) for t in eval_only_tensors])
     EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
     assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
 
@@ -1760,6 +1781,7 @@ def train_stable_diffusion():
         unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
         load_state_dict(unet, unet_ckpt)
         clip, fid = eval_unet(unet)
+        denoise_step.reset() # necessary if we eval more than one checkpoint, so jit will use the next checkpoint
         print(f"clip score: {clip}")
         print(f"fid score: {fid}")
         if WANDB:

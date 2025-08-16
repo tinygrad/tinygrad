@@ -33,12 +33,11 @@ export MODEL="stable_diffusion"
 export GPUS=6 BS=6 EVAL_BS=6
 #export GPUS=1 BS=1 EVAL_BS=1
 
-#export RUN_EVAL=1
-#export EVAL_OVERFIT_SET=1
-#export EVAL_INTERVAL=400
+export RUN_EVAL=1
+export EVAL_OVERFIT_SET=1
+export EVAL_INTERVAL=400
 #export EVAL_ONLY=1
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval"
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_2"
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08142156/run_eval"
 
 export BASEDIR="/home/hooved/stable_diffusion"
 export DATADIR="/raid/datasets/stable_diffusion"
@@ -46,6 +45,6 @@ export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
 
 export WANDB=1
-#export PARALLEL=0
+export PARALLEL=16
 
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
