@@ -371,7 +371,7 @@ def split_store(x:UOp):
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
   rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
-  name = "k_"+colored('_', 'BLACK').join([colored(str(s.vmax+1), "blue") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
+  name = "k"+colored('_', 'BLACK').join(['']+[colored(str(s.vmax+1), "WHITE") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
 
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
   kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()])+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
