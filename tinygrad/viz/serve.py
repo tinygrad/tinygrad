@@ -226,7 +226,7 @@ def get_profile(profile:list[ProfileEvent]):
     if (dm:=mem_layout(events))["peak"] > 0:
       mem_layouts[device] = dm
       peaks.append(dm["peak"])
-  area_scale = ScaleLinear([min(peaks), max(peaks)], [10, 100])
+  area_scale = ScaleLinear([min(peaks), max(peaks)], [32, 100])
   for d,base in mem_layouts.items():
     shapes:list[dict] = []
     area = area_scale(peak:=base["peak"])
@@ -240,7 +240,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
       shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
       shapes.append(shape)
-    layout[f"{d} memory"] = {"shapes":shapes, "height":area}
+    layout[f"{d} memory"] = {"shapes":shapes, "height":area, "ydomain":[0, peak]}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:

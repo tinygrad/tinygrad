@@ -151,10 +151,41 @@ async function renderProfiler() {
     if (v.shapes.length === 0) continue;
     const div = deviceList.appendChild(document.createElement("div"));
     div.innerText = k;
+    div.id = k;
     div.style.padding = `${padding}px`;
     div.style.height = v.height+padding+"px";
     const offsetY = rect(div).y-canvasTop+padding/2;
-    data.tracks.set(k, { shapes:v.shapes, offsetY });
+    // all tracks have an x axis, some can optionally define a local y axis that reveals on click
+    if (v.ydomain != null) {
+      div.style.cursor = "pointer";
+      div.onclick = () => {
+        const prevScroll = profiler.node().scrollTop;
+        for (const [tid, track] of data.tracks) {
+          if (track.ydomain != null) {
+            const scale = (y) => tid === focusedDevice ? y/4 : tid === k ? y*4 : y;
+            for (const { y0, y1 } of track.shapes) {
+              for (let i=0; i < y0.length; i++) {
+                y0[i] = scale(y0[i]); y1[i] = scale(y1[i]);
+              }
+            }
+            track.height = scale(track.height);
+          }
+        }
+        let newOffset = null;
+        for (const [tid, track] of data.tracks) {
+          const vdiv = document.getElementById(tid);
+          const prevHeight = rect(vdiv).height; newHeight = track.height+padding;
+          if (prevHeight !== newHeight) {
+            vdiv.style.height = newHeight+"px";
+            newOffset = newHeight-prevHeight;
+          } else if (newOffset != null) track.offsetY += newOffset;
+        }
+        focusedDevice = focusedDevice === k ? null : k;
+        d3.select(canvas).call(canvasZoom.transform, zoomLevel);
+        if (prevScroll) profiler.node().scrollTop = prevScroll;
+      }
+    } else div.style.pointerEvents = "none";
+    data.tracks.set(k, { shapes:v.shapes, offsetY, ydomain:v.ydomain, height:v.height });
   }
   updateProgress({ "show":false });
   // cache label widths
