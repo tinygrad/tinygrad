@@ -114,6 +114,8 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
 
+  def test_bfloat16_nan_lt(self): universal_test(0.0, math.nan, dtypes.bfloat16, operator.lt)
+
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
