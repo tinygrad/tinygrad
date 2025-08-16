@@ -118,7 +118,7 @@ class TestFuse(unittest.TestCase):
     self.assertListEqual(c.tolist(), [30]*16)
 
   @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
-  @unittest.expectedFailure # TODO: fix
+  # @unittest.expectedFailure # TODO: fix
   def test_fuse_and_tc_opt(self):
     A = Tensor.randn(8, 8).realize()
     B = Tensor.randn(8, 8).realize()
