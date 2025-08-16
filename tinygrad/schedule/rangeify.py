@@ -1,7 +1,7 @@
 from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace, PtrDType
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv
 from tinygrad.uop.symbolic import symbolic_simple
 
@@ -32,7 +32,7 @@ earliest_rewrites = imported_rewrites+PatternMatcher([
    x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
   # assign only to buffer
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}), UPat(name="x"))), lambda x: x),
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}), UPat(name="x"))), lambda x: x if x.src[0].base.op is not Ops.BUFFER else None),
 ])
 
 # 1. add contiguous where we have to
@@ -73,6 +73,9 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     return
   scontig = UOp.sink(*contigs)
   children_map = scontig.get_children_map()
+  for k in children_map:
+    if scontig in children_map[k]:
+      del children_map[k][scontig]
   # REDUCE_AXIS is fine here, should go to contig only (gate)
   ctx.children = {k:list(v.keys()) for k,v in children_map.items() \
                   if len(v) > 1 and k is not scontig and k not in contigs and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
@@ -97,6 +100,7 @@ class RangeifyContext:
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
   progress: int = 0
+  children: dict[UOp, list[UOp]]|None = None
 
 def map_reshape(idx:UOp, r:UOp):
   acc = 1
@@ -234,7 +238,24 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
+@dataclass
+class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
+def extract_children(ctx:ChildrenContext, x:UOp):
+  if ctx.children is not None: return
+  # REDUCE_AXIS is fine here, should go to contig only (gate)
+  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() \
+                  if len(v) > 1 and any(x.op is Ops.REDUCE_AXIS for x in k.toposort())}
+def mark_children(ctx:ChildrenContext, x:UOp, idx:UOp):
+  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
+  return idx.replace(src=(x.replace(src=tuple(new_srcs)),)+idx.src[1:])
+
 pm_rangeify = pm_mops+PatternMatcher([
+  (UPat(Ops.SINK, name="x"), extract_children),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.All-{Ops.CHILD}, name="x"),), allow_any_len=True, name="idx"), mark_children),
+
+  # sink contigs to kick it off
+  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), map_contiguous),
+
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
 
@@ -244,21 +265,13 @@ pm_rangeify = pm_mops+PatternMatcher([
   # CONST can't have axes. remove srcs when we idx
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
 
-  # sink contigs to kick it off
-  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), lambda ctx,x: map_contiguous(ctx, x)),
-
   # handle arg on any op with weight. old endrange stuff
-  (UPat(Ops.INDEX,src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
-
-  # CONTIGUOUS on ASSIGN is STORE
-  # TODO: tag in UPat?
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c", allow_any_len=True),
-   lambda c,a: UOp(Ops.STORE, src=a.src+c.src[1:]) if c.tag == 1 else None),
 ])
 
 # 4. remove bufferize
@@ -375,7 +388,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
+  #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
@@ -395,5 +408,21 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     return {sink:sink}
 
   tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
+
+  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
+  kernel_assign: dict[UOp, UOp] = {}
+  assign_rep: dict[UOp, UOp] = {}
+  for u in tensor_map[sink].toposort():
+    if u.op is not Ops.ASSIGN: continue
+    kernel_assign[u.buf_uop] = u
+    for s in u.src[1].src:
+      # TODO: this is probably broken for MSELECT/MSTACK
+      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
+        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
+      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
+  if assign_rep:
+    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
   return tensor_map
