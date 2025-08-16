@@ -169,7 +169,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> di
 
 def yscale(x, peak, area): return area-(x/peak)*area
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts, max_ts) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -195,18 +195,14 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts, max_ts) ->
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  timestamps.append(max_ts)
-  shapes:list[dict] = []
-  # TODO: scale this by other peaks
-  area = 40
-  for i,n in enumerate(shps.values()):
-    shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
-    shape["y0"] = [yscale(y, peak, area) for y in n["y"]]
-    shape["y1"] = [yscale(y+n["arg"]["nbytes"], peak, area) for y in n["y"]]
-    shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
-    shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
-    shapes.append(shape)
-  return {"shapes":shapes, "height":area}
+  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+
+class ScaleLinear:
+  def __init__(self, domain, range_):
+    self.d0, self.d1 = domain
+    self.r0, self.r1 = range_
+    self.m = (self.r1 - self.r0) / (self.d1 - self.d0)
+  def __call__(self, x): return self.r0 + (x - self.d0) * self.m
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -222,9 +218,29 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   layout:dict[str, dict] = {}
+  mem_layouts:dict[str, dict] = {}
+  peaks:list[int] = []
   for device,events in dev_events.items():
     events.sort(key=lambda v:v[0])
-    layout.update(((device, timeline_layout(events, min_ts)), (f"{device} memory", mem_layout(events, min_ts, max_ts))))
+    layout[device] = timeline_layout(events, min_ts)
+    if (dm:=mem_layout(events))["peak"] > 0:
+      mem_layouts[device] = dm
+      peaks.append(dm["peak"])
+  area_scale = ScaleLinear([min(peaks), max(peaks)], [10, 100])
+  for d,base in mem_layouts.items():
+    shapes:list[dict] = []
+    area = area_scale(peak:=base["peak"])
+    timestamps = base["timestamps"]
+    timestamps.append(max_ts)
+    yscale = ScaleLinear([0, peak], [area, 0])
+    for i,n in enumerate(base["shapes"]):
+      shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
+      shape["y0"] = [yscale(y) for y in n["y"]]
+      shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
+      shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
+      shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
+      shapes.append(shape)
+    layout[f"{d} memory"] = {"shapes":shapes, "height":area}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
