@@ -32,6 +32,11 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
+function addTags(root) {
+  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
+  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
+}
+
 let [workerUrl, worker] = [null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
@@ -71,10 +76,8 @@ async function renderDag(graph, additions, recenter=false) {
       return [ret];
     }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
       .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
-    const tags = nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
-      .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`);
-    tags.selectAll("circle").data(d => [d]).join("circle");
-    tags.selectAll("text").data(d => [d.tag]).join("text").text(d => d).attr("dy", "0.35em");
+    addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
+      .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
     d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -84,7 +87,7 @@ async function renderDag(graph, additions, recenter=false) {
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    const edgeLabels = d3.select("#edge-labels").selectAll("g").data(g.edges().filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
+    addTags(d3.select("#edge-labels").selectAll("g").data(g.edges().filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = g.edge(e).points.slice(-2);
       const dx = p2.x-p1.x;
@@ -98,9 +101,7 @@ async function renderDag(graph, additions, recenter=false) {
       const x = p2.x - ux * offset;
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
-    }).attr("class", "tag");
-    edgeLabels.selectAll("circle").data(e => [g.edge(e).label]).join("circle");
-    edgeLabels.selectAll("text").data(e => [g.edge(e).label]).join("text").text(d => d).attr("dy", "0.35em");
+    }).attr("class", "tag").datum(e => g.edge(e).label));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
@@ -289,16 +290,14 @@ async function renderProfiler() {
     }
     // draw axes
     drawLine(ctx, xscale.range(), [0, 0]);
-    const ticks = xscale.ticks();
-    for (const [i, tick] of ticks.entries()) {
+    for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
-      ctx.textAlign = i === ticks.length-1 ? "right" : "left";
-      const padding = i === ticks.length-1 ? -1 : 1;
-      ctx.fillText(formatTime(tick, et-st), x+(ctx.lineWidth+2)*padding, tickSize);
+      ctx.textAlign = "left";
+      ctx.fillText(formatTime(tick, et-st), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
       drawLine(ctx, [0, 0], yscale.range());

@@ -76,7 +76,7 @@ class TestViz(BaseTestViz):
     self.assertEqual(lineno, inner.__code__.co_firstlineno)
 
   def test_exceptions(self):
-    # VIZ tracks rewrites up to the error
+    # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
       assert x.arg <= 3
       return x.replace(arg=x.arg+1)
@@ -85,7 +85,7 @@ class TestViz(BaseTestViz):
     with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
     lst = get_viz_list()
     err_step = lst[0]["steps"][0]
-    self.assertEqual(err_step["match_count"], 3)
+    self.assertEqual(err_step["match_count"], 4) # 3 successful rewrites + 1 err
 
   def test_default_name(self):
     a = UOp.variable("a", 1, 10)
@@ -124,10 +124,10 @@ class TestViz(BaseTestViz):
 
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
-    b = a.replace(op=Ops.DEFINE_REG)
+    b = a.replace(op=Ops.CONST)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
