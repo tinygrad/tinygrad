@@ -85,39 +85,25 @@ class TestMetalVirtualDevices(unittest.TestCase):
 
   def test_virtual_device_sharding(self):
     devices = tuple(f"METAL:{i}" for i in range(4))
-    x = Tensor.randn(256, 256)
-    x.shard_(devices, axis=0)
-    x.realize()
-    self.assertIsInstance(x.device, tuple)
+    x = Tensor.randn(256, 256).shard_(devices, axis=0).realize()
     self.assertEqual(len(x.device), 4)
     self.assertEqual(set(x.device), {"METAL", "METAL:1", "METAL:2", "METAL:3"})
 
   def test_virtual_device_computation(self):
     for i in range(4):
-      a = Tensor.randn(64, 64, device=f"METAL:{i}")
-      b = Tensor.randn(64, 64, device=f"METAL:{i}")
-      c = a.matmul(b)
-      c.realize()
-      self.assertIsInstance(c.sum().item(), float)
+      a, b = Tensor.randn(64, 64, device=f"METAL:{i}"), Tensor.randn(64, 64, device=f"METAL:{i}")
+      self.assertIsInstance(a.matmul(b).sum().item(), float)
 
   def test_virtual_device_transfer(self):
     import numpy as np
-    src = Tensor.randn(32, 32, device="METAL:0")
-    src.realize()
+    src = Tensor.randn(32, 32, device="METAL:0").realize()
     src_data = src.numpy()
     for i in range(1, 4):
-      dest = src.to(f"METAL:{i}")
-      dest.realize()
-      np.testing.assert_allclose(src_data, dest.numpy(), rtol=1e-5, atol=1e-5)
+      np.testing.assert_allclose(src_data, src.to(f"METAL:{i}").numpy(), rtol=1e-5, atol=1e-5)
 
   def test_virtual_device_sharding_patterns(self):
     devices = tuple(f"METAL:{i}" for i in range(4))
     for axis in [0, 1, -1, None]:
-      tensor = Tensor.randn(128, 128)
-      tensor.shard_(devices, axis=axis)
-      tensor.realize()
-      self.assertIsInstance(tensor.device, tuple)
-      self.assertEqual(len(tensor.device), 4)
-      result = (tensor * 2.0).sum()
-      result.realize()
-      self.assertIsInstance(result.item(), float)
+      x = Tensor.randn(128, 128).shard_(devices, axis=axis).realize()
+      self.assertEqual(len(x.device), 4)
+      self.assertIsInstance((x * 2.0).sum().item(), float)

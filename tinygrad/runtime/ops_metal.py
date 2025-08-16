@@ -95,8 +95,7 @@ class MetalDevice(Compiled):
   def timeline_value(self, value): self._timeline_value_ref[0] = value
 
   def synchronize(self):
-    buffers_to_sync = list(self.mtl_buffers_in_flight)
-    for cbuf in buffers_to_sync:
+    for cbuf in list(self.mtl_buffers_in_flight):
       wait_check(cbuf)
       st, en = decimal.Decimal(cmdbuf_st_time(cbuf)) * 1000000, decimal.Decimal(cmdbuf_en_time(cbuf)) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
