@@ -5,7 +5,7 @@ from tinygrad.helpers import getbits, round_up, fetch
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
-@dataclass(frozen=True)
+@dataclass
 class AMDReg:
   name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:list[tuple[int, ...]] # noqa: E702
   def __post_init__(self): self.addrs = { inst: bases[self.segment] + self.offset for inst, bases in self.bases.items() }
@@ -52,7 +52,12 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
   def _extract_regs(txt):
-    return {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}
+    x = {}
+    for k,v in {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}.items():
+      if k.startswith('VM_') or k.startswith('MC_'): x[prefix.upper()[:2]+k] = v
+      elif k.startswith('regVM_') or k.startswith('regMC_'): x["reg"+prefix.upper()[:2]+k[3:]] = v
+      else: x[k] = v
+    return x
   def _download_file(ver, suff) -> str:
     dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
     fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
@@ -65,8 +70,8 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
       if e.code == 404: continue
       raise
 
-    offsets = {k.replace("regMC", "regMMMC").replace("regVM", "regMMVM"):v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
-    bases = {k[:-len('_BASE_IDX')].replace("regMC", "regMMMC").replace("regVM", "regMMVM"):v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
+    offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
+    bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
 
     fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
     for field_name, field_mask in sh_masks.items():

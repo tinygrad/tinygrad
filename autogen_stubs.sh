@@ -348,6 +348,7 @@ generate_am() {
   AMKERN_INC=$AMKERN_AMD/include/
 
   clang2py -k cdefstum \
+    extra/amdpci/headers/v9_structs.h \
     extra/amdpci/headers/v11_structs.h \
     extra/amdpci/headers/v12_structs.h \
     extra/amdpci/headers/amdgpu_vm.h \
@@ -364,74 +365,74 @@ generate_am() {
   sed -i "s\(int64_t)\ \g" $BASE/am/am.py
   sed -i "s\AMDGPU_PTE_MTYPE_VG10(2)\AMDGPU_PTE_MTYPE_VG10(0, 2)\g" $BASE/am/am.py # incorrect parsing (TODO: remove when clang2py is gone).
 
-  clang2py -k cdefstum \
-    $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
-    $AMKERN_AMD/amdgpu/soc15d.h \
-    -o $BASE/am/pm4_soc15.py
-  fixup $BASE/am/pm4_soc15.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
+  #   $AMKERN_AMD/amdgpu/soc15d.h \
+  #   -o $BASE/am/pm4_soc15.py
+  # fixup $BASE/am/pm4_soc15.py
 
-  clang2py -k cdefstum \
-    $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
-    $AMKERN_AMD/amdgpu/nvd.h \
-    -o $BASE/am/pm4_nv.py
-  fixup $BASE/am/pm4_nv.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
+  #   $AMKERN_AMD/amdgpu/nvd.h \
+  #   -o $BASE/am/pm4_nv.py
+  # fixup $BASE/am/pm4_nv.py
 
-  clang2py -k cdefstum \
-    $AMKERN_INC/vega10_enum.h \
-    -o $BASE/am/vega10.py
-  fixup $BASE/am/vega10.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_INC/vega10_enum.h \
+  #   -o $BASE/am/vega10.py
+  # fixup $BASE/am/vega10.py
 
-  clang2py -k cdefstum \
-    $AMKERN_INC/navi10_enum.h \
-    -o $BASE/am/navi10.py
-  fixup $BASE/am/navi10.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_INC/navi10_enum.h \
+  #   -o $BASE/am/navi10.py
+  # fixup $BASE/am/navi10.py
 
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc21_enum.h \
-    -o $BASE/am/soc21.py
-  fixup $BASE/am/soc21.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_INC/soc21_enum.h \
+  #   -o $BASE/am/soc21.py
+  # fixup $BASE/am/soc21.py
 
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc24_enum.h \
-    -o $BASE/am/soc24.py
-  fixup $BASE/am/soc24.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_INC/soc24_enum.h \
+  #   -o $BASE/am/soc24.py
+  # fixup $BASE/am/soc24.py
 
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_4_0_0.py
-  fixup $BASE/am/sdma_4_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/hip_gpu_driver/sdma_registers.h \
+  #   $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
+  #   --clang-args="-I/opt/rocm/include -x c++" \
+  #   -o $BASE/am/sdma_4_0_0.py
+  # fixup $BASE/am/sdma_4_0_0.py
 
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/navi10_sdma_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_5_0_0.py
-  fixup $BASE/am/sdma_5_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/hip_gpu_driver/sdma_registers.h \
+  #   $AMKERN_AMD/amdgpu/navi10_sdma_pkt_open.h \
+  #   --clang-args="-I/opt/rocm/include -x c++" \
+  #   -o $BASE/am/sdma_5_0_0.py
+  # fixup $BASE/am/sdma_5_0_0.py
 
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/sdma_v6_0_0_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_6_0_0.py
-  fixup $BASE/am/sdma_6_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/hip_gpu_driver/sdma_registers.h \
+  #   $AMKERN_AMD/amdgpu/sdma_v6_0_0_pkt_open.h \
+  #   --clang-args="-I/opt/rocm/include -x c++" \
+  #   -o $BASE/am/sdma_6_0_0.py
+  # fixup $BASE/am/sdma_6_0_0.py
 
-  clang2py -k cdefstum \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v13_0_0_ppsmc.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_0.h \
-    extra/amdpci/headers/amdgpu_smu.h \
-    -o $BASE/am/smu_v13_0_0.py
-  fixup $BASE/am/smu_v13_0_0.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v13_0_0_ppsmc.h \
+  #   $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_0.h \
+  #   extra/amdpci/headers/amdgpu_smu.h \
+  #   -o $BASE/am/smu_v13_0_0.py
+  # fixup $BASE/am/smu_v13_0_0.py
 
-  clang2py -k cdefstum \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_0_pmfw.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_2_ppsmc.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
-    extra/amdpci/headers/amdgpu_smu.h \
-    --clang-args="-include stdint.h" \
-    -o $BASE/am/smu_v14_0_2.py
-  fixup $BASE/am/smu_v14_0_2.py
+  # clang2py -k cdefstum \
+  #   $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_0_pmfw.h \
+  #   $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_2_ppsmc.h \
+  #   $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
+  #   extra/amdpci/headers/amdgpu_smu.h \
+  #   --clang-args="-include stdint.h" \
+  #   -o $BASE/am/smu_v14_0_2.py
+  # fixup $BASE/am/smu_v14_0_2.py
 }
 
 generate_sqtt() {

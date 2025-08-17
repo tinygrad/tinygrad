@@ -195,7 +195,9 @@ class MemoryManager:
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     self.on_range_mapped()
-    return VirtMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
+    # print(paddrs[0][0])
+    mc_addr = self.dev.paddr2mc(paddrs[0][0])
+    return VirtMapping(mc_addr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
@@ -217,6 +219,7 @@ class MemoryManager:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
+    contiguous = True
     if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
