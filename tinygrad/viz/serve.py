@@ -228,7 +228,7 @@ def get_profile(profile:list[ProfileEvent]):
       layout[f"{k} Memory"] = dm
       memory_layouts.append(dm)
       peaks.append(dm["peak"])
-  area_scale = ScaleLinear([min(peaks), max(peaks)], [32, 100])
+  area_scale = ScaleLinear([min(peaks), max(peaks)], [4, 100])
   for base in memory_layouts:
     shapes:list[dict] = []
     area = area_scale(peak:=base["peak"])
