@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, colorsys
 import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -115,6 +115,10 @@ profile_colors = {
   "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
 }
 def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
+def brighter(hex_color:str, k:int) -> str:
+  if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
+  h,l,s = colorsys.rgb_to_hls(*(int(hex_color[i:i+2], 16)/255 for i in [0, 2, 4]))
+  return f"hsl({int(h*360)}, {int(s*100)}%, {int(min(1, l*(1.2**k))*100)}%)"
 
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
@@ -152,8 +156,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> di
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     if depth == 0: colorKey = cat or str(name)
-    # TODO: brighter by depth
-    fillColor = color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map)))
+    fillColor = brighter(color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map))), depth)
     arg:dict = {"tooltipText":tooltip}
     if ref is not None: curr_ref = {"ctx":ref, "step":0}
     elif curr_ref is not None:
@@ -218,16 +221,17 @@ def get_profile(profile:list[ProfileEvent]):
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
   layout:dict[str, dict] = {}
-  mem_layouts:dict[str, dict] = {}
+  memory_layouts:list[dict] = []
   peaks:list[int] = []
   for device,events in dev_events.items():
     events.sort(key=lambda v:v[0])
     layout[device] = timeline_layout(events, min_ts)
     if (dm:=mem_layout(events))["peak"] > 0:
-      mem_layouts[device] = dm
+      layout[f"{device} memory"] = dm
+      memory_layouts.append(dm)
       peaks.append(dm["peak"])
   area_scale = ScaleLinear([min(peaks), max(peaks)], [32, 100])
-  for d,base in mem_layouts.items():
+  for base in memory_layouts:
     shapes:list[dict] = []
     area = area_scale(peak:=base["peak"])
     timestamps = base["timestamps"]
@@ -240,7 +244,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
       shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
       shapes.append(shape)
-    layout[f"{d} memory"] = {"shapes":shapes, "height":area, "ydomain":[0, peak]}
+    base.update([("shapes", shapes), ("height",area), ("ydomain",[0, peak])])
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
