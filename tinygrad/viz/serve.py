@@ -185,9 +185,12 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  for events in dev_events.values(): events.sort(key=lambda v:v[0])
-  dev_layout = {k:{"timeline":timeline_layout(v), "mem":mem_layout(v)} for k,v in dev_events.items()}
-  return json.dumps({"layout":dev_layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+  layout:dict[str, dict] = {}
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
+    layout[k] = timeline_layout(v)
+    layout[f"{k} memory"] = mem_layout(v)
+  return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
