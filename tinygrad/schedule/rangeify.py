@@ -2,7 +2,7 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, flatten, dedup
 from tinygrad.uop.symbolic import symbolic_simple, sym
 
 from tinygrad.schedule.kernelize import Kernel
@@ -277,12 +277,13 @@ def bufferize_to_store(ctx, x:UOp):
   rngs = x.src[1:]
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
+  store_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
   if x.src[0].op is Ops.ASSIGN:
-    return x.src[0].src[0].replace(dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0].src[1], *rngs)
+    return x.src[0].src[0].replace(dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0].src[1], *store_rngs)
   #buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
   buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=prod(shape)), arg=ctx[0])
   ctx[0] += 1
-  return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
+  return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *store_rngs)
 
 def add_load_on_buffer(idx:UOp, b:UOp):
   if isinstance(idx.dtype, PtrDType): return None
@@ -312,9 +313,9 @@ pm_add_buffers = pm_mops+PatternMatcher([
   # HACK
   #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
-  (UPat(Ops.INDEX, name="idx").sink(),
+  (UPat(Ops.INDEX, name="idx").contiguous(),
    lambda idx: UOp.new_buffer(idx.device, prod(idx.arg), idx.dtype).index(shp(idx.arg, idx.src[1:]),
-                                                                          dtype=idx.dtype.ptr(prod(idx.arg))).store(*idx.src).sink())
+                                                                          dtype=idx.dtype.ptr(prod(idx.arg))).store(*idx.src))
 ])
 
 # 5 (alt). create pointers
@@ -411,7 +412,7 @@ def new_range(ctx, s):
   ctx.range_num += 1
   return ret
 
-def td_reshape(idx:UOp, r:UOp):
+def td_reshape(ctx, idx:UOp, r:UOp):
   acc = 1
   to_sum = []
   for s,i in list(zip(idx.arg, idx.src[1:]))[::-1]:
@@ -427,9 +428,31 @@ def td_reshape(idx:UOp, r:UOp):
     else:
       ret.append(UOp.const(dtypes.int, 0))
   ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
-  return idx.src[0].index(*ret, dtype=idx.dtype, arg=r.arg)
+  ii = idx.src[0]
+  out_rng = ret
+
+  """
+  out_rng = []
+  for i,rr in enumerate(ret):
+    if rr.op not in {Ops.RANGE, Ops.CONST}:
+      out_rng.append(new_range(ctx, r.arg[i]))
+    else:
+      out_rng.append(rr)
+
+  mm = [idx.src[0]]
+  for x,y in zip(ret, out_rng):
+    if x is not y:
+      mm.append(x)
+      mm.append(y)
+  if len(mm) > 1:
+    ii = UOp(Ops.MERGE, idx.dtype, tuple(mm))
+  """
+  return ii.index(*out_rng, dtype=idx.dtype, arg=r.arg)
 
 def td_elementwise(ctx, e:UOp):
+  # if the range is closed by a reduce to the left, we can't reuse it
+  # TODO: handle composite ranges better
+  reduces_left = flatten([x.src[1:] for x in e.toposort() if x.op is Ops.REDUCE])
   shps = [u.arg for u in e.src]
   assert all_same(shps)
   rngs = [u.src[1:] for u in e.src]
@@ -439,7 +462,7 @@ def td_elementwise(ctx, e:UOp):
     r = [x for x in r if x is not UOp.const(dtypes.int, 0)]
     if len(r) == 0:
       out_rng.append(UOp.const(dtypes.int, 0))
-    elif all_same(r):
+    elif all_same(r) and r[0] not in reduces_left:
       out_rng.append(r[0])
     else:
       out_rng.append(new_range(ctx, shps[0][i]))
@@ -472,29 +495,47 @@ def td_shrink(idx:UOp, r:UOp):
   shp = []
   for u,(s,e),shape in zip(idx.src[1:], r.arg, idx.arg):
     assert s == 0
-    if u.vmax >= e: u = u.minimum(e)
+    #if u.vmax >= e: u = (u<e).where(u, UOp(Ops.INVALID, u.dtype))
     ret.append(u)
     shp.append(min(shape, e))
   return idx.src[0].index(*ret, dtype=idx.dtype, arg=tuple(shp))
+
+def td_reduce(ctx, idx:UOp, r:UOp):
+  rngs = idx.src[1:]
+  new_shp = tuple([s if i not in r.arg[1] else 1 for i,s in enumerate(idx.arg)])
+  return UOp(Ops.REDUCE, r.dtype, (idx.src[0],)+tuple([x for i,x in enumerate(rngs) if i in r.arg[1]]),
+                     r.arg[0]).index(*[x if i not in r.arg[1] else UOp.const(dtypes.int, 0) for i,x in enumerate(rngs)], arg=new_shp)
+
 pm_td_rangeify = PatternMatcher([
+  #(UPat(Ops.INDEX, src=(UPat(Ops.MERGE, src=(UPat(Ops.LOAD, name="b"),), allow_any_len=True),), allow_any_len=True, name="idx"),
+  # lambda idx,b: b.src[0].src[0].index(*idx.src[1:], dtype=b.src[0].dtype).load().index(*idx.src[1:], arg=idx.arg)),
   (UPat(Ops.BUFFER, name="b"), lambda ctx, b:
     b.replace(tag=1).index(nr:=new_range(ctx, b.size), dtype=b.dtype.ptr(size=b.size)).load().index(nr, arg=(b.size,)) if b.tag is None else None),
+    #b.replace(tag=1).index(new_range(ctx, b.size), arg=(b.size,)) if b.tag is None else None),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="c"), lambda c: c.replace(src=()).index(arg=())),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.INDEX, name="idx"),), name="r"), td_reshape),
   (UPat(Ops.SHRINK, src=(UPat(Ops.INDEX, name="idx"),), name="r"), td_shrink),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.INDEX, name="idx"),), name="r"),
     lambda r,idx: idx.src[0].index(*[idx.src[1+p] for p in r.arg], dtype=idx.dtype, arg=tuple(idx.arg[p] for p in r.arg))),
   # 0s are already in place for EXPAND
-  (UPat(Ops.EXPAND, src=(UPat(Ops.INDEX, name="idx"),), name="r"), lambda r,idx: idx.replace(arg=r.arg)),
+  #(UPat(Ops.EXPAND, src=(UPat(Ops.INDEX, name="idx"),), name="r"), lambda r,idx: idx.replace(arg=r.arg)),
+  (UPat(Ops.EXPAND, src=(UPat(Ops.INDEX, name="idx"),), name="r"),
+    lambda ctx,r,idx: idx.src[0].index(*[ii if s1==s2 else new_range(ctx, s1) for s1,s2,ii in zip(r.arg, idx.arg, idx.src[1:])], arg=r.arg)),
   (UPat(GroupOp.Elementwise, src=UPat(Ops.INDEX), name="e"), td_elementwise),
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.INDEX, name="idx"),), name="r"),
-   lambda r,idx: UOp(Ops.REDUCE, r.dtype, (idx.src[0],)+tuple([x for i,x in enumerate(idx.src[1:]) if i in r.arg[1]]),
-                     r.arg[0]).index(*[x if i not in r.arg[1] else UOp.const(dtypes.int, 0) for i,x in enumerate(idx.src[1:])],
-                                     arg=tuple([s if i not in r.arg[1] else 1 for i,s in enumerate(idx.arg)]))),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.INDEX, name="idx"),), name="r"), td_reduce),
 ])
 
 def remove_merge(m):
-  return UOp(Ops.BUFFERIZE, m.dtype, (m.src[0],)+tuple(m.src[1::2]), arg=m.device).index(*m.src[2::2])
+  tr0, tr1 = [], []
+  for r0,r1 in zip(m.src[1::2], m.src[2::2]):
+    if r0 is r1: continue
+    tr0.append(r0)
+    tr1.append(r1)
+  if m.src[0].op is Ops.LOAD and False:
+    # hack for LOAD
+    reps = {k:v for k,v in zip(tr0, tr1)}
+    return m.src[0].substitute(reps)
+  return UOp(Ops.BUFFERIZE, m.dtype, (m.src[0],)+tuple(tr0), arg=m.device).index(*tr1)
 
 no_merge = PatternMatcher([
   (UPat(Ops.MERGE, name="m"), remove_merge),
@@ -503,6 +544,10 @@ no_merge = PatternMatcher([
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
+  realize_map = {}
+  graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   rsink = tensor_map[sink]
 
   ctx = RContext()
@@ -511,6 +556,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # find MOD on RANGE to split
   while 1:
+    #break
     reps = {}
     for u in rsink.toposort():
       if u.op is Ops.MOD and u.src[0].op is Ops.RANGE and u.src[1].op is Ops.CONST:
@@ -549,10 +595,18 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
 
   """
-  realize_map = {}
-  graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
+  rngs = [x for x in rsink.toposort() if x.op is Ops.RANGE]
+  mmap = {16:1000, 2:8, 3:9}
+  rep = {}
+  for x in rngs:
+    if x.arg in mmap:
+      rep[x] = x.replace(arg=mmap[x.arg])
+  rsink = rsink.substitute(rep)
+  """
+
+  rsink = graph_rewrite(rsink, no_merge, name="remove merge")
+
+  """
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
@@ -562,7 +616,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   #if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
   if getenv("VIZ"): graph_rewrite(rsink, PatternMatcher([]), name="View Rangeify Graph")
 
-  rsink = graph_rewrite(rsink, no_merge, name="remove merge")
   rsink = graph_rewrite(rsink, pm_add_buffers, ctx=[0], bottom_up=True, name="add buffers")
 
   # render
@@ -571,6 +624,12 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
     rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
     rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
+    rsink = graph_rewrite(rsink, sym, name="symbolic 2")
+
+    # renumber ranges
+    #rngs = dedup([x for x in flatten([x.src[2:] for x in list(rsink.toposort())[::-1] if x.op is Ops.STORE]) if x.op is Ops.RANGE])
+    #rsink = rsink.substitute({x:x.replace(arg=i) for i,x in enumerate(rngs)})
+
     from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
     rsink = apply_rewrites(rsink, rewrites_for_linearizer)
     from tinygrad.renderer.cstyle import CStyleLanguage

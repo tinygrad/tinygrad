@@ -100,10 +100,10 @@ class TestTiny(unittest.TestCase):
       lambda x: x.flatten(1), nn.Linear(576, 10)]
 
     # replace random weights with ones
-    Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
+    for p in nn.state.get_parameters(layers): p.replace(Tensor.empty(p.shape))
 
     # run model inference
-    probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
+    probs = Tensor.empty(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
@@ -116,7 +116,8 @@ class TestTiny(unittest.TestCase):
 
     # replace random weights with ones
     # TODO: there's a bug here where it's tying two of the biases together. we need UNIQUE const
-    for p in nn.state.get_parameters(layers): p.replace(Tensor.ones_like(p).contiguous().realize())
+    for p in nn.state.get_parameters(layers): p.replace(Tensor.empty(p.shape))
+    #for p in nn.state.get_parameters(layers): p.replace(Tensor.ones_like(p).contiguous().realize())
 
     # realize gradients
     for x in nn.state.get_parameters(layers): x.requires_grad_()
