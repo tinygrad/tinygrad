@@ -230,8 +230,15 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   if len(idx_ranges) == 0: return c.index(*out_rngs)
+  assert len(end_ranges) == len(idx_ranges)
+  # TODO: this can all be a lot cleaner
+  srcs = [c.index(*out_rngs)]
+  for r0,r1 in zip(end_ranges, [idx.src[1+i] for i in idx_ranges]):
+    if r0 is not r1:
+      srcs.append(UOp(Ops.MERGE, src=(r0,r1)))
+  return UOp(Ops.MBLOCK, c.dtype, tuple(srcs), arg=x.device)
   # NOTE: partial contigs can still come from here
-  return c.index(*out_rngs).bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
+  #return c.index(*out_rngs).bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
   if len(ctx.seen_children[c]) != c.arg: raise RuntimeError("all children should have been seen by now")
@@ -246,6 +253,30 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
+def merge_mblocks(m1, m2):
+  srcs = [m1.src[1]]
+  used = set()
+  for m1s in m1.src[1:]:
+    for m2s in m2.src[1:]:
+      if m1s.src[1] is m2s.src[0]:
+        used.add(m1s)
+        used.add(m2s)
+        srcs.append(UOp(Ops.MERGE, src=(m1s.src[0], m2s.src[1])))
+        print("found")
+  for m1s in m1.src[1:]:
+    if m1s not in used: srcs.append(m1s)
+  for m2s in m2.src[1:]:
+    if m2s not in used: srcs.append(m2s)
+  return m1.replace(src=tuple(srcs))
+
+def remove_dead(m1):
+  tt = m1.src[0].toposort()
+  srcs = [m1.src[0]]
+  for m1s in m1.src[1:]:
+    if m1s.src[0] not in tt and m1s.src[0].op is Ops.RANGE: pass
+    else: srcs.append(m1s)
+  return m1.replace(src=tuple(srcs))
+
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), map_contiguous),
@@ -256,6 +287,10 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if we come across this, remove it. it was a CHILD unused in an INDEX
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
+
+  # mblock cleanups
+  #(UPat(Ops.MBLOCK, src=(UPat(Ops.MBLOCK, name="m1"),), name="m2", allow_any_len=True), merge_mblocks),
+  (UPat(Ops.MBLOCK, name="m1"), remove_dead),
 
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_contiguous),
@@ -299,6 +334,8 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
+
+  (UPat(Ops.MBLOCK, name="mb"), lambda mb: mb.src[0].bufferize(*[s.src[0] for s in mb.src[1:]], arg=mb.arg).index(*[s.src[1] for s in mb.src[1:]])),
 
   # HACK
   #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
