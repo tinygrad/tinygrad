@@ -345,6 +345,7 @@ class Tensor(MathTrait):
     print(t.tolist())
     ```
     """
+    if self.dtype in (dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
     return self.data().tolist()
 
   def numpy(self) -> 'np.ndarray':  # type: ignore [name-defined] # noqa: F821
