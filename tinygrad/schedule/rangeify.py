@@ -472,8 +472,13 @@ def td_elementwise(ctx, e:UOp):
     for u in e.src:
       assert u.op is Ops.INDEX
       out = [u.src[0]]
+      rngs_in_src = [x for x in out[0].toposort() if x.op is Ops.RANGE]
       for i,idx in list(enumerate(u.src[1:]))[::-1]:
-        if idx is not out_rng[i] and idx is not UOp.const(dtypes.int, 0):
+        rngs_in_idx = [x for x in idx.toposort() if x.op is Ops.RANGE]
+        if all(x not in rngs_in_src for x in rngs_in_idx):
+          # for expands
+          continue
+        if idx is not out_rng[i]:
           out.append(idx)
           out.append(out_rng[i])
           #out = UOp(Ops.MERGE, out.dtype, src=(out, idx, out_rng[i]))
