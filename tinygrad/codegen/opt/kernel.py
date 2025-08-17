@@ -378,8 +378,8 @@ class Kernel:
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
-        # can only fuse reduces with the same tc options
         if tensor_core_opts[0] is None: continue
+        # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
