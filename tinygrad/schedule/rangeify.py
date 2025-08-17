@@ -57,8 +57,7 @@ do_realize = PatternMatcher([
 ])
 
 add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
-                                  lambda ctx,x: UOp(Ops.RESHAPE, x.dtype, src=(x.replace(tag=1).contiguous(),), arg=x.shape) \
-                                    if x in ctx and x.tag is None else None)])
+                                  lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
 
@@ -193,7 +192,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret # UOp(Ops.RESHAPE, ret.dtype, (ret,), ret.shape)
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -296,6 +295,8 @@ def cleanup_dead_axes(b:UOp):
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(b2:UOp, idx2:UOp):
+  # HACK
+  if len(b2.src) != len(idx2.src): return None
   assert len(b2.src) == len(idx2.src)
   assert all(x.op is Ops.RANGE for x in b2.src[1:])
   rep = {x:y for x,y in zip(b2.src[1:], idx2.src[1:])}
