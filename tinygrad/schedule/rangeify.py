@@ -104,13 +104,16 @@ class RangeifyContext:
     self.idx += 1
     return ret
 
-def map_reshape(idx:UOp, r:UOp):
+def collapse_to_1(shp:tuple[int, ...], idxs:tuple[UOp, ...]):
   acc = 1
   to_sum = []
-  for s,src in list(zip(idx.shape, idx.src[1:]))[::-1]:
+  for s,src in list(zip(shp, idxs))[::-1]:
     to_sum.append(acc*src)
     acc *= s
-  mish = sum(to_sum)
+  return sum(to_sum)
+
+def map_reshape(idx:UOp, r:UOp):
+  mish = collapse_to_1(idx.shape, idx.src[1:])
   ret = []
   for s in r.src[0].shape[::-1]:
     if resolve(s!=1):
@@ -290,11 +293,21 @@ def cleanup_dead_axes(b:UOp):
   if hit:
     return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
 
+# if a buffer is being stored just for permutes or something, remove it
+# we want to reexpress the indexes of idx2 in terms of the implied b1
+def remove_reindexing(idx:UOp, b2:UOp, idx2:UOp):
+  assert len(b2.src) == len(idx2.src)
+  assert all(x.op is Ops.RANGE for x in b2.src[1:])
+  rep = {x:y for x,y in zip(b2.src[1:], idx2.src[1:])}
+  return idx.substitute(rep)
+
 pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
    lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
+  # remove reindexing
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
 ])
 
 # 4. remove bufferize
