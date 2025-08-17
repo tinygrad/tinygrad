@@ -252,7 +252,7 @@ class Tensor(MathTrait):
     # create the schedule
     schedule, var_vals = create_schedule_with_vars(sink)
     schedule = memory_planner(schedule)
-    if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+    if DEBUG >= 1 and len(schedule) > 1: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
