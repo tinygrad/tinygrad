@@ -135,15 +135,15 @@ const createPolygons = (source, area) => {
   return shapes;
 }
 
-const resizeTrack = (source, tid, scale) => {
-  const div = document.getElementById(tid);
+const rescaleTrack = (source, tid, k) => {
   for (const e of source.shapes) {
     for (let i=0; i<e.y0.length; i++) {
-      e.y0[i] = scale(e.y0[i]);
-      e.y1[i] = scale(e.y1[i]);
+      e.y0[i] = e.y0[i]*k;
+      e.y1[i] = e.y1[i]*k;
     }
   }
   const change = scale(source.area)-source.area;
+  const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
   source.area = scale(source.area);
   return change;
@@ -211,12 +211,8 @@ async function renderProfiler() {
         let offset = 0;
         for (const [tid, track] of data.tracks) {
           track.offsetY += offset;
-          const scaleFactor = track.scaleFactor;
-          if (tid === newFocus) {
-            offset += resizeTrack(track, tid, y => y*scaleFactor);
-          } else if (tid === focusedDevice) {
-            offset += resizeTrack(track, tid, y => y/scaleFactor);
-          }
+          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
+          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
         }
         focusedDevice = newFocus;
         return resize();
@@ -311,7 +307,6 @@ async function renderProfiler() {
       }
     }
     ctx.restore();
-    //document.getElementById("METAL Memory").click();
   }
 
   function resize() {
