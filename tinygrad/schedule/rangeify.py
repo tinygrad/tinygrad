@@ -295,11 +295,11 @@ def cleanup_dead_axes(b:UOp):
 
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
-def remove_reindexing(idx:UOp, b2:UOp, idx2:UOp):
+def remove_reindexing(b2:UOp, idx2:UOp):
   assert len(b2.src) == len(idx2.src)
   assert all(x.op is Ops.RANGE for x in b2.src[1:])
   rep = {x:y for x,y in zip(b2.src[1:], idx2.src[1:])}
-  return idx.substitute(rep)
+  return b2.src[0].substitute(rep)
 
 pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -307,7 +307,9 @@ pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
    lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing
-  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
+  (UPat(Ops.INDEX).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
+  # HACK
+  (UPat(Ops.CMPLT).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
 ])
 
 # 4. remove bufferize
