@@ -153,7 +153,7 @@ async function renderProfiler() {
   const { layout, st, et } = await (await fetch("/get_profile")).json();
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("paddingTop", tickSize+padding+"px");
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
