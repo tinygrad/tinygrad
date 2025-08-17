@@ -146,6 +146,7 @@ const drawLine = (ctx, x, y) => {
 
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
+  console.time("renderProfiler");
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
@@ -323,6 +324,7 @@ async function renderProfiler() {
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
+  console.timeEnd("renderProfiler");
 }
 
 // ** zoom and recentering
