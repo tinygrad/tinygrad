@@ -254,8 +254,8 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
-    self.assertEqual(event['st'], 0)
-    self.assertEqual(event['dur'], 10)
+    self.assertEqual(event['x'], 0)
+    self.assertEqual(event['width'], 10)
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
@@ -265,8 +265,8 @@ class TestVizProfiler(unittest.TestCase):
 
     event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
-    self.assertEqual(event['st'], 900) # diff clock
-    self.assertEqual(event['dur'], 10)
+    self.assertEqual(event['x'], 0) # diff clock
+    self.assertEqual(event['width'], 10)
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -285,18 +285,18 @@ class TestVizProfiler(unittest.TestCase):
 
     nv_events = j['layout']['NV']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
-    self.assertEqual(nv_events[0]['st'], 0)
-    self.assertEqual(nv_events[0]['dur'], 2)
+    self.assertEqual(nv_events[0]['x'], 0)
+    self.assertEqual(nv_events[0]['width'], 2)
     #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
     nv1_events = j['layout']['NV:1']['shapes']
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
-    self.assertEqual(nv1_events[0]['st'], 954)
+    self.assertEqual(nv1_events[0]['x'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
     graph_events = j['layout']['NV Graph']['shapes']
-    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
-    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
+    self.assertEqual(graph_events[0]['x'], nv_events[0]['x'])
+    self.assertEqual(graph_events[0]['x']+graph_events[0]['width'], nv1_events[0]['x']+nv1_events[0]['width'])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
@@ -331,6 +331,7 @@ class TestVizMemoryLayout(BaseTestViz):
     del a
     c = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
+    st = profile_ret["st"]
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(ret["shapes"][0]["x"], [0, 3])

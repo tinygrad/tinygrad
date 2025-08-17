@@ -144,7 +144,6 @@ const drawLine = (ctx, x, y) => {
 
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
-  console.time("renderProfiler");
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
@@ -186,6 +185,13 @@ async function renderProfiler() {
     data.tracks.set(k, { shapes:v.shapes, offsetY, ydomain:v.ydomain, height:v.height, scaleFactor:400/v.height });
   }
   updateProgress({ "show":false });
+  // cache label widths
+  const labelCache = {};
+  function getLabel(name) {
+    if ((cret=labelCache[name]) != null) return cret;
+    labelCache[name] = ret = parseColors(name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+    return ret;
+  }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -234,13 +240,14 @@ async function renderProfiler() {
         ctx.fillRect(x, offsetY+e.y, width, e.height);
         rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
-        if (e.label == null) continue;
+        const label = getLabel(e.name);
+        if (label == null) continue;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         let [labelX, labelWidth] = [x+2, 0];
         const labelY = offsetY+e.y+e.height/2;
-        for (const [i,l] of e.label.entries()) {
-          if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
+        for (const [i,l] of label.entries()) {
+          if (labelWidth+l.width+(i===label.length-1 ? 0 : ellipsisWidth)+2 > width) {
             if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
             break;
           }
@@ -322,7 +329,6 @@ async function renderProfiler() {
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
-  console.timeEnd("renderProfiler");
 }
 
 // ** zoom and recentering
@@ -467,7 +473,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

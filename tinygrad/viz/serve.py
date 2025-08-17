@@ -202,7 +202,8 @@ class ScaleLinear:
   def __init__(self, domain, range_):
     self.d0, self.d1 = domain
     self.r0, self.r1 = range_
-    self.m = (self.r1 - self.r0) / (self.d1 - self.d0)
+    domain = self.d1 - self.d0
+    self.m = 0 if domain == 0 else (self.r1 - self.r0) / domain
   def __call__(self, x): return self.r0 + (x - self.d0) * self.m
 
 def get_profile(profile:list[ProfileEvent]):
@@ -224,17 +225,16 @@ def get_profile(profile:list[ProfileEvent]):
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, min_ts)
-    if (dm:=mem_layout(v))["peak"] > 0:
-      layout[f"{k} Memory"] = dm
-      memory_layouts.append(dm)
-      peaks.append(dm["peak"])
-  area_scale = ScaleLinear([min(peaks), max(peaks)], [4, 100])
+    layout[f"{k} Memory"] = dm = mem_layout(v)
+    memory_layouts.append(dm)
+    peaks.append(dm["peak"])
+  height_scale = ScaleLinear([min(peaks), max(peaks)], [4, 100])
   for base in memory_layouts:
     shapes:list[dict] = []
-    area = area_scale(peak:=base["peak"])
+    height = height_scale(peak:=base["peak"])
     timestamps = base["timestamps"]
     timestamps.append(max_ts)
-    yscale = ScaleLinear([0, peak], [area, 0])
+    yscale = ScaleLinear([0, peak], [height, 0])
     for i,n in enumerate(base["shapes"]):
       shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
       shape["y0"] = [yscale(y) for y in n["y"]]
@@ -242,7 +242,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
       shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
       shapes.append(shape)
-    base.update([("shapes", shapes), ("height",area), ("ydomain",[0, peak])])
+    base.update([("shapes", shapes), ("height",height), ("ydomain",[0, peak])])
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
