@@ -142,10 +142,10 @@ const rescaleTrack = (source, tid, k) => {
       e.y1[i] = e.y1[i]*k;
     }
   }
-  const change = scale(source.area)-source.area;
+  const change = (source.area*k)-source.area;
   const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
-  source.area = scale(source.area);
+  source.area = source.area*k;
   return change;
 }
 
@@ -205,7 +205,7 @@ async function renderProfiler() {
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
       const area = areaScale(v.peak);
-      data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area, scaleFactor:maxArea*4/area });
+      data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area, peak:v.peak, scaleFactor:maxArea*4/area });
       div.style("height", area+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -214,6 +214,7 @@ async function renderProfiler() {
           if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
           else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
         }
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.area, t.offsetY], fmt:"B" } : null;
         focusedDevice = newFocus;
         return resize();
       });
