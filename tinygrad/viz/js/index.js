@@ -122,9 +122,9 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-const createPolygons = (source, area) => {
+const createPolygons = (source, height) => {
   const shapes = [];
-  const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
+  const yscale = d3.scaleLinear().domain([0, source.peak]).range([height, 0]);
   for (const [i,e] of source.shapes.entries()) {
     const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
     const y0 = e.y.map(yscale);
@@ -142,10 +142,10 @@ const rescaleTrack = (source, tid, k) => {
       e.y1[i] = e.y1[i]*k;
     }
   }
-  const change = (source.area*k)-source.area;
+  const change = (source.height*k)-source.height;
   const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
-  source.area = source.area*k;
+  source.height = source.height*k;
   return change;
 }
 
@@ -176,7 +176,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}, st, et};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxArea=100]);
+  const heightScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxheight=100]);
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
@@ -204,9 +204,9 @@ async function renderProfiler() {
       }
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
-      const area = areaScale(v.peak);
-      data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area, peak:v.peak, scaleFactor:maxArea*4/area });
-      div.style("height", area+padding+"px").style("cursor", "pointer").on("click", (e) => {
+      const height = heightScale(v.peak);
+      data.tracks.set(k, { shapes:createPolygons(v, height), offsetY, height, peak:v.peak, scaleFactor:maxheight*4/height });
+      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
@@ -214,7 +214,7 @@ async function renderProfiler() {
           if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
           else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
         }
-        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.area, t.offsetY], fmt:"B" } : null;
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
         focusedDevice = newFocus;
         return resize();
       });
