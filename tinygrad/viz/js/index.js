@@ -135,11 +135,25 @@ const createPolygons = (source, area) => {
   return shapes;
 }
 
-const drawLine = (ctx, x, y) => {
+const resizeTrack = (source, tid, scale) => {
+  const div = document.getElementById(tid);
+  for (const e of source.shapes) {
+    for (let i=0; i<e.y0.length; i++) {
+      e.y0[i] = scale(e.y0[i]);
+      e.y1[i] = scale(e.y1[i]);
+    }
+  }
+  const change = scale(source.area)-source.area;
+  div.style.height = rect(div).height+change+"px";
+  source.area = scale(source.area);
+  return change;
+}
+
+const drawLine = (ctx, x, y, opts=null) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
   ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
   ctx.stroke();
 }
 
@@ -191,19 +205,21 @@ async function renderProfiler() {
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
       const area = areaScale(v.peak);
-      data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area });
+      data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area, scaleFactor:maxArea*4/area });
       div.style("height", area+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
-          if (tid === newFocus) {
-            console.log("expand", tid);
-          } else if (tid === focusedDevice) {
-            console.log("shrinking", tid);
-          }
           track.offsetY += offset;
+          const scaleFactor = track.scaleFactor;
+          if (tid === newFocus) {
+            offset += resizeTrack(track, tid, y => y*scaleFactor);
+          } else if (tid === focusedDevice) {
+            offset += resizeTrack(track, tid, y => y/scaleFactor);
+          }
         }
         focusedDevice = newFocus;
+        return resize();
       });
     }
   }
@@ -227,6 +243,7 @@ async function renderProfiler() {
     }
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
+      drawLine(ctx, xscale.range(), [offsetY, offsetY], { color:"red" });
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
         if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
