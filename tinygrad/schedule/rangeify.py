@@ -254,7 +254,7 @@ def might_end_axis(idx:UOp):
   return idx.replace(arg=None)
 
 def merge_mblocks(m1, m2):
-  srcs = [m1.src[1]]
+  srcs = [m1.src[0]]
   used = set()
   for m1s in m1.src[1:]:
     for m2s in m2.src[1:]:
@@ -262,12 +262,11 @@ def merge_mblocks(m1, m2):
         used.add(m1s)
         used.add(m2s)
         srcs.append(UOp(Ops.MERGE, src=(m1s.src[0], m2s.src[1])))
-        print("found")
   for m1s in m1.src[1:]:
     if m1s not in used: srcs.append(m1s)
   for m2s in m2.src[1:]:
     if m2s not in used: srcs.append(m2s)
-  return m1.replace(src=tuple(srcs))
+  return m2.replace(src=tuple(srcs))
 
 def remove_dead(m1):
   tt = m1.src[0].toposort()
