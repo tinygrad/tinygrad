@@ -2,6 +2,12 @@ import unittest
 from tinygrad import Tensor
 
 class TestRangeify(unittest.TestCase):
+  def test_expand_children(self):
+    N = 1024
+    A = Tensor.empty(N, N).sum(axis=1)
+    ba = A.expand(N, N)
+    ((ba+1).sum(axis=1) + (ba+2).sum(axis=0)).realize()
+
   def test_double_gemm(self):
     N = 1024
     A = Tensor.empty(N, N)

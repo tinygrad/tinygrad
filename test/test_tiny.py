@@ -116,7 +116,8 @@ class TestTiny(unittest.TestCase):
 
     # replace random weights with ones
     # TODO: there's a bug here where it's tying two of the biases together. we need UNIQUE const
-    for p in nn.state.get_parameters(layers): p.replace(Tensor.ones_like(p).contiguous().realize())
+    #Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
+    for p in nn.state.get_parameters(layers): p.replace(Tensor.empty(p.shape))
 
     # realize gradients
     for x in nn.state.get_parameters(layers): x.requires_grad_()

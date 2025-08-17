@@ -57,7 +57,8 @@ do_realize = PatternMatcher([
 ])
 
 add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
-                                  lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
+                                  lambda ctx,x: UOp(Ops.RESHAPE, x.dtype, src=(x.replace(tag=1).contiguous(),), arg=x.shape) \
+                                    if x in ctx and x.tag is None else None)])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
 
@@ -189,7 +190,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.reshape(x.shape)
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -269,6 +270,31 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
+])
+
+# 3.5 cleanups
+
+# you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
+def cleanup_dead_axes(b:UOp):
+  parents = b.src[0].toposort()
+  new_rng = []
+  hit = False
+  reshape = []
+  for s,rng in zip(b.shape, b.src[1:]):
+    if rng not in parents and rng.op is Ops.RANGE:
+      reshape.append(1)
+      hit = True
+    else:
+      reshape.append(s)
+      new_rng.append(rng)
+  if hit:
+    return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
+
+pm_cleanups = pm_mops+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  # remove noop buffers. if we look at the next index we can remove even more of these
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
+   lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
 ])
 
 # 4. remove bufferize
@@ -397,9 +423,11 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
+  tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="cleanups")
+  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
+
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
-  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
   # render
   if getenv("SRC"):
