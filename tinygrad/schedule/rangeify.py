@@ -98,6 +98,10 @@ class RangeifyContext:
   seen_child: dict[UOp, Any] = field(default_factory=dict)
   progress: int = 0
   children: dict[UOp, list[UOp]]|None = None
+  def new_range(self, s:int):
+    ret = UOp.range(dtypes.int, s, self.idx)
+    self.idx += 1
+    return ret
 
 def map_reshape(idx:UOp, r:UOp):
   acc = 1
@@ -180,9 +184,8 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
       continue
     if idx is not None: passthrough_idx.append(idx.src[1+i])
     if resolve(s!=1):
-      ranges.append(UOp.range(dtypes.int, s, ctx.idx))
+      ranges.append(ctx.new_range(s))
       new_ranges.append(ranges[-1])
-      ctx.idx += 1
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
@@ -194,8 +197,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   new_ranges = []
   for i,s in enumerate(red.src[0].shape):
     if i in red.arg[1]:
-      rngs[i] = UOp.range(dtypes.int, s, ctx.idx)
-      ctx.idx += 1
+      rngs[i] = ctx.new_range(s)
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
@@ -219,8 +221,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
       if all_same(r):
         out_rngs.append(r[0])
       else:
-        out_rngs.append(UOp.range(dtypes.int, c.shape[i], ctx.idx))
-        ctx.idx += 1
+        out_rngs.append(ctx.new_range(c.shape[i]))
         end_ranges.append(out_rngs[-1])
         idx_ranges.append(i)
     ctx.seen_child[c] = (idx_ranges, end_ranges)
@@ -395,7 +396,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
+  #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
