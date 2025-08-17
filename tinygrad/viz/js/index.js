@@ -149,11 +149,11 @@ const resizeTrack = (source, tid, scale) => {
   return change;
 }
 
-const drawLine = (ctx, x, y, opts=null) => {
+const drawLine = (ctx, x, y) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
   ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
+  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
   ctx.stroke();
 }
 
@@ -176,7 +176,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}, st, et};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxArea=100])
+  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxArea=100]);
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
@@ -243,7 +243,6 @@ async function renderProfiler() {
     }
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
-      drawLine(ctx, xscale.range(), [offsetY, offsetY], { color:"red" });
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
         if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
@@ -506,7 +505,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
