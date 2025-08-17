@@ -189,7 +189,7 @@ def get_profile(profile:list[ProfileEvent]):
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v)
-    layout[f"{k} memory"] = mem_layout(v)
+    layout[f"{k} Memory"] = mem_layout(v)
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
