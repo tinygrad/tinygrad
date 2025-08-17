@@ -89,7 +89,7 @@ class AMFirmware:
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
       chdr = am.struct_common_firmware_header.from_address(mv_address(blob))
-      headers = [getattr(am, versioned_header + f"_v{chdr.header_version_major}_{chdr.header_version_minor}")] + list(headers)
+      headers += (getattr(am, versioned_header + f"_v{chdr.header_version_major}_{chdr.header_version_minor}"),)
     return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
 
   def desc(self, blob:memoryview, offset:int, size:int, *types:int) -> tuple[list[int], memoryview]: return (list(types), blob[offset:offset+size])
