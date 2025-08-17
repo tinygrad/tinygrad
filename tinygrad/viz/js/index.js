@@ -192,7 +192,19 @@ async function renderProfiler() {
     } else {
       const area = areaScale(v.peak);
       data.tracks.set(k, { shapes:createPolygons(v, area), offsetY, area });
-      div.style("height", area+padding+"px").style("cursor", "pointer");
+      div.style("height", area+padding+"px").style("cursor", "pointer").on("click", (e) => {
+        const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
+        let offset = 0;
+        for (const [tid, track] of data.tracks) {
+          if (tid === newFocus) {
+            console.log("expand", tid);
+          } else if (tid === focusedDevice) {
+            console.log("shrinking", tid);
+          }
+          track.offsetY += offset;
+        }
+        focusedDevice = newFocus;
+      });
     }
   }
   updateProgress({ "show":false });
@@ -283,6 +295,7 @@ async function renderProfiler() {
       }
     }
     ctx.restore();
+    //document.getElementById("METAL Memory").click();
   }
 
   function resize() {
@@ -476,7 +489,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
