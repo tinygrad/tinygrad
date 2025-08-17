@@ -172,16 +172,19 @@ async function renderProfiler() {
             }
             nextHeight = scale(track.height);
           }
+          if (newOffset != null) track.offsetY += newOffset;
           if (track.height != nextHeight) {
-            newOffset = nextHeight-track.height;
+            newOffset += nextHeight-track.height;
             const vdiv = document.getElementById(tid);
             vdiv.style.height = nextHeight+padding+"px";
             track.height = nextHeight;
-          } else if (newOffset != null) {
-            track.offsetY += newOffset;
           }
         }
         focusedDevice = focusedDevice === k ? null : k;
+        if (focusedDevice != null) {
+          const t = data.tracks.get(focusedDevice);
+          data.axes.y = { domain:t.ydomain, range:[t.offsetY+t.height, t.offsetY], fmt:"B" };
+        } else data.axes.y = null;
         d3.select(canvas).call(canvasZoom.transform, zoomLevel);
         if (prevScroll) profiler.node().scrollTop = prevScroll;
       }
@@ -209,6 +212,10 @@ async function renderProfiler() {
     const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
     const zoomDomain = transform != null ? xscale.domain() : null;
+    let yscale = null;
+    if (data.axes.y != null) {
+      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
+    }
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
@@ -264,6 +271,16 @@ async function renderProfiler() {
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
       ctx.fillText(formatTime(tick, et-st), x+ctx.lineWidth+2, tickSize);
+    }
+    if (yscale != null) {
+      drawLine(ctx, [0, 0], yscale.range());
+      for (const tick of yscale.ticks()) {
+        const y = yscale(tick);
+        drawLine(ctx, [0, tickSize], [y, y]);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
+      }
     }
     ctx.restore();
   }
