@@ -116,6 +116,26 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
+const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+  DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
+  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
+const cycleColors = (lst, i) => lst[i%lst.length];
+
+const rescaleTrack = (source, tid, k) => {
+  for (const e of source.shapes) {
+    for (let i=0; i<e.y0.length; i++) {
+      e.y0[i] = e.y0[i]*k;
+      e.y1[i] = e.y1[i]*k;
+    }
+  }
+  const change = (source.height*k)-source.height;
+  const div = document.getElementById(tid);
+  div.style.height = rect(div).height+change+"px";
+  source.height = source.height*k;
+  return change;
+}
+
 const drawLine = (ctx, x, y) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
@@ -124,82 +144,49 @@ const drawLine = (ctx, x, y) => {
   ctx.stroke();
 }
 
-const colorScheme = {
-  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
-const cycleColors = (lst, i) => lst[i%lst.length];
-
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
-  console.time("renderProfiler");
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
-  const deviceList = profiler.append("div").attr("id", "device-list").node();
+  const { layout, st, et } = await (await fetch("/get_profile")).json();
+  // place devices on the y axis and set vertical positions
+  const [tickSize, padding] = [10, 8];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
-  const profileRet = await (await fetch("/get_profile")).json()
-  const { layout, st, et } = profileRet;
-  // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
+  // color by key (name/category/device)
+  const colorMap = new Map();
   data = {tracks:new Map(), axes:{}, st, et};
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
-    const div = deviceList.appendChild(document.createElement("div"));
-    div.innerText = k;
-    div.id = k;
-    div.style.padding = `${padding}px`;
-    div.style.height = v.height+padding+"px";
-    const offsetY = rect(div).y-canvasTop+padding/2;
-    // all tracks have an x axis, some can optionally define a local y axis that reveals on click
-    if (v.ydomain != null) {
-      div.style.cursor = "pointer";
-      div.onclick = () => {
-        const prevScroll = profiler.node().scrollTop;
-        let newOffset = null;
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const { y:baseY, height:baseHeight } = rect(div.node());
+    const offsetY = baseY-canvasTop+padding/2;
+    if (v.ydomain == null) {
+      div.style("height", v.height+padding+"px").style("pointerEvents", "none");
+    } else {
+      div.style("height", v.height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+        const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
+        let offset = 0;
         for (const [tid, track] of data.tracks) {
-          let nextHeight = track.height;
-          if (track.ydomain != null) {
-            const scale = (y) => tid === focusedDevice ? y/4 : tid === k ? y*4 : y;
-            for (const { y0, y1 } of track.shapes) {
-              for (let i=0; i < y0.length; i++) {
-                y0[i] = scale(y0[i]); y1[i] = scale(y1[i]);
-              }
-            }
-            nextHeight = scale(track.height);
-          }
-          if (newOffset != null) track.offsetY += newOffset;
-          if (track.height != nextHeight) {
-            newOffset += nextHeight-track.height;
-            const vdiv = document.getElementById(tid);
-            vdiv.style.height = nextHeight+padding+"px";
-            track.height = nextHeight;
-          }
+          track.offsetY += offset;
+          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
+          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
         }
-        focusedDevice = focusedDevice === k ? null : k;
-        if (focusedDevice != null) {
-          const t = data.tracks.get(focusedDevice);
-          data.axes.y = { domain:t.ydomain, range:[t.offsetY+t.height, t.offsetY], fmt:"B" };
-        } else data.axes.y = null;
-        d3.select(canvas).call(canvasZoom.transform, zoomLevel);
-        if (prevScroll) profiler.node().scrollTop = prevScroll;
-      }
-    } else div.style.pointerEvents = "none";
-    data.tracks.set(k, { shapes:v.shapes, offsetY, ydomain:v.ydomain, height:v.height });
+        data.axes.y = newFocus != null ? { domain:(t=data.tracks.get(newFocus)).ydomain, range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
+        focusedDevice = newFocus;
+        return resize();
+      });
+    }
+    data.tracks.set(k, { shapes:v.shapes, offsetY, ydomain:v.ydomain, height:v.height, scaleFactor:400/v.height });
   }
   updateProgress({ "show":false });
-  // cache label widths
-  const labelCache = {};
-  function getLabel(name) {
-    if ((cret=labelCache[name]) != null) return cret;
-    labelCache[name] = ret = parseColors(name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-    return ret;
-  }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -234,7 +221,11 @@ async function renderProfiler() {
           ctx.fill();
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
-            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
+            let tooltipText = e.arg.tooltipText;
+            if (yscale != null && ((yaxisVal=yscale.invert(offsetY+e.y1[i]))>0)) {
+              tooltipText += `\nTotal: ${formatUnit(yaxisVal, data.axes.y.fmt)}`;
+            }
+            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:{...e.arg, tooltipText} });
           }
           continue;
         }
@@ -244,14 +235,13 @@ async function renderProfiler() {
         ctx.fillRect(x, offsetY+e.y, width, e.height);
         rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
-        if (e.name == null) continue;
-        const label = getLabel(e.name);
+        if (e.label == null) continue;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         let [labelX, labelWidth] = [x+2, 0];
         const labelY = offsetY+e.y+e.height/2;
-        for (const [i,l] of label.entries()) {
-          if (labelWidth+l.width+(i===label.length-1 ? 0 : ellipsisWidth)+2 > width) {
+        for (const [i,l] of e.label.entries()) {
+          if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
             if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
             break;
           }
@@ -333,7 +323,6 @@ async function renderProfiler() {
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
-  console.timeEnd("renderProfiler")
 }
 
 // ** zoom and recentering

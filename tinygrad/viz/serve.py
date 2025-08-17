@@ -170,8 +170,6 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> di
     shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "height":height*len(levels)}
 
-def yscale(x, peak, area): return area-(x/peak)*area
-
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
@@ -223,11 +221,11 @@ def get_profile(profile:list[ProfileEvent]):
   layout:dict[str, dict] = {}
   memory_layouts:list[dict] = []
   peaks:list[int] = []
-  for device,events in dev_events.items():
-    events.sort(key=lambda v:v[0])
-    layout[device] = timeline_layout(events, min_ts)
-    if (dm:=mem_layout(events))["peak"] > 0:
-      layout[f"{device} memory"] = dm
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
+    layout[k] = timeline_layout(v, min_ts)
+    if (dm:=mem_layout(v))["peak"] > 0:
+      layout[f"{k} Memory"] = dm
       memory_layouts.append(dm)
       peaks.append(dm["peak"])
   area_scale = ScaleLinear([min(peaks), max(peaks)], [32, 100])
