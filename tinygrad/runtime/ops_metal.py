@@ -89,11 +89,6 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(msg('name')(self.sysdevice)).lower() else None)
 
-  @property
-  def timeline_value(self): return self._timeline_value_ref[0]
-  @timeline_value.setter
-  def timeline_value(self, value): self._timeline_value_ref[0] = value
-
   def synchronize(self):
     for cbuf in list(self.mtl_buffers_in_flight):
       wait_check(cbuf)
@@ -227,12 +222,12 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
         dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg("endEncoding")(encoder)
     if src_dev != dest_dev and src_dev.mtl_queue != dest_dev.mtl_queue:
-      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeSignalEvent:value:")(src_command_buffer, src_dev.timeline_signal, src_dev._timeline_value_ref[0])
       dest_command_buffer = msg("commandBuffer", objc_instance)(dest_dev.mtl_queue)
-      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev.timeline_value)
+      msg("encodeWaitForEvent:value:")(dest_command_buffer, src_dev.timeline_signal, src_dev._timeline_value_ref[0])
       msg("commit")(dest_command_buffer)
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
+      src_dev._timeline_value_ref[0] += 1
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
