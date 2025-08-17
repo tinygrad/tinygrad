@@ -13,7 +13,6 @@ class Ops(FastEnum):
 
   # track children
   CHILD = auto(); CHILDREN = auto() # noqa: E702
-  MERGE = auto(); MBLOCK = auto() # noqa: E702
 
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
