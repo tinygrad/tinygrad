@@ -160,7 +160,9 @@ async function renderProfiler() {
       div.style.cursor = "pointer";
       div.onclick = () => {
         const prevScroll = profiler.node().scrollTop;
+        let newOffset = null;
         for (const [tid, track] of data.tracks) {
+          let nextHeight = track.height;
           if (track.ydomain != null) {
             const scale = (y) => tid === focusedDevice ? y/4 : tid === k ? y*4 : y;
             for (const { y0, y1 } of track.shapes) {
@@ -168,17 +170,16 @@ async function renderProfiler() {
                 y0[i] = scale(y0[i]); y1[i] = scale(y1[i]);
               }
             }
-            track.height = scale(track.height);
+            nextHeight = scale(track.height);
           }
-        }
-        let newOffset = null;
-        for (const [tid, track] of data.tracks) {
-          const vdiv = document.getElementById(tid);
-          const prevHeight = rect(vdiv).height; newHeight = track.height+padding;
-          if (prevHeight !== newHeight) {
-            vdiv.style.height = newHeight+"px";
-            newOffset = newHeight-prevHeight;
-          } else if (newOffset != null) track.offsetY += newOffset;
+          if (track.height != nextHeight) {
+            newOffset = nextHeight-track.height;
+            const vdiv = document.getElementById(tid);
+            vdiv.style.height = nextHeight+padding+"px";
+            track.height = nextHeight;
+          } else if (newOffset != null) {
+            track.offsetY += newOffset;
+          }
         }
         focusedDevice = focusedDevice === k ? null : k;
         d3.select(canvas).call(canvasZoom.transform, zoomLevel);
