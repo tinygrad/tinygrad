@@ -65,7 +65,7 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
 
 def truncate_model(model:onnx.ModelProto, truncate:int):
-  # NOTE: this does not always work
+  # NOTE: truncated models may fail to run with onnxruntime
   model_copy = onnx.ModelProto()
   model_copy.CopyFrom(model)
   nodes_up_to_limit = list(model_copy.graph.node)[:truncate + 1]
