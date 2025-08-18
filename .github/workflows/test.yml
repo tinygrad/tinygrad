@@ -50,7 +50,7 @@ jobs:
       run: |
         pip install build
         python -m build --wheel --outdir dist
-        ls -l dist/*.whl
+        ls -lh dist/*.whl
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
