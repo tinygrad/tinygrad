@@ -18,9 +18,12 @@ imported_rewrites = PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 ])
 
-earliest_rewrites = imported_rewrites+PatternMatcher([
+double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
+])
+
+earliest_rewrites = imported_rewrites+double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
   # RESHAPE after COPY
@@ -56,9 +59,8 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
-add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
-    lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
+add_contiguous = double_reshape+PatternMatcher([
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
   (UPat(Ops.CONTIGUOUS, name="x"), lambda x: UOp(Ops.RESHAPE, x.dtype, (x.replace(tag=1),), arg=x.shape) if x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
