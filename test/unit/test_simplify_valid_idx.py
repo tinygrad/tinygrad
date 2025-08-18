@@ -396,7 +396,7 @@ class TestImageSimplification(unittest.TestCase):
     valid = alu3<640
 
     load = get_load_image_uop(shape, valid, idx)
-    self.check(load, "(((idx0+(idx1*64))%192)<160)", "((idx0+((idx1//3)*16))+128)", "(((idx0+(idx1*64))%192)//16)")
+    self.check(load, None, "((idx0+((idx1//3)*16))+128)", "(((idx0+(idx1*64))%192)//16)")
 
   def test_simplify6(self):
     # from openpilot
