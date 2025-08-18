@@ -118,7 +118,7 @@ def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
 def brighter(hex_color:str, k:int) -> str:
   if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
   h,l,s = colorsys.rgb_to_hls(*(int(hex_color[i:i+2], 16)/255 for i in [0, 2, 4]))
-  return f"hsl({int(h*360)}, {int(s*100)}%, {int(min(1, l*(1.2**k))*100)}%)"
+  return f"hsl({int(h*360)}, {int(s*100)}%, {int(min(1, l*(1.24**k))*100)}%)"
 
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
@@ -139,7 +139,7 @@ color_map:dict[str, str] = {}
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
-  height, colorKey, curr_ref = 20, "", None
+  height, colorKey, curr_ref = 24, "", None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
