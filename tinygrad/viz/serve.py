@@ -136,8 +136,7 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-color_map:dict[str, str] = {}
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> dict:
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, color_map:dict[str, str]) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
   height, color_key, curr_ref = 24, "", None
@@ -205,11 +204,6 @@ class ScaleLinear:
     self.m = 0 if domain == 0 else (self.r1 - self.r0) / domain
   def __call__(self, x): return self.r0 + (x - self.d0) * self.m
 
-class LayoutSpec(TypedDict):
-  shapes:list[dict]                    # shapes in local coordinates
-  height:int
-  ydomain:tuple[int, int]|None = None  # optionally provide a y axis
-
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   for ev in profile:
@@ -223,11 +217,14 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  layout:dict[str, LayoutSpec] = {}
+  layout:dict[str, dict] = {}
+  # timeline layout has a global color mapping
+  color_map:dict[str, str] = {}
+  # memory layout has a global y scale
   peaks:list[int] = []
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v, min_ts)
+    layout[k] = timeline_layout(v, unwrap(min_ts), color_map)
     layout[f"{k} Memory"] = dm = mem_layout(v)
     peaks.append(dm["peak"])
   height_scale = ScaleLinear([min(peaks, default=0), max(peaks, default=0)], [4, 100])
@@ -246,7 +243,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
       shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
       shapes.append(shape)
-    layout[tid] = {"shapes":shapes, "height":height, "ydomain":[0, peak]}
+    layout[tid] = {"shapes":shapes, "height":height, "ydomain":(0, peak)}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
