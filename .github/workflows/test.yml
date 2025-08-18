@@ -46,6 +46,11 @@ jobs:
       with:
         deps: docs
         pydeps: "capstone"
+    - name: Build wheel and show size
+      run: |
+        pip install build
+        python -m build --wheel --outdir dist
+        ls -lh dist/*.whl
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
