@@ -49,11 +49,12 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])
 
-  print("\n\n=====\nreplay_kernelize\n\n")
+  print("\n\n===== replay_kernelize =====\n\n")
+  print(big_sink, "\n")
   print(vvv:=new_sink, f"\n\n{to_str(vvv)}")
-  print("-----------\n")
+  print("\n-----------\n")
   print(vvv:=ret[big_sink], f"\n\n{to_str(vvv)}")
-  print("~~~~~~~~~~~\n\n")
+  print("\n=============================\n\n")
 
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
