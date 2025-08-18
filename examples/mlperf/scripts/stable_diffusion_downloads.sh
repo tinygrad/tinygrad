@@ -3,33 +3,37 @@
 
 # setup dirs
 
-#DATA=/raid/datasets/stable_diffusion
-DATA=/home/hooved/stable_diffusion/datasets
+DATA=/raid/datasets/stable_diffusion
+#DATA=/home/hooved/stable_diffusion/datasets
 
 LAION=$DATA/laion-400m/webdataset-moments-filtered 
 COCO=$DATA/coco2014
 mkdir -p $LAION $COCO
 
-#CKPT=/raid/weights/stable_diffusion
-CKPT=/home/hooved/stable_diffusion/checkpoints
+CKPT=/raid/weights/stable_diffusion
+#CKPT=/home/hooved/stable_diffusion/checkpoints
 mkdir -p $CKPT/clip $CKPT/sd $CKPT/inception
 
 # download data
 
+# didn't want to install rclone system wide if it wasn't already
+#RCLONE="/home/hooved/rclone-v1.70.3-linux-amd64/rclone"
+RCLONE="rclone"
+
 ## VAE-encoded image latents, from 6.1M image subset of laion-400m
 ## about 1 TB for whole download
-rclone config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
-rclone copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/ ${LAION} --include="*.tar" -P
-rclone copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/sha512sums.txt ${LAION} -P
+$RCLONE config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
+$RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/ ${LAION} --include="*.tar" -P
+$RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/sha512sums.txt ${LAION} -P
 sha512sum --quiet -c sha512sums.txt
 
 ## prompts and FID statistics from 30k image subset of coco2014
 ## 33 MB
-rclone config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
-rclone copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/coco2014/val2014_30k.tsv ${COCO} -P
+$RCLONE config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
+$RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/coco2014/val2014_30k.tsv ${COCO} -P
 
-rclone config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
-rclone copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/coco2014/val2014_30k_stats.npz ${COCO} -P
+$RCLONE config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
+$RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/coco2014/val2014_30k_stats.npz ${COCO} -P
 
 # download checkpoints
 
