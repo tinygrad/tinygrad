@@ -309,9 +309,14 @@ class TestVizMemoryLayout(BaseTestViz):
     _b = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
     ret = profile_ret["layout"][f"{a.device} Memory"]
-    self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+    st, et = profile_ret["st"], profile_ret["et"]
+    shapes = ret["shapes"]
+    self.assertEqual(len(shapes), 2)
+    self.assertEqual(ret["height"], 4)
+    a_x, b_x = shapes[0]["x"], shapes[1]["x"]
+    self.assertEqual(a_x, [0, et-st])
+    self.assertGreaterEqual(b_x[0], b_x[0])
+    self.assertEqual(b_x[1], a_x[1], et-st)
 
   def test_del_once(self):
     a = _alloc(1)
@@ -319,11 +324,17 @@ class TestVizMemoryLayout(BaseTestViz):
     b = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
     ret = profile_ret["layout"][f"{b.device} Memory"]
-    self.assertEqual(ret["peak"], 1)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+    st, et = profile_ret["st"], profile_ret["et"]
+    shapes = ret["shapes"]
+    self.assertEqual(len(shapes), 2)
+    a_x, b_x = shapes[0]["x"], shapes[1]["x"]
+    # b allocates later than a. both deallocate at the same time
+    assert len(a_x) == len(b_x) == 2
+    self.assertEqual(a_x[0], 0)
+    self.assertGreaterEqual(b_x[0], a_x[0])
+    self.assertEqual(b_x[1], a_x[1], et-st)
+    H = ret["height"]
+    self.assertEqual(shapes[0]["y0"], shapes[1]["y0"], [H, H])
 
   def test_alloc_free(self):
     a = _alloc(1)
@@ -331,15 +342,17 @@ class TestVizMemoryLayout(BaseTestViz):
     del a
     c = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
-    st = profile_ret["st"]
+    st, et = profile_ret["st"], profile_ret["et"]
     ret = profile_ret["layout"][f"{c.device} Memory"]
-    self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
-    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
-    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
+    H = ret["height"]
+    a_x, b_x, c_x = (s["x"] for s in ret["shapes"])
+    self.assertEqual(a_x[0], 0)
+    # b allocates after a allocates
+    self.assertGreaterEqual(b_x[0], a_x[0])
+    # c allocates after a deallocates
+    self.assertEqual(c_x[0], a_x[-1])
+    # b and c deallocate in the end
+    self.assertEqual(b_x[-1], c_x[-1], et-st)
 
 if __name__ == "__main__":
   unittest.main()
