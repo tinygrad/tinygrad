@@ -76,6 +76,8 @@ class Kernel:
     full_shape = ast.full_shape
     self.sts.append(ShapeTracker.from_shape(full_shape, (0,)*len(full_shape)))
 
+    self.sts = [st.reshape(st.shape + (1,) * (len(full_shape) - len(st.shape))) for st in self.sts]
+
     # parameters for optimization
     self.tensor_core: TensorCore|None = None
     self.tensor_core_opts: TensorCoreOptions|None = None
@@ -378,9 +380,9 @@ class Kernel:
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         tensor_core_opts = [self._create_tc_opts(reduceop, tc, axis, opt_level) for reduceop in self.reduceops]
+        if tensor_core_opts[0] is None: continue
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
-        if tensor_core_opts[0] is None: continue
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
         # attempt to pad the tensor axes that require it

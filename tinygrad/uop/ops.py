@@ -135,6 +135,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop shape stuff ***
 
   @functools.cached_property
+  def reduced(self) -> tuple[int, ...]:
+    return tuple((set(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else set()).union(
+      *(x.reduced for x in self.src if x.op not in GroupOp.Movement and x.op != Ops.VIEW)))
+
+  @functools.cached_property
+  def shape_with_reduced(self) -> tuple[sint, ...]:
+    shape = self.shape
+    for i in sorted(self.reduced): shape = shape[:i] + (1,) + shape[i:]
+    return shape
+
+  @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.BUFFER, Ops.BUFFERIZE}: return None
     if self.op in GroupOp.Block: return None
@@ -164,13 +175,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None and x.op is not Ops.INDEX]): return None
-    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
     match self.op:
       case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.reduced)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -290,16 +300,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
   def r(self, op:Ops, axis:tuple[int, ...]):
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
+    axis = tuple(sorted(x for x in axis))
     if len(axis) == 0: return self
     # move any non reduce axis before the first reduce axis
-    move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
+    move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis)
     permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
     ret = self.permute(permaxis)
-    new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
+    new_axis = tuple(x for x in range(axis[0]+len(move_early), len(self.shape)))
     assert len(axis) == len(new_axis)
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
-    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    return ret.reshape(tuple(x for i,x in enumerate(self.shape) if i not in axis))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
@@ -865,7 +875,7 @@ class TrackedPatternMatcher(PatternMatcher):
       try: ret = match(uop, ctx)
       except Exception as e:
         if TRACK_MATCH_STATS >= 2 and active_rewrites and not isinstance(e, RewriteNotReady):
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.NOOP, arg=str(sys.exc_info()[1]))), p.location))
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR, src=uop.src, arg=str(sys.exc_info()[1]))), p.location))
         raise
       if ret is not None and ret is not uop:
         match_stats[p][0] += 1
