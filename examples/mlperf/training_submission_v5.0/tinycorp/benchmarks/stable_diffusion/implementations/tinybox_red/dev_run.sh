@@ -15,8 +15,8 @@
 #pip install scipy
 
 #### to use mlperf reference dataloader
+#pip install --index-url https://download.pytorch.org/whl/cpu torch # for torch.utils.data.DataLoader, which webdataset depends on
 #pip install webdataset
-#pip install torch # for torch.utils.data.DataLoader, which webdataset depends on
 source venv/bin/activate
 #export DEBUG=2
 export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
@@ -30,17 +30,18 @@ export HCQDEV_WAIT_TIMEOUT_MS=300000
 
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
-export GPUS=6 BS=6 EVAL_BS=6
+export GPUS=8 BS=248 EVAL_BS=192
 #export GPUS=1 BS=1 EVAL_BS=1
 
-export RUN_EVAL=1
-export EVAL_OVERFIT_SET=1
-export EVAL_INTERVAL=400
+#export RUN_EVAL=1
+#export EVAL_OVERFIT_SET=1
+#export EVAL_INTERVAL=4000
 #export EVAL_ONLY=1
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08142156/run_eval"
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08181458/run_eval"
 
 export BASEDIR="/home/hooved/stable_diffusion"
 export DATADIR="/raid/datasets/stable_diffusion"
+export CKPTDIR="/raid/weights/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
 

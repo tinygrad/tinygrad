@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1407,11 +1406,12 @@ def train_stable_diffusion():
   # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
-  #CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
-  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = 42000
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
   print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
 
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
+  DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
 
   # ** init wandb **
@@ -1442,7 +1442,7 @@ def train_stable_diffusion():
 
   model = StableDiffusion()
   #if not getenv("EVAL_ONLY", ""):
-  weights: dict[str,Tensor] = torch_load(BASEDIR / "checkpoints" / "sd" / "512-base-ema.ckpt")["state_dict"]
+  weights: dict[str,Tensor] = torch_load(CKPTDIR / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
   #for k,v in weights.items():
     #if v.dtype is dtypes.float32:
@@ -1526,12 +1526,12 @@ def train_stable_diffusion():
   if getenv("RUN_EVAL", ""):
     if not getenv("EVAL_OVERFIT_SET", ""):
       # load prompts for generating images for validation; 2 MB of data total
-      with open(BASEDIR / "datasets" / "coco2014" / "val2014_30k.tsv") as f:
+      with open(DATADIR / "coco2014" / "val2014_30k.tsv") as f:
         reader = csv.DictReader(f, delimiter="\t")
         eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
       assert len(eval_inputs) == 30_000
     else:
-      with open("/home/hooved/stable_diffusion/checkpoints/overfit_set.pickle", "rb") as f:
+      with open("/home/hooved/stable_diffusion/checkpoints/overfit_set_12.pickle", "rb") as f:
         eval_inputs = pickle.load(f)
       eval_inputs = [{"caption": txt, "mean_logvar": npy} for txt,npy in zip(eval_inputs["txt"], eval_inputs["npy"])]
 
@@ -1545,7 +1545,7 @@ def train_stable_diffusion():
     eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]])
 
     jit_context_step = TinyJit(model.cond_stage_model.embed_tokens)
-    inception = FidInceptionV3().load_from_pretrained(BASEDIR / "checkpoints" / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+    inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
     jit_inception = TinyJit(inception)
 
     # only needed for decoding denoised latents in eval
@@ -1553,7 +1553,7 @@ def train_stable_diffusion():
     vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
     text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
     clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
-    loaded = torch_load(BASEDIR / "checkpoints" / "clip" / "open_clip_pytorch_model.bin")
+    loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
     loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
     load_state_dict(clip_encoder, loaded)
     jit_clip_score = TinyJit(clip_encoder.get_clip_score)
@@ -1666,7 +1666,7 @@ def train_stable_diffusion():
         #safe_save(to_save, f"{EVAL_CKPT_DIR}/eval_results.safetensors")
 
       if not getenv("EVAL_OVERFIT_SET", ""):
-        inception_stats_fn = str(BASEDIR / "datasets" / "coco2014" / "val2014_30k_stats.npz")
+        inception_stats_fn = str(DATADIR / "coco2014" / "val2014_30k_stats.npz")
         #"/home/hooved/stable_diffusion/datasets/coco2014/val2014_30k_stats.npz"
       else:
         inception_stats_fn = str(BASEDIR / "checkpoints" / "overfit_set_inceptions.npz")
@@ -1694,13 +1694,13 @@ def train_stable_diffusion():
   if not getenv("EVAL_ONLY", ""):
     # training loop
     seen_keys = []
-    #dl = batch_load_train_stable_diffusion(BS)
-    #for i, batch in enumerate(dl, start=1):
-    i = 0
-    with open("/home/hooved/stable_diffusion/checkpoints/overfit_set.pickle", "rb") as f:
-      batch = pickle.load(f)
-    while True:
-      i += 1
+    dl = batch_load_train_stable_diffusion(BS)
+    for i, batch in enumerate(dl, start=1):
+    #i = 0
+    #with open("/home/hooved/stable_diffusion/checkpoints/overfit_set_12.pickle", "rb") as f:
+      #batch = pickle.load(f)
+    #while True:
+      #i += 1
       t0 = time.perf_counter()
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
@@ -1723,8 +1723,8 @@ def train_stable_diffusion():
     mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
 
       if WANDB:
-        wandb.log({"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i})
+        wandb_log = {"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
+                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i}
 
       if i % CKPT_STEP_INTERVAL == 0:
         # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
@@ -1735,10 +1735,10 @@ def train_stable_diffusion():
             f.write(f"wandb.run.id = {wandb.run.id}")
 
         #prefix = f"{UNET_CKPTDIR}/{i}"
-        fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+        fn = f"{UNET_CKPTDIR}/backup.safetensors"
         print(f"saving training state checkpoint at {fn}")
         safe_save(get_training_state(unet, optimizer, lr_scheduler, grad_scaler), fn)
-        with open(f"{UNET_CKPTDIR}/{i}_seen_keys.pickle", "wb") as f:
+        with open(f"{UNET_CKPTDIR}/seen_keys.pickle", "wb") as f:
           pickle.dump(seen_keys, f)
 
         # Only checkpoint collection is required here; eval can be done offline
@@ -1758,12 +1758,14 @@ def train_stable_diffusion():
           clip, fid = eval_unet(unet)
           print(f"step {i}: clip score: {clip}, fid score:{fid}")
           if WANDB:
-            wandb.log({"eval/step": i, "eval/clip_score": clip, "eval/fid_score": fid})
+            wandb_log.update({"eval/step": i, "eval/clip_score": clip, "eval/fid_score": fid})
 
           for jit in (denoise_step, jit_clip_score, jit_inception, jit_context_step, decode): jit.reset()
           with Context(BEAM=0):
             Tensor.realize(*[t.to_("CPU") for t in eval_only_tensors])
             Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
+
+      if WANDB: wandb.log(wandb_log)
 
   else:
     with Context(BEAM=0): Tensor.realize(*[t.to_(GPUS) for t in eval_only_tensors])
