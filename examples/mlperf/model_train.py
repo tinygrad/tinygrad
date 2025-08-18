@@ -1390,6 +1390,12 @@ def train_llama3():
   @TinyJit
   @Tensor.train(False)
   def eval_step(model, tokens:Tensor):
+    if (DP := getenv("DP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+      tokens = tokens.shard(device, 0)
+    if (MP := getenv("MP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+      tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten()
