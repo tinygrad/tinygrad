@@ -240,6 +240,14 @@ def gep_through_wmma(gep:UOp, wmma:UOp):
     tsrcs.append(s.gep(tuple(src_args)))
   return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
 
+def square_consts(x:UOp):
+  if x.op is Ops.CONST: return x.replace(arg=abs(x.arg))
+  if x.op is Ops.MUL:
+    return x.replace(src=(*map(square_consts, x.src),))
+  if x.op is Ops.WHERE:
+    return x.replace(src=(*map(square_consts, x.src[1:]),))
+  return x
+
 gep_pushing = PatternMatcher([
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(Ops.GEP, src=(UPat(Ops.GEP, name='g2'),), name='g1'),
@@ -283,6 +291,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  # consts are positive when we square
+  ((UPat.var("x") * UPat.var("x")), lambda x: (y:=square_consts(x))*y),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
