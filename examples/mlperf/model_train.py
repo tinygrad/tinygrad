@@ -1297,6 +1297,8 @@ def train_llama3():
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
 
   # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
@@ -1384,16 +1386,34 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  if getenv("FAKEDATA", 0):
-    def fake_data():
-      for _ in range(SAMPLES // GBS):
-        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
-    iter = fake_data()
-  else:
-    from examples.mlperf.dataloader import batch_load_llama3
-    iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+  @TinyJit
+  @Tensor.train(False)
+  def eval_step(model, tokens:Tensor):
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten()
 
-  i = 0
+  # ** data iters **
+  def fake_data(samples):
+    for _ in range(samples // GBS):
+      yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+
+  def get_train_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(SAMPLES)
+    else:
+      from examples.mlperf.dataloader import batch_load_llama3
+      return batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+
+  def get_eval_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(5760)
+    else:
+      from examples.mlperf.dataloader import batch_load_llama3
+      return batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=True)
+
+  iter = get_train_iter()
+  i, sequences_seen = 0, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
@@ -1410,7 +1430,21 @@ def train_llama3():
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
       fn = f"{ckpt_dir}/{i}.safe"
       safe_save(get_state_dict(model), fn)
+
     i += 1
+    sequences_seen += tokens.shape[0]
+
+    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 0):
+      tqdm.write(f"evaluating after {sequences_seen} sequences")
+
+      # run eval
+      eval_losses = []
+      eval_iter = get_eval_iter()
+      for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
+        eval_losses += eval_step(model, tokens).tolist()
+      log_perplexity = Tensor(losses).mean().item()
+
+      tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
