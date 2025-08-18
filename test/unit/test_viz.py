@@ -344,7 +344,6 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = json.loads(get_profile(Buffer.profile_events))
     st, et = profile_ret["st"], profile_ret["et"]
     ret = profile_ret["layout"][f"{c.device} Memory"]
-    H = ret["height"]
     a_x, b_x, c_x = (s["x"] for s in ret["shapes"])
     self.assertEqual(a_x[0], 0)
     # b allocates after a allocates

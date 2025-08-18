@@ -226,7 +226,7 @@ def get_profile(profile:list[ProfileEvent]):
     layout[k] = timeline_layout(v, min_ts)
     layout[f"{k} Memory"] = dm = mem_layout(v)
     peaks.append(dm["peak"])
-  height_scale = ScaleLinear([min(peaks), max(peaks)], [4, 100])
+  height_scale = ScaleLinear([min(peaks, default=0), max(peaks, default=0)], [4, 100])
   # TODO: move this to mem_layout
   for k,v in layout.items():
     if "Memory" not in k: continue
@@ -371,6 +371,10 @@ if __name__ == "__main__":
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
+  if not getenv("LAUNCH", 1):
+    stop_reloader.set()
+    exit(0)
+
   if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}{'/profiler' if contexts is None else ''}")
   try: server.serve_forever()
   except KeyboardInterrupt:
