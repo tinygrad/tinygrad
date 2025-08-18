@@ -39,8 +39,7 @@ def subblock(ctx: IndexContext, full_new_idx: list[UOp], src: UOp):
   return graph_rewrite(src, pm_lowerer, lc, name="subblock", bottom_up=True)
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
-  src_shape = x.src[0].shape_with_reduced if x.axis_arg and len(x.src[0].shape) < (max(x.axis_arg)+1) else x.src[0].shape
-  new_idxs = shape_to_idx(src_shape, ctx.axis_types, ctx.start)
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
   full_new_idx = list(ctx.idxs)
   for a in x.axis_arg: full_new_idx[a] = new_idxs[a]
 
@@ -58,12 +57,11 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   # TODO: reenable after REDUCE_AXIS is fixed
   #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
 
-  src_shape = x.src[0].shape + (1,) * (len(x.full_shape)-len(x.src[0].shape))
-  new_idxs = shape_to_idx(src_shape, ctx.axis_types, ctx.start)
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
   idx, valid = x.st_arg.to_indexed_uops(new_idxs)
   used_idxs = [x for x in UOp.sink(idx, valid).toposort() if x in new_idxs]
   real_new_idxs = []
-  for i in range(len(src_shape)):
+  for i in range(len(x.src[0].shape)):
     if new_idxs[i] in used_idxs or len(ctx.idxs) <= i: real_new_idxs.append(new_idxs[i])
     else: real_new_idxs.append(ctx.idxs[i])
 
@@ -81,8 +79,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
 
 def fixup_wmma(ctx:IndexContext, x:UOp):
   if x.tag is not None: return None
-  src_shape = x.src[0].shape_with_reduced if x.axis_arg and len(x.src[0].shape) < (max(x.axis_arg)+1) else x.src[0].shape
-  new_idxs = shape_to_idx(src_shape, ctx.axis_types, ctx.start)
+  new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
   full_new_idx = list(ctx.idxs)
   for a in x.arg[-1]: full_new_idx[a] = new_idxs[a]
 
