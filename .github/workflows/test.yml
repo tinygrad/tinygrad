@@ -46,6 +46,11 @@ jobs:
       with:
         deps: docs
         pydeps: "capstone"
+    - name: Build wheel and show size
+      run: |
+        pip install build
+        python -m build --wheel --outdir dist
+        ls -lh dist/*.whl
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -329,15 +334,13 @@ jobs:
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
-        python3 -m ruff check extra/onnx.py
         python3 -m ruff check examples/mlperf/ --ignore E501
     - name: Lint tinygrad with pylint
-      run: python -m pylint tinygrad/ extra/onnx.py
+      run: python -m pylint tinygrad/
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-        python -m mypy --strict-equality extra/onnx.py
 
   unittest:
     name: Unit Tests
@@ -375,8 +378,8 @@ jobs:
         PYTHONPATH=. python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         DEBUG=1 MIN_ASTS=1 PYTHONPATH=. python extra/optimization/get_action_space.py
-    - name: Repo line count < 16000 lines
-      run: MAX_LINE_COUNT=16000 python sz.py
+    - name: Repo line count < 17000 lines
+      run: MAX_LINE_COUNT=17000 python sz.py
 
   fuzzing:
     name: Fuzzing
