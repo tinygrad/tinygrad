@@ -284,7 +284,7 @@ class AMDComputeQueue(HWQueue):
 
   def wait(self, signal:AMDSignal, value:sint=0):
     self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
-    if self.dev.xccs > 1: self.xcc_barrier()
+    # if self.dev.xccs > 1: self.xcc_barrier()
     return self
 
   def timestamp(self, signal:AMDSignal):
@@ -854,11 +854,11 @@ class AMDDevice(HCQCompiled):
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
     # XCC setup
-    self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
-    if self.xccs > 1:
-      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
-      self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
-      AMDComputeQueue(self).xcc_config().submit(self)
+    # self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
+    # if self.xccs > 1:
+    #   self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
+    #   self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
+    #   AMDComputeQueue(self).xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
