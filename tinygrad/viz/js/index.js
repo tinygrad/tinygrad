@@ -126,7 +126,7 @@ const createPolygons = (source, height) => {
   const shapes = [];
   const yscale = d3.scaleLinear().domain([0, source.peak]).range([height, 0]);
   for (const [i,e] of source.shapes.entries()) {
-    const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
+    const x = e.x.map((i,_) => source.timestamps[i]-data.st);
     const y0 = e.y.map(yscale);
     const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
     const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
