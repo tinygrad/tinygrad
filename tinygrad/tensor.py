@@ -1144,7 +1144,7 @@ class Tensor(MathTrait):
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           # TODO: this used to be contiguous in non rangeify
-          #index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
