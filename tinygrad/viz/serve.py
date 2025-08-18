@@ -3,6 +3,7 @@ import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrow
 import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
@@ -114,7 +115,7 @@ profile_colors = {
   "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
 }
-def cycle_list(lst:list[str], i:int): return lst[i%len(lst)]
+def cycle_list(lst:list[str], i:int) -> str: return lst[i%len(lst)]
 @functools.cache
 def brighter(hex_color:str, k:int) -> str:
   if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
@@ -148,7 +149,8 @@ class TimelineBuilder:
     self.color_map:dict[str, str] = {}
     self.shapes:dict[str, list[dict]] = {}
     self.levels:dict[str, list[int]] = {}
-    self.h, self.st, self.curr_ref, self.color_key, self.name = 24, st, None, None, ""
+    self.h, self.st, self.name, self.color_key = 24, st, "", ""
+    self.curr_ref:dict|None = None
 
   def add(self, k:str, st:int, et:int, dur:float, e:DevEvent) -> None:
     if dur == 0: return
@@ -181,10 +183,61 @@ class TimelineBuilder:
 
   def get(self, k:str) -> dict: return {"shapes":self.shapes.get(k, []), "height":self.h*len(self.levels.get(k, []))}
 
+@dataclass
+class DeviceMemoryState:
+  step: int = 0
+  peak: int = 0
+  mem: int = 0
+  shps:dict[int, dict] = field(default_factory=dict)
+  temp:dict[int, dict] = field(default_factory=dict)
+  timestamps:list[int] = field(default_factory=list)
+
 class MemoryBuilder:
-  def __init__(self): pass
-  def add(self, k:str, st:int, et:int, dur:float, e:DevEvent) -> None: self.name = " Memory"
-  def get(self, k:str) -> dict: return {"shapes":[], "height":0}
+  def __init__(self, st:int, et:int):
+    self.name, self.st, self.et = " Memory", st, et
+    self.dev_states:dict[str, DeviceMemoryState] = {}
+
+  def add(self, k:str, st:int, et:int, dur:float, e:DevEvent) -> None:
+    s = self.dev_states.setdefault(k, DeviceMemoryState())
+    if not isinstance(e, ProfilePointEvent): return
+    if e.name == "alloc":
+      s.shps[e.key] = s.temp[e.key] = {"x":[s.step], "y":[s.mem], "arg":e.arg}
+      s.timestamps.append(int(e.ts))
+      s.step += 1
+      s.mem += e.arg["nbytes"]
+      if s.mem > s.peak: s.peak = s.mem
+    if e.name == "free":
+      s.timestamps.append(int(e.ts))
+      s.step += 1
+      s.mem -= (removed:=s.temp.pop(e.key))["arg"]["nbytes"]
+      removed["x"].append(s.step)
+      removed["y"].append(removed["y"][-1])
+      for i,v in s.temp.items():
+        if i > e.key:
+          v["x"] += [s.step, s.step]
+          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+
+  @functools.cached_property
+  def height_scale(self):
+    peaks = [s.peak for s in self.dev_states.values()]
+    return ScaleLinear([min(peaks, default=0), max(peaks, default=0)], [4, 100])
+
+  def get(self, k:str) -> dict:
+    s = self.dev_states.setdefault(k, DeviceMemoryState())
+    for v in s.temp.values():
+      v["x"].append(s.step)
+      v["y"].append(v["y"][-1])
+    shapes:list[dict] = []
+    height = self.height_scale(s.peak)
+    yscale = ScaleLinear([0, s.peak], [height, 0])
+    for i,n in enumerate(s.shps.values()):
+      shape:dict = {"x":[(s.timestamps[x] if x<len(s.timestamps) else self.et)-self.st for x in n["x"]]}
+      shape["y0"] = [yscale(y) for y in n["y"]]
+      shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
+      shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
+      shape["fillColor"] = cycle_list(profile_colors["BUFFER"], i)
+      shapes.append(shape)
+    return {"shapes":shapes, "height":height, "ydomain":(0, s.peak)}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -199,7 +252,7 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  builders = [TimelineBuilder(unwrap(min_ts)), MemoryBuilder()]
+  builders:list = [TimelineBuilder(unwrap(min_ts)), MemoryBuilder(unwrap(min_ts), unwrap(max_ts))]
   for k,events in dev_events.items():
     events.sort(key=lambda e:e[0])
     for v in events:
