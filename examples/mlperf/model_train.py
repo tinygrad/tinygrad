@@ -1449,7 +1449,7 @@ def train_llama3():
       eval_iter = get_eval_iter()
       for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
-      log_perplexity = Tensor(losses).mean().item()
+      log_perplexity = Tensor(eval_losses).mean().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 
