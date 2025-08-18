@@ -140,13 +140,14 @@ color_map:dict[str, str] = {}
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
-  height, colorKey, curr_ref = 24, "", None
+  height, color_key, curr_ref = 24, "", None
   for st,et,dur,e in events:
     if dur == 0: continue
     # find a free level to put the event
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
+    # find the rewrite step this event belongs to
     name, cat, tooltip = e.name, None, f"{time_to_str(dur*1e-9).strip()}"
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
@@ -156,18 +157,15 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts) -> di
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    if depth == 0: colorKey = cat or str(name)
-    fillColor = brighter(color_map.setdefault(colorKey, cycle_colors(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map))), depth)
-    arg:dict = {"tooltipText":tooltip}
     if ref is not None: curr_ref = {"ctx":ref, "step":0}
     elif curr_ref is not None:
-      start, stepIdx = curr_ref["step"]+1 if curr_ref["step"]>0 else 0, None
-      for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]):
-        if i >= start and s["name"] == name:
-          stepIdx = i
-          break
-      curr_ref = None if stepIdx is None else {"ctx":curr_ref["ctx"], "step":stepIdx}
-    if curr_ref is not None: arg.update(curr_ref.items())
+      if (start_step:=curr_ref["step"]) > 0: start_step += 1
+      i = next((i for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]) if i>=start_step and s["name"] == name), None)
+      curr_ref = {"ctx":curr_ref["ctx"], "step":i} if i is not None else None
+    arg = {"tooltipText":tooltip, **(curr_ref or {})}
+    # update colors when a new time range start
+    if depth == 0: color_key = cat or str(name)
+    fillColor = brighter(color_map.setdefault(color_key, cycle_colors(profile_colors.get(e.device,profile_colors["DEFAULT"]), len(color_map))), depth)
     shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
   return {"shapes":shapes, "height":height*len(levels)}
 
@@ -248,7 +246,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
       shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
       shapes.append(shape)
-    layout[k] = {"shapes":shapes, "height":height, "ydomain":[0, peak]}
+    layout[tid] = {"shapes":shapes, "height":height, "ydomain":[0, peak]}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
