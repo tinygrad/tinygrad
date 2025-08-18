@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.uop.ops import PatternMatcher, Ops, UPat, graph_rewrite, RewriteContext, UOp
-from tinygrad.schedule.kernelize import sym, merge_views
+from tinygrad.schedule.kernelize import kernelize_sym, merge_views
 
 class TestRewriteTrackedChildren(unittest.TestCase):
   @unittest.skip("track_children no longer supported")
@@ -57,7 +57,7 @@ class TestRewriteTrackedChildren(unittest.TestCase):
     extra = PatternMatcher([(UPat(Ops.REDUCE_AXIS, name="r"), print_children)])
     a = Tensor.empty(3, 3)
     r = (a+0).sum()
-    graph_rewrite(r.uop, merge_views+sym+extra, track_children=True)
+    graph_rewrite(r.uop, merge_views+kernelize_sym+extra, track_children=True)
 
 if __name__ == '__main__':
   unittest.main()

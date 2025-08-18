@@ -1,10 +1,11 @@
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.opt.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.device import Buffer
-from tinygrad.opt.search import get_test_global_size, bufs_from_lin
+from tinygrad.codegen.opt.search import get_test_global_size, bufs_from_lin
 from tinygrad.helpers import GlobalCounters
 from extra.optimization.helpers import time_linearizer
+from test.test_linearizer import push_views
 
 class TestSearchUtil(unittest.TestCase):
   def test_get_test_global_size(self):
@@ -25,7 +26,7 @@ class TestSearchUtil(unittest.TestCase):
     a = Tensor.randn(4, 4).realize()
     b = a+a[0]
     si = b.schedule()[0]
-    rawbufs = bufs_from_lin(Kernel(si.ast))
+    rawbufs = bufs_from_lin(Kernel(push_views(si.ast)))
     assert len(rawbufs) == 2
     assert all(r is not None for r in rawbufs)
     assert all(isinstance(r, Buffer) for r in rawbufs)
@@ -38,13 +39,13 @@ class TestTimeLinearizer(unittest.TestCase):
     si = (a+1).schedule()[0]
     # create fresh empty buffers
     rawbufs = [Buffer(b.device, b.size, b.dtype).allocate() for b in si.bufs]
-    tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
+    tm = time_linearizer(Kernel(push_views(si.ast)), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
   # Ensure that the kernel count is not incremented by time_linearizer when clearing l2
   def test_kernel_count(self):
     ast = Tensor.zeros(16).contiguous().kernelize().uop.src[1].arg.ast
-    lin = Kernel(ast)
+    lin = Kernel(push_views(ast))
     bufs = bufs_from_lin(lin)
 
     kernel_count = GlobalCounters.kernel_count

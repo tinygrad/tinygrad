@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Context, Device
 from tinygrad.engine.realize import get_program
-from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad.uop.ops import KernelInfo
 
 class TestLinearizerRewrite(unittest.TestCase):

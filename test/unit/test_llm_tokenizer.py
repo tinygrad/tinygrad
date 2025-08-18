@@ -1,7 +1,8 @@
-import unittest, base64, functools
+import unittest, base64, functools, sys
 from tinygrad.apps.llm import SimpleTokenizer, get_llama_re
 from tinygrad.helpers import fetch
 
+@unittest.skipIf(sys.platform == 'win32', "fetch race condition on Windows")
 class TestLLMTokenizer(unittest.TestCase):
   @functools.cached_property
   def basic_tok(self): return SimpleTokenizer(".*", { b"a": 0, b"b": 1, b"c": 2, b"ab": 3, b"bc": 4 }, { "<x>": 5, "<y>": 6, "<z>": 7 })

@@ -182,6 +182,19 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
+  # determine what ranges this is in
+  @functools.cached_property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None}
+    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE, Ops.STORE}:
+      ret = self.src[0].ranges.copy()
+      for s in self.src[1:]:
+        if s in ret: del ret[s]
+    else:
+      ret = {}
+      for s in self.src: ret.update(s.ranges)
+    return ret
+
   # *** uop evaluation ***
 
   def simplify(self):
@@ -219,7 +232,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp|None, **kwargs): return UOp(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
-  def index(self, idx:UOp, valid:UOp|None=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def index(self, *srcs:UOp|None, **kwargs):
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
@@ -229,9 +243,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType):
+    # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
+    if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
     if self.dtype == dtype: return self
     return UOp(Ops.CAST, dtype, (self,))
-  def cast_vec(self, dtype:DType): return UOp(Ops.CAST, dtype.vec(self.dtype.count), (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:tuple[int, ...]|int):
     if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
@@ -248,7 +263,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def alu(self, op, *src:UOp, **kwargs):
     out_dtype = (self, *src)[-1].dtype
-    if op in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(op, out_dtype, (self,)+src, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
@@ -259,7 +274,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       from tinygrad.shape.shapetracker import ShapeTracker
       ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(shape, (0,)*len(shape))),))
     if device is not None:
-      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+      if shape is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+      else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
     return ret
   @staticmethod
   def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
@@ -275,7 +291,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
-  def contiguous(self): return self.alu(Ops.CONTIGUOUS)
+  def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def fuse(self): return self.alu(Ops.FUSE)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
@@ -440,7 +456,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     all_vars = set([x for x in self.toposort() if x.op is Ops.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> list[Variable]:
-    st_vars: list[set[Variable]] = [x.st_arg.vars() for x in self.toposort() if x.op in GroupOp.Buffer]
+    st_vars: list[set[Variable]] = [x.arg.vars() for x in self.toposort() if x.op is Ops.VIEW]
     return sorted(set.union(*st_vars, set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()])), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
@@ -468,6 +484,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def pop_const(self) -> tuple[UOp, int]: return (self.src[0], self.src[1].arg) if self.op is Ops.ADD and self.src[1].op is Ops.CONST else (self, 0)
   @property
   def vmin(self) -> ConstType: return self._min_max[0]
   @property
@@ -559,10 +576,10 @@ def safe_pow(x, y):
 python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
   Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow, Ops.TRUNC: math.trunc,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
+  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
@@ -739,16 +756,6 @@ class PatternMatcher:
       if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
-  def fixed_point_rewrite(self, uop:UOp, ctx=None) -> UOp:
-    # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
-    new_n: UOp|None = uop
-    seen = set()
-    while new_n is not None:
-      if new_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-      seen.add(new_n)
-      last_n, new_n = new_n, self.rewrite(new_n, ctx)
-    return last_n
-
 # *** non-blocking UOp tracker ***
 
 ucount = itertools.count()
@@ -788,7 +795,7 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   def save_to_diskcache():
     for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
 
-def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
+def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       fn = key = func.__name__
@@ -802,7 +809,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
         e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
-      if getenv("CAPTURE_PROCESS_REPLAY"):
+      if getenv("CAPTURE_PROCESS_REPLAY") and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
@@ -840,7 +847,12 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (ret:=match(uop, ctx)) is not None and ret is not uop:
+      try: ret = match(uop, ctx)
+      except Exception as e:
+        if TRACK_MATCH_STATS >= 2 and active_rewrites and not isinstance(e, RewriteNotReady):
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR, src=uop.src, arg=str(sys.exc_info()[1]))), p.location))
+        raise
+      if ret is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
@@ -880,39 +892,66 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
+class RewriteNotReady(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
+    self.pm_cache: dict[UOp, UOp|None] = {}
     self.bpm: PatternMatcher|None = bpm
+    self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+
+  def cached_pm_rewrite(self, x:UOp):
+    if (ret:=self.pm_cache.get(x,False)) is not False: return ret
+    ret = self.pm_cache[x] = cast(PatternMatcher, self.pm).rewrite(x, self.ctx)
+    return ret
+
+  def cached_bpm_rewrite(self, x:UOp):
+    if (ret:=self.bpm_cache.get(x,False)) is not False: return ret
+    ret = self.bpm_cache[x] = cast(PatternMatcher, self.bpm).rewrite(x, self.ctx)
+    return ret
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     while stack:
-      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite")
+      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0:
-        # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-        if self.bpm is not None: new_n = self.bpm.fixed_point_rewrite(new_n, self.ctx)
-        stack.append((n, 1, new_n))
-        for x in reversed(new_n.src): stack.append((x, 0, x))
-      elif stage == 1:
-        if (new_src:=tuple([self.replace[x] for x in new_n.src])) == new_n.src:
-          # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
-            self.replace[n] = new_n
-            continue
+      try:
+        if stage == 0:
+          # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+          if self.bpm is not None:
+            # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
+            test_n: UOp|None = n
+            seen = set()
+            while test_n is not None:
+              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+              seen.add(test_n)
+              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+          stack.append((n, 1, new_n))
+          for x in reversed(new_n.src): stack.append((x, 0, x))
+        elif stage == 1:
+          try: new_src = tuple([self.replace[x] for x in new_n.src])
+          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          if new_src == new_n.src:
+            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
+            if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
+              self.replace[n] = new_n
+              continue
+          else:
+            # if srcs changed from rewrites, construct a new UOp with the new srcs
+            new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
         else:
-          # if srcs changed from rewrites, construct a new UOp with the new srcs
-          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
-        # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
-        stack.append((n, 2, new_src_n))
-        stack.append((new_src_n, 0, new_src_n))
-      else:
-        # in stage 2, we link the result of new_n to the result of n
-        self.replace[n] = self.replace[new_n]
+          # in stage 2, we link the result of new_n to the result of n
+          try: self.replace[n] = self.replace[new_n]
+          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+      except RewriteNotReady:
+        # retry this later
+        stack.insert(0, (n, stage, new_n))
     return self.replace[root]
 
 @track_matches
@@ -925,7 +964,7 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
                       input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   new_map: dict[UOp, UOp] = {}
-  for k in sink.toposort():
+  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
     new_map[k] = v = rewrite_ctx.unified_rewrite(k)
     if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
   if input_map is not None:

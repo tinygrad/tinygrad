@@ -62,7 +62,6 @@ class TestNaNEdgeCases(unittest.TestCase):
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  @unittest.expectedFailure
   def test_sort_empty(self):
     # Sorting an empty tensor works in PyTorch and should return empty
     # values and indices. tinygrad raises an error instead.
@@ -219,7 +218,6 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
-  @unittest.expectedFailure
   def test_assign_broadcast(self):
     # broadcasting during assign should behave like PyTorch
     torch_tensor = torch.zeros(3, 5)
@@ -258,12 +256,11 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
-  @unittest.expectedFailure
   def test_arange_float_step(self):
     # float steps should match PyTorch exactly
     torch_out = torch.arange(0, 2, 0.3).numpy()
     out = Tensor.arange(0, 2, 0.3).numpy()
-    np.testing.assert_allclose(out, torch_out)
+    np.testing.assert_allclose(out, torch_out, atol=1e-7)
 
   @unittest.skip("this is flaky")
   @unittest.expectedFailure

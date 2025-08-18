@@ -76,7 +76,7 @@ class TestViz(BaseTestViz):
     self.assertEqual(lineno, inner.__code__.co_firstlineno)
 
   def test_exceptions(self):
-    # VIZ tracks rewrites up to the error
+    # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
       assert x.arg <= 3
       return x.replace(arg=x.arg+1)
@@ -85,7 +85,7 @@ class TestViz(BaseTestViz):
     with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
     lst = get_viz_list()
     err_step = lst[0]["steps"][0]
-    self.assertEqual(err_step["match_count"], 3)
+    self.assertEqual(err_step["match_count"], 4) # 3 successful rewrites + 1 err
 
   def test_default_name(self):
     a = UOp.variable("a", 1, 10)
@@ -97,9 +97,9 @@ class TestViz(BaseTestViz):
 
   # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
-    @track_rewrites(name=lambda a,ret: a.render())
-    def name_from_fxn(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_from_fxn(UOp.variable("a", 1, 10)+1)
+    @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
+    def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
+    name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
     lst = get_viz_list()
     # name gets deduped by the function call counter
     self.assertEqual(lst[0]["name"], "(a+1) n1")
@@ -124,10 +124,10 @@ class TestViz(BaseTestViz):
 
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
-    b = a.replace(op=Ops.DEFINE_REG)
+    b = a.replace(op=Ops.CONST)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
@@ -250,7 +250,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    dev_events = j['layout']['NV']['timeline']['shapes']
+    dev_events = j['layout']['NV']['shapes']
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
@@ -263,7 +263,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    event = j['layout']['NV']['timeline']['shapes'][0]
+    event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
     self.assertEqual(event['st'], 900) # diff clock
     self.assertEqual(event['dur'], 10)
@@ -278,23 +278,23 @@ class TestVizProfiler(unittest.TestCase):
 
     j = json.loads(get_profile(prof))
 
-    devices = list(j['layout'])
-    self.assertEqual(devices[0], 'NV Graph')
-    self.assertEqual(devices[1], 'NV')
-    self.assertEqual(devices[2], 'NV:1')
+    tracks = list(j['layout'])
+    self.assertEqual(tracks[0], 'NV Graph')
+    self.assertEqual(tracks[2], 'NV')
+    self.assertEqual(tracks[4], 'NV:1')
 
-    nv_events = j['layout']['NV']['timeline']['shapes']
+    nv_events = j['layout']['NV']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
     self.assertEqual(nv_events[0]['st'], 0)
     self.assertEqual(nv_events[0]['dur'], 2)
     #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    nv1_events = j['layout']['NV:1']['timeline']['shapes']
+    nv1_events = j['layout']['NV:1']['shapes']
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
-    graph_events = j['layout']['NV Graph']['timeline']['shapes']
+    graph_events = j['layout']['NV Graph']['shapes']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
@@ -308,7 +308,7 @@ class TestVizMemoryLayout(BaseTestViz):
     a = _alloc(1)
     _b = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][a.device]["mem"]
+    ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(ret["shapes"][0]["x"], [0, 2])
     self.assertEqual(ret["shapes"][1]["x"], [1, 2])
@@ -318,7 +318,7 @@ class TestVizMemoryLayout(BaseTestViz):
     del a
     b = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][b.device]["mem"]
+    ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
     self.assertEqual(ret["shapes"][0]["x"], [0, 2])
     self.assertEqual(ret["shapes"][1]["x"], [2, 3])
@@ -331,7 +331,7 @@ class TestVizMemoryLayout(BaseTestViz):
     del a
     c = _alloc(1)
     profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][c.device]["mem"]
+    ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(ret["shapes"][0]["x"], [0, 3])
     self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
