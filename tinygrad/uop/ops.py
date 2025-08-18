@@ -141,7 +141,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
-    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([r.vmax+1 for r in self.src[1:]]))
+    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape((prod(tuple([r.vmax+1 for r in self.src[1:]])),))
+    #if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([r.vmax+1 for r in self.src[1:]]))
     if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
     if self.op in GroupOp.Movement:
       if self.src[0].st is None: return None
@@ -375,6 +376,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
+  def forced_reshape(self, arg:tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, src=(self,), arg=arg)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)

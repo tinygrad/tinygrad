@@ -61,7 +61,7 @@ do_realize = PatternMatcher([
 
 add_contiguous = double_reshape+PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: UOp(Ops.RESHAPE, x.dtype, (x.replace(tag=1),), arg=x.shape) if x.tag is None else None),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.replace(tag=1).forced_reshape(x.shape) if x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
@@ -197,7 +197,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.forced_reshape(x.shape)
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
