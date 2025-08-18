@@ -17,6 +17,9 @@ class Ops(FastEnum):
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 
+  # create buffer
+  BUFFERIZE = auto()
+
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
   BUFFERIZE = auto()
