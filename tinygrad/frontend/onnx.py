@@ -562,7 +562,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def If(condition:Tensor, else_branch:SubGraphOnnxRunner, then_branch:SubGraphOnnxRunner, intermediate_tensors:dict[str, Tensor]):
     else_branch.graph_values.update(intermediate_tensors)
     then_branch.graph_values.update(intermediate_tensors)
-    # we run run both branch lazily and then select based on condition
+    # we run both branch lazily and then select based on condition
     else_out = else_branch({k:intermediate_tensors[k] for k in else_branch.graph_inputs.keys()})
     then_out = then_branch({k:intermediate_tensors[k] for k in then_branch.graph_inputs.keys()})
     # dereference intermediate tensors so Buffer can be deallocated
