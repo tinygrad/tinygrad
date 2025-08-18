@@ -207,6 +207,11 @@ class ScaleLinear:
     self.m = 0 if domain == 0 else (self.r1 - self.r0) / domain
   def __call__(self, x): return self.r0 + (x - self.d0) * self.m
 
+class LayoutSpec(TypedDict):
+  shapes:list[dict]                    # shapes in local coordinates
+  height:int
+  ydomain:tuple[int, int]|None = None  # optionally provide a y axis
+
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
   for ev in profile:
@@ -220,7 +225,7 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  layout:dict[str, dict] = {}
+  layout:dict[str, LayoutSpec] = {}
   peaks:list[int] = []
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
@@ -229,14 +234,14 @@ def get_profile(profile:list[ProfileEvent]):
     peaks.append(dm["peak"])
   height_scale = ScaleLinear([min(peaks, default=0), max(peaks, default=0)], [4, 100])
   # TODO: move this to mem_layout
-  for k,v in layout.items():
-    if "Memory" not in k: continue
+  for tid,spec in layout.items():
+    if "Memory" not in tid: continue
     shapes:list[dict] = []
-    height = height_scale(peak:=v["peak"])
-    timestamps = v["timestamps"]
+    height = height_scale(peak:=spec["peak"])
+    timestamps = spec["timestamps"]
     timestamps.append(max_ts)
     yscale = ScaleLinear([0, peak], [height, 0])
-    for i,n in enumerate(v["shapes"]):
+    for i,n in enumerate(spec["shapes"]):
       shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
       shape["y0"] = [yscale(y) for y in n["y"]]
       shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]

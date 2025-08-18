@@ -182,7 +182,7 @@ async function renderProfiler() {
         return resize();
       });
     }
-    data.tracks.set(k, { shapes:v.shapes, offsetY, ydomain:v.ydomain, height:v.height, scaleFactor:400/v.height });
+    data.tracks.set(k, { shapes:v.shapes, ydomain:v.ydomain, height:v.height, offsetY, scaleFactor:400/v.height });
   }
   updateProgress({ "show":false });
   // cache label widths
