@@ -164,11 +164,10 @@ async function renderProfiler() {
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
-    const { y:baseY, height:baseHeight } = rect(div.node());
+    const { y:baseY } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    if (v.ydomain == null) {
-      div.style("height", v.height+padding+"px").style("pointerEvents", "none");
-    } else {
+    if (v.ydomain == null) div.style("height", v.height+padding+"px").style("pointerEvents", "none");
+    else {
       div.style("height", v.height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -473,7 +472,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
