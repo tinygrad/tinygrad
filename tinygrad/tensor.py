@@ -14,7 +14,8 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.schedule.rangeify import get_kernelize_map
+if getenv("RANGEIFY", 1): from tinygrad.schedule.rangeify import get_kernelize_map
+else: from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
