@@ -1398,26 +1398,26 @@ def train_llama3():
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    return loss.flatten()
+    return loss.flatten().float()
 
   # ** data iters **
-  def fake_data(samples):
-    for _ in range(samples // GBS):
-      yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+  def fake_data(bs, samples):
+    for _ in range(samples // bs):
+      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
-      return fake_data(SAMPLES)
+      return fake_data(GBS, SAMPLES)
     else:
       from examples.mlperf.dataloader import batch_load_llama3
       return batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
 
   def get_eval_iter():
     if getenv("FAKEDATA", 0):
-      return fake_data(5760)
+      return fake_data(EVAL_BS, 5760)
     else:
       from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=True)
+      return batch_load_llama3(EVAL_BS, 5760, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=True)
 
   iter = get_train_iter()
   i, sequences_seen = 0, 0
@@ -1441,15 +1441,17 @@ def train_llama3():
     i += 1
     sequences_seen += tokens.shape[0]
 
-    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 0):
+    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
       tqdm.write(f"evaluating after {sequences_seen} sequences")
 
       # run eval
       eval_losses = []
       eval_iter = get_eval_iter()
+      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+
       for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
-      log_perplexity = Tensor(eval_losses).mean().item()
+      log_perplexity = Tensor(eval_losses).mean().float().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 
