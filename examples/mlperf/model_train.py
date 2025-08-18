@@ -1299,6 +1299,7 @@ def train_llama3():
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
+  EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
 
   # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
@@ -1428,7 +1429,7 @@ def train_llama3():
     if getenv("CKPT") and (i % 200 == 0 or i == 10):
       tqdm.write("saving checkpoint")
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-      fn = f"{ckpt_dir}/{i}.safe"
+      fn = f"{ckpt_dir}/llama3_{i}.safe"
       safe_save(get_state_dict(model), fn)
 
     i += 1
@@ -1445,6 +1446,14 @@ def train_llama3():
       log_perplexity = Tensor(losses).mean().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
+
+      if log_perplexity < EVAL_TARGET:
+        tqdm.write(f"target achieved after {sequences_seen} sequences")
+        if getenv("CKPT"):
+          if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/llama3.safe"
+          safe_save(get_state_dict(model), fn)
+        break
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
