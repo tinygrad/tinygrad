@@ -122,17 +122,31 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-const createPolygons = (source, area) => {
+const createPolygons = (source, height) => {
   const shapes = [];
-  const yscale = d3.scaleLinear().domain([0, source.peak]).range([area, 0]);
+  const yscale = d3.scaleLinear().domain([0, source.peak]).range([height, 0]);
   for (const [i,e] of source.shapes.entries()) {
-    const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
+    const x = e.x.map((i,_) => source.timestamps[i]-data.st);
     const y0 = e.y.map(yscale);
     const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
     const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
     shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
   }
   return shapes;
+}
+
+const rescaleTrack = (source, tid, k) => {
+  for (const e of source.shapes) {
+    for (let i=0; i<e.y0.length; i++) {
+      e.y0[i] = e.y0[i]*k;
+      e.y1[i] = e.y1[i]*k;
+    }
+  }
+  const change = (source.height*k)-source.height;
+  const div = document.getElementById(tid);
+  div.style.height = rect(div).height+change+"px";
+  source.height = source.height*k;
+  return change;
 }
 
 const drawLine = (ctx, x, y) => {
@@ -150,77 +164,61 @@ async function renderProfiler() {
   // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
-  const deviceList = profiler.append("div").attr("id", "device-list").node();
+  const { layout, st, et } = await (await fetch("/get_profile")).json();
+  // place devices on the y axis and set vertical positions
+  const [tickSize, padding] = [10, 8];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
-  const profileRet = await (await fetch("/get_profile")).json()
-  const { layout, st, et } = profileRet;
-  // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  deviceList.style.paddingTop = `${tickSize+padding}px`;
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}, st, et};
-  const areaScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.mem.peak), 0)]).range([4,maxArea=100]);
-  for (const [k, { timeline, mem }] of Object.entries(layout)) {
-    if (timeline.shapes.length === 0 && mem.shapes.length == 0) continue;
-    const div = deviceList.appendChild(document.createElement("div"));
-    div.innerText = k;
-    div.style.padding = `${padding}px`;
-    div.onclick = () => { // TODO: make this feature more visible
-      const prevScroll = profiler.node().scrollTop;
-      let newOffset = null;
-      for (const [track, v] of data.tracks) {
-        if (track === `${k} memory`)  {
-          // expand the y axis or reset to default size
-          const pick = [areaScale(mem.peak), maxArea*4];
-          const expand = k !== focusedDevice;
-          const [newArea, prevArea] = expand ? pick.reverse() : pick;
-          focusedDevice = expand ? k : null;
-          data.axes.y = expand ? { domain:[0, mem.peak], range:[v.offsetY+newArea, v.offsetY], fmt:"B" } : null;
-          // either way update all offsets
-          v.shapes = createPolygons(mem, newArea);
-          newOffset = newArea-prevArea;
-          v.div.style.height = rect(v.div).height+newOffset+"px";
-        } else if (newOffset != null) v.offsetY += newOffset;
-      }
-      d3.select(canvas).call(canvasZoom.transform, zoomLevel);
-      if (prevScroll) profiler.node().scrollTop = prevScroll;
-    }
-    const { y:baseY, height:baseHeight } = rect(div);
-    const levelHeight = baseHeight-padding;
+  const heightScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxheight=100]);
+  for (const [k, v] of Object.entries(layout)) {
+    if (v.shapes.length === 0) continue;
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [];
-    data.tracks.set(k, { shapes, offsetY });
-    let colorKey, ref;
-    for (const e of timeline.shapes) {
-      if (e.depth === 0) colorKey = e.cat ?? e.name;
-      if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
-      const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
-      const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-      if (e.ref != null) ref = {ctx:e.ref, step:0};
-      else if (ref != null) {
-        const start = ref.step>0 ? ref.step+1 : 0;
-        const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-        ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
+    if (v.shapes[0].dur != null) {
+      const levelHeight = baseHeight-padding;
+      const shapes = [];
+      data.tracks.set(k, { shapes, offsetY });
+      let colorKey, ref;
+      for (const e of v.shapes) {
+        if (e.depth === 0) colorKey = e.cat ?? e.name;
+        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
+        const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
+        const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        if (e.ref != null) ref = {ctx:e.ref, step:0};
+        else if (ref != null) {
+          const start = ref.step>0 ? ref.step+1 : 0;
+          const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+          ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
+        }
+        const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+        // offset y by depth
+        shapes.push({x:e.st-st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
-      const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
-      // offset y by depth
-      shapes.push({x:e.st-st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+      div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
+    } else {
+      const height = heightScale(v.peak);
+      data.tracks.set(k, { shapes:createPolygons(v, height), offsetY, height, peak:v.peak, scaleFactor:maxheight*4/height });
+      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+        const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
+        let offset = 0;
+        for (const [tid, track] of data.tracks) {
+          track.offsetY += offset;
+          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
+          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
+        }
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
+        focusedDevice = newFocus;
+        return resize();
+      });
     }
-    // position shapes on the canvas and scale to fit fixed area
-    let area = mem.shapes.length === 0 ? 0 : areaScale(mem.peak);
-    if (area === 0) div.style.pointerEvents = "none";
-    else {
-      const startY = offsetY+(levelHeight*timeline.maxDepth)+padding/2;
-      data.tracks.set(`${k} memory`, { shapes:createPolygons(mem, area), offsetY:startY, div });
-      div.style.cursor = "pointer";
-    }
-    // lastly, adjust device rect by number of levels
-    div.style.height = `${Math.max(levelHeight*timeline.maxDepth, baseHeight)+area+padding}px`;
   }
   updateProgress({ "show":false });
   // draw events on a timeline
