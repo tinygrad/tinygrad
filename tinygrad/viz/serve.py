@@ -135,14 +135,25 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
-# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, color_map:dict[str, str]) -> dict:
-  shapes:list[dict] = []
-  levels:list[int] = []
-  height, color_key, curr_ref = 24, "", None
-  for st,et,dur,e in events:
-    if dur == 0: continue
+class ScaleLinear:
+  def __init__(self, domain, range_):
+    self.d0, self.d1 = domain
+    self.r0, self.r1 = range_
+    domain = self.d1 - self.d0
+    self.m = 0 if domain == 0 else (self.r1 - self.r0) / domain
+  def __call__(self, x): return self.r0 + (x - self.d0) * self.m
+
+class TimelineBuilder:
+  def __init__(self, st:int):
+    self.color_map:dict[str, str] = {}
+    self.shapes:dict[str, list[dict]] = {}
+    self.levels:dict[str, list[int]] = {}
+    self.h, self.st, self.curr_ref, self.color_key, self.name = 24, st, None, None, ""
+
+  def add(self, k:str, st:int, et:int, dur:float, e:DevEvent) -> None:
+    if dur == 0: return
     # find a free level to put the event
+    levels = self.levels.setdefault(k, [])
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
     if depth < len(levels): levels[depth] = et
     else: levels.append(et)
@@ -156,53 +167,24 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, c
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    if ref is not None: curr_ref = {"ctx":ref, "step":0}
-    elif curr_ref is not None:
-      if (start_step:=curr_ref["step"]) > 0: start_step += 1
-      i = next((i for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]) if i>=start_step and s["name"] == name), None)
-      curr_ref = {"ctx":curr_ref["ctx"], "step":i} if i is not None else None
-    arg = {"tooltipText":tooltip, **(curr_ref or {})}
+    if ref is not None: self.curr_ref = {"ctx":ref, "step":0}
+    elif self.curr_ref is not None:
+      if (start_step:=self.curr_ref["step"]) > 0: start_step += 1
+      i = next((i for i,s in enumerate(ctxs[self.curr_ref["ctx"]]["steps"]) if i>=start_step and s["name"] == name), None)
+      self.curr_ref = {"ctx":self.curr_ref["ctx"], "step":i} if i is not None else None
+    arg = {"tooltipText":tooltip, **(self.curr_ref or {})}
     # update colors when a new time range starts
-    if depth == 0: color_key = cat or str(name)
-    color = brighter(color_map.setdefault(color_key, cycle_list(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map))), depth)
-    shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":color, "arg":arg})
-  return {"shapes":shapes, "height":height*len(levels)}
+    if depth == 0: self.color_key = cat or str(name)
+    color_list = profile_colors.get(e.device, profile_colors["DEFAULT"])
+    color = brighter(self.color_map.setdefault(self.color_key, cycle_list(color_list, len(self.color_map))), depth)
+    self.shapes.setdefault(k, []).append({"name":name, "x":st-self.st, "width":dur, "y":depth*self.h, "height":self.h, "fillColor":color, "arg":arg})
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
-  step, peak, mem = 0, 0, 0
-  shps:dict[int, dict] = {}
-  temp:dict[int, dict] = {}
-  timestamps:list[int] = []
-  for st,_,_,e in events:
-    if not isinstance(e, ProfilePointEvent): continue
-    if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.ts))
-      step += 1
-      mem += e.arg["nbytes"]
-      if mem > peak: peak = mem
-    if e.name == "free":
-      timestamps.append(int(e.ts))
-      step += 1
-      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
-      removed["x"].append(step)
-      removed["y"].append(removed["y"][-1])
-      for k,v in temp.items():
-        if k > e.key:
-          v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
-  for v in temp.values():
-    v["x"].append(step)
-    v["y"].append(v["y"][-1])
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  def get(self, k:str) -> dict: return {"shapes":self.shapes.get(k, []), "height":self.h*len(self.levels.get(k, []))}
 
-class ScaleLinear:
-  def __init__(self, domain, range_):
-    self.d0, self.d1 = domain
-    self.r0, self.r1 = range_
-    domain = self.d1 - self.d0
-    self.m = 0 if domain == 0 else (self.r1 - self.r0) / domain
-  def __call__(self, x): return self.r0 + (x - self.d0) * self.m
+class MemoryBuilder:
+  def __init__(self): pass
+  def add(self, k:str, st:int, et:int, dur:float, e:DevEvent) -> None: self.name = " Memory"
+  def get(self, k:str) -> dict: return {"shapes":[], "height":0}
 
 def get_profile(profile:list[ProfileEvent]):
   # start by getting the time diffs
@@ -217,33 +199,12 @@ def get_profile(profile:list[ProfileEvent]):
     if min_ts is None or st < min_ts: min_ts = st
     if max_ts is None or et > max_ts: max_ts = et
   # return layout of per device events
-  layout:dict[str, dict] = {}
-  # timeline layout has a global color mapping
-  color_map:dict[str, str] = {}
-  # memory layout has a global y scale
-  peaks:list[int] = []
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v, unwrap(min_ts), color_map)
-    layout[f"{k} Memory"] = dm = mem_layout(v)
-    peaks.append(dm["peak"])
-  height_scale = ScaleLinear([min(peaks, default=0), max(peaks, default=0)], [4, 100])
-  # TODO: move this to mem_layout
-  for tid,spec in layout.items():
-    if "Memory" not in tid: continue
-    shapes:list[dict] = []
-    height = height_scale(peak:=spec["peak"])
-    timestamps = spec["timestamps"]
-    timestamps.append(max_ts)
-    yscale = ScaleLinear([0, peak], [height, 0])
-    for i,n in enumerate(spec["shapes"]):
-      shape:dict = {"x":[timestamps[x]-min_ts for x in n["x"]]}
-      shape["y0"] = [yscale(y) for y in n["y"]]
-      shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
-      shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
-      shape["fillColor"] = cycle_list(profile_colors["BUFFER"], i)
-      shapes.append(shape)
-    layout[tid] = {"shapes":shapes, "height":height, "ydomain":(0, peak)}
+  builders = [TimelineBuilder(unwrap(min_ts)), MemoryBuilder()]
+  for k,events in dev_events.items():
+    events.sort(key=lambda e:e[0])
+    for v in events:
+      for b in builders: b.add(k, *v)
+  layout = {k+b.name:b.get(k) for k in dev_events for b in builders}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
