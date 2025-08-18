@@ -2,6 +2,7 @@ __pycache__
 .venv/
 .venv-*/
 .vscode
+.vs
 .DS_Store
 notebooks
 .*.swp
