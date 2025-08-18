@@ -114,7 +114,7 @@ profile_colors = {
   "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
 }
-def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
+def cycle_list(lst:list[str], i:int): return lst[i%len(lst)]
 @functools.cache
 def brighter(hex_color:str, k:int) -> str:
   if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
@@ -162,10 +162,10 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, c
       i = next((i for i,s in enumerate(ctxs[curr_ref["ctx"]]["steps"]) if i>=start_step and s["name"] == name), None)
       curr_ref = {"ctx":curr_ref["ctx"], "step":i} if i is not None else None
     arg = {"tooltipText":tooltip, **(curr_ref or {})}
-    # update colors when a new time range start
+    # update colors when a new time range starts
     if depth == 0: color_key = cat or str(name)
-    fillColor = brighter(color_map.setdefault(color_key, cycle_colors(profile_colors.get(e.device,profile_colors["DEFAULT"]), len(color_map))), depth)
-    shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":fillColor, "arg":arg})
+    color = brighter(color_map.setdefault(color_key, cycle_list(profile_colors.get(e.device, profile_colors["DEFAULT"]), len(color_map))), depth)
+    shapes.append({"name":name, "x":st-min_ts, "width":dur, "y":depth*height, "height":height, "fillColor":color, "arg":arg})
   return {"shapes":shapes, "height":height*len(levels)}
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
@@ -241,7 +241,7 @@ def get_profile(profile:list[ProfileEvent]):
       shape["y0"] = [yscale(y) for y in n["y"]]
       shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
       shape["arg"] = {"tooltipText":f"{n['arg']['dtype']}"}
-      shape["fillColor"] = cycle_colors(profile_colors["BUFFER"], i)
+      shape["fillColor"] = cycle_list(profile_colors["BUFFER"], i)
       shapes.append(shape)
     layout[tid] = {"shapes":shapes, "height":height, "ydomain":(0, peak)}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
