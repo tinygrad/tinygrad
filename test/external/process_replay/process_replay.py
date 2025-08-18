@@ -45,16 +45,16 @@ class ProcessReplayWarning(Warning): pass
 def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_kernelize_map(big_sink))
-
-  print("\n\n=====\nreplay_kernelize\n\n")
-  print(new_sink)
-  print("-----------\n")
-  print(ret[big_sink])
-  print("~~~~~~~~~~~\n")
-
   def to_str(ret:UOp) -> str:
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])
+
+  print("\n\n=====\nreplay_kernelize\n\n")
+  print(vvv:=new_sink, f"\n\n{to_str(vvv)}")
+  print("-----------\n")
+  print(vvv:=ret[big_sink], f"\n\n{to_str(vvv)}")
+  print("~~~~~~~~~~~\n\n")
+
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
@@ -99,6 +99,8 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       if good != compare:
         for m in metadata: trunc_log(m)
         logging.info(loc)
+        print("!!!", name)
+        print(compare)
         for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ctx_vars: logging.info(ctx_vars)

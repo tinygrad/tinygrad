@@ -364,5 +364,6 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
+  print("\n\n=====\n", sink.substitute(tensor_map), "\n")
 
   return tensor_map
