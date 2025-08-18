@@ -56,8 +56,11 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
-add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
-                                  lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
+add_contiguous = PatternMatcher([
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
+    lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: UOp(Ops.RESHAPE, x.dtype, (x.replace(tag=1),), arg=x.shape) if x.tag is None else None),
+])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
 
@@ -192,7 +195,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
     else:
       ranges.append(UOp.const(dtypes.int, 0))
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret # UOp(Ops.RESHAPE, ret.dtype, (ret,), ret.shape)
+  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret
   return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -303,13 +306,13 @@ def remove_bufferize(b2:UOp, idx2:UOp):
   return b2.src[0].substitute(rep)
 
 pm_cleanups = pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is the same case as below
   #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
   # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing
-  (UPat(Ops.INDEX).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_bufferize),
+  #(UPat(Ops.INDEX).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_bufferize),
   # HACK
   #(UPat(Ops.CMPLT, src=[UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
   #(UPat(Ops.WHERE, src=[UPat(Ops.INDEX), UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
