@@ -158,8 +158,6 @@ async function renderProfiler() {
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
-  // color by key (name/category/device)
-  const colorMap = new Map();
   data = {tracks:new Map(), axes:{}, st, et};
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
@@ -185,11 +183,10 @@ async function renderProfiler() {
   }
   updateProgress({ "show":false });
   // cache label widths
-  const labelCache = {};
+  const labelCache = new Map();
   function getLabel(name) {
-    if ((cret=labelCache[name]) != null) return cret;
-    labelCache[name] = ret = parseColors(name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-    return ret;
+    if (!labelCache.has(name)) labelCache.set(name, parseColors(name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width })));
+    return labelCache.get(name);
   }
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
