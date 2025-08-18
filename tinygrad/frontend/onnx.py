@@ -474,7 +474,7 @@ class OnnxRunner:
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
 
-      if debug >= 1: print(f"{num}: op '{node.op}' opt {opts}")
+      if debug >= 1: print(("[SubGraph] " if isinstance(self, SubGraphOnnxRunner) else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
       ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
@@ -490,7 +490,6 @@ class OnnxRunner:
 
 class SubGraphOnnxRunner(OnnxRunner):
   """Usage: https://onnx.ai/onnx/intro/concepts.html#subgraphs-tests-and-loops"""
-  # TODO: hmmmmmmm maybe there's a better way to do this
   # pylint: disable=W0231 # super-init-not-called
   def __init__(self, graph: dict): self._init_from_graph(graph)
 
@@ -563,8 +562,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def If(condition:Tensor, else_branch:SubGraphOnnxRunner, then_branch:SubGraphOnnxRunner, intermediate_tensors:dict[str, Tensor]):
     else_branch.graph_values.update(intermediate_tensors)
     then_branch.graph_values.update(intermediate_tensors)
+    # we run run both branch lazily and then select based on condition
     else_out = else_branch({k:intermediate_tensors[k] for k in else_branch.graph_inputs.keys()})
     then_out = then_branch({k:intermediate_tensors[k] for k in then_branch.graph_inputs.keys()})
+    # dereference intermediate tensors so Buffer can be deallocated
     for k in intermediate_tensors:
       del else_branch.graph_values[k]
       del then_branch.graph_values[k]
