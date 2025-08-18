@@ -109,12 +109,11 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
 
 # Profiler API
 
-profile_colors = {
+profile_colors:dict[str, list[str]] = {
   "TINY":["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   "DEFAULT":["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
-}
-def cycle_list(lst:list[str], i:int): return lst[i%len(lst)]
+  "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],}
+def cycle_list(lst:list[str], i:int) -> str: return lst[i%len(lst)]
 @functools.cache
 def brighter(hex_color:str, k:int) -> str:
   if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
@@ -226,21 +225,16 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     layout[k] = timeline_layout(v, min_ts, color_map)
     layout[f"{k} Memory"] = dev_memory = mem_layout(v, unwrap(max_ts))
     peaks.append(dev_memory["peak"])
-  # rescale layouts that define a y axis
+  # rescale layouts with y axis by the global peak
   height_scale = ScaleLinear((min(peaks, default=0), max(peaks, default=0)), (4, 100))
-  for tid,spec in layout.items():
-    shapes:list[dict] = []
+  for k,spec in layout.items():
     if (peak:=spec.get("peak")) is None: continue
     height = height_scale(peak)
     yscale = ScaleLinear((0, peak), (height, 0))
-    for i,n in enumerate(spec["shapes"]):
-      shape:dict = {"x":[spec["timestamps"][x]-min_ts for x in n["x"]]}
-      shape["y0"] = [yscale(y) for y in n["y"]]
-      shape["y1"] = [yscale(y+n["arg"]["nbytes"]) for y in n["y"]]
-      shape["arg"] = {"tooltipText":f"{n['arg']['dtype']} len:{n['arg']['sz']}\n{n['arg']['nbytes']}B"}
-      shape["fillColor"] = cycle_list(profile_colors["BUFFER"], i)
-      shapes.append(shape)
-    layout[tid] = {"shapes":shapes, "height":height, "ydomain":(yscale.d0, yscale.d1)}
+    shapes = [{"x":[spec["timestamps"][x]-min_ts for x in n["x"]], "fillColor":cycle_list(profile_colors["BUFFER"], i),
+               "y0":[yscale(y) for y in n["y"]], "y1":[yscale(y+n["arg"]["nbytes"]) for y in n["y"]],
+               "arg":{"tooltipText":f'{n["arg"]["dtype"]} len:{n["arg"]["sz"]}\n{n["arg"]["nbytes"]}B'}} for i,n in enumerate(spec["shapes"])]
+    layout[k] = {"shapes":shapes, "height":height, "ydomain":(yscale.d0, yscale.d1)}
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
