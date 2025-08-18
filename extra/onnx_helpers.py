@@ -1,6 +1,7 @@
 from tinygrad import Tensor
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.frontend.onnx import OnnxRunner, OnnxValue
+import onnx
 import numpy as np
 import onnxruntime as ort
 
@@ -62,3 +63,15 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
     if tiny_v is None: assert onnx_v is None, f"{k}: {tiny_v=}, {onnx_v=}"
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+
+def truncate_model(model:onnx.ModelProto, truncate:int):
+  # NOTE: this does not always work
+  model_copy = onnx.ModelProto()
+  model_copy.CopyFrom(model)
+  nodes_up_to_limit = list(model_copy.graph.node)[:truncate + 1]
+  new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
+  model_copy.graph.ClearField("node")
+  model_copy.graph.node.extend(nodes_up_to_limit)
+  model_copy.graph.ClearField("output")
+  model_copy.graph.output.extend(new_output_values)
+  return model_copy
