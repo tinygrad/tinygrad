@@ -22,11 +22,11 @@ merge_views = PatternMatcher([
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
   # contiguous, expand, and the same with ones removed
-  if unwrap(view.st).contiguous and len(r.shape_with_reduced) < len(view.shape) and \
+  if unwrap(view.st).contiguous and len(r.shape) < len(view.shape) and \
       tuple(x for x in r.shape if resolve(x != 1)) == tuple(x for x in view.shape if resolve(x != 1)):
     new_shape: list[sint] = []
     new_reduce_axis = []
-    if (contraction:=get_contraction_with_reduce(view.shape, r.shape_with_reduced, r.arg[1])) is None: return None
+    if (contraction:=get_contraction_with_reduce(view.shape, r.shape, r.arg[1])) is None: return None
     for i,pairs in enumerate(contraction):
       new_shape_chunk = [view.shape[p] for p in pairs]
       if i in r.arg[1]:
@@ -37,7 +37,7 @@ def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
       else:
         # otherwise, pass through the new_shape_chunk
         new_shape += new_shape_chunk
-    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:]).reshape(view.shape)
+    ret = r.replace(src=(src.reshape(tuple(new_shape)),), arg=(r.arg[0], tuple(new_reduce_axis))+r.arg[2:])
     assert ret.shape == view.shape, f"shape mismatch on reduce_push_add_ones, {ret.shape} != {view.shape}"
     return ret
   return None
@@ -62,11 +62,10 @@ def apply_swizzle(u:UOp) -> UOp: return graph_rewrite(u, view_left, name="Sub Vi
 def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
   # contiguous and same size can push to children
   # if there's a reduce child, shapes match with ones removed
-  if unwrap(view.st).contiguous and view.shape == r.shape_with_reduced and \
+  if unwrap(view.st).contiguous and view.size == r.size and \
       (not (len(r.arg) == 3 and r.arg[2]) or # arg[2] = True is fuse marker
        tuple((i,x) for i,x in enumerate(r.shape) if resolve(x != 1)) == tuple((i,x) for i,x in enumerate(view.shape) if resolve(x != 1))):
     return None
-  if isinstance(r.dtype, ImageDType): return None
   # swizzle the input
   input_st = ShapeTracker.from_shape(src.shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
@@ -84,8 +83,8 @@ def swizzle_reduceop(r:UOp, src:UOp, view:UOp, fuse=False):
 
 def reduceop_view_right(src:UOp, v:UOp, r:UOp):
   assert unwrap(v.st).contiguous and v.size == src.size, f"can't compute new axis for {src.shape} -> {r.shape}"
-  new_axis = [i for i,(s,u) in enumerate(zip(src.shape, r.shape_with_reduced)) if s != u]
-  return src.r(r.arg[0], tuple(new_axis)).reshape(r.shape_with_reduced)
+  new_axis = [i for i,(s,u) in enumerate(zip(src.shape, r.shape)) if s != u]
+  return src.r(r.arg[0], tuple(new_axis)).reshape(r.shape)
 
 def elementwise_view_right(root:UOp):
   if not (swizzles:=[x for x in root.src if x.op is Ops.VIEW and x.base.op not in ALWAYS_CONTIGUOUS]): return None
