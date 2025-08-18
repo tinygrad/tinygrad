@@ -669,7 +669,8 @@ class UPat(MathTrait):
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
-  def or_broadcasted(self, **kwargs): return UPat.any(self, UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs))
+  def broadcast(self, **kwargs): return UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs)
+  def or_broadcasted(self, **kwargs): return UPat.any(self, self.broadcast(**kwargs))
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):

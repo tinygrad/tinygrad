@@ -189,7 +189,7 @@ class MUOpX86(MUOp):
       return ((0b0100 << 4) | (self.w << 3) | 0b000).to_bytes() + self.opcode.to_bytes()
     if self.opcode == 0xB8: # 64bit imm load
       return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(self.out.index > 7) & 0b1)).to_bytes() + \
-        int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little')
+        int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0)
     if self.opcode in (0x0F8C, 0x0F84): # jumps
       inst.extend(self.opcode.to_bytes(2))
       inst.extend(self.ins[0].value.to_bytes(self.ins[0].size, 'little', signed=True))
