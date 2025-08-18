@@ -115,6 +115,7 @@ profile_colors = {
   "BUFFER":["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
 }
 def cycle_colors(lst:list[str], i:int): return lst[i%len(lst)]
+@functools.cache
 def brighter(hex_color:str, k:int) -> str:
   if len(hex_color:=hex_color.lstrip("#")) == 3: hex_color = "".join(c*2 for c in hex_color)
   h,l,s = colorsys.rgb_to_hls(*(int(hex_color[i:i+2], 16)/255 for i in [0, 2, 4]))
