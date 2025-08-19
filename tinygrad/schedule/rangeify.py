@@ -459,8 +459,8 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
     rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
     from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
     rsink = apply_rewrites(rsink, rewrites_for_linearizer)
-    from tinygrad.renderer.cstyle import CStyleLanguage
-    src = CStyleLanguage().render(rsink.arg.lst)
+    from tinygrad.runtime.ops_null import NullRenderer
+    src = NullRenderer().render(rsink.arg.lst)
     print(src)
 
   tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
