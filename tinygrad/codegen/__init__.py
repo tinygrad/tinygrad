@@ -87,7 +87,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   # decompositions
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
-  ret.append(RewriteStep(pm_decomp, name="decompositions"))
+  ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
 
   # final rules for the renderer (without sym)
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher

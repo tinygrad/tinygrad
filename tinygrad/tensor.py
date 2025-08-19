@@ -1132,11 +1132,12 @@ class Tensor(MathTrait):
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     x, indices = self, list(indices)
 
-    # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
+    # fill ellipsis or rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
-    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
+    # NOTE: None adds a dim later
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
+    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
 
     indices_parsed, dim = [], 0
@@ -1152,6 +1153,7 @@ class Tensor(MathTrait):
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
+          # TODO: is this right for (negative) symbolic?
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
@@ -1165,9 +1167,9 @@ class Tensor(MathTrait):
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
             # update size for slice
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif (step == 1) and isinstance(step, int) and all(isinstance(s,(int,UOp)) for s in (start, stop)) and resolve((stop-start) > 0, False):
+          elif resolve(step == 1, False) and all(isinstance(s,sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
             # simple symbolic slice
-            size = cast(UOp|int, cast(UOp, (stop - start)).ssimplify())
+            size = cast(sint, cast(UOp, (stop - start)).ssimplify())
           else: raise TypeError(f"slice {index=} is not supported")
         case None: pass # do nothing
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
@@ -1179,9 +1181,9 @@ class Tensor(MathTrait):
       # flip negative strides
       shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
       x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
-      # handle stride != 1 or -1
-      if any(abs(st) != 1 for st in strides):
-        strides = tuple(abs(s) for s in strides)
+      strides = tuple(map(abs, strides))
+      # apply stride
+      if any(st != 1 for st in strides):
         # pad shape to multiple of stride
         if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
         x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
@@ -2685,7 +2687,7 @@ class Tensor(MathTrait):
     print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, 0).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, self.zeros_like())
 
   def tril(self, diagonal:int=0) -> Tensor:
     """
@@ -2708,7 +2710,7 @@ class Tensor(MathTrait):
     print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(0, self).cast(self.dtype)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(self.zeros_like(), self)
 
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
