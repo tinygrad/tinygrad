@@ -130,7 +130,6 @@ class MathTrait:
     """
     return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  #def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
