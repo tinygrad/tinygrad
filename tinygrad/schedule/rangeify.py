@@ -61,7 +61,6 @@ do_realize = PatternMatcher([
 
 add_contiguous = double_reshape+PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
-  #(UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.replace(tag=1).forced_reshape(x.shape) if x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
@@ -175,30 +174,28 @@ pm_mops = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PAD, name="r"),), allow_any_len=True, name="idx"), map_pad),
 ])
 
-def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
-  # NOTE: partial contig is disabled for now
-  arg = x.arg
-  #arg = None
-  if arg is None and idx is not None: return None
-  if arg is not None and idx is None: return None
-
+def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
+  if x.arg is None: return None  # map_contiguous can handle this
   ranges = []
   new_ranges = []
   passthrough_idx = []
   for i,s in enumerate(x.shape):
-    if arg is not None and i not in arg:
-      assert idx is not None, "partial contig requires index"
+    if i not in x.arg:
       ranges.append(idx.src[1+i])
       continue
-    if idx is not None: passthrough_idx.append(idx.src[1+i])
-    if resolve(s!=1):
-      ranges.append(ctx.new_range(s))
-      new_ranges.append(ranges[-1])
-    else:
-      ranges.append(UOp.const(dtypes.int, 0))
+    passthrough_idx.append(idx.src[1+i])
+    ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.int, 0))
+    new_ranges.append(ranges[-1])
   ret = x.src[0].index(*ranges).bufferize(*new_ranges, arg=x.device)
-  ret = ret.index(*passthrough_idx) if len(passthrough_idx) else ret.forced_reshape(x.shape)
-  return ret
+  return ret.index(*passthrough_idx)
+
+def map_contiguous(ctx:RangeifyContext, x:UOp):
+  if x.arg is not None: return None
+  ranges = []
+  for s in x.shape:
+    ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.int, 0))
+  ret = x.src[0].index(*ranges).bufferize(*ranges, arg=x.device)
+  return ret.forced_reshape(x.shape)
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
@@ -258,6 +255,8 @@ def might_end_axis(idx:UOp):
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"), map_contiguous),
+  # if there's an INDEX it can support partial contig
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_contiguous),
 
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -265,9 +264,6 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # if we come across this, remove it. it was a CHILD unused in an INDEX
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
-
-  # if there's an INDEX it can support partial contig
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_contiguous),
 
   # CONST can't have axes. remove srcs when we idx
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
