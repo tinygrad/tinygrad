@@ -143,10 +143,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.arg
     if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape((prod(tuple([r.vmax+1 for r in self.src[1:]])),))
     #if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([r.vmax+1 for r in self.src[1:]]))
+    # allow reshape from nothing
     if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
-    if self.op in GroupOp.Movement:
-      if self.src[0].st is None: return None
-      return unwrap(self.src[0].st).mop(self.op, self.arg)
+    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
