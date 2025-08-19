@@ -76,6 +76,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
   for k,v in children_map.items():
     non_sink_children = [u for u in v if u.op is not Ops.SINK]
     if len(non_sink_children) <= 1: continue
+    # NOTE: this gate shouldn't be here
     if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
       ctx.children[k] = non_sink_children
 
