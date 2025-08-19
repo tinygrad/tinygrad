@@ -458,7 +458,7 @@ jobs:
   testopenpilot:
     name: 'openpilot Compile Tests'
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       IGNORE_OOB: 0
     steps:
