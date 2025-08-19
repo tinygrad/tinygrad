@@ -603,6 +603,7 @@ jobs:
       with:
         key: devectorize-minimal
         deps: testing_minimal
+        pydeps: "pillow"
         llvm: "true"
     - name: Test LLVM=1 DEVECTORIZE=0
       run: LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
