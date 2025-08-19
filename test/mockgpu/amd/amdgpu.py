@@ -13,7 +13,9 @@ regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_SIZE = 0x39e9 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
-THREAD_TRACE_FINISH = 0x00000037
+
+class SQTT_EVENTS:
+  THREAD_TRACE_FINISH = 0x00000037
 
 CACHE_FLUSH_AND_INV_TS_EVENT = 0x14
 
@@ -209,7 +211,7 @@ class PM4Executor(AMDQueue):
     assert n == 0
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
-      case THREAD_TRACE_FINISH:
+      case SQTT_EVENTS.THREAD_TRACE_FINISH:
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
