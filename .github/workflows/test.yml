@@ -942,18 +942,18 @@ jobs:
         env:
           HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py --durations 20
       - name: Run REMOTE=1 Test (GPU)
         env:
           HOST: 127.0.0.1:7667*6
         run: |
-          python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py
+          python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py --durations 20
           IMAGE=2 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
       - name: Run REMOTE=1 Test (CPU)
         env:
           HOST: 127.0.0.1:8667*6
         run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py --durations 20
       - name: Show remote server logs
         if: always()
         run: |
