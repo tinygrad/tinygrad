@@ -377,7 +377,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
     m = ResNet18()
     m.load_from_pretrained()
@@ -412,7 +412,7 @@ class TestMultiTensor(unittest.TestCase):
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
     labels = Tensor.randint(2, low=0, high=1000)
     m = ResNet18()
     self._test_model_train_step(m, fake_image, labels)
