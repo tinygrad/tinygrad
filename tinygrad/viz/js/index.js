@@ -122,19 +122,6 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
-const createPolygons = (source, height) => {
-  const shapes = [];
-  const yscale = d3.scaleLinear().domain([0, source.peak]).range([height, 0]);
-  for (const [i,e] of source.shapes.entries()) {
-    const x = e.x.map((i,_) => (source.timestamps[i] ?? data.et)-data.st);
-    const y0 = e.y.map(yscale);
-    const y1 = e.y.map(y => yscale(y+e.arg.nbytes));
-    const arg = { tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}` };
-    shapes.push({ x, y0, y1, arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
-  }
-  return shapes;
-}
-
 const rescaleTrack = (source, tid, k) => {
   for (const e of source.shapes) {
     for (let i=0; i<e.y0.length; i++) {
@@ -205,7 +192,14 @@ async function renderProfiler() {
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
       const height = heightScale(v.peak);
-      data.tracks.set(k, { shapes:createPolygons(v, height), offsetY, height, peak:v.peak, scaleFactor:maxheight*4/height });
+      const yscale = d3.scaleLinear().domain([0, v.peak]).range([height, 0]);
+      const shapes = [];
+      for (const [i,e] of v.shapes.entries()) {
+        const x = e.x.map(tsIdx => v.timestamps[tsIdx]-st);
+        const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
+        shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+e.arg.nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+      }
+      data.tracks.set(k, { shapes, offsetY, height, peak:v.peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;

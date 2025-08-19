@@ -140,6 +140,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
+    # allow reshape from nothing
+    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
@@ -186,9 +188,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
-    if self.op in {Ops.CONTIGUOUS, Ops.REDUCE, Ops.STORE}:
+    if self.op in {Ops.BUFFERIZE, Ops.REDUCE}:
       ret = self.src[0].ranges.copy()
       for s in self.src[1:]:
+        if s in ret: del ret[s]
+    elif self.op in {Ops.STORE}:
+      ret = self.src[0].ranges.copy()
+      ret.update(self.src[1].ranges)
+      for s in self.src[2:]:
         if s in ret: del ret[s]
     else:
       ret = {}
@@ -293,6 +300,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
+  def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
@@ -364,6 +372,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
+  def forced_reshape(self, arg:tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, src=(self,), arg=arg)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
@@ -658,6 +667,9 @@ class UPat(MathTrait):
   @staticmethod
   def const(dtype:DType|tuple[DType, ...]|None, b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
+  # lil helper
+  def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)
+
   # copied from UOp
   def sink(self, *srcs:UPat|None, **kwargs): return UPat(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def index(self, idx:UPat, valid:UPat|None=None): return UPat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
@@ -671,6 +683,7 @@ class UPat(MathTrait):
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
   def or_broadcasted(self, **kwargs): return UPat.any(self, UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs))
+  def contiguous(self, *args, **kwargs): return UPat(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
