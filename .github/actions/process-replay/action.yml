@@ -3,6 +3,10 @@ description: Verify process replay compared to master
 runs:
   using: "composite"
   steps:
+    - name: Process replay on branch
+      shell: bash
+      run: ASSERT_PROCESS_REPLAY=1 PYTHONPATH=. python3 test/external/process_replay/process_replay.py
+
     - name: Run process replay tests
       shell: bash
       run: |
