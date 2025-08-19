@@ -36,6 +36,25 @@ class MathTrait:
     ```
     """
     return self._binop(Ops.ADD, x, reverse)
+  def sub(self, x, reverse=False):
+      """
+      Subtracts `x` from `self`.
+      Equivalent to `self - x`.
+      Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+      ```python exec="true" source="above" session="tensor" result="python"
+      Tensor.manual_seed(42)
+      t = Tensor.randn(4)
+      print(t.numpy())
+      ```
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t.sub(20).numpy())
+      ```
+      ```python exec="true" source="above" session="tensor" result="python"
+      print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+      ```
+      """
+      return self._binop(Ops.SUB, x, reverse)
   def mul(self, x, reverse=False):
     """
     Multiplies `self` and `x`.
@@ -111,7 +130,7 @@ class MathTrait:
     """
     return self._binop(Ops.IDIV, x, reverse)
   def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
-  def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
+  #def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
