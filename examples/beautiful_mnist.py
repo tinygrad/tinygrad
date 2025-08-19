@@ -21,8 +21,9 @@ if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
   X_train = X_train.contiguous().realize()
   Y_train = Y_train.contiguous().realize()
-  X_test = X_test[:500].contiguous().realize()
-  Y_test = Y_test[:500].contiguous().realize()
+  test_size = getenv("TEST", 100)
+  X_test = X_test[:test_size].contiguous().realize()
+  Y_test = Y_test[:test_size].contiguous().realize()
 
   model = Model()
   opt = (nn.optim.Adam if not getenv("MUON") else nn.optim.Muon)(nn.state.get_parameters(model))

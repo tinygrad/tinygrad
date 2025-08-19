@@ -177,8 +177,8 @@ pm_mops = PatternMatcher([
 
 def map_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp|None=None):
   # NOTE: partial contig is disabled for now
-  #arg = x.arg
-  arg = None
+  arg = x.arg
+  #arg = None
   if arg is None and idx is not None: return None
   if arg is not None and idx is None: return None
 
