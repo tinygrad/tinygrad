@@ -377,26 +377,6 @@ generate_am() {
   fixup $BASE/am/pm4_nv.py
 
   clang2py -k cdefstum \
-    $AMKERN_INC/vega10_enum.h \
-    -o $BASE/am/vega10.py
-  fixup $BASE/am/vega10.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/navi10_enum.h \
-    -o $BASE/am/navi10.py
-  fixup $BASE/am/navi10.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc21_enum.h \
-    -o $BASE/am/soc21.py
-  fixup $BASE/am/soc21.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc24_enum.h \
-    -o $BASE/am/soc24.py
-  fixup $BASE/am/soc24.py
-
-  clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
     --clang-args="-I/opt/rocm/include -x c++" \
