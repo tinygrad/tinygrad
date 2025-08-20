@@ -5,7 +5,7 @@ from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
-from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype
+from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate
 from tinygrad.device import is_dtype_supported, Device
 
 # ***** protobuf definitions ******
@@ -105,9 +105,7 @@ class PBBufferedReader(BufferedReader):
   def read_bytes(self) -> Tensor: return self.read_delimited(use_tensor=True)
   def read_float(self) -> float: return struct.unpack("<f", self.read(4))[0]
   def read_packed_floats(self) -> Tensor: return self.read_delimited(use_tensor=True)
-  def read_int64(self) -> int:
-    val = self.decode_varint()
-    return val - 2**64 if val & (1 << 63) else val
+  def read_int64(self) -> int: return truncate[dtypes.int64](self.decode_varint())
   def read_packed_int64s(self) -> list[int]:
     total_bytes_len = self.decode_varint()
     old_pos = self.tell()
@@ -1074,7 +1072,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if X.ndim == 4: X = X.permute(0, 2, 1, 3)
     elif X.ndim == 3:
       assert num_heads is not None, "num_heads must be provided for 3D input"
-      X = X.reshape(*X.shape[:-1], num_heads, X.shape[-1] // num_heads)
+      X = X.unflatten(-1, (num_heads, X.shape[-1] // num_heads))
 
     head_size = cast(int, X.shape[-1])
     rot_dim = rotary_embedding_dim or head_size
@@ -1085,16 +1083,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     cos = cos[..., :rot_dim//2].unsqueeze(2)
     sin = sin[..., :rot_dim//2].unsqueeze(2)
 
-    if interleaved:
-      x1, x2 = x_rotate[..., ::2], x_rotate[..., 1::2]
-      real = x1 * cos - x2 * sin
-      imag = x1 * sin + x2 * cos
-      x_rotated = Tensor.stack(real, imag, dim=-1).flatten(start_dim=-2)
-    else:
-      x1, x2 = x_rotate.chunk(2, dim=-1)
-      real = x1 * cos - x2 * sin
-      imag = x1 * sin + x2 * cos
-      x_rotated = real.cat(imag, dim=-1)
+    x1, x2 = (x_rotate[..., ::2], x_rotate[..., 1::2]) if interleaved else x_rotate.chunk(2, dim=-1)
+    real = x1 * cos - x2 * sin
+    imag = x1 * sin + x2 * cos
+    x_rotated = real.stack(imag, dim=-1).flatten(start_dim=-2) if interleaved else real.cat(imag, dim=-1)
 
     output = x_rotated.cat(x_pass, dim=-1)
     return output.flatten(start_dim=2) if len(original_input_shape) == 3 else output.permute(0, 2, 1, 3)
