@@ -206,7 +206,7 @@ class ClangRenderer(CStyleLanguage):
   # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
     (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu),
-    (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0])))]) + CStyleLanguage.extra_matcher
+    (UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]) + CStyleLanguage.extra_matcher
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
