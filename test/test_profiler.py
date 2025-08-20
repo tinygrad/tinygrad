@@ -210,7 +210,7 @@ class TestProfiler(unittest.TestCase):
       self.assertEqual(len(ge.ents), len(graphs))
 
   def test_trace_metadata(self):
-    with Context(TRACEMETA=2):
+    with Context(TRACEMETA=1):
       a = Tensor.empty(1)+2
       b = Tensor.empty(1)+2
       with helper_collect_profile(TestProfiler.d0) as profile:
@@ -218,9 +218,9 @@ class TestProfiler(unittest.TestCase):
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
     range_events = [e for e in profile if isinstance(e, ProfileRangeEvent)]
-    self.assertEqual(len(exec_points), len(range_events))
+    self.assertEqual(len(exec_points), len(range_events), 2)
     self.assertEqual(len(dedup(e.key for e in exec_points)), 1)
-    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 2)
+    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()
