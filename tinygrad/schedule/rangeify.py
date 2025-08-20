@@ -1,12 +1,11 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, AddrSpace, PtrDType
+from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored
-from tinygrad.uop.symbolic import symbolic_simple
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
 
 imported_rewrites = PatternMatcher([
   # UOp with size 0 is zero
@@ -82,6 +81,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
       ctx.children[k] = non_sink_children
 
 def mark_children(ctx:ChildrenContext, x:UOp):
+  assert ctx.children is not None
   new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
                    arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
@@ -104,12 +104,12 @@ class RangeifyContext:
   seen_child: dict[UOp, Any] = field(default_factory=dict)
   progress: int = 0
   children: dict[UOp, list[UOp]]|None = None
-  def new_range(self, s:int):
+  def new_range(self, s:sint):
     ret = UOp.range(dtypes.int, s, self.idx)
     self.idx += 1
     return ret
 
-def collapse_to_1(shp:tuple[int, ...], idxs:tuple[UOp, ...]):
+def collapse_to_1(shp:tuple[sint, ...], idxs:tuple[UOp, ...]) -> UOp:
   acc = 1
   to_sum = []
   for s,src in list(zip(shp, idxs))[::-1]:
@@ -127,8 +127,8 @@ def map_reshape(idx:UOp, r:UOp):
       mish //= s
     else:
       ret.append(UOp.const(dtypes.int, 0))
-  ret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
-  return r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg)
+  tret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
+  return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
   ret = list(idx.src[1:])
@@ -158,7 +158,7 @@ def map_expand(r:UOp, idx:UOp):
       new_rngs.append(a)
   ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
   if idx.arg is not None: ending_ranges.append(idx.arg)
-  return r.src[0].index(*new_rngs, arg=min([x for x in ending_ranges]) if ending_ranges else None)
+  return r.src[0].index(*new_rngs, arg=min(ending_ranges) if ending_ranges else None)
 
 pm_mops = PatternMatcher([
   # this is like the definitions of these
@@ -286,7 +286,7 @@ def cleanup_dead_axes(b:UOp):
   parents = b.src[0].toposort()
   new_rng = []
   hit = False
-  reshape = []
+  reshape: list[sint] = []
   for s,rng in zip(b.shape, b.src[1:]):
     if rng not in parents and rng.op is Ops.RANGE:
       reshape.append(1)
@@ -304,8 +304,7 @@ def remove_bufferize(b2:UOp, idx2:UOp):
   if len(b2.src) != len(idx2.src): return None
   assert len(b2.src) == len(idx2.src)
   assert all(x.op is Ops.RANGE for x in b2.src[1:])
-  rep = {x:y for x,y in zip(b2.src[1:], idx2.src[1:])}
-  return b2.src[0].substitute(rep)
+  return b2.src[0].substitute(dict(zip(b2.src[1:], idx2.src[1:])))
 
 pm_cleanups = pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -315,10 +314,6 @@ pm_cleanups = pm_mops+PatternMatcher([
   # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing
   (UPat(Ops.INDEX).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_bufferize),
-  # HACK
-  #(UPat(Ops.CMPLT, src=[UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
-  #(UPat(Ops.WHERE, src=[UPat(Ops.INDEX), UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
-
   # no buffers for const
   #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
 ])
@@ -327,7 +322,7 @@ pm_cleanups = pm_mops+PatternMatcher([
 
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
-  shape = tuple([r.vmax+1 for r in rngs])
+  shape = tuple([int(r.vmax+1) for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
@@ -343,7 +338,7 @@ def add_load_on_buffer(idx:UOp, b:UOp):
 def add_load_on_store(x:UOp, st:UOp):
   if isinstance(x.dtype, PtrDType): return None
   rngs = x.src[1:]
-  shape = tuple([r.vmax+1 for r in rngs])
+  shape = tuple([int(r.vmax+1) for r in rngs])
   b = st.src[0].src[0]
   assert b.op is Ops.BUFFER
   return b.shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=b.size)).load(st)
@@ -356,13 +351,13 @@ pm_add_buffers = pm_mops+PatternMatcher([
 
 # 5 (alt). create pointers
 
-def debuf(ctx, b:UOp):
+def alt_debuf(ctx, b:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx[0])
   ctx[0] += 1
   return ret
 
 pm_debuf = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.BUFFER, name="b"), alt_debuf),
   # HACK: consts shouldn't have srcs by here
   (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
   # no movement ops
@@ -442,9 +437,9 @@ pm_children_fixup = PatternMatcher([
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
-def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
+def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
-  realize_map = {}
+  realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")

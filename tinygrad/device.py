@@ -10,8 +10,7 @@ from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-# NOTE: CPU is default cause I'm sick of METAL crashing my machine
-ALL_DEVICES = ["CPU", "METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
