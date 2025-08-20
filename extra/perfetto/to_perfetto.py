@@ -1,6 +1,6 @@
 import sys, pickle, decimal, json
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent
-from tinygrad.helpers import tqdm, temp, ProfileEvent, ProfileRangeEvent
+from tinygrad.helpers import tqdm, temp, ProfileEvent, ProfileRangeEvent, TracingKey
 
 devices:dict[str, tuple[decimal.Decimal, decimal.Decimal, int]] = {}
 def prep_ts(device:str, ts:decimal.Decimal, is_copy): return int(decimal.Decimal(ts) + devices[device][is_copy])
@@ -11,12 +11,14 @@ def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
           {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 0, "args": {"name": "COMPUTE"}},
           {"name": "thread_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "tid": 1, "args": {"name": "COPY"}}]
 def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
-  return [{"name": ev.name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": float(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
+  name = ev.name.display_name if isinstance(ev.name, TracingKey) else ev.name
+  return [{"name": name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": float(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
 def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
   ret = []
   for i,e in enumerate(ev.ents):
     st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
-    ret += [{"name": e.name, "ph": "X", "ts": prep_ts(e.device, st, e.is_copy), "dur": float(en-st), **dev_to_pid(e.device, e.is_copy)}]
+    name = e.name.display_name if isinstance(e.name, TracingKey) else e.name
+    ret += [{"name": name, "ph": "X", "ts": prep_ts(e.device, st, e.is_copy), "dur": float(en-st), **dev_to_pid(e.device, e.is_copy)}]
     for dep in ev.deps[i]:
       d = ev.ents[dep]
       ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
@@ -24,6 +26,8 @@ def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
   return ret
 def to_perfetto(profile:list[ProfileEvent]):
   # Start json with devices.
+  profile += [ProfileDeviceEvent("TINY")]
+
   prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
   for ev in tqdm(profile, desc="preparing profile"):
     if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)

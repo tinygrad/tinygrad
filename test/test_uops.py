@@ -14,7 +14,7 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt.kernel import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -415,6 +415,17 @@ class TestAssembly(unittest.TestCase):
     uops = program.uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
+  def test_use_cmpeq(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    comp = l.ne(c).ne(True)
+    uops = to_uops_list([comp], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.CMPEQ, ops)
+    self.assertNotIn(Ops.CMPNE, ops)
+
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
@@ -507,19 +518,6 @@ class TestShapeSpec(unittest.TestCase):
     self.assertEqual(a.st, ShapeTracker.from_shape(()))
     a = Tensor.ones((4, 4)).uop
     self.assertEqual(a.st, ShapeTracker.from_shape(()).reshape((1,1)).expand((4,4)))
-
-  def test_padded_const(self):
-    a = Tensor.ones((1, 1)).pad(((1, 1), (1, 1)))
-    ast = a.contiguous().schedule()[0].ast
-    valid_pattern = UPat(Ops.WHERE, src=(UPat(Ops.VALID), UPat.cvar(), UPat.cvar()))
-    valid_ternary = [x for x in ast.toposort() if valid_pattern.match(x, {})][0]
-    # the WHERE outputs a contiguous (3, 3)
-    self.assertEqual(valid_ternary.st, ShapeTracker.from_shape((3, 3)))
-    valid, x, y = valid_ternary.src
-    # very notably, only the first source is padded
-    self.assertIsNotNone(valid.st.views[-1].mask)
-    assert x.st.views[-1].mask is y.st.views[-1].mask is None
-    assert all(s.shape == (3, 3) for s in valid_ternary.src)
 
   # NOTE: CONST ShapeTracker comes from its source
   def test_scalar_const(self):

@@ -1296,7 +1296,7 @@ def train_llama3():
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
-  SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000)
+  SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
 
   # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
@@ -1318,18 +1318,54 @@ def train_llama3():
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
+  if getenv("FAKEDATA"):
+    for v in get_parameters(model):
+      v = v.assign(Tensor.empty(v.shape))
+
+  if (DP := getenv("DP", 1)) > 1:
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+    for v in get_parameters(model):
+      v.shard_(device, axis=None)
+
+  if (MP := getenv("MP", 1)) > 1:
+    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+    for k,v in get_state_dict(model).items():
+      if 'scale' in k: v.shard_(device, axis=None)  # from quantized
+      elif '.attention.wq' in k: v.shard_(device, axis=0)
+      elif '.attention.wk' in k: v.shard_(device, axis=0)
+      elif '.attention.wv' in k: v.shard_(device, axis=0)
+      elif '.attention.wo' in k: v.shard_(device, axis=1)
+      elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
+      elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
+      elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
+      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
+      elif 'output.weight' in k: v.shard_(device, axis=0)
+      else:
+        # attention_norm, ffn_norm, norm
+        v.shard_(device, axis=None)
+      # prevents memory spike on device 0
+      v.realize()
+
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, tokens):
+  def train_step(model, tokens:Tensor, grad_acc:int):
     optim.zero_grad()
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    loss.backward()
-
+    # grad acc
+    for batch in tokens.split(tokens.shape[0]//grad_acc):
+      if (DP := getenv("DP", 1)) > 1:
+        device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+        batch = batch.shard(device, 0)
+      if (MP := getenv("MP", 1)) > 1:
+        device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+        batch = batch.shard(device)
+      logits:Tensor = model(batch[:, :-1], start_pos=0, temperature=math.nan)
+      loss = logits.sparse_categorical_crossentropy(batch[:, 1:])
+      loss.backward()
+      Tensor.realize(*[p.grad for p in optim.params])
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
@@ -1358,14 +1394,16 @@ def train_llama3():
     iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
 
   i = 0
-  for tokens in tqdm(iter, total=SAMPLES//BS):
+  for tokens in tqdm(iter, total=SAMPLES//GBS):
+    t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens)
+    loss, lr = train_step(model, tokens, grad_acc)
+    loss = loss.float().item()
     # above as tqdm.write f-string
-    tqdm.write(f"{loss.item():.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used")
+    tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
-        f.write(f"{i} {loss.item():.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+        f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
     if getenv("CKPT") and (i % 200 == 0 or i == 10):
       tqdm.write("saving checkpoint")

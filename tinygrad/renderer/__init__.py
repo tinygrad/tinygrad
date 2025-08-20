@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import Callable, cast, TYPE_CHECKING
-import functools, itertools
-from dataclasses import dataclass, field, replace
+import functools
+from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
-  from tinygrad.opt.tc import TensorCore
-  from tinygrad.opt.kernel import Opt
+  from tinygrad.codegen.opt.tc import TensorCore
+  from tinygrad.codegen.opt.kernel import Opt
 
 @dataclass(frozen=True)
 class Estimates:
@@ -23,6 +23,7 @@ class Estimates:
   def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
+    mem: dict[tuple[UOp, Ops], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
     dont_count: set[UOp] = set()
@@ -34,6 +35,11 @@ class Estimates:
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
+      if u.op in {Ops.LOAD, Ops.STORE}:
+        buf = u
+        while len(buf.src): buf = buf.src[0]
+        if buf.op is Ops.DEFINE_GLOBAL: # assume all DEFINE_GLOBAL memory is accessed
+          mem[(buf, u.op)] = cast(PtrDType, buf.dtype).size * buf.dtype.itemsize
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         mults *= cast(sint, u.src[0].ssimplify())
@@ -47,7 +53,7 @@ class Estimates:
         lds += u.src[1].dtype.itemsize * mults
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
-    return Estimates(flops, lds, lds) # TODO: properly track memory, lds is always a high estimate
+    return Estimates(flops, lds, sum(mem.values()))
 
 @dataclass
 class ProgramSpec:
@@ -85,16 +91,8 @@ class ProgramSpec:
       self._ran_post_init = True
 
   @functools.cached_property
-  def mem_estimate(self) -> sint:
-    # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
-    # TODO: these max and min don't work on symbolic, and results are very wrong.
-    return sum(max(x.src[0].dtype.nbytes() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE} and x.src[0].base.op is Ops.DEFINE_GLOBAL],
-                        key=lambda x: (x.op, x.src[0].base.arg)))
-
-  @functools.cached_property
   def estimates(self) -> Estimates:
-    return replace(Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True), mem=self.mem_estimate)
+    return Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
