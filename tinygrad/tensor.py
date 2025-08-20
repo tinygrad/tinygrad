@@ -2996,6 +2996,9 @@ class Tensor(MathTrait):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
+    # TODO: make it generic, and same thing to log and cos
+    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
+    # TODO: behavior when DEFAULT_FLOAT is bfloat16 and input is int32?
     return self.mul(1/math.log(2)).exp2()
 
   def exp2(self) -> Tensor:
