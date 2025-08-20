@@ -1375,7 +1375,7 @@ def train_llama3():
         total_norm += p.grad.float().square().sum()
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
-        p.grad = p.grad * opt_gradient_clip_norm / (total_norm + 1e-6)
+        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
 
     optim.step()
     scheduler.step()
