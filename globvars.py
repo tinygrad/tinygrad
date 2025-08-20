@@ -13,15 +13,18 @@ def md(a:Tensor, b:Tensor):
   print()
   return mean_diff.item(), a.abs().mean().item(), max_diff.item()
 
-base = "/home/hooved/stable_diffusion/checkpoints"
-unet = safe_load(f"{base}/train0_init_unet.safetensors")
+#base = "/home/hooved/stable_diffusion/checkpoints"
 
-data = safe_load(f"{base}/train_20_steps.safetensors")
-for v in get_parameters(data):
-  v.to_("CPU").realize()
+# NOTE: for verification, on tinyr4
+clip = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_clip.safetensors")
+fid = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_fid_score.safetensors")
+images = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_images.safetensors")
+inception = safe_load("/home/hooved/stable_diffusion/checkpoints/val2_inception.safetensors")
+for d in (clip, fid, images, inception):
+  for v in get_parameters(d):
+    v.to_("CPU").realize()
 
-with open(f"{base}/train_20_steps_prompts.txt") as f:
-  prompts = f.read()
-  prompts = prompts.split("\n")
+with open("/home/hooved/stable_diffusion/checkpoints/val2_prompts.txt") as f:
+  prompts = f.read().split("\n")
 
 pause = 1
