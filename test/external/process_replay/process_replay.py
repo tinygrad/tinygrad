@@ -91,6 +91,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
   cur = conn.cursor()
   cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
+  prevloc = ""
   for row in cur.fetchall():
     if changed > MAX_DIFF_PCT:
       warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
@@ -107,7 +108,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       if good != compare:
         for m in metadata: trunc_log(m)
         logging.info(loc)
-        print("!!!", name)
+        print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", name, loc, "prev=", prevloc)
         print(compare)
         for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
@@ -116,6 +117,7 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
     except Exception as e:
       changed += 1
       warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
+    prevloc = loc
   cur.close()
 
 # *** generic runner to map rows of a table to a function in parallel
