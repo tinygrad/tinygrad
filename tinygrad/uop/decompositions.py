@@ -2,7 +2,7 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN, getenv
+from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -332,7 +332,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
-    if not getenv("DISABLE_FAST_IDIV"):
+    if not DISABLE_FAST_IDIV:
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
