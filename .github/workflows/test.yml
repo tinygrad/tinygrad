@@ -759,7 +759,7 @@ jobs:
         backend: [llvm, cpu, gpu]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       IGNORE_OOB: 0
