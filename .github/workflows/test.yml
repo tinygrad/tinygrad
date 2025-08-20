@@ -740,6 +740,11 @@ jobs:
           deps: testing_minimal
           cuda: 'true'
           ocelot: 'true'
+      - name: Install/Pin LLVM 16 toolchain
+        run: |
+          sudo apt-get -y install llvm-16 llvm-16-dev clang-16
+          sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/bin/llvm-config-16 100
+          sudo update-alternatives --set llvm-config /usr/bin/llvm-config-16
       - name: Set env
         run: printf "${{ matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
