@@ -574,7 +574,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
       return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
     # otherwise, use condition to select the output in python
-    return tuple(t if condition.item() else e for t,e in zip(then_out.values(), else_out.values()))
+    cond = _resolve_const(_cached_to_python_const(condition))
+    return tuple(t if cond else e for t,e in zip(then_out.values(), else_out.values()))
 
   def Identity(x:Tensor): return x
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
