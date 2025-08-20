@@ -312,17 +312,23 @@ pm_cleanups = pm_mops+PatternMatcher([
 ])
 
 # 4. put in buffers for bufferize
+# TODO: should BUFFERIZE look a lot more like STORE
+# BUFFERIZE has device in arg
+# BUFFERIZE doesn't have indexing, that's implied by the ranges it closes
+# BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
+# NOTE: this has been fixed up a bit
 
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
+  sdtype = x.dtype.ptr(size=prod(shape))
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=x.dtype.ptr(size=prod(shape))).store(assign_src, *rngs)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
-  return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype)
 
 def add_load_on_buffer(idx:UOp, b:UOp):
   if isinstance(idx.dtype, PtrDType): return None
@@ -330,33 +336,17 @@ def add_load_on_buffer(idx:UOp, b:UOp):
 
 def add_load_on_store(x:UOp, st:UOp):
   if isinstance(x.dtype, PtrDType): return None
+  assert isinstance(st.dtype, PtrDType), f"{st} has the wrong dtype"
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
-  b = st.src[0].src[0]
-  assert b.op is Ops.BUFFER
-  return b.shrink(((0,prod(shape)),)).reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=b.size)).load(st)
+  #assert st.dtype.size == prod(shape)  # if it doesn't, we need a BUFFER_VIEW
+  if st.dtype.size != prod(shape): st = st.shrink(((0, prod(shape)),))
+  return st.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).load()
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
-  (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
-])
-
-# 5 (alt). create pointers
-
-def alt_debuf(ctx, b:UOp):
-  ret = UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx[0])
-  ctx[0] += 1
-  return ret
-
-pm_debuf = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), alt_debuf),
-  # HACK: consts shouldn't have srcs by here
-  (UPat(Ops.CONST, name="x"), lambda x: x.replace(src=()) if len(x.src) else None),
-  # no movement ops
-  (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
-  # HACK: no copy
-  (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
+  (UPat(Ops.STORE, name="st").f(Ops.INDEX, allow_any_len=True, name="x"), add_load_on_store),
 ])
 
 # 5. split into kernels
@@ -367,40 +357,30 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
 
-def debuf(ctx:LocalAddBufferContext, b:UOp): return UOp(Ops.DEFINE_GLOBAL, b.dtype.ptr(b.arg), arg=ctx.map[b][1])
+def debuf(ctx:LocalAddBufferContext, buf:UOp):
+  ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
+  if buf not in ctx.map: ctx.map[buf] = buf
+  ctx.dg += 1
+  return ret
+
 def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   ctx.vars[b] = None
   return b.src[0]
 
-def split_load(ctx:LocalAddBufferContext, s:UOp):
-  b = s.src[0].src[0]
-  if b.op is not Ops.BUFFER: return None
-
-  if len(s.src) == 2 and s.src[1].op is Ops.ASSIGN:
-    assert len(s.src) == 2
-    lb = s.src[1]
-    assert b not in ctx.map or ctx.map[b][0] == lb
-  else:
-    lb = b
-  if b not in ctx.map:
-    ctx.map[b] = (lb, ctx.dg)
-    ctx.dg += 1
-  return s.replace(src=s.src[0:1]) if b is not lb else None
-
-def handle_store(ctx:LocalAddBufferContext, s:UOp):
-  b = s.src[0].src[0]
-  if b.op is not Ops.BUFFER: return None
-  if b not in ctx.map:
-    ctx.map[b] = (b, ctx.dg)
-    ctx.dg += 1
-  if s.src[1].op is Ops.COPY: return s.src[1]
-  return None
+def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
+  buf = assign.as_buf()
+  assert buf not in ctx.map
+  ctx.map[buf] = assign
+  return buf
 
 to_define_global = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), debuf),
+  (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat(Ops.LOAD, name="s"), split_load),
-  (UPat(Ops.STORE, name="s"), handle_store),
+  (UPat(Ops.ASSIGN, name="assign"), handle_assign),
+
+  # TODO: this can be moved into codegen
+  (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
+    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store)),
 
   # HACK
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -408,16 +388,17 @@ to_define_global = PatternMatcher([
 
 def split_store(x:UOp):
   if len(x.ranges): return None
-  store_rngs = x.src[2:]
-
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
+
+  store_rngs = x.src[2:]
   rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
   name = "k"+colored('_', 'BLACK').join(['']+[colored(str(s.vmax+1), "WHITE") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
 
-  ret = ret.sink(arg=KernelInfo(name=name)) if ret.op is Ops.STORE else ret
-  kernel = UOp(Ops.KERNEL, src=tuple([x[0] for x in ctx.map.values()])+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
-  return kernel.src[0].assign(kernel)
+  # NOTE: the hack for COPY is here
+  ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
+  kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
+  return x.as_buf().assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
@@ -438,19 +419,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
-
-  # render
-  if getenv("SRC"):
-    rsink = tensor_map[sink]
-    from tinygrad.codegen.devectorizer import pm_reduce, ReduceContext
-    rsink = graph_rewrite(rsink, pm_reduce, ctx=ReduceContext(), name="remove reduce")
-    rsink = graph_rewrite(rsink, pm_debuf, ctx=[0], name="debuf", bottom_up=True)
-    from tinygrad.codegen import rewrites_for_linearizer, apply_rewrites
-    rsink = apply_rewrites(rsink, rewrites_for_linearizer)
-    from tinygrad.runtime.ops_null import NullRenderer
-    src = NullRenderer().render(rsink.arg.lst)
-    print(src)
-
   tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
