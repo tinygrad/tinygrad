@@ -121,7 +121,7 @@ runs:
         echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
         echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' | sudo tee -a /etc/apt/apt.conf.d/99keep-debs
-    
+
     - name: Add OpenCL Repo
       if: inputs.opencl == 'true' && runner.os == 'Linux'
       shell: bash
@@ -174,7 +174,7 @@ runs:
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
           pkgs+=" libllvm20 clang-20 lld-20"
         fi
-        
+
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
@@ -190,14 +190,14 @@ runs:
       shell: bash
       run: |
         sudo apt -qq update || true
-        
+
         # ******** do install ********
         if [[ -n "${{ steps.apt-pkgs.outputs.pkgs }}" ]]; then
           sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}
         fi
-        
+
         sudo chown -R $USER:$USER /var/cache/apt/archives/
-    
+
     # **** AMD ****
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
@@ -234,7 +234,7 @@ runs:
         cache-name: cache-gpuocelot-build
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-1
     - name: Clone/compile gpuocelot
       if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
