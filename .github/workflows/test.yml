@@ -730,6 +730,16 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
+    env:
+      CC: /usr/bin/clang-16
+      CXX: /usr/bin/clang++-16
+      # Make sure subprojects that hardcode -std still end up on C++17
+      CXXFLAGS: -std=gnu++17
+      # Helps find_package(LLVM) pick the right version, if used
+      LLVM_DIR: /usr/lib/llvm-16/lib/cmake/llvm
+      # (optional) if your build scripts read this:
+      CMAKE_CXX_STANDARD: "17"
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
