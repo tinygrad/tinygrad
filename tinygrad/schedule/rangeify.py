@@ -171,6 +171,8 @@ pm_mops = PatternMatcher([
 
 def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
+  # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
+  return idx.replace(src=(x.replace(arg=None),)+idx.src[1:])
   ranges = []
   new_ranges = []
   passthrough_idx = []

@@ -604,6 +604,7 @@ jobs:
         key: rangeify-minimal
         deps: testing_minimal
     - name: Test CPU=1 RANGEIFY=1
+      # TODO: add more passing tests here
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py -k "not test_gather_failure" --durations 20
 
   testdevectorize:
