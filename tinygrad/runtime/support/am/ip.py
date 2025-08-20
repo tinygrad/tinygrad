@@ -1,7 +1,8 @@
-import ctypes, time, contextlib, importlib, functools
+import ctypes, time, contextlib, functools
 from typing import Literal
-from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond
+from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.support.amd import import_soc
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -11,9 +12,7 @@ class AM_IP:
   def set_clockgating_state(self): pass # Set clockgating state for this IP
 
 class AM_SOC(AM_IP):
-  def init_sw(self):
-    self.soc_ver = 24 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 21
-    self.module = importlib.import_module(f"tinygrad.runtime.autogen.am.soc{self.soc_ver}")
+  def init_sw(self): self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
 
   def init_hw(self):
     self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)

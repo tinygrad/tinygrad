@@ -43,11 +43,21 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
   return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 
+def header_download(file, name=None, subdir="defines") -> str:
+  url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
+  return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
+
+def import_header(path:str):
+  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines"), flags=re.S)
+  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t)}
+
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
+
+def import_soc(ip): return type("SOC", (object,), import_header(f"include/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h"))
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
@@ -56,8 +66,7 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
   def _download_file(ver, suff) -> str:
     dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
     fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
-    url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
-    return fetch(f"{url}/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs").read_text()
+    return header_download(f"include/asic_reg/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs")
 
   for ver in fixup_ip_version(prefix, version):
     try: offs, sh_masks = _extract_regs(_download_file(ver, "offset")), _extract_regs(_download_file(ver, "sh_mask"))

@@ -2,7 +2,7 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN, getenv
+from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -317,8 +317,10 @@ powers_of_two = {2**i:i for i in range(64)}
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
   pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
-  # no real hardware supports THREEFRY
-  pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
+  # no real hardware supports THREEFRY, but NullRenderer does
+  if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
+  # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
+  if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
   # rewrite SQRT to xpow 0.5
   if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
@@ -330,7 +332,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
-    if not getenv("DISABLE_FAST_IDIV"):
+    if not DISABLE_FAST_IDIV:
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d"), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:

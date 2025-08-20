@@ -99,7 +99,6 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
     except Exception as e:
       changed += 1
       warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
-  conn.commit()
   cur.close()
 
 # *** generic runner to map rows of a table to a function in parallel
@@ -111,12 +110,11 @@ def _pmap(fxns:dict[str, Callable]) -> None:
   except sqlite3.OperationalError:
     raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
   finally:
-    conn.commit()
     cur.close()
 
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
-    inputs = list(range(0, row_count, PAGE_SIZE))
-    list(tqdm(pool.imap_unordered(functools.partial(diff, fxns=fxns), inputs), total=len(inputs)))
+    bar = tqdm(total=row_count)
+    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, PAGE_SIZE)): bar.update(PAGE_SIZE)
     pool.close()
     pool.join()
     pool.terminate()
