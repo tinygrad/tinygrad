@@ -40,7 +40,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
     sink = UOp.sink(*[t.uop for t in fixed_tensors])
     new_sink = sink.substitute(applied_map, name=name)
 
-    if __debug__: type_verify(list(new_sink.toposort()), tensor_uop_spec)
+    # NOTE: you can check the Tensor graph early here
+    #if __debug__: type_verify(list(new_sink.toposort()), tensor_uop_spec)
 
     # set the relevant uop to the realized UOps
     for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
