@@ -39,7 +39,7 @@ def nms(boxes, scores, thresh=0.5):
 def nms2(img_boxes:Tensor, img_scores:Tensor, thresh=0.5) -> Tensor:
   x1, y1, x2, y2 = img_boxes.permute(1, 0)
   areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-  to_process, keep = (img_scores.sort()[1] if img_scores.numel() > 1 else img_scores)[::-1].cast(dtypes.int), []
+  to_process, keep = (img_scores.argsort() if img_scores.numel() > 1 else img_scores)[::-1].cast(dtypes.int), []
   while to_process.numel() > 0:
     cur, to_process = to_process[0], to_process[1:]
     keep.append(cur)
@@ -82,7 +82,7 @@ def batched_nms(img_boxes:Tensor, img_scores:Tensor, img_labels:Tensor) -> Tenso
     keep_mask[curr_indices[curr_keep_indices]] = True
 
   keep = _masked_indices(keep_mask)
-  keep = keep[img_scores[keep].sort(descending=True)[1]]
+  keep = keep[img_scores[keep].argsort(descending=True)]
   res.append(keep)
   return res
 
