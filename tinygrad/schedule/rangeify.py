@@ -119,7 +119,7 @@ def collapse_to_1(shp:tuple[sint, ...], idxs:tuple[UOp, ...]) -> UOp:
 
 def map_reshape(idx:UOp, r:UOp):
   mish = collapse_to_1(idx.shape, idx.src[1:])
-  ret = []
+  ret:list[UOp] = []
   for s in r.src[0].shape[::-1]:
     if resolve(s!=1):
       # this MOD should limit any ranges outside s
@@ -127,7 +127,7 @@ def map_reshape(idx:UOp, r:UOp):
       mish //= s
     else:
       ret.append(UOp.const(dtypes.int, 0))
-  tret = UOp.sink(*ret).simplify().src[::-1] if len(ret) else ()
+  tret = ret[0].sink(*ret[1:]).simplify().src[::-1] if len(ret) else ()
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):

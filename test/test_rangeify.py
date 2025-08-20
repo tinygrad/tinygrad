@@ -1,57 +1,53 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.helpers import RANGEIFY
 
+N = 256
+
+@unittest.skipIf(RANGEIFY == 0, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_expand_children(self):
-    N = 1024
     A = Tensor.empty(N, N).sum(axis=1)
     ba = A.expand(N, N)
     ((ba+1).sum(axis=1) + (ba+2).sum(axis=0)).realize()
 
   def test_double_gemm(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (A@B@C).realize()
 
   def test_double_gemm_exp(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (((A@B).exp()@C).exp()).realize()
 
   def test_double_gemm_relu(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (((A@B).relu()@C).relu()).realize()
 
   def test_double_gemm_relu_half_contig(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (((A@B).relu().contiguous(arg=(1,))@C).relu()).realize()
 
   def test_double_gemm_half_contig(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     ((A@B).contiguous(arg=(1,))@C).realize()
 
   def test_double_gemm_contig(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     ((A@B).contiguous()@C).realize()
 
   def test_many_gemm(self):
-    N = 1024
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)

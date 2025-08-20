@@ -591,6 +591,21 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testrangeify:
+    name: Linux (rangeify)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: rangeify-minimal
+        deps: testing_minimal
+    - name: Test CPU=1 RANGEIFY=1
+      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py -k "not test_gather_failure" --durations 20
+
   testdevectorize:
     name: Linux (devectorize)
     runs-on: ubuntu-24.04
