@@ -2,7 +2,7 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, PARTIAL_CONTIG
 
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
@@ -172,7 +172,7 @@ pm_mops = PatternMatcher([
 def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
   # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
-  return idx.replace(src=(x.replace(arg=None),)+idx.src[1:])
+  if not PARTIAL_CONTIG: return idx.replace(src=(x.replace(arg=None),)+idx.src[1:])
   ranges = []
   new_ranges = []
   passthrough_idx = []

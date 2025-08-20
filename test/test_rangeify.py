@@ -4,7 +4,7 @@ from tinygrad.helpers import RANGEIFY
 
 N = 256
 
-@unittest.skipIf(RANGEIFY == 0, "tests only for RANGEIFY")
+@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_expand_children(self):
     A = Tensor.empty(N, N).sum(axis=1)
