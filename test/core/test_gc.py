@@ -18,6 +18,7 @@ def bufs_allocated():
 class TestGC(unittest.TestCase):
 
   def test_gc(self):
+    # test
     Tensor.manual_seed(0)
     base = tensors_allocated()
     a = Tensor.rand(4, 4, requires_grad=True)
