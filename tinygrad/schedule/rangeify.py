@@ -7,22 +7,18 @@ from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
 
-imported_rewrites = PatternMatcher([
+# 0. do some cleanup rewrites, mostly copied from the old stuff
+
+earliest_rewrites = PatternMatcher([
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
-  # DETACH and CONTIGUOUS_BACKWARD are NOOPs here
+  # DETACH and CONTIGUOUS_BACKWARD are NOOPs here, so is FUSE
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-])
-
-double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
-])
-
-earliest_rewrites = imported_rewrites+double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
   # RESHAPE after COPY
@@ -59,7 +55,7 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
 ])
 
-add_contiguous = double_reshape+PatternMatcher([
+add_contiguous = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
@@ -89,9 +85,6 @@ def mark_children(ctx:ChildrenContext, x:UOp):
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
   (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN}, name="x"), mark_children),
-
-  # hack for one kernel threefry
-  #(UPat(Ops.CHILD, src=(UPat(Ops.THREEFRY, name="x"),)), lambda x: x),
 ])
 
 # 3. rangeify
@@ -430,12 +423,6 @@ split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
 ])
 
-pm_children_fixup = PatternMatcher([
-  # clone all movement ops
-  (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat(GroupOp.Movement, name="m"),)),), name="c"),
-    lambda c,m: UOp(m.op, m.dtype, (c.replace(src=(c.src[0].replace(src=(m.src[0],)),)),), m.arg)),
-])
-
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
@@ -444,7 +431,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
   tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
-  #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
