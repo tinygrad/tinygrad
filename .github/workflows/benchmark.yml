@@ -65,11 +65,11 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
-      run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+      run: METAL=1 python3.11 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test AMX tensor cores
       run: |
-        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
-        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
     - name: Run Tensor Core GEMM (float)
       run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (half)
@@ -115,9 +115,9 @@ jobs:
     - name: Run 10 CIFAR training steps w winograd
       run: BENCHMARK_LOG=cifar_10steps_wino JIT=1 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: UsbGPU boot time
-      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/core/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/core/test_tiny.py
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - name: UsbGPU openpilot test
@@ -194,8 +194,8 @@ jobs:
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
       run: |
-        NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
-        PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        NV=1 ALLOW_TF32=1 python3 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PTX=1 ALLOW_TF32=1 NV=1 python3 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -206,9 +206,9 @@ jobs:
     - name: Run Tensor Core GEMM (NV)
       run: NV=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
     - name: Test NV=1
-      run: DEBUG=2 NV=1 python -m pytest -rA test/test_tiny.py
+      run: DEBUG=2 NV=1 python -m pytest -rA test/core/test_tiny.py
     - name: Test CUDA=1
-      run: DEBUG=2 CUDA=1 python -m pytest -rA test/test_tiny.py
+      run: DEBUG=2 CUDA=1 python -m pytest -rA test/core/test_tiny.py
     - name: Run Stable Diffusion
       run: BENCHMARK_LOG=stable_diffusion NV=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -400,18 +400,18 @@ jobs:
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     - name: Test AMD=1
-      run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
+      run: DEBUG=2 AMD=1 python -m pytest -rA test/core/test_tiny.py
     #- name: Test HIP=1
-    #  run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
+    #  run: DEBUG=2 HIP=1 python -m pytest -rA test/core/test_tiny.py
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
     #- name: Remove amdgpu
     #  run: sleep 10 && sudo rmmod amdgpu # sleep a bit to let the driver unload the prev pid.
     - name: Test AM cold start time
-      run: time AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time AMD=1 AM_RESET=1 python3 test/core/test_tiny.py TestTiny.test_plus
     - name: Test AM warm start time
-      run: time AMD=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time AMD=1 python3 test/core/test_tiny.py TestTiny.test_plus
     - name: Run Stable Diffusion
       run: BENCHMARK_LOG=stable_diffusion AMD=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -673,9 +673,9 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: Test driver cold start time
-      run: time DEBUG=3 AMD=1 AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 AMD=1 AM_RESET=1 python3 test/core/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
-      run: time DEBUG=3 AMD=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 AMD=1 python3 test/core/test_tiny.py TestTiny.test_plus
     # Fails on 9070
     # - name: Test tensor cores
     #   run: |
@@ -685,7 +685,7 @@ jobs:
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee am_matmul_amd.txt
     - name: Test AMD=1
-      run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
+      run: DEBUG=2 AMD=1 python -m pytest -rA test/core/test_tiny.py
     - name: Test DISK copy time
       run: AMD=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Run full CIFAR training w 1 GPU
@@ -740,9 +740,9 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: Test driver start time
-      run: time DEBUG=3 NV=1 python3 test/test_tiny.py TestTiny.test_plus
+      run: time DEBUG=3 NV=1 python3 test/core/test_tiny.py TestTiny.test_plus
     - name: Test tensor cores
-      run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+      run: NV=1 ALLOW_TF32=1 python3 test/linearizer/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test DISK copy time
       run: NV=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Test LLAMA-3
