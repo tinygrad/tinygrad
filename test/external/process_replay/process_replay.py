@@ -22,12 +22,10 @@ except ImportError as e:
 # *** process replay settings
 
 # internal
-PAGE_SIZE = getenv("PAGE_SIZE", 100)
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["CAPTURE_PROCESS_REPLAY"] = "0"
-early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 MAX_LINES = 500
 def trunc_log(x):
@@ -69,54 +67,49 @@ replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_ke
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
-  if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
-  if early_stop.is_set(): return None
-  conn = db_connection()
-  cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
-  changed = 0
-  for row in cur.fetchall():
-    if changed > MAX_DIFF_PCT:
-      warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
-      early_stop.set()
-      break
-    name, loc = "", ""
-    try:
-      name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
-      if (replayer:=fxns.get(name)) is None: continue
-      with Context(**ctx_vars):
-        if (ret:=replayer(ret, *args, **kwargs)) is None: continue
-        good, compare, metadata = ret
-      if good != compare:
-        for m in metadata: trunc_log(m)
-        logging.info(loc)
-        for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
-          logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-        if ctx_vars: logging.info(ctx_vars)
-        warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
-    except Exception as e:
-      changed += 1
-      warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
-  conn.commit()
-  cur.close()
+def diff(row:bytes, fxns:dict[str, Callable[..., tuple|None]]) -> bool:
+  name, loc = "", ""
+  try:
+    name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
+    ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+    if (replayer:=fxns.get(name)) is None: return False
+    with Context(**ctx_vars):
+      if (ret:=replayer(ret, *args, **kwargs)) is None: return False
+      good, compare, metadata = ret
+    if good != compare:
+      for m in metadata: trunc_log(m)
+      logging.info(loc)
+      for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
+        logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+      if ctx_vars: logging.info(ctx_vars)
+      warnings.warn("PROCESS REPLAY DETECTED CHANGE", ProcessReplayWarning)
+      return False
+  except Exception as e:
+    warnings.warn(f"{name=} {loc=} {e=}", ProcessReplayWarning)
+    return False
+  return True
 
 # *** generic runner to map rows of a table to a function in parallel
 
 def _pmap(fxns:dict[str, Callable]) -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  try:
+    rows = cur.execute(f"SELECT val FROM '{TABLE_NAME}'").fetchall()
   except sqlite3.OperationalError:
     raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
   finally:
-    conn.commit()
     cur.close()
 
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
-    inputs = list(range(0, row_count, PAGE_SIZE))
-    list(tqdm(pool.imap_unordered(functools.partial(diff, fxns=fxns), inputs), total=len(inputs)))
+    bar = tqdm(total=len(rows))
+    failed = 0
+    for i,ret in enumerate(pool.imap_unordered(functools.partial(diff, fxns=fxns), rows, chunksize=10)):
+      if i%100 == 99: bar.update(100)
+      if not ret: failed += 1
+      if i > 100 and failed*100//i > MAX_DIFF_PCT:
+        warnings.warn(f"detected changes in over {MAX_DIFF_PCT}%. skipping further diff generation.", ProcessReplayWarning)
+        break
     pool.close()
     pool.join()
     pool.terminate()
