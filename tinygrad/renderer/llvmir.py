@@ -123,11 +123,10 @@ class LLVMRenderer(Renderer):
   has_local = False
   global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  code_for_op = {Ops.FDIV: lambda: None}
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = PatternMatcher([
-    # rewrite RECIP with FDIV
-    (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
     # rewrite cast to bool to CMPNE 0
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE

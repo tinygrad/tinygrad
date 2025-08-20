@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -126,7 +126,9 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
+  exec_points:dict[str, dict] = {}
   for st,et,dur,e in events:
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
     # find a free level to put the event
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
@@ -135,9 +137,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      # TODO: support symbolic by capturing var_vals in profile events
-      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and all(isinstance(es,int) for es in [p.estimates.ops, p.estimates.mem, p.estimates.lds]):
-        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
+      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+        info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
+               f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)

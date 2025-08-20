@@ -205,7 +205,7 @@ class ProfileEvent: pass
 class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePointEvent(ProfileEvent): device:str; name:str; ts:decimal.Decimal; key:int; arg:dict=field(default_factory=dict) # noqa: E702
+class ProfilePointEvent(ProfileEvent): device:str; name:str; ts:decimal.Decimal; key:Any; arg:dict=field(default_factory=dict) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
@@ -293,7 +293,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.10.3"}), timeout=10) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0"}), timeout=10) as r:
       assert r.status == 200, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
