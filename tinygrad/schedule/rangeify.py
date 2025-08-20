@@ -35,7 +35,8 @@ earliest_rewrites = imported_rewrites+double_reshape+PatternMatcher([
    x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
   # assign only to buffer
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}), UPat(name="x"))), lambda x: x if x.src[0].base.op is not Ops.BUFFER else None),
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x"))),
+   lambda x,target: x if target.base.op is not Ops.BUFFER else None),
 ])
 
 # 1. add contiguous where we have to
@@ -329,7 +330,9 @@ def bufferize_to_store(x:UOp):
   shape = tuple([r.vmax+1 for r in rngs])
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
   if x.src[0].op is Ops.ASSIGN:
-    return x.src[0].src[0].replace(dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0].src[1], *rngs)
+    assign_target, assign_src = x.src[0].src
+    assert assign_target.op is Ops.INDEX
+    return assign_target.replace(dtype=x.dtype.ptr(size=prod(shape))).store(assign_src, *rngs)
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
   return buf.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).store(x.src[0], *rngs)
 
@@ -448,7 +451,8 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
-  tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
+  # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
+  #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="cleanups")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
