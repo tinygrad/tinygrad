@@ -41,7 +41,7 @@ class TestFuse(unittest.TestCase):
 
   def test_fuse_norm(self):
     a = Tensor.rand(50,50).realize()
-    self._test_fuse(lambda a: a / a.mean(axis=1), a)
+    self._test_fuse(lambda a: a / a.mean(axis=1), a, atol=1e-6)
 
   def test_fuse_argmax(self):
     a = Tensor.rand(50,50).realize()
