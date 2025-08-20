@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1624,8 +1623,7 @@ def train_stable_diffusion():
       def generate_latents(embeds:Tensor) -> Tensor:
         uc_c = Tensor.stack(state["uc"].expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
         uc_c = shard_tensor(uc_c)
-        #x = shard_tensor(Tensor.randn(bs,4,64,64))
-        x = shard_tensor(gv.images["init_latent"])
+        x = shard_tensor(Tensor.randn(bs,4,64,64))
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
@@ -1636,22 +1634,10 @@ def train_stable_diffusion():
           sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[ts].reshape(bs, 1, 1, 1)
           x_x = shard_tensor(Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64))
           x = denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
-        gv.md(gv.images['sample'], x.to("CPU"))
-        #diff.abs().mean(): 0.0005498887039721012
-        #a.abs().mean(): 0.5661840438842773
-        #diff.abs().max(): 0.00865793228149414
         return x
 
-      def decode_latents(latents:Tensor) -> Tensor:
-        ret = decode(shard_tensor(latents))
-        return ret
-      def generate_inception(imgs:Tensor) -> Tensor:
-        ret = jit_inception(shard_tensor(imgs))[:,:,0,0]
-        gv.md(gv.inception['inception_activation'], ret.to("CPU"))
-        # diff.abs().mean(): 0.002458753762766719
-        # a.abs().mean(): 0.36962890625
-        # diff.abs().max(): 0.023907601833343506
-        return ret
+      def decode_latents(latents:Tensor) -> Tensor: return decode(shard_tensor(latents))
+      def generate_inception(imgs:Tensor) -> Tensor: return jit_inception(shard_tensor(imgs))[:,:,0,0]
 
       def calc_clip_scores(batch:Tensor, batch_tokens:Tensor) -> Tensor:
         # Tensor.interpolate does not yet support bicubic, so we use PIL
@@ -1661,10 +1647,6 @@ def train_stable_diffusion():
         batch = batch.cast(dtypes.float) / 255
         batch = (batch - model.mean) / model.std
         batch = jit_clip(shard_tensor(batch_tokens), batch)
-        gv.md(gv.clip['clip_score'].squeeze(1), batch.to("CPU"))
-        # diff.abs().mean(): 0.0022983269300311804
-        # a.abs().mean(): 0.0477294921875
-        # diff.abs().max(): 0.00400334969162941
         return batch
 
       callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
@@ -1717,18 +1699,9 @@ def train_stable_diffusion():
           sigma = np.cov(activations.numpy(), rowvar=False)
           np.savez_compressed(inception_stats_fn, mu=mu, sigma=sigma)
 
-      #fid_score = inception.compute_score(inception_activations, inception_stats_fn)
-      fid_score = inception.compute_score(gv.fid['fid_scores'], inception_stats_fn)
-      gv.md(gv.fid['fid_value'], Tensor(fid_score, dtype=dtypes.float64, device="CPU").realize())
-      # diff.abs().mean(): 7.06614571299724e-07
-      # a.abs().mean(): 146.45987514905977
-      # diff.abs().max(): 7.06614571299724e-07
+      fid_score = inception.compute_score(inception_activations, inception_stats_fn)
 
       clip_score = clip_scores.to(GPUS[0]).mean().item()
-      gv.md(gv.clip['clip_score'].squeeze(1).mean(), clip_scores.to(GPUS[0]).mean().to("CPU"))
-      # diff.abs().mean(): 0.0015870481729507446
-      # a.abs().mean(): 0.0477294921875
-      # diff.abs().max(): 0.0015870481729507446
       return clip_score, fid_score
 
   if not getenv("EVAL_ONLY", ""):
@@ -1807,11 +1780,9 @@ def train_stable_diffusion():
           if len(wandb_run_id) > 0:
             wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
       elif p.name.endswith(".safetensors"):
-        # NOTE: for verification, use tinyr4:/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_298669/for_comparison.safetensors
         ckpt_iteration = p.name.split(".safetensors")[0]
         if ckpt_iteration.isdigit(): ckpt_iteration = int(ckpt_iteration)
-        #unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
-        unet_ckpt = {k.replace("model.diffusion_model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.diffusion_model.")}
+        unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
         load_state_dict(unet, unet_ckpt)
         clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
         print(f"clip score: {clip}")
