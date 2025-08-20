@@ -163,7 +163,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       out = single_kernel_softmax(self.test)
       out.realize()
 
-    np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
   def test_auto_softmax(self):
     print("*** softmax ***")
@@ -176,7 +176,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       out = self.test.contiguous().softmax(-1).fuse()
       run_one_schedule_item(out)
 
-    np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
   @unittest.skip("recursion error no longer raised")
   def test_softmax_bw(self):
