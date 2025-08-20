@@ -87,7 +87,7 @@ class PCIDevice:
         except OSError as e:
           if e.errno == errno.EPERM:
             raise RuntimeError(f"Cannot resize BAR {i}: {e}. Permission error: run `extra/amdpci/setup_python_cap.sh`"
-                                "to allow python accessing device or run with sudo") from e
+                                " to allow python accessing device or run with sudo") from e
           raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio()) is not None:
