@@ -309,7 +309,7 @@ def remove_bufferize(b2:UOp, idx2:UOp):
 pm_cleanups = pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  # NOTE: this is the same case as below
+  # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
   # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing
@@ -317,6 +317,9 @@ pm_cleanups = pm_mops+PatternMatcher([
   # HACK
   #(UPat(Ops.CMPLT, src=[UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
   #(UPat(Ops.WHERE, src=[UPat(Ops.INDEX), UPat(Ops.INDEX), UPat.cvar()]).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_reindexing),
+
+  # no buffers for const
+  #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
 ])
 
 # 4. put in buffers for bufferize
@@ -346,9 +349,6 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
   (UPat(Ops.INDEX, src=(UPat(Ops.STORE, name="st"),), allow_any_len=True, name="x"), add_load_on_store),
-
-  # HACK
-  #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
 # 5 (alt). create pointers
@@ -410,6 +410,9 @@ to_define_global = PatternMatcher([
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat(Ops.LOAD, name="s"), split_load),
   (UPat(Ops.STORE, name="s"), handle_store),
+
+  # HACK
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
 def split_store(x:UOp):
@@ -445,10 +448,10 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   #tensor_map = graph_rewrite_map(tensor_map[sink], pm_children_fixup, bottom_up=True, input_map=tensor_map, name="fixup children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
+  #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="cleanups")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
-  #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
 
   # render
