@@ -242,10 +242,17 @@ runs:
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
-        mkdir build
-        cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-        ninja
+
+        files="$(git ls-files)"
+        sed -i 's/-std=gnu++11/-std=gnu++17/g;s/-std=c++11/-std=gnu++17/g;s/-std=gnu++14/-std=gnu++17/g;s/-std=c++14/-std=gnu++17/g' $files || true
+
+        rm -rf build && mkdir build && cd build
+        cmake .. -Wno-dev -G Ninja \
+          -DOCELOT_BUILD_TOOLS=OFF -DBUILD_TESTS_CUDA=OFF -DCMAKE_BUILD_ALWAYS=0 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+          -DCMAKE_C_COMPILER=/usr/bin/clang-16 \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++-16 \
+          -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+          -DLLVM_DIR=/usr/lib/llvm-16/lib/cmake/llvm
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
       shell: bash
