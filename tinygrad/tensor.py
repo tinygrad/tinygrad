@@ -250,7 +250,7 @@ class Tensor(MathTrait):
     sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # remove all ASSIGNs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
+    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.STORE and u.dtype is not None}
     _apply_map_to_tensors(remove_assign_map, name="Remove Assigns")
 
     # create the schedule
@@ -293,7 +293,7 @@ class Tensor(MathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    self.uop = self.uop.assign(x.uop)
+    self.uop = self.uop.store(x.uop, dtype=self.dtype, arg=123)
     return self
 
   def detach(self) -> Tensor:
