@@ -560,15 +560,13 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   # ***** Property/Graph Ops *****
   def If(condition:Tensor, else_branch:SubGraphOnnxRunner, then_branch:SubGraphOnnxRunner, intermediate_tensors:dict[str, Tensor]):
-    else_branch.graph_values.update(intermediate_tensors)
-    then_branch.graph_values.update(intermediate_tensors)
-    # we run both branch lazily and then select based on condition
-    else_out = else_branch({k:intermediate_tensors[k] for k in else_branch.graph_inputs.keys()})
-    then_out = then_branch({k:intermediate_tensors[k] for k in then_branch.graph_inputs.keys()})
-    # dereference intermediate tensors so Buffer can be deallocated
-    for k in intermediate_tensors:
-      del else_branch.graph_values[k]
-      del then_branch.graph_values[k]
+    def run_branch(branch:SubGraphOnnxRunner):
+      branch.graph_values.update(intermediate_tensors)
+      out = branch({k:intermediate_tensors[k] for k in branch.graph_inputs.keys()})
+      # dereference intermediate tensors so Buffer can be deallocated
+      for k in intermediate_tensors: del branch.graph_values[k]
+      return out
+    else_out, then_out = run_branch(else_branch), run_branch(then_branch)
     assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
     # can use where op when output shape is the same
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
