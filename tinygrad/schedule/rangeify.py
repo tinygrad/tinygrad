@@ -108,7 +108,7 @@ def collapse_to_1(shp:tuple[sint, ...], idxs:tuple[UOp, ...]) -> UOp:
   for s,src in list(zip(shp, idxs))[::-1]:
     to_sum.append(acc*src)
     acc *= s
-  return sum(to_sum)
+  return sum(to_sum, start=UOp.const(dtypes.int, 0))
 
 def map_reshape(idx:UOp, r:UOp):
   mish = collapse_to_1(idx.shape, idx.src[1:])
@@ -120,7 +120,7 @@ def map_reshape(idx:UOp, r:UOp):
       mish //= s
     else:
       ret.append(UOp.const(dtypes.int, 0))
-  tret = ret[0].sink(*ret[1:]).simplify().src[::-1] if len(ret) else ()
+  tret = ret[0].sink(*ret[1:]).simplify(tracked=True).src[::-1] if len(ret) else ()
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
@@ -262,14 +262,14 @@ pm_rangeify = pm_mops+PatternMatcher([
   # if we come across this, remove it. it was a CHILD unused in an INDEX
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
 
-  # CONST can't have axes. remove srcs when we idx
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),)), lambda c: c.replace(src=())),
+  # CONST (or DEFINE_VAR) can't have axes. remove srcs when we idx
+  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
 
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 ])
