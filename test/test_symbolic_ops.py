@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Variable
 from tinygrad.shape.shapetracker import View
-from tinygrad.helpers import Context, GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device
@@ -155,13 +155,14 @@ class TestSymbolicOps(unittest.TestCase):
       vi = Variable("i", 3, 10).bind(i)
       symbolic = a[:vi*3].reshape((3, 3))
       symbolic = symbolic.numpy()
-      expected = a[:i*3].reshape((3, 3)).numpy()
+      # reshaping from symbolic can be a shrink - should it?
+      expected = a[:i*3].shrink(((0, 9),)).reshape((3, 3)).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_invalid_reshape_from_symbolic(self):
+  def test_invalid_reshape_from_symbolic_simple(self):
+    a = Tensor.rand(30)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      a = Tensor.rand(30)
       symbolic = a[:vi*3]
       with self.assertRaises(ValueError): symbolic.reshape((3, 3))
 
