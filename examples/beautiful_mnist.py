@@ -41,6 +41,9 @@ if __name__ == "__main__":
     if i%10 == 9: test_acc = get_test_acc().item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 
+  GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
+  test_acc = get_test_acc().item()
+
   # verify eval acc
   if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
     if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
