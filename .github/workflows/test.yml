@@ -606,6 +606,8 @@ jobs:
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
+    - name: Test CPU=1 RANGEIFY=1 PARTIAL_CONTIG=1
+      run: PARTIAL_CONTIG=1 CPU=1 RANGEIFY=1 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
 
   testdevectorize:
     name: Linux (devectorize)
