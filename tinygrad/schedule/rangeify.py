@@ -330,25 +330,10 @@ def bufferize_to_store(x:UOp):
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype)
-
-def add_load_on_buffer(idx:UOp, b:UOp):
-  if isinstance(idx.dtype, PtrDType): return None
-  return idx.replace(dtype=idx.dtype.ptr(b.size), arg=None).load()
-
-def add_load_on_store(x:UOp, st:UOp):
-  if isinstance(x.dtype, PtrDType): return None
-  assert isinstance(st.dtype, PtrDType), f"{st} has the wrong dtype"
-  rngs = x.src[1:]
-  shape = tuple([int(r.vmax+1) for r in rngs])
-  #assert st.dtype.size == prod(shape)  # if it doesn't, we need a BUFFER_VIEW
-  if st.dtype.size != prod(shape): st = st.shrink(((0, prod(shape)),))
-  return st.reshape(shape).index(*rngs, dtype=x.dtype.ptr(size=prod(shape))).load()
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
-  (UPat(Ops.STORE, name="st").f(Ops.INDEX, allow_any_len=True, name="x"), add_load_on_store),
 ])
 
 # 5. split into kernels
@@ -370,7 +355,7 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
-  buf = assign.buf_uop
+  buf = assign.as_buf()
   assert buf not in ctx.map
   ctx.map[buf] = assign
   return buf
@@ -380,9 +365,14 @@ to_define_global = PatternMatcher([
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat(Ops.ASSIGN, name="assign"), handle_assign),
 
+  # add loads to non ptr indexes
+  # TODO: this can be moved into codegen?
+  (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
+   lambda dg,idx: idx.replace(dtype=dg.dtype, arg=None).load() if not isinstance(idx.dtype, PtrDType) else None),
+
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.buf_uop,)+idx.src[1:]).load(store)),
+    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store)),
 
   # HACK
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -400,7 +390,7 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
-  return x.buf_uop.assign(kernel)
+  return x.as_buf().assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),

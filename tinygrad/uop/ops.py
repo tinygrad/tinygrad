@@ -378,7 +378,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
-  def forced_reshape(self, arg:tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, src=(self,), arg=arg)
+  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
@@ -413,8 +413,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.op in {Ops.ASSIGN, Ops.STORE, Ops.INDEX, Ops.RESHAPE}, f"must be ASSIGN {self.op}"
-    return self.src[0].buf_uop
+    assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
+    return self.src[0].base
+
+  def as_buf(self) -> UOp:
+    # TODO: this should be the only one of these. this is the one RANGEIFY uses
+    s = self
+    while len(s.src) and s.op is not Ops.BUFFER: s = s.src[0]
+    return s
+
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
