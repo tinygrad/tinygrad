@@ -52,7 +52,8 @@ class Ops(FastEnum):
   UNROLL = auto(); CONTRACT = auto(); GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
   # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto() # noqa: E702
+  CAST = auto(); BITCAST = auto(); EXP = auto(); EXP2 = auto() # noqa: E702
+  LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto() # noqa: E702
 
   # load/store before math
   LOAD = auto(); STORE = auto() # noqa: E702
@@ -83,7 +84,7 @@ class Ops(FastEnum):
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
 class GroupOp:
-  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
+  Unary = {Ops.EXP, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW}
   Ternary = {Ops.WHERE, Ops.MULACC}

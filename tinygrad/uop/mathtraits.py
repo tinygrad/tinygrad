@@ -166,4 +166,5 @@ class MathTrait:
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
+  def exp(self): return self.alu(Ops.EXP)
   def pow(self, x): return self.alu(Ops.POW, self.ufix(x))

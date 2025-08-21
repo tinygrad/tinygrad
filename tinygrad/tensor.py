@@ -2996,7 +2996,9 @@ class Tensor(MathTrait):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    return self.mul(1/math.log(2)).exp2()
+    if self.dtype == dtypes.bfloat16:
+      return self.cast(dtypes.float32)._apply_uop(UOp.exp).cast(dtypes.bfloat16)
+    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp)
 
   def exp2(self) -> Tensor:
     """
