@@ -49,7 +49,6 @@ def draw_bounding_boxes_and_save(predictions, class_labels,orig_img=None,orig_im
     r, g, b = color
     brightness = (r * 299 + g * 587 + b * 114) / 1000
     return brightness > 127
-  
   if path:
     orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
   height, width, _ = orig_img.shape
@@ -70,11 +69,10 @@ def draw_bounding_boxes_and_save(predictions, class_labels,orig_img=None,orig_im
     font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
     cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
     object_count[class_labels[class_id]] += 1
-  
   if not draw_only:
     print("Objects detected:")
     for obj, count in object_count.items():
-        print(f"- {obj}: {count}")
+      print(f"- {obj}: {count}")
 
     cv2.imwrite(output_img_path, orig_img)
     print(f'saved detections at {output_img_path}')
@@ -215,7 +213,7 @@ class DFL:
     self.c1 = c1
 
   def __call__(self, x):
-    b, c, a = x.shape # batch, channels, anchors
+    b, _, a = x.shape # batch, channels, anchors
     return self.conv(x.reshape(b, 4, self.c1, a).transpose(2, 1).softmax(1)).reshape(b, 4, a)
 
 #backbone
@@ -360,7 +358,7 @@ def get_weights_location(yolo_variant: str) -> Path:
 
 if __name__ == '__main__':
 
-  # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
+  # usage : python3 yolov8.py "image_URL OR image_path OR 'webcam'" "v8 variant" (optional, n is default)
   if len(sys.argv) < 2:
     print("Error: Image URL or path not provided.")
     sys.exit(1)
@@ -380,30 +378,27 @@ if __name__ == '__main__':
   if img_path == 'webcam':
     webcamera = cv2.VideoCapture(0)
     while webcamera.isOpened():
-        success, image = webcamera.read()
-        if not success:
-            print("Can't receive frame (stream end?). Exiting ...")
-            break
+      success, image = webcamera.read()
+      if not success:
+        print("Can't receive frame (stream end?). Exiting ...")
+        break
 
-        image = [cv2.cvtColor(image, cv2.IMREAD_COLOR)]
-    
-        if not isinstance(image[0], np.ndarray):
-            print('Error in image loading. Check your image file.')
-            sys.exit(1)
-    
-        pre_processed_image = preprocess(image)
+      image = [cv2.cvtColor(image, cv2.IMREAD_COLOR)]
+      if not isinstance(image[0], np.ndarray):
+        print('Error in image loading. Check your image file.')
+        sys.exit(1)
+      pre_processed_image = preprocess(image)
 
-        st = time.time()
-        predictions = yolo_infer(pre_processed_image).numpy()
-    
-        predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
-        out_image = draw_bounding_boxes_and_save(orig_img=image[0], predictions=predictions, class_labels=class_labels)
-        ti = round(1/((time.time() - st)+0.0001),2)
-        cv2.putText(out_image, f"{ti} frame/sec", (10, 30),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
-        cv2.imshow("Live Camera", out_image)
+      st = time.time()
+      predictions = yolo_infer(pre_processed_image).numpy()
+      predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
+      out_image = draw_bounding_boxes_and_save(orig_img=image[0], predictions=predictions, class_labels=class_labels)
+      ti = round(1/((time.time() - st)+0.0001),2) #+0.0001 safe case if the inference is faster than 1ms so it dosen't divide by zer0
+      cv2.putText(out_image, f"{ti} frame/sec", (10, 30),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+      cv2.imshow("Live Camera", out_image)
 
-        if cv2.waitKey(1) == ord('q'):
-            break
+      if cv2.waitKey(1) == ord('q'):
+        break
 
     webcamera.release()
     cv2.destroyAllWindows()
@@ -417,16 +412,14 @@ if __name__ == '__main__':
     out_path = (output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()
 
     if not isinstance(image[0], np.ndarray):
-        print('Error in image loading. Check your image file.')
-        sys.exit(1)
-  
+      print('Error in image loading. Check your image file.')
+      sys.exit(1)
     pre_processed_image = preprocess(image)
 
     st = time.time()
     predictions = yolo_infer(pre_processed_image).numpy()
 
     print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
-  
     predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
     draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels, draw_only=False,path=True)
 
@@ -434,4 +427,4 @@ if __name__ == '__main__':
 #  1. Fix SPPF minor difference due to maxpool
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
-#  4. Add video inferencet
+#  4. Add video inference
