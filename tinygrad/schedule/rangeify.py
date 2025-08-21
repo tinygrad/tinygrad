@@ -129,8 +129,8 @@ def map_pad(idx:UOp, r:UOp):
   for i,(sh,(s,e)) in enumerate(zip(r.shape, r.arg)):
     if s == 0 and e == 0: continue
     where = UOp.const(dtypes.bool, True)
-    if e > 0: where = where & (ret[i] < (sh-e))
-    if s > 0: where = where & (ret[i] >= s)
+    if resolve(e > 0): where = where & (ret[i] < (sh-e))
+    if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
     # this is safe but dumb
     ret[i] = (ret[i] - s).maximum(0).minimum(r.src[0].shape[i]-1)
