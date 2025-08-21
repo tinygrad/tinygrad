@@ -393,9 +393,9 @@ def split_store(x:UOp):
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
 
-  store_rngs = x.src[2:]
+  store_rngs = ret.src[2:]
   rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
-  name = "k"+colored('_', 'BLACK').join(['']+[colored(str(s.vmax+1), "WHITE") if s in store_rngs else colored(str(s.vmax+1), "red") for s in rng])
+  name = "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), "WHITE" if s in store_rngs else "red") for s in rng])
 
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
