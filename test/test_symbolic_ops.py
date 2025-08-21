@@ -232,7 +232,7 @@ class TestSymbolicOps(unittest.TestCase):
     a = Tensor.rand(10, 3)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      for axis in [0, 1, None]:
+      for axis in [None, 0, 1]:
         expected = a.shrink(((0,i), (0,3))).var(axis).numpy()
         symbolic = a.shrink(((0,vi), (0,3))).var(axis).reshape(expected.shape).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
