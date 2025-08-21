@@ -413,15 +413,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
-    return self.src[0].base
-
-  def as_buf(self) -> UOp:
-    # TODO: this should be the only one of these
-    s = self
-    while len(s.src) and s.op is not Ops.BUFFER: s = s.src[0]
-    return s
-
+    assert self.op in {Ops.ASSIGN, Ops.STORE, Ops.INDEX, Ops.RESHAPE}, f"must be ASSIGN {self.op}"
+    return self.src[0].buf_uop
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
@@ -568,7 +561,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
-    ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
+    with Context(TRACK_MATCH_STATS=0):
+      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 class AxisType(Enum):

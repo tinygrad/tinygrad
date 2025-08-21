@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, PARTIAL_CONTIG
+from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
@@ -347,8 +348,8 @@ def add_load_on_store(x:UOp, st:UOp):
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
-  (UPat(Ops.STORE, name="st").f(Ops.INDEX, allow_any_len=True, name="x"), add_load_on_store),
+  #(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="b"), UPat()), name="idx"), add_load_on_buffer),
+  #(UPat(Ops.STORE, name="st").f(Ops.INDEX, allow_any_len=True, name="x"), add_load_on_store),
 ])
 
 # 5. split into kernels
@@ -370,15 +371,27 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
-  buf = assign.as_buf()
+  buf = assign.buf_uop
+  if buf is assign: return None
   assert buf not in ctx.map
+  # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
+  if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   ctx.map[buf] = assign
   return buf
+
+def add_load(idx:UOp, dg:UOp):
+  if isinstance(idx.dtype, PtrDType): return None
+  rngs = idx.src[1:]
+  shape = tuple([int(r.vmax+1) for r in rngs])
+  return idx.replace(dtype=dg.dtype, src=(dg, collapse_to_1(shape, rngs)), arg=None).load()
 
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat(Ops.ASSIGN, name="assign"), handle_assign),
+  (UPat((Ops.ASSIGN, Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
+
+  # TODO: this can be moved into codegen?
+  (UPat(Ops.DEFINE_GLOBAL, name="dg").f(Ops.INDEX, name="idx", allow_any_len=True), add_load),
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
@@ -400,15 +413,17 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
-  return x.as_buf().assign(kernel)
+  return x.buf_uop.assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
+  # HACK
+  #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0]),
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
-  tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
+  tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
