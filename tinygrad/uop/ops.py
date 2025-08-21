@@ -378,7 +378,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
-  def forced_reshape(self, arg:tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, src=(self,), arg=arg)
+  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
@@ -417,7 +417,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0].base
 
   def as_buf(self) -> UOp:
-    # TODO: this should be the only one of these
+    if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)
+    if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.as_buf() for x in self.src))
+    # TODO: this should be the only one of these. this is the one RANGEIFY uses
     s = self
     while len(s.src) and s.op is not Ops.BUFFER: s = s.src[0]
     return s
@@ -568,7 +570,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
-    ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
+    with Context(TRACK_MATCH_STATS=0):
+      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 class AxisType(Enum):
@@ -773,7 +776,7 @@ class PatternMatcher:
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
+  def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ler = {u.op for u in uop.src}
