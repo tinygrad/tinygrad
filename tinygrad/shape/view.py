@@ -325,7 +325,7 @@ class View:
     if 0 in self.shape: return View.create(new_shape)
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 
-    if not self_all_int and self.min_size() < (prod(new_shape) if all_int(new_shape) else prod(new_shape).vmax):
+    if not self_all_int and resolve(prod(self.shape) < prod(new_shape), True):
       raise ValueError(f"symbolic reshape might lead to OOB: {self.shape=} -> {new_shape=}")
 
     # after the asserts, it's okay to check contiguous

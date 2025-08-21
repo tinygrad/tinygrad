@@ -840,10 +840,16 @@ class TestRender(unittest.TestCase):
     self.assertEqual(valid.render(), "(ridx0<2)")
 
 class TestVariableReshape(unittest.TestCase):
-  # TODO: maybe these too
   def test_reshape(self):
-    st = ShapeTracker.from_shape((3,))
+    st = ShapeTracker.from_shape((10,))
     st = st.reshape((Variable("i", 1, 10),))
+    assert len(st.views) == 1
+
+  def test_double_reshape(self):
+    st = ShapeTracker.from_shape((10,))
+    i = Variable("i", 1, 10)
+    st = st.shrink(((0, i),))
+    st = st.reshape((i,)).reshape((1, i))
     assert len(st.views) == 1
 
   def test_reshape_stride_0(self):

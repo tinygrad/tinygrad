@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable
-from tinygrad.helpers import Context
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
@@ -23,43 +22,40 @@ class TestTensorVariable(unittest.TestCase):
     assert (Tensor(3) * (vv * 4)).item() == 24
 
   def test_symbolic_mean(self):
-    with Context(IGNORE_OOB=1):
-      vv = Variable("a", 1, 10).bind(2)
-      t = Tensor.ones(2, 2).contiguous().reshape(2, vv)
-      ret = t.mean().item()
-      assert ret == 1
+    vv = Variable("a", 1, 10).bind(2)
+    t = Tensor.ones(2, 10).contiguous()[:, :vv]
+    ret = t.mean().item()
+    assert ret == 1
 
   def test_symbolic_mean_2d(self):
-    with Context(IGNORE_OOB=1):
-      vv = Variable("a", 1, 10).bind(2)
-      vv2 = Variable("b", 1, 10).bind(2)
-      t = Tensor.ones(2, 2).contiguous().reshape(vv2, vv)
-      ret = t.mean().item()
-      assert ret == 1
+    vv = Variable("a", 1, 10).bind(2)
+    vv2 = Variable("b", 1, 10).bind(2)
+    t = Tensor.ones(100).contiguous()[:vv*vv2]
+    t = t.reshape(vv2, vv)
+    ret = t.mean().item()
+    assert ret == 1
 
   def test_symbolic_mean_2d_axis_1(self):
-    with Context(IGNORE_OOB=1):
-      vv = Variable("a", 1, 10).bind(2)
-      vv2 = Variable("b", 1, 10).bind(2)
-      t = Tensor.ones(2, 2).contiguous().reshape(vv2, vv)
-      ret = t.mean(axis=1).reshape(2, 1).numpy()
-      assert np.all(ret == 1)
+    vv = Variable("a", 1, 10).bind(2)
+    vv2 = Variable("b", 2, 10).bind(2)
+    t = Tensor.ones(100).contiguous()[:vv*vv2]
+    t = t.reshape(vv2, vv)
+    ret = t.mean(axis=1).reshape(2, 1).numpy()
+    assert np.all(ret == 1)
 
   def test_symbolic_mean_2d_add(self):
-    with Context(IGNORE_OOB=1):
-      add_term = Variable("c", 0, 10).bind(1)
-      vv = Variable("a", 1, 10).bind(1)
-      vv2 = Variable("b", 1, 10).bind(1)
-      t = Tensor.ones(2, 2).contiguous().reshape(vv2+add_term, vv+add_term)
-      ret = t.mean().item()
-      assert ret == 1
+    add_term = Variable("c", 0, 2).bind(1)
+    vv = Variable("a", 1, 10).bind(1)
+    vv2 = Variable("b", 1, 10).bind(1)
+    t = Tensor.ones(200).contiguous()[:(vv2+add_term)*(vv+add_term)].reshape(vv2+add_term, vv+add_term)
+    ret = t.mean().item()
+    assert ret == 1
 
   def test_symbolic_var(self):
-    with Context(IGNORE_OOB=1):
-      vv = Variable("a", 1, 10).bind(2)
-      t = Tensor.ones(2, 2).contiguous().reshape(2, vv)
-      ret = t.var().item()
-      assert ret == 0
+    vv = Variable("a", 1, 10).bind(2)
+    t = Tensor.ones(20).contiguous()[:2*vv].reshape(2, vv)
+    ret = t.var().item()
+    assert ret == 0
 
   def test_symbolic_pad(self):
     vv = Variable("a", 1, 10).bind(2)
@@ -72,10 +68,10 @@ class TestTensorVariable(unittest.TestCase):
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10)
     ret = Tensor.arange(0, vv.bind(4))
-    self.assertListEqual(ret.reshape(4).tolist(), [0,1,2,3])
+    self.assertListEqual(ret.shrink(((0, 4),)).tolist(), [0,1,2,3])
 
   def test_symbolic_arange_sym_start(self):
-    vv = Variable("a", 1, 6)
+    vv = Variable("a", 1, 4)
     ret = Tensor.arange(vv.bind(4), 7)
     self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
 
@@ -87,8 +83,8 @@ class TestTensorVariable(unittest.TestCase):
     self.assertListEqual(ret.reshape(5).tolist(), [0,2,4,6,8])
 
   def test_symbolic_arange_two_vars(self):
-    begin = Variable("b", 1, 5)
-    end = Variable("e", 6, 10)
+    begin = Variable("b", 1, 4)
+    end = Variable("e", 7, 10)
     ret = Tensor.arange(begin.bind(4), end.bind(7))
     self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
 
