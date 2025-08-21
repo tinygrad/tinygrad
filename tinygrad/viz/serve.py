@@ -93,7 +93,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
 def _reconstruct(a:int):
   op, dtype, src, arg, tag, metadata = contexts[2][a]
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag, metadata=metadata)
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag, metadata)
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}

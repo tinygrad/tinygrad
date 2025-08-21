@@ -795,7 +795,7 @@ def track_uop(u:UOp):
   uop_number[u] = num = next(ucount)
   # KERNEL also has a UOp in the arg
   arg = type(u.arg)(track_uop(u.arg.ast), u.arg.metadata) if u.op is Ops.KERNEL else u.arg
-  uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag)+((u.metadata,) if TRACEMETA >= 2 else ())
+  uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag, u.metadata if TRACEMETA>=2 else None)
   return num
 
 # *** tracking pattern matcher ***
