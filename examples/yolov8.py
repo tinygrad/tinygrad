@@ -41,7 +41,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   return im
 
 
-def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, class_labels):
+def draw_bounding_boxes_and_save(predictions, class_labels,orig_img=None,orig_img_path=None, output_img_path=None, draw_only=True,path=False):
   color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -49,8 +49,9 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
     r, g, b = color
     brightness = (r * 299 + g * 587 + b * 114) / 1000
     return brightness > 127
-
-  orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
+  
+  if path:
+    orig_img = cv2.imread(orig_img_path) if not isinstance(orig_img_path, np.ndarray) else cv2.imdecode(orig_img_path, 1)
   height, width, _ = orig_img.shape
   box_thickness = int((height + width) / 400)
   font_scale = (height + width) / 2500
@@ -69,13 +70,16 @@ def draw_bounding_boxes_and_save(orig_img_path, output_img_path, predictions, cl
     font_color = (0, 0, 0) if is_bright_color(color) else (255, 255, 255)
     cv2.putText(orig_img, label, (x1, label_y), font, font_scale, font_color, 1, cv2.LINE_AA)
     object_count[class_labels[class_id]] += 1
+  
+  if not draw_only:
+    print("Objects detected:")
+    for obj, count in object_count.items():
+        print(f"- {obj}: {count}")
 
-  print("Objects detected:")
-  for obj, count in object_count.items():
-    print(f"- {obj}: {count}")
-
-  cv2.imwrite(output_img_path, orig_img)
-  print(f'saved detections at {output_img_path}')
+    cv2.imwrite(output_img_path, orig_img)
+    print(f'saved detections at {output_img_path}')
+  else:
+    return orig_img
 
 # utility functions for forward pass.
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
@@ -365,33 +369,69 @@ if __name__ == '__main__':
   yolo_variant = sys.argv[2] if len(sys.argv) >= 3 else (print("No variant given, so choosing 'n' as the default. Yolov8 has different variants, you can choose from ['n', 's', 'm', 'l', 'x']") or 'n')
   print(f'running inference for YOLO version {yolo_variant}')
 
-  output_folder_path = Path('./outputs_yolov8')
-  output_folder_path.mkdir(parents=True, exist_ok=True)
-  #absolute image path or URL
-  image_location = np.frombuffer(fetch(img_path).read_bytes(), np.uint8)
-  image = [cv2.imdecode(image_location, 1)]
-  out_path = (output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()
-  if not isinstance(image[0], np.ndarray):
-    print('Error in image loading. Check your image file.')
-    sys.exit(1)
-  pre_processed_image = preprocess(image)
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
   state_dict = safe_load(get_weights_location(yolo_variant))
   load_state_dict(yolo_infer, state_dict)
-
-  st = time.time()
-  predictions = yolo_infer(pre_processed_image).numpy()
-
-  print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
   #v8 and v3 have same 80 class names for Object Detection
   class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
-  predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
-  draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels)
+
+  if img_path == 'webcam':
+    webcamera = cv2.VideoCapture(0)
+    while webcamera.isOpened():
+        success, image = webcamera.read()
+        if not success:
+            print("Can't receive frame (stream end?). Exiting ...")
+            break
+
+        image = [cv2.cvtColor(image, cv2.IMREAD_COLOR)]
+    
+        if not isinstance(image[0], np.ndarray):
+            print('Error in image loading. Check your image file.')
+            sys.exit(1)
+    
+        pre_processed_image = preprocess(image)
+
+        st = time.time()
+        predictions = yolo_infer(pre_processed_image).numpy()
+    
+        predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
+        out_image = draw_bounding_boxes_and_save(orig_img=image[0], predictions=predictions, class_labels=class_labels)
+        ti = round(1/((time.time() - st)+0.0001),2)
+        cv2.putText(out_image, f"{ti} frame/sec", (10, 30),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.imshow("Live Camera", out_image)
+
+        if cv2.waitKey(1) == ord('q'):
+            break
+
+    webcamera.release()
+    cv2.destroyAllWindows()
+  else:
+
+    output_folder_path = Path('./outputs_yolov8')
+    output_folder_path.mkdir(parents=True, exist_ok=True)
+    #absolute image path or URL
+    image_location = np.frombuffer(fetch(img_path).read_bytes(), np.uint8)
+    image = [cv2.imdecode(image_location, 1)]
+    out_path = (output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix or '.png'}").as_posix()
+
+    if not isinstance(image[0], np.ndarray):
+        print('Error in image loading. Check your image file.')
+        sys.exit(1)
+  
+    pre_processed_image = preprocess(image)
+
+    st = time.time()
+    predictions = yolo_infer(pre_processed_image).numpy()
+
+    print(f'did inference in {int(round(((time.time() - st) * 1000)))}ms')
+  
+    predictions = scale_boxes(pre_processed_image.shape[2:], predictions, image[0].shape)
+    draw_bounding_boxes_and_save(orig_img_path=image_location, output_img_path=out_path, predictions=predictions, class_labels=class_labels, draw_only=False,path=True)
 
 # TODO for later:
 #  1. Fix SPPF minor difference due to maxpool
 #  2. AST exp overflow warning while on cpu
 #  3. Make NMS faster
-#  4. Add video inference and webcam support
+#  4. Add video inferencet
