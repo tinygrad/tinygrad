@@ -312,7 +312,7 @@ class View:
     if not all(x >= 0 for x in new_shape): raise ValueError(f"shape can't contain negative numbers {new_shape}")
     # check for the same size
     if (self_all_int := all_int(self.shape)):
-      assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
+      assert all(isinstance(s, int) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non int dims"
       if resolve(prod(self.shape) != prod(new_shape), False): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if 0 in self.shape: return View.create(new_shape)
