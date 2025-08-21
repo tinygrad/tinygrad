@@ -129,12 +129,6 @@ class View:
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def min_size(self) -> int:
-    ret = prod([x.vmin if isinstance(x, UOp) else x for x in self.shape])
-    assert isinstance(ret, int), f"{ret=} is not int"
-    return ret
-
   @staticmethod
   @functools.cache
   def create(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None, offset:sint=0, mask:tuple[tuple[sint, sint], ...]|None=None):
