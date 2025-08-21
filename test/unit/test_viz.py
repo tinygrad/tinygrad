@@ -242,11 +242,12 @@ class TestVizIntegration(BaseTestViz):
 
   def test_metadata_tracing(self):
     with Context(TRACEMETA=2):
-      a = Tensor.empty(32)
-      alu_uop = (alu:=a+1).uop
+      a = Tensor.empty(1)
+      b = Tensor.empty(1)
+      metadata = (alu:=a+b).uop.metadata
       alu.kernelize()
       graph = next(get_details(tracked_ctxs[0][0]))["graph"]
-    assert repr(alu_uop.metadata) in graph[id(alu_uop)]["label"]
+    self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
