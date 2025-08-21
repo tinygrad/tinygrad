@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, Context
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -239,6 +239,14 @@ class TestVizIntegration(BaseTestViz):
     self.assertEqual(len(lst), 2)
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
+
+  def test_metadata_tracing(self):
+    with Context(TRACEMETA=2):
+      a = Tensor.empty(32)
+      alu_uop = (alu:=a+1).uop
+      alu.kernelize()
+      graph = next(get_details(tracked_ctxs[0][0]))["graph"]
+    assert repr(alu_uop.metadata) in graph[id(alu_uop)]["label"]
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
