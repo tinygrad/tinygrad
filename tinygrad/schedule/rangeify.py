@@ -370,7 +370,7 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
-  buf = assign.as_buf()
+  buf = assign.buf_uop
   assert buf not in ctx.map
   ctx.map[buf] = assign
   return buf
@@ -382,7 +382,7 @@ to_define_global = PatternMatcher([
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store)),
+    lambda store,idx: idx.replace(src=(store.buf_uop,)+idx.src[1:]).load(store)),
 
   # HACK
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -400,7 +400,7 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret, ()))
-  return x.as_buf().assign(kernel)
+  return x.buf_uop.assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
