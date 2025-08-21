@@ -417,6 +417,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0].base
 
   def as_buf(self) -> UOp:
+    if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)
+    if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.as_buf() for x in self.src))
     # TODO: this should be the only one of these. this is the one RANGEIFY uses
     s = self
     while len(s.src) and s.op is not Ops.BUFFER: s = s.src[0]
@@ -774,7 +776,7 @@ class PatternMatcher:
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
+  def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ler = {u.op for u in uop.src}

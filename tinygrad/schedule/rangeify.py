@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, PARTIAL_CONTIG
+from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
@@ -334,6 +335,10 @@ def bufferize_to_store(x:UOp):
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+
+  # move RESHAPEs through MSELECT/MSTACK
+  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
+   lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
 ])
 
 # 5. split into kernels
@@ -357,13 +362,15 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
 def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
   buf = assign.as_buf()
   assert buf not in ctx.map
+  # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
+  if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   ctx.map[buf] = assign
   return buf
 
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat(Ops.ASSIGN, name="assign"), handle_assign),
+  (UPat((Ops.ASSIGN, Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
@@ -398,7 +405,7 @@ split_kernels = PatternMatcher([
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
-  tensor_map = graph_rewrite_map(sink, earliest_rewrites, name="earliest")
+  tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
