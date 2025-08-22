@@ -2,7 +2,7 @@ import unittest, math
 import numpy as np
 from tinygrad import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.uop.decompositions import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction
+from tinygrad.uop.decompositions import TRANSCENDENTAL_DTYPES, payne_hanek_reduction, cody_waite_reduction
 from tinygrad.uop.decompositions import frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
 from test.helpers import eval_uop
 
@@ -89,7 +89,7 @@ class TestTranscendentalVectorizedFunctions(unittest.TestCase):
       assert u1.op == u2.op, f'expected {u1.op=} but got {u2.op=} for UOps\n{u1=}\n{u2}'
     [self._check_uops_match(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
-  def _test_vectorized(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
+  def _test_vectorized(self, fxn, scalar_dtypes=TRANSCENDENTAL_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
       for val in vals:
         for vcount in vcounts:

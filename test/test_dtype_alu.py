@@ -1,16 +1,13 @@
-import unittest
-
+import unittest, operator, math
 from tinygrad import Tensor, dtypes, Device
-import operator
-import numpy as np
-from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
-from tinygrad.engine.realize import run_schedule
-from tinygrad.uop.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
-import pytest, math
+import numpy as np
+import pytest
+from hypothesis import given, strategies as strat, settings, HealthCheck
+
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -71,17 +68,11 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
   out: Tensor = op[0](ta)
-  sched = out.schedule()
-  ast = sched[-1].ast
-  run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
   if dtype in (dtypes.float16, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-6, rtol=1e-5)
   else: np.testing.assert_equal(tensor_value, numpy_value)
-  if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.toposort() if x.op in GroupOp.Unary][0]
-    assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)

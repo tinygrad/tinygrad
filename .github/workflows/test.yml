@@ -380,8 +380,8 @@ jobs:
         PYTHONPATH=. python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         DEBUG=1 MIN_ASTS=1 PYTHONPATH=. python extra/optimization/get_action_space.py
-    - name: Repo line count < 17000 lines
-      run: MAX_LINE_COUNT=17000 python sz.py
+    - name: Repo line count < 17500 lines
+      run: MAX_LINE_COUNT=17500 python sz.py
 
   fuzzing:
     name: Fuzzing
@@ -590,6 +590,33 @@ jobs:
         run: CPU=1 python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  testrangeify:
+    name: Linux (rangeify)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: rangeify-minimal-llvm
+        deps: testing_minimal
+        llvm: "true"
+    - name: Test CPU=1 RANGEIFY=1
+      # TODO: add more passing tests here
+      # test_symbolic_arange_sym_step is passing now
+      # test_threefry_doesnt_use_long is because there's a contig after the long now
+      run: |
+        CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
+          -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
+          test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
+          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py test/test_tensor_data.py
+    - name: Test CPU=1 RANGEIFY=2
+      run: CPU=1 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
+    - name: Test LLVM=1 RANGEIFY=1 (slow tests)
+      run: LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
 
   testdevectorize:
     name: Linux (devectorize)

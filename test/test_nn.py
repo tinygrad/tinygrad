@@ -210,6 +210,27 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
+  def test_layernorm_forward(self):
+    N, C, H, W = 20, 5, 10, 10
+
+    # create in torch
+    torch_layer = torch.nn.LayerNorm([H, W]).eval()
+
+    # create in tinygrad
+    layer = LayerNorm([H, W])
+    layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
+    layer.bias = Tensor(torch_layer.bias.detach().numpy(), requires_grad=True)
+
+    x = Tensor.empty(N, C, H, W, requires_grad=True)
+    z = layer(x)
+    z.realize()
+
+    torch_x = torch.tensor(x.numpy(), requires_grad=True)
+    torch_z = torch_layer(torch_x)
+    torch_z.sum().backward()
+
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+
   def test_layernorm(self):
     N, C, H, W = 20, 5, 10, 10
 
