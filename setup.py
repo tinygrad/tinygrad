@@ -104,5 +104,8 @@ setup(name='tinygrad',
             "black",
             "numpy",
         ],
+        'typed': [
+            "typeguard",
+        ],
       },
       include_package_data=True)
