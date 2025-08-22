@@ -70,6 +70,8 @@ symbolic_simple = PatternMatcher([
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast().named('a').cast().named('b'), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
   # ** pow **
+  # abs(x) ** 2 -> x ** 2, abs(x) -> x*x.sign(), sign matched by checking bounds and dtype, doesnt handle 0, could refactor abs to remove sign dependency in that case??
+  ((UPat.var("x") * UPat.var("y")).pow(UPat.cvar("n")), lambda x,y,n: x.pow(n) if n.arg % 2 == 0 and dtypes.is_int(y.dtype) and y.vmin >= -1 and y.vmax <= 1 else None),
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
@@ -352,8 +354,6 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
-  # abs(x) ** 2 -> x ** 2, abs(x) -> x*x.sign(), sign matched by checking bounds and dtype, can try to decompose it with a bunch of wheres instead but this works??
-  ((UPat.var("x") * UPat.var("y")).pow(2), lambda x,y: x.pow(2) if dtypes.is_int(y.dtype) and y.vmin >= -1 and y.vmax <= 1 else None),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
