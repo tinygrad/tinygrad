@@ -3141,6 +3141,19 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.type(torch.uint8).min(),
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
+  def test_log_bfloat16(self):
+    torch_result = torch.log(torch.tensor([12.0], dtype=torch.bfloat16))
+    tiny_result = Tensor([12.0], dtype="bfloat16").log()
+    np.testing.assert_allclose(tiny_result.float().numpy(), torch_result.float().numpy(), rtol=1e-3, atol=1e-3)
+  def test_cos_bfloat16(self):
+    torch_result = torch.cos(torch.tensor([12.0], dtype=torch.bfloat16))
+    tiny_result = Tensor([12.0], dtype="bfloat16").cos()
+    np.testing.assert_allclose(tiny_result.float().numpy(), torch_result.float().numpy(), rtol=1e-3, atol=1e-3)
+  def test_exp_bfloat16(self):
+    torch_result = torch.exp(torch.tensor([12.0], dtype=torch.bfloat16))
+    tiny_result = Tensor([12.0], dtype="bfloat16").exp()
+    np.testing.assert_allclose(tiny_result.float().numpy(), torch_result.float().numpy(), rtol=1e-3, atol=1e-3)
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
