@@ -104,7 +104,7 @@ class AMPageTableEntry:
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
   def address(self, entry_id:int) -> int: return self.entries[entry_id] & 0x0000FFFFFFFFF000
-  def is_huge_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
+  def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
@@ -239,7 +239,7 @@ class AMDev(PCIDevImplBase):
       ip_offset = ctypes.addressof(self.bhdr) + ctypes.sizeof(dhdr) + ihdr.die_info[num_die].die_offset
       for _ in range(dhdr.num_ips):
         ip = am.struct_ip_v4.from_address(ip_offset)
-        ba = (ctypes.c_uint32 * ip.num_base_address).from_address(ip_offset + 8)
+        ba = ((ctypes.c_uint64 if ihdr.base_addr_64_bit else ctypes.c_uint32) * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
           if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
             self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
