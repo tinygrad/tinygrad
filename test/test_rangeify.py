@@ -132,6 +132,20 @@ class TestOuterworld(unittest.TestCase):
 
     self.assertTrue((t.flip(0)==cpy).all().item())
 
+  def test_vmap(self):
+    def f(x): return x.sum(axis=0)*2
+
+    x = Tensor.ones(3, 10, 2).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(dtypes.int, 3, -1)
+    out = f(x[a])
+    out = out.contiguous(a)
+
+    # 3x2 grid of 20
+    out.realize()
+    print(out.numpy())
+
   def test_triple_gemm(self):
     x = Tensor.rand(1, 16).realize()
     W = Tensor.rand(3, 16, 16).realize()
