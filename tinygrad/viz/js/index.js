@@ -187,7 +187,7 @@ async function renderProfiler() {
         }
         const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
         // offset y by depth
-        shapes.push({x:e.st-st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
@@ -195,7 +195,7 @@ async function renderProfiler() {
       const yscale = d3.scaleLinear().domain([0, v.peak]).range([height, 0]);
       const shapes = [];
       for (const [i,e] of v.shapes.entries()) {
-        const x = e.x.map(tsIdx => v.timestamps[tsIdx]-st);
+        const x = e.x.map(tsIdx => v.timestamps[tsIdx]);
         const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
         shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+e.arg.nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
       }
