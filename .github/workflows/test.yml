@@ -67,10 +67,11 @@ jobs:
       run: |
         mkdir $GITHUB_WORKSPACE/test_dir
         cd $GITHUB_WORKSPACE/test_dir
-        python -m venv venv_typed
+        python -m venv venv
         source venv_typed/bin/activate
         pip install $GITHUB_WORKSPACE[typed]
         TYPED=1 python -c "import tinygrad"
+        pip install mypy
         TYPED=1 mypy -c "import tinygrad"
     - name: Run beautiful_mnist with tinygrad only
       run: |
