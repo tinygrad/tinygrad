@@ -29,14 +29,14 @@ class TestAttention(unittest.TestCase):
     def rope_fn(x_in, pos): return apply_rope(x_in, pos)
     rope_noprune = TinyJit(rope_fn)
     rope_prune = TinyJit(rope_fn, prune=True)
-    
+
     v_pos = UOp.variable("start_pos", 0, 100)
     for _ in range(3):
       rope_noprune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
       rope_prune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
     noprune_size = len(rope_noprune.captured.jit_cache)
     prune_size = len(rope_prune.captured.jit_cache)
-    
+
     self.assertGreater(noprune_size, prune_size)
     self.assertGreaterEqual(noprune_size, 3)
     self.assertEqual(prune_size, 1)
