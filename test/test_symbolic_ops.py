@@ -9,14 +9,13 @@ from examples.gpt2 import Attention
 import numpy as np
 
 class TestSymbolicOps(unittest.TestCase):
-  # TODO: check spacing eg pad(((0, 0), (0,0))) might be littered around
   def test_plus1(self):
     def f(a): return (a+1).realize()
     a = Tensor.rand(3, 10)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       # Pad to max size then shrink down to remove symbolic shape
-      symbolic = f(a[:, :vi]).pad((0, 10-vi))[:, :i].numpy()
+      symbolic = f(a[:, :vi]).pad((0,10-vi))[:, :i].numpy()
       expected = f(a[:, :i]).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
@@ -26,7 +25,7 @@ class TestSymbolicOps(unittest.TestCase):
     b = Tensor.rand(3, 10)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      symbolic = f(a[:, :vi], b[:, :vi]).pad((0, 10-vi))[:, :i].numpy()
+      symbolic = f(a[:, :vi], b[:, :vi]).pad((0,10-vi))[:, :i].numpy()
       expected = f(a[:, :i], b[:, :i]).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
@@ -88,7 +87,7 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       b = Tensor.rand(2, 3)
-      symbolic = f(a[:vi, :], b).pad(((0, 12-vi),(0,0)))[:i+2].numpy()
+      symbolic = f(a[:vi, :], b).pad(((0,12-vi), (0,0)))[:i+2].numpy()
       expected = f(a[:i, :], b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
@@ -98,7 +97,7 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       b = Tensor.rand(3, 2)
-      symbolic = f(a[:, :vi], b).pad(((0,0),(0,12-vi)))[:, :i+2].numpy()
+      symbolic = f(a[:, :vi], b).pad(((0,0), (0,12-vi)))[:, :i+2].numpy()
       expected = f(a[:, :i], b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
@@ -111,7 +110,7 @@ class TestSymbolicOps(unittest.TestCase):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         symbolic = f(a[:vi, :], b[:vj, :])
-        symbolic = symbolic.pad(((0,10-vi),(0,0))).pad(((0, 10-vj),(0,0)))[:i+j].numpy()
+        symbolic = symbolic.pad(((0,10-vi),(0,0))).pad(((0,10-vj),(0,0)))[:i+j].numpy()
         expected = f(a[:i, :], b[:j, :]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
