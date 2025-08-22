@@ -441,18 +441,16 @@ class TestUOpGraph(unittest.TestCase):
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(Variable("i", 0, 20)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
-  @unittest.skip("outdated")
   def test_in_out_of_bounds_access_gated_store(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), src=(), arg=0)
       v = Variable("v", 0, 20)
-      st0 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), UOp.const(dtypes.int, 0), v<16))
+      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v), UOp.const(dtypes.int, 0), UOp(Ops.IF, src=(v<16,))))
       to_uops_list([st0])
 
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
       with self.assertRaises(RuntimeError): to_uops_list([st1])
 
-  @unittest.skip("outdated")
   def test_in_bounds_access_gated_local(self):
     with Context(IGNORE_OOB=0):
       # Define buffers
@@ -465,7 +463,7 @@ class TestUOpGraph(unittest.TestCase):
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx), UOp.const(dtypes.uint, 1), lidx<8))
+      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx), UOp.const(dtypes.uint, 1), UOp(Ops.IF, src=(lidx<8,))))
 
       barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
       if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))
