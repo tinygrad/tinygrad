@@ -116,7 +116,7 @@ class TestOuterworld(unittest.TestCase):
     t = Tensor.rand(10, 10).realize()
 
     # passthrough ranges
-    a = UOp.range(dtypes.int, 10, 9999)
+    a = UOp.range(dtypes.int, 10, -1)
     sel = t[a]
     cpy = sel.contiguous(a).realize()
 
@@ -126,11 +126,23 @@ class TestOuterworld(unittest.TestCase):
     t = Tensor.rand(10, 10).realize()
 
     # passthrough ranges
-    a = UOp.range(dtypes.int, 10, 9999)
+    a = UOp.range(dtypes.int, 10, -1)
     sel = t[9-a]
     cpy = sel.contiguous(a).realize()
 
     self.assertTrue((t.flip(0)==cpy).all().item())
+
+  def test_triple_gemm(self):
+    x = Tensor.rand(1, 16).realize()
+    W = Tensor.rand(3, 16, 16).realize()
+
+    manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
+
+    a = UOp.range(dtypes.int, 3, -1)
+    x = x.assign(x @ W[a])
+    out = x.contiguous(a)[-1].contiguous().realize()
+
+    self.assertTrue((manual==out).all().item())
 
 if __name__ == '__main__':
   unittest.main()
