@@ -390,8 +390,6 @@ def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
     cache_misses = info.misses
   return ret
 
-shape_cache: dict[tuple[tuple[int, ...], str], Tensor] = {}
-
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
 limit = int(getenv("ONNXLIMIT", "-1"))
@@ -613,14 +611,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return value.expand(shape)
 
   def Size(data:Tensor): return data.numel()
-  def Shape(data:Tensor, end:int|None=None, start:int=0):
-    shape = tuple(data.shape[start:end])
-    key = cast(tuple[tuple[int, ...], str], (shape, data.device))
-    # so that to_python_const can hit cache
-    if key in shape_cache: return shape_cache[key]
-    t = Tensor(shape, dtype=dtypes.int64)
-    shape_cache[key] = t
-    return t
+  def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
 
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
