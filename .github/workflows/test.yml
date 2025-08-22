@@ -65,14 +65,14 @@ jobs:
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Use as an external package (with TYPED=1)
       run: |
-        mkdir $GITHUB_WORKSPACE/test_dir
-        cd $GITHUB_WORKSPACE/test_dir
+        mkdir $HOME/test_external_typed_dir
+        cd $HOME/test_external_typed_dir
         python -m venv venv
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE[typed]
         TYPED=1 python -c "import tinygrad"
         pip install mypy
-        TYPED=1 mypy -c "import tinygrad"
+        TYPED=1 mypy -c 'import tinygrad'
     - name: Run beautiful_mnist with tinygrad only
       run: |
         mkdir $GITHUB_WORKSPACE/test_dir
