@@ -177,8 +177,8 @@ class Tensor(MathTrait):
     all_tensors[weakref.ref(self)] = None
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable, *x:Tensor, **kwargs) -> Tensor:
-    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], **kwargs)
+  def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
+    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
     if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
@@ -2941,11 +2941,11 @@ class Tensor(MathTrait):
     """
     return self*-1 if self.dtype != dtypes.bool else self.logical_not()
 
-  def contiguous(self, **kwargs) -> Tensor:
+  def contiguous(self, *args, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
     """
-    return self._apply_uop(UOp.contiguous, **kwargs)
+    return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
 
   def fuse(self) -> Tensor:
     """
