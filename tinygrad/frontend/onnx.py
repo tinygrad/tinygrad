@@ -266,7 +266,7 @@ class OnnxPBParser:
         case 3: obj["i"] = self.reader.read_int64()
         case 4: obj["s"] = self.reader.read_bytes().data().tobytes().decode("utf8")
         case 5: obj["t"] = self._parse_TensorProto()['parsed_tensor']
-        case 6: obj["g"] = SubGraphOnnxRunner(self._parse_GraphProto())
+        case 6: obj["g"] = OnnxRunner._from_subgraph(self._parse_GraphProto())
         case 7: obj["floats"].append(self.reader.read_float())
         case 8: obj["ints"].append(self.reader.read_int64())
         case 9: obj["strings"].append(self.reader.read_bytes().data().tobytes().decode("utf8"))
@@ -406,8 +406,9 @@ class OnnxRunner:
     model = OnnxPBParser(model_path, load_external_data=True).parse()
     self._init_from_graph(model["graph"])
 
-  def _init_from_graph(self, graph: dict):
+  def _init_from_graph(self, graph: dict, is_subgraph: bool = False):
     self.is_training = any(n['parsed_node'].opset_id.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in graph["node"])
+    self.graph_name = graph["name"] if is_subgraph else ""
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
@@ -418,6 +419,12 @@ class OnnxRunner:
 
     self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
+
+  @classmethod
+  def _from_subgraph(cls, graph: dict) -> "OnnxRunner":
+    subgraph = cls.__new__(cls)
+    subgraph._init_from_graph(graph, is_subgraph=True)
+    return subgraph
 
   def _parse_input(self, name: str, value: Any, spec: OnnxValue):
     if spec.is_optional and value is None: return None
@@ -474,7 +481,7 @@ class OnnxRunner:
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
 
-      if debug >= 1: print(("[SubGraph] " if isinstance(self, SubGraphOnnxRunner) else "") + f"{num}: op '{node.op}' opt {opts}")
+      if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
       ret = self._select_op(node.op, node.opset_id)(*inps, **opts)
       ret = ret if isinstance(ret, tuple) else (ret,)
@@ -487,11 +494,6 @@ class OnnxRunner:
         return {name:self.graph_values[name] for name in node.outputs}
     Tensor.training = self.old_training
     return {name:self.graph_values[name] for name in self.graph_outputs}
-
-class SubGraphOnnxRunner(OnnxRunner):
-  """Usage: https://onnx.ai/onnx/intro/concepts.html#subgraphs-tests-and-loops"""
-  # pylint: disable=W0231 # super-init-not-called
-  def __init__(self, graph: dict): self._init_from_graph(graph)
 
 ####################
 ##### ONNX OPS #####
@@ -559,13 +561,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Property/Graph Ops *****
-  def If(condition:Tensor, else_branch:SubGraphOnnxRunner, then_branch:SubGraphOnnxRunner, intermediate_tensors:dict[str, Tensor]):
-    def run_branch(branch:SubGraphOnnxRunner):
+  def If(condition:Tensor, else_branch:OnnxRunner, then_branch:OnnxRunner, intermediate_tensors:dict[str, Tensor]):
+    def run_branch(branch:OnnxRunner):
       branch.graph_values.update(intermediate_tensors)
       out = branch({k:intermediate_tensors[k] for k in branch.graph_inputs.keys()})
       # dereference intermediate tensors so Buffer can be deallocated
       for k in intermediate_tensors: del branch.graph_values[k]
       return out
+    # both branch must be ran before the condition can be evaluated
     else_out, then_out = run_branch(else_branch), run_branch(then_branch)
     assert len(else_out) == len(then_out), f"else_out and then_out must have the same number of outputs: {len(else_out)} != {len(then_out)}"
     # can use where op when output shape is the same
