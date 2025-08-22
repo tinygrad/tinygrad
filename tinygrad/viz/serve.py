@@ -172,7 +172,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  timestamps.append(min_ts-max_ts)
+  timestamps.append(max_ts-min_ts)
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
