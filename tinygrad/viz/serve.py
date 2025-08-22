@@ -194,7 +194,7 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, min_ts)
     layout[f"{k} Memory"] = mem_layout(v, min_ts, unwrap(max_ts))
-  return json.dumps({"layout":layout, "dur":max_ts-min_ts}).encode("utf-8")
+  return json.dumps({"layout":layout, "dur":unwrap(max_ts)-min_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
