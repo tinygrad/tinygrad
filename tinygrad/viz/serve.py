@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -122,11 +122,19 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
+def enum_str(s, cache:dict[str, int]) -> int:
+  if (cret:=cache.get(s)) is not None: return cret
+  cache[s] = ret = len(cache)
+  return ret
+
+def option(s:int|None) -> int: return 0 if s is None else s+1
+
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int) -> dict:
-  shapes:list[dict] = []
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
+  shapes:list[bytes] = []
   levels:list[int] = []
   exec_points:dict[str, dict] = {}
+  category_enum:dict[str, int] = {}
   for st,et,dur,e in events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
@@ -143,10 +151,11 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int)
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st-start_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
-  return {"shapes":shapes, "maxDepth":len(levels)}
+    shapes.append(struct.pack("<IIIfBBI", enum_str(name,scache), option(ref), st-start_ts, dur, depth,
+                              option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "",scache)))
+  return struct.pack("<BIB", 0, len(shapes), len(levels))+b"".join(shapes) if shapes else None
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], scache:dict[str, int]) -> bytes|None:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -173,7 +182,10 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_
     v["x"].append(step)
     v["y"].append(v["y"][-1])
   timestamps.append(end_ts-start_ts)
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  peaks.append(peak)
+  bufs = [struct.pack("<I"+str(i:=len(v['x']))+f"I{i}QIQQ", i, *v["x"], *v["y"], enum_str(v["arg"]["dtype"], scache), v["arg"]["nbytes"],
+                      v["arg"]["sz"]) for v in shps.values()]
+  return struct.pack("<BIQI", 1, len(shps), peak, len(timestamps))+struct.pack(f"<{len(timestamps)}I", *timestamps)+b"".join(bufs) if bufs else None
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
@@ -189,12 +201,15 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if end_ts is None or et > end_ts: end_ts = et
   if start_ts is None: return None
   # return layout of per device events
-  layout:dict[str, dict] = {}
+  layout:dict[str, bytes|None] = {}
+  scache:dict[str, int] = {}
+  peaks:list[int] = []
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v, start_ts)
-    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts))
-  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts}).encode("utf-8")
+    layout[k] = timeline_layout(v, start_ts, scache)
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, scache)
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
+  return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(s:=(json.dumps(list(scache)).encode())), len(ret))+s+b"".join(ret)
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
