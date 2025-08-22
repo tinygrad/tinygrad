@@ -58,7 +58,7 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
+  # always realize ASSIGN/COPY/BUFFER_VIEW
   (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
@@ -70,7 +70,6 @@ add_contiguous = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
-early_cleanups = PatternMatcher([(UPat().contiguous(name="c").contiguous(), lambda c: c),])
 
 # 2. mark all children
 
@@ -419,7 +418,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], early_cleanups+remove_tags, input_map=tensor_map, name="cleanup")
+  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="cleanup")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
