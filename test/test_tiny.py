@@ -2,7 +2,6 @@
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
 from tinygrad.helpers import IMAGE, CI
-from tinygrad.uop.ops import resolve
 
 class TestTiny(unittest.TestCase):
 
