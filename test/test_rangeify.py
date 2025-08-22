@@ -105,5 +105,32 @@ class TestRangeify(unittest.TestCase):
     v = Tensor.empty(BS, HEADS, MATDIM, EMB)
     q.scaled_dot_product_attention(k, v).realize()
 
+from tinygrad import dtypes
+from tinygrad.uop.ops import UOp
+
+# contiguous + reduce can support ranges?
+
+@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
+class TestOuterworld(unittest.TestCase):
+  def test_passthrough_range(self):
+    t = Tensor.rand(10, 10).realize()
+
+    # passthrough ranges
+    a = UOp.range(dtypes.int, 10, 9999)
+    sel = t[a]
+    cpy = sel.contiguous(a).realize()
+
+    self.assertTrue((t==cpy).all().item())
+
+  def test_flip_range(self):
+    t = Tensor.rand(10, 10).realize()
+
+    # passthrough ranges
+    a = UOp.range(dtypes.int, 10, 9999)
+    sel = t[9-a]
+    cpy = sel.contiguous(a).realize()
+
+    self.assertTrue((t.flip(0)==cpy).all().item())
+
 if __name__ == '__main__':
   unittest.main()
