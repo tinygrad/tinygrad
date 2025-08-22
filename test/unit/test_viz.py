@@ -268,14 +268,19 @@ class TestVizProfiler(unittest.TestCase):
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
-            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
+            ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
+            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
+            ProfileDeviceEvent(device='NV:2', comp_tdiff=decimal.Decimal(-800), copy_tdiff=decimal.Decimal(-80))]
 
     j = json.loads(get_profile(prof))
 
     event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
-    self.assertEqual(event['st'], 900) # diff clock
+    self.assertEqual(event['st'], 0)   # first event
     self.assertEqual(event['dur'], 10)
+
+    event2 = j['layout']['NV:2']['shapes'][0]
+    self.assertEqual(event2['st'], 20) # second event, diff clock
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),

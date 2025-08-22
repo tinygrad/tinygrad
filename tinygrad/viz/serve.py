@@ -123,7 +123,7 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
   exec_points:dict[str, dict] = {}
@@ -143,10 +143,10 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
+    shapes.append({"name":name, "ref":ref, "st":st-min_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], min_ts:int, max_ts:int) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -155,12 +155,12 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dic
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
       shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.ts))
+      timestamps.append(int(e.ts)-min_ts)
       step += 1
       mem += e.arg["nbytes"]
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.ts))
+      timestamps.append(int(e.ts)-min_ts)
       step += 1
       mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
       removed["x"].append(step)
@@ -172,7 +172,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dic
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  timestamps.append(max_ts)
+  timestamps.append(max_ts-min_ts)
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
@@ -192,8 +192,8 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   layout:dict[str, dict] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v)
-    layout[f"{k} Memory"] = mem_layout(v, unwrap(max_ts))
+    layout[k] = timeline_layout(v, min_ts)
+    layout[f"{k} Memory"] = mem_layout(v, min_ts, unwrap(max_ts))
   return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
