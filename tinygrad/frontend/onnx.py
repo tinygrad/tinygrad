@@ -457,7 +457,7 @@ class OnnxRunner:
   def to(self, device:str|None):
     self.graph_values = {k: (v.to(device) if isinstance(v, Tensor) else v) for k,v in self.graph_values.items()}
     self.graph_nodes = tuple(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
-                                      {k: (v.to(device) if isinstance(v, Tensor) or isinstance(v, OnnxRunner) else v) for k,v in n.opts.items()})
+                                      {k: (v.to(device) if isinstance(v, (Tensor, OnnxRunner)) else v) for k,v in n.opts.items()})
                                       for n in self.graph_nodes)
     return self
 
