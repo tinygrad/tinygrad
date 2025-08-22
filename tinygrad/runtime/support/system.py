@@ -85,7 +85,7 @@ class PCIDevice:
       if FileIOInterface.exists(rpath:=f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize"):
         try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
         except OSError as e:
-          if e.errno == errno.EPERM:
+          if e.errno in {errno.EPERM, errno.EACCES}:
             raise RuntimeError(f"Cannot resize BAR {i}: {e}. Permission error: run `extra/amdpci/setup_python_cap.sh`"
                                 " to allow python accessing device or run with sudo") from e
           raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
