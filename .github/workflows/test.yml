@@ -68,7 +68,7 @@ jobs:
         mkdir $GITHUB_WORKSPACE/test_dir
         cd $GITHUB_WORKSPACE/test_dir
         python -m venv venv
-        source venv_typed/bin/activate
+        source venv/bin/activate
         pip install $GITHUB_WORKSPACE[typed]
         TYPED=1 python -c "import tinygrad"
         pip install mypy
