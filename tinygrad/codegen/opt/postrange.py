@@ -1,7 +1,7 @@
 from typing import cast
 from dataclasses import replace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, AxisType, sint, ssimplify
-from tinygrad.helpers import colored, partition, argfix
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, AxisType, sint, ssimplify, KernelInfo
+from tinygrad.helpers import colored, argfix
 from tinygrad.codegen.opt.kernel import Opt, OptOps, axis_colors, KernelOptError, check
 from tinygrad.dtype import dtypes
 from tinygrad.renderer import Renderer
@@ -29,7 +29,7 @@ class RangeManip:
   @property
   def full_shape(self) -> tuple[sint, ...]: return tuple([ssimplify(x.src[0]) for x in self.rng])
   @property
-  def axis_types(self) -> list[AxisType]: return tuple([x.arg[1] for x in self.rng])
+  def axis_types(self) -> list[AxisType]: return [x.arg[1] for x in self.rng]
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
 
@@ -72,10 +72,12 @@ class RangeManip:
 
 def add_name(ctx:Renderer, s:UOp):
   manip = RangeManip(s, ctx)
-  for opt in s.arg.opts_to_apply:
-    manip.apply_opt(opt)
+  arg = s.arg if s.arg is not None else KernelInfo()
+  if arg.opts_to_apply:
+    for opt in arg.opts_to_apply:
+      manip.apply_opt(opt)
   s = s.substitute(manip.replaces)
-  return s.replace(arg=replace(s.arg, name=manip.name, opts_to_apply=tuple()))
+  return s.replace(arg=replace(arg, name=manip.name, opts_to_apply=None))
 
 pm_postrange_opt = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_name),

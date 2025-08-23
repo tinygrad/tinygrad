@@ -3,7 +3,7 @@
 import functools, itertools, operator
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -95,10 +95,6 @@ expander = PatternMatcher([
   # UNROLL GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(Ops.UNROLL, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(Ops.UNROLL, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
-  # rewrite UPCAST/UNROLL range to something to be expanded
-  (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
-    if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
 ])
 
 def create_gate(root:UOp) -> UOp|None:
