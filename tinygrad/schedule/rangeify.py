@@ -33,41 +33,37 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda x:
    x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
-  # assign only to buffer
-  (UPat(Ops.STORE, arg="assign", src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x"))),
+  # store only to buffer
+  (UPat(Ops.STORE, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x"))),
    lambda x,target: x if target.base.op is not Ops.BUFFER else None),
-  # contiguous/buffer/copy/assign is already contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY)),)), lambda root: root.src[0]),
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.STORE, arg="assign"),)), lambda root: root.src[0]),
+  # contiguous/buffer/copy/store is already contiguous
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.STORE)),)), lambda root: root.src[0]),
 ])
 
 # 1. add contiguous where we have to
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.STORE, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
-
-def is_always_contiguous(uop:UOp): return uop.op in ALWAYS_CONTIGUOUS or uop.op is Ops.STORE and uop.arg == "assign"
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
-    if not is_always_contiguous(s): ctx[s] = None
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
-  if not is_always_contiguous(a.src[1]): ctx[a.src[1]] = None
+  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if not is_always_contiguous(x.base))),
-  # always realize ASSIGN/COPY/BUFFER_VIEW
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
-  (UPat(Ops.STORE, arg="assign", name="tr"), realize),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
+  # always realize STORE/COPY/BUFFER_VIEW
+  (UPat({Ops.STORE, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
   # realize input to assign (might be optimized out)
-  (UPat(Ops.STORE, arg="assign", name="a"), realize_assign),
+  (UPat(Ops.STORE, name="a"), realize_assign),
 ])
 
 add_contiguous = PatternMatcher([
@@ -417,8 +413,6 @@ split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
 ])
 
-def is_assign(uop:UOp): return uop.op is Ops.STORE and uop.arg == "assign"
-
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
@@ -436,20 +430,20 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
   tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
-  kernel_assign: dict[UOp, UOp] = {}
-  assign_rep: dict[UOp, UOp] = {}
+  # if a kernel depends on a buffer, and that buffer is later stored to, make the store depend on the kernel's store
+  kernel_store: dict[UOp, UOp] = {}
+  store_rep: dict[UOp, UOp] = {}
   for u in tensor_map[sink].toposort():
-    if not is_assign(u): continue
-    kernel_assign[u.buf_uop] = u
+    if u.op is not Ops.STORE: continue
+    kernel_store[u.buf_uop] = u
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
-      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
-      if any(is_assign(x) and x.buf_uop is s for x in u.toposort()):
-        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
-      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
-  if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_store.get(s)) is None: continue
+      if any(x.op is Ops.STORE and x.buf_uop is s for x in u.toposort()):
+        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on STORE or BUFFER")
+      store_rep[a] = kernel_store[s] = a.replace(src=a.src+(u,))
+  if store_rep:
+    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=store_rep, bottom_up=True, input_map=tensor_map, name="fix_store")
 
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
   return tensor_map
