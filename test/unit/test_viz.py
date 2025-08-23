@@ -349,6 +349,13 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
+  def test_bytes_per_kernel(self):
+    step = 10
+    n_events = 1_000
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    sz = len(get_profile(prof))
+    self.assertLessEqual(sz/n_events, 100)
+
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
   a.uop.buffer.allocate()

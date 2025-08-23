@@ -60,10 +60,10 @@ def add_gpudims(ctx:Renderer, s:UOp):
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
   # get global and local shape
-  all_ranges = {x.arg%1000:x for x in s_topo if x.op is Ops.RANGE}
+  all_ranges = {x.arg[0]%1000:x for x in s_topo if x.op is Ops.RANGE}
   ranges = [all_ranges[r] for r in global_dims+local_dims if r in all_ranges]
-  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in global_dims])
-  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg%1000 in local_dims])
+  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in global_dims])
+  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in local_dims])
 
   # get the idxs
   if ki.dont_use_locals:
@@ -78,8 +78,8 @@ def add_gpudims(ctx:Renderer, s:UOp):
   for r in s_topo:
     if r.op is not Ops.RANGE: continue
     try:
-      ii = (global_dims+local_dims).index(r.arg%1000)
-      if r.arg < 2000 and ki.axis_types[r.arg%1000] == AxisType.GROUP_REDUCE: continue
+      ii = (global_dims+local_dims).index(r.arg[0]%1000)
+      if r.arg[0] < 2000 and ki.axis_types[r.arg[0]%1000] == AxisType.GROUP_REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)

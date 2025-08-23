@@ -12,6 +12,9 @@ if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
 
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
@@ -296,7 +299,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
     return ret
   @staticmethod
-  def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
+  def range(dtype:DType, end:sint, idx:int, axistype:AxisType=AxisType.LOOP):
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=(idx, axistype))
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
@@ -535,13 +539,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if s1_vmax < 0: return (0, -s1_vmin-1) if s0_vmin >= 0 else (-(-s1_vmin-1), 0) if s0_vmax <= 0 else (-(-s1_vmin-1), -s1_vmin-1)
       if self.op is Ops.IDIV:
         assert isinstance(s0_vmin, int) and isinstance(s0_vmax, int) and isinstance(s1_vmin, int) and isinstance(s1_vmax, int)
-        if (c:=s1_vmin) == s1_vmax:  # s1 is a const
-          if c > 0: return cdiv(s0_vmin, c), cdiv(s0_vmax, c)
-          if c < 0: return cdiv(s0_vmax, c), cdiv(s0_vmin, c)
-        if (s0_vmax <= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmin), cdiv(s0_vmin, s1_vmax)
-        if (s0_vmin >= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin)
-        if (s0_vmax <= 0 and s1_vmin > 0): return cdiv(s0_vmin, s1_vmin), cdiv(s0_vmax, s1_vmax)
-        if (s0_vmin >= 0 and s1_vmax < 0): return cdiv(s0_vmax, s1_vmax), cdiv(s0_vmin, s1_vmin)
+        if s1_vmin*s1_vmax>0:
+          return min(vals:=(cdiv(s0_vmin, s1_vmin), cdiv(s0_vmin, s1_vmax), cdiv(s0_vmax, s1_vmin), cdiv(s0_vmax, s1_vmax))), max(vals)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
@@ -579,9 +578,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=0):
       ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
-
-class AxisType(Enum):
-  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1015,7 +1011,7 @@ syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<"
          Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
-  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg}" if x.arg >= 0 else f"ridxm{-x.arg}")),
+  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg[0]}" if x.arg[0] >= 0 else f"ridxm{-x.arg[0]}")),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
   (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
