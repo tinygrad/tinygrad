@@ -2,7 +2,7 @@
 
 Tinygrad lazily builds up a graph of Tensor operations. The Tensor graph includes a mix of:
 
-- Buffer and Assignment Ops: `BUFFER`, `BUFFER_VIEW`, `COPY`, `ASSIGN`
+- Buffer and Assignment Ops: `BUFFER`, `BUFFER_VIEW`, `COPY`, `STORE`
 - Movement Ops: `RESHAPE`, `EXPAND`, `PERMUTE`, `PAD`, `SHRINK`, `FLIP`
 - Compute Ops: `ADD`, `MUL`, `REDUCE_AXIS`, ...
 
@@ -28,10 +28,10 @@ print(out) # <Tensor <UOp METAL (1,) int (<Ops.ADD: 52>, None)> on METAL with gr
 out.kernelize()
 
 print(mul) # <Tensor <UOp METAL (1,) int (<Ops.MUL: 48>, None)> on METAL with grad None>
-print(out) # <Tensor <UOp METAL (1,) int (<Ops.ASSIGN: 66>, None)> on METAL with grad None>
+print(out) # <Tensor <UOp METAL (1,) int (<Ops.STORE: 58>, None)> on METAL with grad None>
 ```
 
-The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes a new ASSIGN UOp:
+The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes a new STORE UOp:
 
 ```py
 print(out.uop)
@@ -102,7 +102,7 @@ print(out.item()) # 5
 
 - The large Tensor graph is built from a mix of data, compute and movement Ops.
 
-- `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with ASSIGN.
+- `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with STORE.
 
 - `Tensor.realize` executes KERNELs on device and replaces the Tensor graph with just a BUFFER.
 
