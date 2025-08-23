@@ -353,7 +353,7 @@ class TestVizProfiler(unittest.TestCase):
     n_events = 1_000
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     sz = len(get_profile(prof))
-    self.assertLessEqual(sz/n_events, 27)
+    self.assertLessEqual(sz/n_events, 26)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
