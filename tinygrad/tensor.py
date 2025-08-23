@@ -3518,16 +3518,15 @@ class Tensor(MathTrait):
     """
     return self * self.softplus().tanh()
 
-  def softplus(self, beta=1.0, threshold=20.0) -> Tensor:
+  def softplus(self, beta=1.0) -> Tensor:
     """
     Applies the Softplus function element-wise.
-    For numerical stability, the implementation folds into identity function when `self * beta > threshold`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
     ```
     """
-    return (self * beta > threshold).where(self, (1/beta) * (1 + (self*beta).exp()).log())
+    return (1/beta) * (self*beta).logaddexp(0.0)
 
   def softsign(self) -> Tensor:
     """
