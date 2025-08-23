@@ -134,16 +134,11 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
 def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   shapes:list[bytes] = []
-  levels:list[int] = []
   exec_points:dict[str, dict] = {}
   category_enum:dict[str, int] = {}
   for st,et,dur,e in events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
-    # find a free level to put the event
-    depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
-    if depth < len(levels): levels[depth] = et
-    else: levels.append(et)
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
@@ -153,9 +148,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int,
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append(struct.pack("<IIIfBBI", enum_str(name,scache), option(ref), st-start_ts, dur, depth,
+    shapes.append(struct.pack("<IIIfBI", enum_str(name,scache), option(ref), st-start_ts, dur,
                               option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "",scache)))
-  return struct.pack("<BIB", 0, len(shapes), len(levels))+b"".join(shapes) if shapes else None
+  return struct.pack("<BI", 0, len(shapes))+b"".join(shapes) if shapes else None
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtypes_map:dict[str, int],
                scache:dict[str, int]) -> bytes|None:

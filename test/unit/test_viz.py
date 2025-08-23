@@ -276,10 +276,9 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     layout[k] = v = {"shapes":[]}
     event_type, event_count = u("<BI")
     if event_type == 0:
-      v["max_depth"] = u("<B")
       for _ in range(event_count):
-        name, ref, st, dur, depth, cat, _ = u("<IIIfBBI")
-        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "depth":depth, "cat":option(cat)})
+        name, ref, st, dur, cat, _ = u("<IIIfBI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
     else:
       v["peak"] = u("<Q")[0]
       v["timestamps"] = list(u(f"<{u('I')[0]}I"))
@@ -354,7 +353,7 @@ class TestVizProfiler(unittest.TestCase):
     n_events = 1_000
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     sz = len(get_profile(prof))
-    self.assertLessEqual(sz/n_events, 27)
+    self.assertLessEqual(sz/n_events, 26)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
