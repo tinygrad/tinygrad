@@ -381,6 +381,7 @@ decomps = [
   aten.elu,  # elu has a scale + input_scale param
   aten.elu_backward,
   aten.softplus,
+  aten.logaddexp,
   aten.threshold,
   aten.nll_loss_forward,
   aten.nll_loss_backward,

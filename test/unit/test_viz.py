@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, Context
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -252,12 +252,16 @@ class TestVizIntegration(BaseTestViz):
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
+def load_profile(lst:list[ProfileEvent]) -> dict:
+  ret = get_profile(lst)
+  return json.loads(ret)
+
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     dev_events = j['layout']['NV']['shapes']
     self.assertEqual(len(dev_events), 1)
@@ -272,7 +276,7 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:2', comp_tdiff=decimal.Decimal(-800), copy_tdiff=decimal.Decimal(-80))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
@@ -290,7 +294,7 @@ class TestVizProfiler(unittest.TestCase):
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV Graph')
@@ -321,7 +325,7 @@ class TestVizMemoryLayout(BaseTestViz):
   def test_double_alloc(self):
     a = _alloc(1)
     _b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(ret["shapes"][0]["x"], [0, 2])
@@ -331,7 +335,7 @@ class TestVizMemoryLayout(BaseTestViz):
     a = _alloc(1)
     del a
     b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
     self.assertEqual(ret["shapes"][0]["x"], [0, 2])
@@ -344,7 +348,7 @@ class TestVizMemoryLayout(BaseTestViz):
     _b = _alloc(1)
     del a
     c = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(ret["shapes"][0]["x"], [0, 3])

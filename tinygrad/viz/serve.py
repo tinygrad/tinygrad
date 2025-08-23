@@ -146,7 +146,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int)
     shapes.append({"name":name, "ref":ref, "st":st-start_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtypes_map:dict[str, int]) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -154,25 +154,27 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
+      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":{"dtype":e.arg["dtype"].name, "sz":e.arg["sz"]}}
+      dtypes_map.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
       timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem += e.arg["nbytes"]
+      mem += e.arg["sz"]*e.arg["dtype"].itemsize
       if mem > peak: peak = mem
     if e.name == "free":
       timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
+      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtypes_map[removed["arg"]["dtype"]])
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
         if k > e.key:
           v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+          v["y"] += [v["y"][-1], v["y"][-1]-free_nbytes]
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
   timestamps.append(end_ts-start_ts)
+  peaks.append(peak)
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
@@ -190,11 +192,13 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, dict] = {}
+  peaks:list[int] = []
+  dtypes_map:dict[str, int] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts)
-    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts))
-  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts}).encode("utf-8")
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtypes_map)
+  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts, "peak":max(peaks, default=0), "dtypes":dtypes_map}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
