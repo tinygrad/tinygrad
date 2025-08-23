@@ -14,6 +14,7 @@ class RangeManip:
 
     self.replaces = {}
     self.rng = sorted([u for u in ast.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
+    self.tensor_core = None
 
     # convert LOOP to GLOBAL
     if self.opts.has_local:
@@ -45,12 +46,20 @@ class RangeManip:
     replaced_rng = self.rng[axis].replace(src=(UOp.const(dtypes.int, self.rng[axis].src[0].arg // amount),))
 
     maxarg = max([x.arg[0] for x in self.rng])
-    new_rng = UOp.range(dtypes.int, amount, maxarg+1, AxisType.UPCAST)
+    new_rng = UOp.range(dtypes.int, amount, maxarg+1, new_type)
 
     self.replaces[self.rng[axis]] = replaced_rng * amount + new_rng
 
     self.rng[axis] = replaced_rng
-    self.rng.append(new_rng)
+    self.rng.insert(insert_at if insert_at is not None else len(self.rng), new_rng)
+
+  def renumber(self):
+    # renumber in the order of the self.rng array
+    for i,r in enumerate(self.rng):
+      if r.arg[0] != i:
+        rng = r.replace(arg=(i, r.arg[1]))
+        self.replaces[r] = rng
+        self.rng[i] = rng
 
   def real_axis(self, op:OptOps, axis:int|None):
     try:
@@ -65,10 +74,19 @@ class RangeManip:
     axis = self.real_axis(opt.op, opt.axis)
     amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
 
-    if opt.op is OptOps.UPCAST:                     # yellow
+    print(opt.op)
+    if opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
+    elif opt.op is OptOps.UPCAST:                     # yellow
+      check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
+      # NOTE: assume the first get_local_axes() LOCAL are for TC
+      check(not (self.tensor_core and axis in self.axes_of(AxisType.LOCAL)[:len(self.tensor_core.get_local_axes())]), "can't upcast TC locals")
+      check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
+      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
+    else:
+      raise RuntimeError(f"{opt.op} not supported")
 
 def add_name(ctx:Renderer, s:UOp):
   manip = RangeManip(s, ctx)
@@ -76,9 +94,18 @@ def add_name(ctx:Renderer, s:UOp):
   if arg.opts_to_apply:
     for opt in arg.opts_to_apply:
       manip.apply_opt(opt)
+  manip.renumber()
   s = s.substitute(manip.replaces)
   return s.replace(arg=replace(arg, name=manip.name, opts_to_apply=None))
 
+def flatten_range(r:UOp):
+  off = 2 if r.op is Ops.STORE else 1
+  rngs = r.src[off:]
+  if not len(rngs): return None
+  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
+  return r.replace(src=r.src[:off]+tuple(new_rngs))
+
 pm_postrange_opt = PatternMatcher([
+  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
   (UPat(Ops.SINK, name="s"), add_name),
 ])
