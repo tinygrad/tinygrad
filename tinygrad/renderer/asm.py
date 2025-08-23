@@ -121,7 +121,8 @@ x86_matcher = PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # TODO: cmpne, add shouldn't have consts on the left to begin with
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.ADD), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"), lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
+   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # *** CASTS ***
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
@@ -194,6 +195,7 @@ x86_matcher = PatternMatcher([
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
 def shuf_imm(x:UOp) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(x.src))
 def x86_setcc(dt:DType, op:Ops):
+  if op is Ops.CMPEQ: return ("sete", 0x0F94)
   if op is Ops.CMPNE: return ("setne", 0x0F95)
   if op is Ops.CMPLT: return ("setl", 0x0F9C) if dt in dtypes.sints else ("setb", 0x0F92)
 def x86_mov(dt:DType): return ("mov", 0x8A) if dt in dtypes.ints8+(dtypes.bool,) else ("mov", 0x8B)
@@ -287,8 +289,10 @@ x86_vec_lowerer = PatternMatcher([
   (UPat(Ops.FDIV, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vdivpd", 0x5E, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 0, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 0, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 0, 1)), # noqa: E501
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 1, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 1, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 1, 1)), # noqa: E501
   # float ternary TODO: can share with scalar pm
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvps", 0x4A, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
@@ -347,12 +351,12 @@ x86_lowerer = PatternMatcher([
   ((UPat.var("a", dtypes.ints64) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 4), 1)), # noqa: E501
   (UPat((Ops.SHL, Ops.SHR), dtypes.ints, (UPat.var("a"), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
                                                                                                         MUOpX86.RM_I(*MUOpX86.imm_ops(x.op, x.dtype), ctx[x], Immediate(c.arg, 1), *x86_pre(x))]), # noqa: E501
-  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86._RM_I(*MUOpX86.imm_ops(x.op, a.dtype), ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(a)), # noqa: E501
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86._RM_I(*MUOpX86.imm_ops(x.op, a.dtype), ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(a)), # noqa: E501
                                                                                                                 MUOpX86.RM(*x86_setcc(x.src[0].dtype, x.op), ctx[x])]), # noqa: E501
   (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints+(dtypes.bool,)), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
                                                                                                                        MUOpX86.RM_I(*MUOpX86.imm_ops(x.op, x.dtype), ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(x))]), # noqa: E501
   # int binary with register/memory
-  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpX86._R_RM(*MUOpX86.i_ops(x.op, a.dtype), ctx[a], ctx[b], *x86_pre(a)), # noqa: E501
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpX86._R_RM(*MUOpX86.i_ops(x.op, a.dtype), ctx[a], ctx[b], *x86_pre(a)), # noqa: E501
                                                                                                                MUOpX86.RM(*x86_setcc(x.src[0].dtype, x.op), ctx[x])]), # noqa: E501
   (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints+(dtypes.bool,)), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
                                                                                                                       MUOpX86.R_RM(*MUOpX86.i_ops(x.op, x.dtype), ctx[x], ctx[b], *x86_pre(x))]), # noqa: E501
@@ -439,8 +443,10 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.FDIV, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vdivsd", 0x5E, ctx[x], ctx[a], ctx[b], 3, 1)), # noqa: E501
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltss", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 2, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqss", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 2, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqss", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 2, 1)), # noqa: E501
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 3, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 3, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 3, 1)), # noqa: E501
   # float ternary NOTE: packed where
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvps", 0x4A, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
@@ -475,7 +481,7 @@ class X86Renderer(Renderer):
   pre_matcher = x86_pre_matcher
   extra_matcher = x86_matcher
   lowerer = x86_lowerer
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   function_name: str = ""
 
   def __getitem__(self, x:UOp) -> Register: # hacky helper
