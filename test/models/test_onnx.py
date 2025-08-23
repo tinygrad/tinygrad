@@ -32,6 +32,7 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+  @unittest.skip("this isn't a test, it can't fail")
   def test_benchmark_openpilot_model(self):
     onnx_model = fetch(OPENPILOT_MODEL)
     run_onnx = OnnxRunner(onnx_model)

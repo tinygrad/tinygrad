@@ -229,12 +229,12 @@ class TestSymbolicOps(unittest.TestCase):
           np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_var(self):
+    a = Tensor.rand(10, 3)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       for axis in [None, 0, 1]:
-        a = Tensor.rand(i, 3)
-        expected = a.var(axis).numpy()
-        symbolic = a.reshape(vi, 3).var(axis).reshape(expected.shape).numpy()
+        expected = a[:i, :].var(axis).numpy()
+        symbolic = a[:vi, :].var(axis).reshape(expected.shape).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_var_2d(self):

@@ -151,7 +151,7 @@ async function renderProfiler() {
   // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
-  const { layout, st, et } = await (await fetch("/get_profile")).json();
+  const { layout, dur } = await (await fetch("/get_profile")).json();
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -162,7 +162,7 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/category/device)
   const colorMap = new Map();
-  data = {tracks:new Map(), axes:{}, st, et};
+  data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxheight=100]);
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
@@ -187,7 +187,7 @@ async function renderProfiler() {
         }
         const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
         // offset y by depth
-        shapes.push({x:e.st-st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
       div.style("height", levelHeight*v.maxDepth+padding+"px").style("pointerEvents", "none");
     } else {
@@ -195,7 +195,7 @@ async function renderProfiler() {
       const yscale = d3.scaleLinear().domain([0, v.peak]).range([height, 0]);
       const shapes = [];
       for (const [i,e] of v.shapes.entries()) {
-        const x = e.x.map(tsIdx => v.timestamps[tsIdx]-st);
+        const x = e.x.map(tsIdx => v.timestamps[tsIdx]);
         const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
         shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+e.arg.nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
       }
@@ -225,7 +225,7 @@ async function renderProfiler() {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([0, et-st]).range([0, canvas.clientWidth]);
+    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
     const zoomDomain = transform != null ? xscale.domain() : null;
     let yscale = null;
@@ -289,7 +289,7 @@ async function renderProfiler() {
       // tick label
       ctx.textBaseline = "top";
       ctx.textAlign = "left";
-      ctx.fillText(formatTime(tick, et-st), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
       drawLine(ctx, [0, 0], yscale.range());
