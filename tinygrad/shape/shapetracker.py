@@ -112,7 +112,7 @@ class ShapeTracker:
   def axis_is_masked(self, axis:int) -> bool:
     with Context(TRACK_MATCH_STATS=0):
       _, valid = self.to_indexed_uops()
-      return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
+      return axis in [x.arg[0] for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
