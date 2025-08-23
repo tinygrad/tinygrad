@@ -3759,6 +3759,13 @@ class Tensor(MathTrait):
     # TODO: remove other*0?
     return (other < 0).where(-self.abs(), self.abs()) + other*0
 
+  def logaddexp(self, other) -> Tensor:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
+
   # ***** op wrappers *****
 
   def __invert__(self) -> Tensor: return self.bitwise_not()
