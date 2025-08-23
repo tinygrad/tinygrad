@@ -180,11 +180,12 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
+    const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
-      const shapes = [], levels = [];
+      const levels = [];
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
@@ -196,10 +197,9 @@ async function renderProfiler() {
           depth = levels.length;
           levels.push(et);
         } else levels[depth] = et;
-        e.depth = depth;
-        if (e.depth === 0) colorKey = e.cat ?? e.name;
+        if (depth === 0) colorKey = e.cat ?? e.name;
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
-        const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
+        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
         else if (ref != null) {
@@ -209,7 +209,7 @@ async function renderProfiler() {
         }
         const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
         // offset y by depth
-        shapes.push({x:e.st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
@@ -217,7 +217,6 @@ async function renderProfiler() {
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       const timestamps = Array.from({length:u32()}, u32);
-      const shapes = [];
       for (let j=0; j<eventsLen; j++) {
         const length = u32();
         const x = Array.from({ length }, () => timestamps[u32()]);

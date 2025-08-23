@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
