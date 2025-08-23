@@ -13,6 +13,7 @@ def add_name(s:UOp):
   if len(opts_to_apply):
     opt:Opt = opts_to_apply.pop(0)
     if opt.op == OptOps.UPCAST:
+      assert opt.axis is not None and isinstance(opt.arg, int)
       re_rng = rng[opt.axis]
       assert re_rng.src[0].op is Ops.CONST
       assert re_rng.src[0].arg % opt.arg == 0
