@@ -165,12 +165,12 @@ replace_buffers = PatternMatcher([
   # STORE (except for meta ops)
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink:
    UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)],
-            arg=sink.arg) if all(s.op is not Ops.STORE or s.is_assign() for s in sink.src) else None),
+            arg=sink.arg) if all(s.op is not Ops.STORE or s.src[0].base.op is not Ops.DEFINE_GLOBAL for s in sink.src) else None),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
-  # passthrough STORE (but let MSTACK process first)
-  (UPat(Ops.STORE, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: x.src[1] if x.is_assign() else None),
+  # passthrough STORE (let MSTACK process first and ignore stores to DEFINE_GLOBAL)
+  (UPat(Ops.STORE, src=(UPat(GroupOp.All-{Ops.MSTACK}), UPat()), name="x"), lambda x: None if x.src[0].base.op is Ops.DEFINE_GLOBAL else x.src[1]),
   # remove any BINDs from VIEWS
   (UPat(Ops.VIEW, src=(UPat(), UPat((Ops.BIND, Ops.DEFINE_VAR))), allow_any_len=True, name="x"), lambda x: x.replace(src=x.src[0:1])),
   # remove any BINDs from DEFINE_VARs
@@ -180,7 +180,7 @@ replace_buffers = PatternMatcher([
 ])
 
 def fix_kernel_ast(k:UOp) -> UOp|None:
-  if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE and not s.is_assign() for s in k.arg.ast.src): return None
+  if k.arg.ast.op in GroupOp.Meta or all(s.op is Ops.STORE and s.src[0].base.op is Ops.DEFINE_GLOBAL for s in k.arg.ast.src): return None
   # replace buffer with define_global + add load/store last
   bufs = []
   for s in k.src:
