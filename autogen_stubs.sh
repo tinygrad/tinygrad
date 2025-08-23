@@ -87,6 +87,17 @@ generate_kfd() {
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
+generate_tdma() {
+  clang2py -k cdefstum ./extra/tdma/tdma.h -o $BASE/tdma.py
+
+  fixup $BASE/tdma.py
+  sed -i "s/import fcntl, functools/import functools/g" $BASE/tdma.py
+  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/tdma.py
+  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/tdma.py
+  sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/tdma.py
+  python3 -c "import tinygrad.runtime.autogen.tdma"
+}
+
 generate_cuda() {
   clang2py /usr/include/cuda.h --clang-args="-D__CUDA_API_VERSION_INTERNAL" -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
@@ -449,6 +460,7 @@ elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "nvrtc" ]; then generate_nvrtc
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
+elif [ "$1" == "tdma" ]; then generate_tdma
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am

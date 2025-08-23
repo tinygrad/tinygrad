@@ -1,11 +1,12 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno
+import os, mmap, array, functools, re, ctypes, select, contextlib, dataclasses, sys, errno
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
-from tinygrad.runtime.autogen import libc, vfio
+from tinygrad.runtime.autogen import libc, vfio, tdma
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
+SZ_2G = 2**31
 
 class _System:
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
@@ -56,6 +57,11 @@ class _System:
       vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
       return vfio_fd
+    except OSError: return None
+
+  @functools.cache
+  def tdma(self) -> FileIOInterface|None:
+    try: return FileIOInterface("/dev/tdma", os.O_RDWR)
     except OSError: return None
 
   def flock_acquire(self, name:str) -> int:
@@ -116,12 +122,18 @@ class PCIDevice:
     bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
 
+    self.p_domain, self.p_bus, self.p_dev, self.p_fn = tuple(int(x, 16) if i < 3 else int(x) for i, x in enumerate(re.split('[:.]', self.pcibus)))
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
+  def export_bar_parts(self, bar:int, parts:list[tuple[int, int]]) -> int:
+    parts = [(offset+split, min(size-split, SZ_2G)) for offset,size in parts for split in range(0, size, SZ_2G)]
+    usgl = (tdma.struct_tdma_ioctl_usge * len(parts))(*[tdma.struct_tdma_ioctl_usge(offset=offset, size=size) for offset,size in parts])
+    return tdma.TDMA_GET_DMABUF(System.tdma(), domain=self.p_domain, bus=self.p_bus, device=self.p_dev, function=self.p_fn, bar=bar,
+                                usgl=usgl, usgl_size=len(usgl)).out_fd
 
 class PCIDevImplBase:
   mm: MemoryManager
