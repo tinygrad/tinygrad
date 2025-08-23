@@ -151,7 +151,7 @@ async function renderProfiler() {
   // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
-  const { layout, dur } = await (await fetch("/get_profile")).json();
+  const { layout, dur, peak } = await (await fetch("/get_profile")).json();
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -163,7 +163,7 @@ async function renderProfiler() {
   // color by key (name/category/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
-  const heightScale = d3.scaleLinear().domain([0, Object.entries(layout).reduce((peak, [_,d]) => Math.max(peak, d.peak||0), 0)]).range([4,maxheight=100]);
+  const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
   for (const [k, v] of Object.entries(layout)) {
     if (v.shapes.length === 0) continue;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
