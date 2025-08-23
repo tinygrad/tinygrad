@@ -180,11 +180,12 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
+    const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
-      const shapes = [], levels = [];
+      const levels = [];
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
@@ -217,7 +218,6 @@ async function renderProfiler() {
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       const timestamps = Array.from({length:u32()}, u32);
-      const shapes = [];
       for (let j=0; j<eventsLen; j++) {
         const length = u32();
         const x = Array.from({ length }, () => timestamps[u32()]);
