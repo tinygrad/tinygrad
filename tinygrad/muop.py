@@ -137,17 +137,17 @@ class MUOpX86(MUOp):
                    self.l, _sub(self.vvvv), self.prefix, self.w, _sub(self.imm))
   def i_ops(op:Ops, dt:DType):
     if dt.itemsize == 1: return {Ops.ADD: ("add", 0x02), Ops.SUB: ("sub", 0x2A), Ops.AND: ("and", 0x22), Ops.OR: ("or", 0x0A),
-                                 Ops.XOR: ("xor", 0x32), Ops.CMPNE: ("cmp", 0x3A), Ops.CMPLT: ("cmp", 0x3A)}[op]
+                                 Ops.XOR: ("xor", 0x32), Ops.CMPNE: ("cmp", 0x3A), Ops.CMPLT: ("cmp", 0x3A), Ops.CMPEQ: ("cmp", 0x3A)}[op]
     return {Ops.ADD: ("add", 0x03), Ops.SUB: ("sub", 0x2B), Ops.MUL: ("imul", 0x0FAF), Ops.AND: ("and", 0x23), Ops.OR: ("or", 0x0B),
-            Ops.XOR: ("xor", 0x33), Ops.CMPNE: ("cmp", 0x3B), Ops.CMPLT: ("cmp", 0x3B)}[op]
+            Ops.XOR: ("xor", 0x33), Ops.CMPNE: ("cmp", 0x3B), Ops.CMPLT: ("cmp", 0x3B), Ops.CMPEQ: ("cmp", 0x3B)}[op]
   def imm_ops(op:Ops, dt:DType):
     if dt.itemsize == 1:
       if op is Ops.SHR: return ("shr", 0xC0, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC0, 7)
       return {Ops.ADD: ("add", 0x80, 0), Ops.OR: ("or", 0x80, 1), Ops.AND: ("and", 0x80, 4), Ops.SUB: ("sub", 0x80, 5), Ops.XOR: ("xor", 0x80, 6),
-              Ops.SHL: ("shl", 0xC0, 4), Ops.CMPNE: ("cmp", 0x80, 7), Ops.CMPLT: ("cmp", 0x80, 7)}[op]
+              Ops.SHL: ("shl", 0xC0, 4), Ops.CMPNE: ("cmp", 0x80, 7), Ops.CMPLT: ("cmp", 0x80, 7), Ops.CMPEQ: ("cmp", 0x80, 7)}[op]
     if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
     return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
-            Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7)}[op]
+            Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7), Ops.CMPEQ: ("cmp", 0x81, 7)}[op]
   #def idiv(out:Register, in0:Register, in1:Register, is_signed:bool) -> MUOp:
   #  in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
   #  move = MUOpX86("mov", 0x8B, out, (in0,), (Register("rax", 0, 8),), (GPR,), out, in0, w=int(out.size == 8), prefix=int(out.size == 2))
