@@ -135,7 +135,7 @@ def append_to_kernel(x:UOp):
   if (new_src:=tuple(dedup(new_srcs))) != x.src: return x.replace(src=new_src, arg=Kernel(x.arg.ast, tuple(dedup(metadata))))
 
 create_kernels = PatternMatcher([
-  # always give assign/contiguous a kernel
+  # always give store/contiguous a kernel
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat(GroupOp.All-{Ops.KERNEL})), name="x"), create_kernel),
   (UPat(Ops.CONTIGUOUS, name="x"), create_kernel),
   # walk back the local graph until we reach a realized source

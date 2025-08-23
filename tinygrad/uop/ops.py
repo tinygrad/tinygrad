@@ -154,8 +154,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
-    # BufferOps and ASSIGN flow ShapeTracker from a direct edge
-    if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
+    # BufferOps flow ShapeTracker from a direct edge
+    if self.op in {Ops.STORE, Ops.LOAD}: return self.src[0].st
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
