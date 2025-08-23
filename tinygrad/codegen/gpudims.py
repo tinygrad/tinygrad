@@ -1,6 +1,6 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
-from tinygrad.helpers import all_int
+from tinygrad.helpers import all_int, partition, flatten, prod
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
@@ -84,6 +84,23 @@ def add_gpudims(ctx:Renderer, s:UOp):
     except ValueError: continue
   return s.substitute(subs)
 
+def fix_reduce_unroll(x:UOp):
+  reduce_range, reduce_expand = partition(x.src[1:], lambda y: y.op is Ops.RANGE)
+  if len(reduce_expand) == 0: return None
+  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
+  ret = x.src[0]
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)
+  # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
+  return x.replace(src=(ret,)+tuple(reduce_range))
+
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
+  # rewrite UPCAST/UNROLL range to something to be expanded
+  (UPat(Ops.RANGE, name="r"),
+   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+    if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
+  # fix REDUCEs with UNROLLs
+  (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=x.src[:2]+tuple([x for x in x.src[2:] if x.op is Ops.RANGE]))),
 ])
