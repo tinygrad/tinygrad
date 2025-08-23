@@ -3,7 +3,6 @@ from tinygrad.helpers import trange, colored, DEBUG, temp
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
-from tinygrad import TinyJit
 
 class Model(nn.Module):
   def __init__(self):
@@ -30,10 +29,8 @@ if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.frontend.torch  # noqa: F401
     device = torch.device("tiny")
-    compiler = TinyJit
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
-    compiler = torch.compile
   if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -46,7 +43,7 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  @compiler
+  #@torch.compile
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
