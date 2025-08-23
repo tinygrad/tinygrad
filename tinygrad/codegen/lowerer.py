@@ -23,12 +23,13 @@ def shape_to_idx(s, axis_types, start=0):
       idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s), tuple(range(s))),), ((i,s),), tag=1))
     else:
       # all others are RANGES
-      idxs.append(UOp(Ops.RANGE, dtypes.int, (sint_to_uop(s),), start+i))
+      idxs.append(UOp.range(dtypes.int, sint_to_uop(s), start+i, axistype=at))
   return idxs
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
+  if len(ast.full_shape) != len(axis_types):
+    axis_types = tuple([AxisType.REDUCE if s is not fs else AxisType.LOOP for s,fs in zip(ast.shape, ast.full_shape)])
   return IndexContext(axis_types, [], 0)
 
 # ***** lowering (given index) *****
@@ -71,9 +72,9 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
 
   # insert BARRIER if we are ending a LOCAL, IF if we are ending a GROUP_REDUCE
   if cast(PtrDType, buf.dtype).addrspace == AddrSpace.LOCAL and \
-      any(ctx.axis_types[x.arg%1000] in {AxisType.GROUP_REDUCE, AxisType.LOCAL} for x in used_ranges):
+      any(ctx.axis_types[x.arg[0]%1000] in {AxisType.GROUP_REDUCE, AxisType.LOCAL} for x in used_ranges):
     ret = ret.barrier()
-    range_gates = [x.eq(0) for x in used_ranges if ctx.axis_types[x.arg%1000] == AxisType.GROUP_REDUCE]
+    range_gates = [x.eq(0) for x in used_ranges if ctx.axis_types[x.arg[0]%1000] == AxisType.GROUP_REDUCE]
     if len(range_gates): ret = UOp(Ops.IF, src=(functools.reduce(operator.and_, range_gates), ret))
   return ret
 

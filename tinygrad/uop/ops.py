@@ -12,6 +12,9 @@ if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
 
+class AxisType(Enum):
+  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
@@ -296,7 +299,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
     return ret
   @staticmethod
-  def range(dtype:DType, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=idx)
+  def range(dtype:DType, end:sint, idx:int, axistype:AxisType=AxisType.LOOP):
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end),), arg=(idx, axistype))
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
@@ -579,9 +583,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=0):
       ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
-
-class AxisType(Enum):
-  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
 
 @dataclass(frozen=True)
 class KernelInfo:
