@@ -622,6 +622,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
+    self.helper_test_variable(cond.where(u0, u1), 0, 1, "((a<2)!=True)")
+    self.helper_test_variable(cond.where(u0, u1).where(u0, u1), 0, 1, "(a<2)")
 
   def test_where_combine(self):
     cond = Variable("x", 0, 3) < 2

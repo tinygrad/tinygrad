@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -91,9 +91,9 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
 
 @functools.cache
 def _reconstruct(a:int):
-  op, dtype, src, arg, tag = contexts[2][a]
+  op, dtype, src, arg, *rest = contexts[2][a]
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, tag)
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
 def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
@@ -123,10 +123,12 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
+def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int) -> dict:
   shapes:list[dict] = []
   levels:list[int] = []
+  exec_points:dict[str, dict] = {}
   for st,et,dur,e in events:
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
     # find a free level to put the event
     depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
@@ -135,16 +137,16 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      # TODO: support symbolic by capturing var_vals in profile events
-      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and all(isinstance(es,int) for es in [p.estimates.ops, p.estimates.mem, p.estimates.lds]):
-        info = f"{p.estimates.ops/(t:=dur*1e3):.2f} GFLOPS {p.estimates.mem/t:4.1f}|{p.estimates.lds/t:.1f} GB/s"
+      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+        info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
+               f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
+    shapes.append({"name":name, "ref":ref, "st":st-start_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtypes_map:dict[str, int]) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -152,25 +154,27 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dic
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.ts))
+      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":{"dtype":e.arg["dtype"].name, "sz":e.arg["sz"]}}
+      dtypes_map.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
+      timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem += e.arg["nbytes"]
+      mem += e.arg["sz"]*e.arg["dtype"].itemsize
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.ts))
+      timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
+      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtypes_map[removed["arg"]["dtype"]])
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
         if k > e.key:
           v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+          v["y"] += [v["y"][-1], v["y"][-1]-free_nbytes]
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  timestamps.append(max_ts)
+  timestamps.append(end_ts-start_ts)
+  peaks.append(peak)
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
@@ -179,20 +183,22 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
-  min_ts:int|None = None
-  max_ts:int|None = None
+  start_ts:int|None = None
+  end_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if min_ts is None or st < min_ts: min_ts = st
-    if max_ts is None or et > max_ts: max_ts = et
-  if min_ts is None: return None
+    if start_ts is None or st < start_ts: start_ts = st
+    if end_ts is None or et > end_ts: end_ts = et
+  if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, dict] = {}
+  peaks:list[int] = []
+  dtypes_map:dict[str, int] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v)
-    layout[f"{k} Memory"] = mem_layout(v, unwrap(max_ts))
-  return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+    layout[k] = timeline_layout(v, start_ts)
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtypes_map)
+  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts, "peak":max(peaks, default=0), "dtypes":dtypes_map}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []

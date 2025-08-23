@@ -109,6 +109,9 @@ class GroupOp:
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
+  # These can change the dtype to bool
+  Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
+
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
 
