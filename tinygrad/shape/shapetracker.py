@@ -44,13 +44,13 @@ def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[
   ret: list[sint|None] = [None] * len(views[-1].shape)
   idx, valid = views_to_indexed_uops(views)
   for c in split_uop(idx, Ops.ADD):
-    if c.op is Ops.RANGE: ret[c.arg] = 1
-    if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
-    if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
-  used_ranges = [x.arg for x in idx.toposort() if x.op is Ops.RANGE]
+    if c.op is Ops.RANGE: ret[c.arg[0]] = 1
+    if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
+    if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
+  used_ranges = [x.arg[0] for x in idx.toposort() if x.op is Ops.RANGE]
   ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
   if not ignore_valid:
-    for masked_axis in [x.arg for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
+    for masked_axis in [x.arg[0] for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
   return tuple(ret)
 
 @dataclass(frozen=True, order=True)

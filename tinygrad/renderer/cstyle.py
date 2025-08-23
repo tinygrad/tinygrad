@@ -157,7 +157,7 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg[0]
-      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg}" if u.arg >= 0 else f"ridxm{-u.arg}"
+      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg[0]}" if u.arg[0] >= 0 else f"ridxm{-u.arg[0]}"
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.PRECAST: "precast",
