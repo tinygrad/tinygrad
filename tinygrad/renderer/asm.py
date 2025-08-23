@@ -170,14 +170,8 @@ x86_matcher = PatternMatcher([
    lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) > 1 and x.src[1].op is not Ops.CONST or len(x.src) == 1 and x.src[0].op is not Ops.CONST else None),
   (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
    lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
-  # TODO: replacing recip with fdiv very bad for perf but required for precision, ideally you replace recip + mul with fdiv but imm gets loaded
-  # x * (1/b) => x / b, float64 doesn't have recip
-  #(UPat.var("a", dtypes.float64) * UPat(Ops.RECIP, name="b"), lambda a,b: UOp(Ops.FDIV, a.dtype, (a, b.src[0]))),
-  (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # mulacc only available for floats
   (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
-  # rewrite MAX to CMPLT + WHERE, no max for scalar int and CMPLT + WHERE nearly as fast
-  (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.ints8) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
@@ -467,7 +461,7 @@ class X86Renderer(Renderer):
   pre_matcher = x86_pre_matcher
   extra_matcher = x86_matcher
   lowerer = x86_lowerer
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT)}
   function_name: str = ""
 
   def __getitem__(self, x:UOp) -> Register: # hacky helper
