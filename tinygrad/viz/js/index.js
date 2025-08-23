@@ -159,9 +159,9 @@ async function renderProfiler() {
   const u64 = () => { const ret = new Number(view.getBigUint64(offset, true)); offset += 8; return ret; }
   const f32 = () => { const ret = view.getFloat32(offset, true); offset += 4; return ret; }
   const optional = (i) => i === 0 ? null : i-1;
-  const dur = u32(), peak = u64(), stringsLen = u32(), layoutsLen = u32();
+  const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
-  const strings = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, stringsLen))); offset += stringsLen;
+  const { strings, dtypes }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -214,10 +214,10 @@ async function renderProfiler() {
       for (let j=0; j<eventsLen; j++) {
         const length = u32();
         const x = Array.from({ length }, () => timestamps[u32()]);
-        const y = Array.from({ length }, u64);
-        const dtype = strings[u32()], nbytes = u64(), sz = u64();
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
-        shapes.push({ x, y0:y.map(yscale), y1:y.map(y => yscale(y+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
+        const e = {y:Array.from({ length }, u64), arg:{dtype:strings[u32()], sz:u64()}};
+        const nbytes = dtypes[e.arg.dtype]*e.arg.sz;
+        const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
+        shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {

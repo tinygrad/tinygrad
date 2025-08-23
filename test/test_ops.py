@@ -928,6 +928,12 @@ class TestOps(unittest.TestCase):
       for j in [-1., 0., 1.]:
         helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
 
+  def test_logaddexp(self):
+    helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-1.], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-100.0, -200, -300], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[1.0, 2000, 30000], [-1.0, 2, 3]])
+
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
     helper_test_op([()], torch.nn.functional.softsign, Tensor.softsign)
