@@ -90,7 +90,7 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
       parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
-        if p.op is Ops.BUFFER and p in storers and p not in store_targets: forced_realize, can_chase = True, False
+        if p.op is Ops.BUFFER and p in stores and p not in store_targets: forced_realize, can_chase = True, False
         if p in realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:
