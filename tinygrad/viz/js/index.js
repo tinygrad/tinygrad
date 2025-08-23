@@ -151,7 +151,7 @@ async function renderProfiler() {
   // layout once!
   if (data != null) return;
   const profiler = d3.select(".profiler").html("");
-  const { layout, dur, peak } = await (await fetch("/get_profile")).json();
+  const { layout, dur, peak, dtypes } = await (await fetch("/get_profile")).json();
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -196,8 +196,9 @@ async function renderProfiler() {
       const shapes = [];
       for (const [i,e] of v.shapes.entries()) {
         const x = e.x.map(tsIdx => v.timestamps[tsIdx]);
-        const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
-        shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+e.arg.nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
+        const nbytes = dtypes[e.arg.dtype]*e.arg.sz;
+        const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(nbytes, "B")}`};
+        shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, i) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak:v.peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
