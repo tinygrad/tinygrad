@@ -422,6 +422,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_div_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
 
+  def test_div_symbolic_const_gcd(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((3*a+9*b)//(3*d), -40, 40, "((a+(b*3))//d)")
+
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
 
