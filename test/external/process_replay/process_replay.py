@@ -43,26 +43,17 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-sink_store_to_assign = PatternMatcher([
-  (UPat(Ops.SINK, src=(UPat(Ops.STORE, name="s"),)), lambda s: s.src[0].assign(s.src[1]).sink() if s.src[0].dtype != dtypes.void else None),
+pm_store_to_assign = PatternMatcher([
+  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].assign(s.src[1]) if s.src[0].dtype != dtypes.void else None),
 ])
 
 def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
-  fixed_big_sink = graph_rewrite(big_sink, sink_store_to_assign)
-
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
-  new_sink = fixed_big_sink.substitute(get_kernelize_map(fixed_big_sink))
+  rewritten_sink = graph_rewrite(big_sink, pm_store_to_assign)
+  new_sink = rewritten_sink.substitute(get_kernelize_map(rewritten_sink))
   def to_str(ret:UOp) -> str:
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])
-
-  # print("\n\n===== replay_kernelize =====\n\n")
-  # print(big_sink, "\n")
-  # print(vvv:=new_sink, f"\n\n{to_str(vvv)}")
-  # print("\n-----------\n")
-  # print(vvv:=ret[big_sink], f"\n\n{to_str(vvv)}")
-  # print("\n=============================\n\n")
-
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
@@ -107,8 +98,6 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       if good != compare:
         for m in metadata: trunc_log(m)
         logging.info(loc)
-        print("!!!", name)
-        print(compare)
         for line in difflib.unified_diff(good.splitlines(), compare.splitlines()):
           logging.info(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
         if ctx_vars: logging.info(ctx_vars)
