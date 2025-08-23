@@ -59,10 +59,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
 
   # construct children graph (only for bases)
   children: dict[UOp, dict[UOp, None]] = {}
-  storers: dict[UOp, None] = {}
+  stores: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
-    if u.op is Ops.STORE: storers[u.buf_uop] = None
+    if u.op is Ops.STORE: stores[u.buf_uop] = None
     for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
