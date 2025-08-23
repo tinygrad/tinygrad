@@ -183,13 +183,20 @@ async function renderProfiler() {
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
-      const maxDepth = u8();
       const levelHeight = baseHeight-padding;
-      const shapes = [];
+      const shapes = [], levels = [];
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), depth:u8(), cat:optional(u8()), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), cat:optional(u8()), info:strings[u32()] || null};
+        // find a free level to put the event
+        let depth = levels.findIndex(levelEt => e.st >= levelEt);
+        const et = e.st+Math.trunc(e.dur);
+        if (depth === -1) {
+          depth = levels.length;
+          levels.push(et);
+        } else levels[depth] = et;
+        e.depth = depth;
         if (e.depth === 0) colorKey = e.cat ?? e.name;
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
         const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
@@ -204,7 +211,7 @@ async function renderProfiler() {
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
-      div.style("height", levelHeight*maxDepth+padding+"px").style("pointerEvents", "none");
+      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
       const height = heightScale(peak);
