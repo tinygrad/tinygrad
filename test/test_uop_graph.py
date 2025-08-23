@@ -487,6 +487,13 @@ class TestUOpGraph(unittest.TestCase):
       i = (ldfloat+3.14).cast(dtypes.int)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
 
+  def test_load_cast_to_bool(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), (), 0)
+      ridx = UOp.range(dtypes.int, 20, 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(ridx, ridx.cast(dtypes.bool).logical_not()),))
+      to_uops_list([ld0])
+
   @unittest.skip("Bool load is not supported yet")
   def test_load_mask(self):
     with Context(IGNORE_OOB=0):
