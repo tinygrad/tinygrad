@@ -93,7 +93,7 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
   (UPat(Ops.IDIV, name="alu"), no_vectorized_alu),
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
   (UPat(Ops.DEFINE_REG, name="acc").index(UPat.cvar("c")), split_vectorized_acc),
-  # no narrowing int casts, shuffle instead
+  # no narrowing int casts, shuffle instead, NOTE: this needs to be after split_vectorized_alu
   (UPat.var("y", dtypes.ints64+(dtypes.mask64,)).cast(dtypes.ints32+(dtypes.mask32,), name="x"),
    lambda y,x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.bitcast(x.dtype.scalar().vec(x.dtype.count*2)).gep(i*2) for i in range(2))) if y.dtype.count > 1 else None),
 ]) + mask_matcher
@@ -121,7 +121,7 @@ x86_matcher = PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # TODO: cmpne, add shouldn't have consts on the left to begin with
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
    lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # *** CASTS ***
   # rewrite cast to bool to CMPNE 0
@@ -184,6 +184,8 @@ x86_matcher = PatternMatcher([
    lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) > 1 and x.src[1].op is not Ops.CONST or len(x.src) == 1 and x.src[0].op is not Ops.CONST else None),
   (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
    lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
+  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
+  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
   # mulacc only available for floats
   (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
   # no int8 mul or cmove, cast to int16
