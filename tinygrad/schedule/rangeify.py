@@ -1,7 +1,7 @@
 from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, AxisType
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
 
@@ -108,8 +108,8 @@ class RangeifyContext:
 
   # create ranges
   range_idx: int = 0
-  def new_range(self, s:sint):
-    ret = UOp.range(dtypes.int, s, self.range_idx)
+  def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
+    ret = UOp.range(dtypes.int, s, self.range_idx, axistype)
     self.range_idx += 1
     return ret
 
@@ -203,7 +203,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   new_ranges = []
   for i,s in enumerate(red.src[0].shape):
     if i in red.arg[1]:
-      rngs[i] = ctx.new_range(s)
+      rngs[i] = ctx.new_range(s, axistype=AxisType.REDUCE)
       new_ranges.append(rngs[i])
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
 
