@@ -146,7 +146,7 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int)
     shapes.append({"name":name, "ref":ref, "st":st-start_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
   return {"shapes":shapes, "maxDepth":len(levels)}
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int]) -> dict:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -173,6 +173,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_
     v["x"].append(step)
     v["y"].append(v["y"][-1])
   timestamps.append(end_ts-start_ts)
+  peaks.append(peak)
   return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
@@ -190,11 +191,12 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, dict] = {}
+  peaks:list[int] = []
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts)
-    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts))
-  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts}).encode("utf-8")
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks)
+  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts, "peak":max(peaks, default=0)}).encode("utf-8")
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
