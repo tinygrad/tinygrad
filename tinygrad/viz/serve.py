@@ -163,7 +163,7 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_
     if e.name == "free":
       timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtypes.fields()[removed["arg"]["dtype"]].itemsize)
+      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtypes_map[removed["arg"]["dtype"]])
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
