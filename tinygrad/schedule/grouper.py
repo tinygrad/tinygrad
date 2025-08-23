@@ -2,7 +2,7 @@ from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternM
 from tinygrad.helpers import all_int, prod, unwrap, dedup, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, FUSE_CONV_BW
 from tinygrad.shape.shapetracker import ShapeTracker
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.STORE, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
@@ -12,10 +12,9 @@ def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
-    if s.op not in ALWAYS_CONTIGUOUS and not s.is_assign(): ctx[s] = None
+    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
-  if tr.is_assign(): return None
   st = unwrap(view.st)
   # always realize unsafe pad ops before masked view
   if any(v.mask is not None for v in st.views) and not can_pad(tr, ctx): return realize(ctx, tr)
@@ -26,10 +25,9 @@ def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
 
 do_realize = PatternMatcher([
   # always realize SINK parents
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS and not x.base.is_assign())),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
-  (UPat(Ops.STORE, name="tr"), lambda ctx,tr: realize(ctx, tr) if tr.is_assign() else None),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
+  # always realize STORE/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.STORE, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize parents of COPY, MSELECT, MSTACK
@@ -61,10 +59,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
 
   # construct children graph (only for bases)
   children: dict[UOp, dict[UOp, None]] = {}
-  assigns: dict[UOp, None] = {}
+  storers: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
-    if u.is_assign(): assigns[u.buf_uop] = None
+    if u.op is Ops.STORE: storers[u.buf_uop] = None
     for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -87,12 +85,12 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     forced_realize = r in group
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.is_assign()}):
+    # can only fuse store if no other store_target is used in the kernel
+    if not forced_realize and (store_targets:={x.buf_uop for x in group if x.op is Ops.STORE}):
       parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
-        if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
+        if p.op is Ops.BUFFER and p in storers and p not in store_targets: forced_realize, can_chase = True, False
         if p in realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:

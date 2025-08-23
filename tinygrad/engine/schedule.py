@@ -21,6 +21,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
   var_vals: dict[Variable, int] = {}
+  assert all(u.op is not Ops.STORE or u.is_assign() for u in sched_sink.toposort())
   for u in sched_sink.toposort():
     if not u.is_assign(): continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]

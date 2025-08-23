@@ -63,12 +63,11 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.VIEW), lambda: True),
 ])
 
-assign_spec = PatternMatcher([
-  # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.MSELECT, Ops.MSTACK, Ops.BIND)), name="x"), lambda x: all(s.op is not Ops.STORE or s.is_assign() for s in x.src)),
+store_spec = PatternMatcher([
+  # KERNEL can attach to an STORE to describe the compute required to realize a BUFFER
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
-  # ASSIGN has a target and a value. It can also optionally depend on other assigns
-  # (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+  # STORE has a target and a value. It can also optionally depend on other stores
   (UPat(Ops.STORE, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.STORE for s in x.src[2:])),
 
   # MSELECT chooses one of the multi buffers
@@ -80,7 +79,7 @@ assign_spec = PatternMatcher([
 
 # *** this is the spec of a Tensor in UOp ***
 
-tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
+tensor_uop_spec = buffer_spec+store_spec+PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
