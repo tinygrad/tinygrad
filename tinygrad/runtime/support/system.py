@@ -141,7 +141,8 @@ class PCIIfaceBase:
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or (uncached and cpu_access): # host or gtt-like memory.
+    if host: # host or gtt-like memory.
+      assert False
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)[1]]
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)

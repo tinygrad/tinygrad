@@ -293,11 +293,11 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def signal(self, signal:AMDSignal, value:sint=0):
-    print(hex(signal.value_addr), value)
-    self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    print(hex(signal.value_addr), value, hex(signal.base_buf.meta.mapping.sva))
+    self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
     return self
-    
+
     with self.pred_exec(xcc_mask=0b1):
       # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
       self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
@@ -329,6 +329,7 @@ class AMDComputeQueue(HWQueue):
       cmds = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(ib_ptr), len(cmds) | self.pm4.INDIRECT_BUFFER_VALID,
               self.pm4.PACKET3(self.pm4.PACKET3_NOP, ib_pad + len(cmds) - 1), *((0,) * ib_pad), *cmds]
 
+    print("ww", hex(dev.compute_queue.ring.addr))
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
     dev.compute_queue.put_value += len(cmds)
@@ -786,12 +787,14 @@ class AMDDevice(HCQCompiled):
     self.allocator = AMDAllocator(self)
     self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
     sig = AMDSignal(base_buf=self.xcc_sync_area)
+    sig.value = 1
     AMDComputeQueue(self).signal(sig, 10).submit(self)
     import time
-    time.sleep(1)
+    time.sleep(2)
     print(sig.value)
     print(self.compute_queue.read_ptrs[0][0])
     print(self.compute_queue.write_ptrs[0][0])
+    self.iface.dev_impl.gmc.on_interrupt()
     exit(0)
 
     # max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000

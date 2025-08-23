@@ -100,7 +100,7 @@ class TLSFAllocator:
 # Memory Managment
 
 @dataclasses.dataclass(frozen=True)
-class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
+class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; sva:int=0; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class PageTableTraverseContext:
   def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
@@ -118,7 +118,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
-    assert not pt.is_huge_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_huge_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.is_huge_page(pte_idx)=} {pt.lv=} {pte_idx=}, {pt.entry(pte_idx):#x}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -191,13 +191,14 @@ class MemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
+          print(f"Mapping {vaddr + off + pte_off * pte_covers:#x} to {paddr + off + pte_off * pte_covers:#x} size={pte_covers:#x} uncached={uncached} system={system} snooped={snooped} frag={self._frag_size(ctx.vaddr+off, pte_covers)}")
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     self.on_range_mapped()
     # print(paddrs[0][0])
     mc_addr = self.dev.paddr2mc(paddrs[0][0])
-    return VirtMapping(mc_addr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
+    return VirtMapping(mc_addr, size, paddrs, sva=vaddr, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")

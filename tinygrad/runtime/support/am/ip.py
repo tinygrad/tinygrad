@@ -130,11 +130,19 @@ class AM_GMC(AM_IP):
     if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
       extra |= am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE_GFX12 if not is_table and pte_lv != am.AMDGPU_VM_PTB else (am.AMDGPU_PTE_IS_PTE if not is_table else 0))
-    else:
+    elif self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
       extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
+    else:
+      extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+      if is_table and pte_lv == am.AMDGPU_VM_PDB1: extra |= am.AMDGPU_PDE_BFS(0x9)
+      if is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= am.AMDGPU_PTE_TF
+      if not is_table and pte_lv not in {am.AMDGPU_VM_PTB, am.AMDGPU_VM_PDB0}: extra |= am.AMDGPU_PDE_PTE
+      if not is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= (1 << 12)
+      extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
     return extra
-  def is_pte_huge_page(self, pte): return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
+  def is_pte_huge_page(self, pte):
+    return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:
@@ -208,17 +216,15 @@ class AM_GFX(AM_IP):
     self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
     for xcc in range(self.adev.soc.xccs):
-      self.adev.regGRBM_CNTL.update(read_timeout=0xff)
+      self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
       for i in range(0, 16):
         self._grbm_select(vmid=i, xcc=xcc)
-        self.adev.regSH_MEM_CONFIG.write(address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64,
-                                        alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED,
-                                        inst=xcc)
+        self.adev.regSH_MEM_CONFIG.write(0x1018, inst=xcc)
 
         # Configure apertures:
         # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
         # Scratch:     0x20000000'00000000 - 0x20000001'00000000 (4GB)
-        self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2, inst=xcc)
+        self.adev.regSH_MEM_BASES.write(0x20001000, inst=xcc)
       self._grbm_select(xcc=xcc)
 
       # Configure MEC doorbell range
@@ -228,6 +234,12 @@ class AM_GFX(AM_IP):
       # Enable MEC
       if self.adev.ip_ver[am.GC_HWIP] < (10,0,0): self.adev.regCP_MEC_CNTL.write(0, inst=xcc)
       else: self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+
+      print("RLC")
+      self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
+      wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
+      self.adev.regRLC_CGCG_CGLS_CTRL.write(0, inst=xcc)
+      self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
@@ -295,8 +307,7 @@ class AM_GFX(AM_IP):
 
   def _config_gfx(self, xcc=0):
     if self.adev.ip_ver[am.GC_HWIP] <= (10,0,0):
-      self.adev.regCP_MEC_CNTL.update(mec_me1_pipe0_reset=1, mec_me2_pipe0_reset=1, mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
-      self.adev.regCP_MEC_CNTL.update(mec_me1_pipe0_reset=0, mec_me2_pipe0_reset=0, mec_me1_halt=0, mec_me2_halt=0, inst=xcc)
+      self.adev.regCP_MEC_CNTL.update(mec_invalidate_icache=1, mec_me1_pipe0_reset=1, mec_me2_pipe0_reset=1, mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
     else:
       def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0):
         for pipe in range(pipe_cnt):
@@ -361,9 +372,10 @@ class AM_SDMA(AM_IP):
 
       # rd=noa, wr=bypass
       # self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}))
-      self.adev.reg(f"regSDMA_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0})
-      self.adev.reg(f"regSDMA_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
-    self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
+      # self.adev.reg(f"regSDMA_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0})
+      # self.adev.reg(f"regSDMA_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
+      pass
+    # self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0, size=4)
 
   def fini_hw(self):
     self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
