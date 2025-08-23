@@ -475,6 +475,27 @@ class TestUOpGraph(unittest.TestCase):
       global_store = UOp(Ops.STORE, dtypes.void, (gbuf.index(gidx), local_load))
       to_uops_list([global_store])
 
+  def test_load_with_float_in_index(self):
+    with Context(IGNORE_OOB=0):
+      ridx = UOp.range(dtypes.int, 20, 0)
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      i = (ridx.cast(dtypes.float)*0.68).trunc().cast(dtypes.int)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
+      to_uops_list([ld0])
+      glblfloat = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(20), (), 0)
+      ldfloat = UOp(Ops.LOAD, dtypes.float, (glblfloat.index(ridx),))
+      i = (ldfloat+3.14).cast(dtypes.int)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
+
+  @unittest.skip("Bool load is not supported yet")
+  def test_load_mask(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      mask = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+      ridx = UOp.range(dtypes.int, 20, 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(ridx, ridx<16&mask),)))
+      to_uops_list([ld0])
+
   def test_out_of_bounds_off_by_one_access(self):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
