@@ -102,5 +102,5 @@ pm_add_gpudims = PatternMatcher([
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
-  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=x.src[:2]+tuple([x for x in x.src[2:] if x.op is Ops.RANGE]))),
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=x.src[:2]+tuple([x for x in x.src[2:] if x.op is not Ops.UNROLL]))),
 ])
