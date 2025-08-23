@@ -97,8 +97,9 @@ def fix_reduce_unroll(x:UOp):
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
+  # NOTE: this mod 1000 is a hack for unrolling AxisType.GROUP_REDUCE
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0]%1000,s),)) \
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
