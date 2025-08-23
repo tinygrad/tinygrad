@@ -1,4 +1,4 @@
-import unittest, decimal, json
+import unittest, decimal, json, struct
 from dataclasses import dataclass
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
@@ -252,9 +252,41 @@ class TestVizIntegration(BaseTestViz):
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
+class TinyUnpacker:
+  def __init__(self, buf): self.buf, self.offset = buf, 0
+  def __call__(self, fmt:str) -> tuple:
+    ret = struct.unpack_from(fmt, self.buf, self.offset)
+    self.offset += struct.calcsize(fmt)
+    return ret
+
+# 0 means None, otherwise it's an enum value
+def option(i:int) -> int|None: return None if i == 0 else i-1
+
 def load_profile(lst:list[ProfileEvent]) -> dict:
   ret = get_profile(lst)
-  return json.loads(ret)
+  u = TinyUnpacker(ret)
+  dur, global_peak, index_len, layout_len = u("<IQII")
+  strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
+  u.offset += index_len
+  layout:dict[str, dict] = {}
+  for _ in range(layout_len):
+    klen = u("<B")[0]
+    k = ret[u.offset:u.offset+klen].decode()
+    u.offset += klen
+    layout[k] = v = {"shapes":[]}
+    event_type, event_count = u("<BI")
+    if event_type == 0:
+      v["max_depth"] = u("<B")
+      for _ in range(event_count):
+        name, ref, st, dur, depth, cat, _ = u("<IIIfBBI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "depth":depth, "cat":option(cat)})
+    else:
+      v["peak"] = u("<Q")[0]
+      v["timestamps"] = list(u(f"<{u('I')[0]}I"))
+      for _ in range(event_count):
+        i = u("<I")[0]
+        v["shapes"].append({"x":list(u(f"<{i}I")), "y":list(u(f"<{i}Q")), "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+  return {"dur":dur, "peak":global_peak, "layout":layout}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
@@ -269,6 +301,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(event['name'], 'E_2')
     self.assertEqual(event['st'], 0)
     self.assertEqual(event['dur'], 10)
+    assert event['ref'] is None
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
@@ -298,8 +331,8 @@ class TestVizProfiler(unittest.TestCase):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV Graph')
-    self.assertEqual(tracks[2], 'NV')
-    self.assertEqual(tracks[4], 'NV:1')
+    self.assertEqual(tracks[1], 'NV')
+    self.assertEqual(tracks[2], 'NV:1')
 
     nv_events = j['layout']['NV']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -315,6 +348,22 @@ class TestVizProfiler(unittest.TestCase):
     graph_events = j['layout']['NV Graph']['shapes']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
+
+  def test_bytes_per_kernel(self):
+    step = 10
+    n_events = 1_000
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    sz = len(get_profile(prof))
+    self.assertLessEqual(sz/n_events, 27)
+
+  # can pack up to 1hr 11 min of trace events
+  def test_trace_duration(self):
+    dur_mins = 72
+    n_events = 1_000
+    step = decimal.Decimal(dur_mins*60*1e6//n_events)
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    with self.assertRaises(struct.error):
+      get_profile(prof)
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

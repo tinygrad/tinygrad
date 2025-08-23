@@ -47,11 +47,11 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-UNROLL input
-      if root.op is Ops.IF:
+      if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif root.op in {Ops.REDUCE, Ops.STORE} and src.op is Ops.RANGE:
-        # for any range args of REDUCE, pass them through
+      elif (root.op is Ops.STORE and i >= 2) or (root.op is Ops.REDUCE and i >= 1):
+        # for any range args of STORE/REDUCE, pass them through
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -73,7 +73,7 @@ def do_contract(con:UOp):
   # CONTRACT without UNROLL repeats the element VECTORIZED
   if ex.op is not Ops.UNROLL: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from UNROLL
-  assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
+  assert con.dtype == dtypes.void or con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]

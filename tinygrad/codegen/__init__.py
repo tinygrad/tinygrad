@@ -69,15 +69,15 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
 
+  # add gpu dims (late). this also handles UNROLL range
+  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
+
   # expand
   ret.append(RewriteStep(sym+expander, name="expander"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
-
-  # add gpu dims (late)
-  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
