@@ -94,14 +94,18 @@ def fix_reduce_unroll(x:UOp):
   # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
   return x.replace(src=(ret,)+tuple(reduce_range))
 
+def fix_store_unroll(x:UOp):
+  store_expand, store_range = partition(x.src[2:], lambda y: y.op is Ops.UNROLL)
+  if len(store_expand) == 0: return None
+  return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
+
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
-  # NOTE: this mod 1000 is a hack for unrolling AxisType.GROUP_REDUCE
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0]%1000,s),)) \
+   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
-  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=x.src[:2]+tuple([x for x in x.src[2:] if x.op is not Ops.UNROLL]))),
+  (UPat(Ops.STORE, name="x"), fix_store_unroll),
 ])
