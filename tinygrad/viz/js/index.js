@@ -197,10 +197,9 @@ async function renderProfiler() {
           depth = levels.length;
           levels.push(et);
         } else levels[depth] = et;
-        e.depth = depth;
-        if (e.depth === 0) colorKey = e.cat ?? e.name;
+        if (depth === 0) colorKey = e.cat ?? e.name;
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
-        const fillColor = d3.color(colorMap.get(colorKey)).brighter(e.depth).toString();
+        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
         else if (ref != null) {
@@ -210,7 +209,7 @@ async function renderProfiler() {
         }
         const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
         // offset y by depth
-        shapes.push({x:e.st, y:levelHeight*e.depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
