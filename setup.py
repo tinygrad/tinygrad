@@ -93,7 +93,8 @@ setup(name='tinygrad',
             "pycocotools",
             "boto3",
             "pandas",
-            "influxdb3-python"
+            "influxdb3-python",
+            "typeguard",
         ],
         'docs': [
             "mkdocs",
@@ -103,9 +104,6 @@ setup(name='tinygrad',
             "markdown-exec[ansi]",
             "black",
             "numpy",
-        ],
-        'typed': [
-            "typeguard",
         ],
       },
       include_package_data=True)
