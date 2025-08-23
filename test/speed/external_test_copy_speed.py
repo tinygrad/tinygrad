@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, TinyJit
 from tinygrad.helpers import Timing, CI, OSX
 import multiprocessing.shared_memory as shared_memory
 
-N = 256 if CI else 4096
+N = 256
 class TestCopySpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()

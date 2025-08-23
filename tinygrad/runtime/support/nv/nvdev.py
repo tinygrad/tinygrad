@@ -51,14 +51,14 @@ class NVPageTableEntry:
     return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self._is_dual_pde() else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.is_huge_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
+    if self.is_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
     return (self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t).decode(self.entry(entry_id))
 
-  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
+  def is_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
   def supports_huge_page(self, paddr:int): return self.lv >= self.nvdev.mm.level_cnt - 3 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
-    if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
+    if self.is_page(entry_id): return self.read_fields(entry_id)['valid']
     return self.read_fields(entry_id)['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
 
   def address(self, entry_id:int) -> int:
