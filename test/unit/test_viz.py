@@ -276,10 +276,9 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     layout[k] = v = {"shapes":[]}
     event_type, event_count = u("<BI")
     if event_type == 0:
-      v["max_depth"] = u("<B")
       for _ in range(event_count):
-        name, ref, st, dur, depth, cat, _ = u("<IIIfBBI")
-        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "depth":depth, "cat":option(cat)})
+        name, ref, st, dur, cat, _ = u("<IIIfBI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
     else:
       v["peak"] = u("<Q")[0]
       v["timestamps"] = list(u(f"<{u('I')[0]}I"))
