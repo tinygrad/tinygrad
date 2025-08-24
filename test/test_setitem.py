@@ -32,7 +32,7 @@ class TestSetitem(unittest.TestCase):
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
   def test_setitem_inplace_mul(self):
-    t = Tensor.arange(10).realize()
+    t = Tensor.arange(10)
     t[:3] *= 10
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
@@ -123,7 +123,7 @@ class TestSetitem(unittest.TestCase):
       t[2:4, 3:5] = a
 
     for i in range(1, 6):
-      t = Tensor.zeros(6, 6).contiguous().realize()
+      t = Tensor.zeros(6, 6).contiguous()
       a = Tensor.full((2, 2), fill_value=i, dtype=dtypes.float).contiguous()
       f(t, a)
 
@@ -135,9 +135,9 @@ class TestSetitem(unittest.TestCase):
     with Context(IGNORE_OOB=1):
       @TinyJit
       def f(t:Tensor, a:Tensor, v:Variable):
-        t.shrink(((v,v+1), None)).assign(a).realize()
+        t.shrink(((v,v+1), None)).assign(a)
 
-      t = Tensor.zeros(6, 6).contiguous().realize()
+      t = Tensor.zeros(6, 6).contiguous()
       n = np.zeros((6, 6))
 
       for i in range(6):
