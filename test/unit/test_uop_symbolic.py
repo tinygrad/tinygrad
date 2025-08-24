@@ -128,6 +128,8 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
     self.helper_test_variable((a+b)+b, 0, 24, "(a+(b*2))")
+    self.helper_test_variable((a*3+b)+a, 0, 40, "(b+(a*4))")
+    self.helper_test_variable((a+b)+a*3, 0, 40, "(b+(a*4))")
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)
