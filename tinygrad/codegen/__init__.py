@@ -67,7 +67,8 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   if _POSTOPT:
     # new optimizer
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
-    #ret.append(RewriteStep(pm_postrange_opt_2, ctx=lambda _: opts, name="post optimize ast 2"))
+    ret.append(RewriteStep(sym, name="early symbolic"))
+    ret.append(RewriteStep(pm_postrange_opt_2, ctx=lambda _: opts, name="post optimize ast 2"))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))

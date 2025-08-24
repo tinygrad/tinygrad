@@ -51,7 +51,7 @@ def rangeify_kernel3():
   #c = c.reshape((32,2,16,4,32,2,16,4)).contiguous()
   with Context(RANGEIFY=1):
     sink = c.schedule()[-1].ast
-  print(sink)
+  #print(sink)
 
   opts  = [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UPCAST, 0, 2)]
   opts += [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 1, 16), Opt(OptOps.UPCAST, 1, 2)]
