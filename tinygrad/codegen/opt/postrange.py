@@ -23,7 +23,7 @@ class RKernel(Kernel):
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         if tc.dtype_in == dtypes.float and tc.dtype_out == dtypes.float:
-          axes = [0,1]
+          axes = [1,0]
           ne = []
           un, ln = 0, 0
           ss = []
