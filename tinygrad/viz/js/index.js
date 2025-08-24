@@ -220,10 +220,10 @@ async function renderProfiler() {
       for (let j=0; j<eventsLen; j++) {
         const length = u32();
         const x = Array.from({ length }, () => timestamps[u32()]);
-        const e = {y:Array.from({ length }, u64), arg:{dtype:strings[u32()], sz:u64()}};
-        const nbytes = dtypeSize[e.arg.dtype]*e.arg.sz;
-        const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
-        shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
+        const y = Array.from({ length }, u64);
+        const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
+        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
