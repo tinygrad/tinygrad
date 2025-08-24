@@ -1,6 +1,7 @@
 from typing import cast
 from dataclasses import replace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, AxisType, sint, ssimplify, KernelInfo
+from tinygrad.uop.ops import Variable, GroupOp
 from tinygrad.helpers import colored, argfix, prod
 from tinygrad.codegen.opt.kernel import Opt, OptOps, axis_colors, KernelOptError, check
 from tinygrad.dtype import dtypes, AddrSpace
@@ -10,7 +11,12 @@ from tinygrad.device import Device
 # this is Kernel now
 class RangeManip:
   def __init__(self, ast:UOp, opts:Renderer|None=None):
+    self.ast = ast
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
+
+    self.vars: list[Variable] = self.ast.variables()
+    # NOTE: this requires a specific order with the [::-1], this is likely a bug
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE}][::-1]
 
     self.replaces = {}
     self.rng = sorted([u for u in ast.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
@@ -22,17 +28,35 @@ class RangeManip:
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
 
+    self.reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
+
+    self.applied_opts: list[Opt] = []
+
+  # TODO: need this?
+  def copy(self):
+    return RangeManip(self.ast, self.opts)
+
+  @property
+  def reduceop(self) -> UOp|None: return self.reduceops[0] if len(self.reduceops) > 0 else None
+
   @property
   def name(self): return "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), axis_colors[s.arg[1]]) for s in self.rng])
 
   @property
   def shape_len(self): return len(self.rng)
   @property
+  def output_shape(self) -> tuple[sint, ...]:
+    return tuple([ssimplify(x.src[0]) for x in self.ast.src[0].src[2:]])
+  @property
   def full_shape(self) -> tuple[sint, ...]: return tuple([ssimplify(x.src[0]) for x in self.rng])
   @property
   def axis_types(self) -> list[AxisType]: return [x.arg[1] for x in self.rng]
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
+  @property
+  def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
+  @property
+  def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
   # heuristic helpers
   @property
@@ -93,12 +117,20 @@ class RangeManip:
     else:
       raise RuntimeError(f"{opt.op} not supported")
 
+    self.applied_opts.append(opt)
+
 def add_name(ctx:Renderer, s:UOp):
   manip = RangeManip(s, ctx)
   arg = s.arg if s.arg is not None else KernelInfo()
   if arg.opts_to_apply:
-    for opt in arg.opts_to_apply:
-      manip.apply_opt(opt)
+    for opt in arg.opts_to_apply: manip.apply_opt(opt)
+  else:
+    #from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+    #opts = hand_coded_optimizations(manip)
+    #print(opts)
+    #for opt in opts: manip.apply_opt(opt)
+    pass
+
   manip.renumber()
   s = s.substitute(manip.replaces)
   return s.replace(arg=replace(arg, name=manip.name, opts_to_apply=None))
@@ -114,6 +146,8 @@ pm_postrange_opt = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
   (UPat(Ops.SINK, name="s"), add_name),
 ])
+
+# local optimizer (late)
 
 def load_to_locals(l:UOp):
   # if already processed or not GLOBAL, skip

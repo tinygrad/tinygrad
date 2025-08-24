@@ -9,6 +9,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   k = k.copy()
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
+  """
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
@@ -26,9 +27,10 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
           return k.applied_opts
+  """
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.sts[0].shape[i] for i in k.upcastable_dims) <= 2048, False):
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
     for sz in [16]:
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -62,7 +64,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.sts[0].shape[i] for i in k.upcastable_dims) >= 1024):
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
@@ -104,6 +106,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
 
   # **** local groups ****
 
+  """
   if k.opts.has_local:
     if NOLOCALS:
       k.apply_opt(Opt(OptOps.NOLOCALS))
@@ -121,5 +124,6 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         will_delete_shape = local_sz == k.full_shape[axis]
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
+  """
 
   return k.applied_opts
