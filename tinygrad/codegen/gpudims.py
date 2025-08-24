@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
 from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
@@ -68,8 +68,14 @@ def add_gpudims(ctx:Renderer, s:UOp):
   global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in global_dims])
   local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in local_dims])
 
-  # define indexes for GPU-like execution
-  idxs = get_grouped_dims("gidx", global_shape, ctx.global_max, reverse=True) + get_grouped_dims("lidx", local_shape, ctx.local_max)
+  # get the idxs
+  ki: KernelInfo = s.arg
+  if ki.dont_use_locals:
+    assert not local_dims, "can't use locals if there's no local dims"
+    idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
+  else:
+    # define indexes for GPU-like execution
+    idxs = get_grouped_dims("gidx", global_shape, ctx.global_max, reverse=True) + get_grouped_dims("lidx", local_shape, ctx.local_max)
 
   # apply to multiple ranges
   subs = {}
