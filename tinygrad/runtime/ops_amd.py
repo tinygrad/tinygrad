@@ -8,6 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, all_same, flatten, DEBUG, AMD_LLVM, PROFILE, ProfileEvent, suppress_finalizing
+from tinygrad.helpers import lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -24,6 +25,8 @@ EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
+AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) \
+        | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -284,7 +287,7 @@ class AMDComputeQueue(HWQueue):
 
   def wait(self, signal:AMDSignal, value:sint=0):
     self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
-    # if self.dev.xccs > 1: self.xcc_barrier()
+    if self.dev.xccs > 1 and not self.dev.is_aql: self.xcc_barrier()
     return self
 
   def timestamp(self, signal:AMDSignal):
@@ -329,69 +332,35 @@ class AMDComputeQueue(HWQueue):
     dev.compute_queue.put_value += len(cmds)
     dev.compute_queue.signal_doorbell(dev)
 
-# TODO: parse this
-class amd_aql_pm4_packet_t(ctypes.Structure):
-    _fields_ = [('header', ctypes.c_uint16), ('format', ctypes.c_uint16), ('pm4_cmds', ctypes.c_uint32*13), ('completion_signal', hsa.hsa_signal_t)]
-
 class AMDComputeAQLQueue(AMDComputeQueue):
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
-
-    packet = hsa.hsa_kernel_dispatch_packet_t()
-    packet.workgroup_size_x = local_size[0]
-    packet.workgroup_size_y = local_size[1]
-    packet.workgroup_size_z = local_size[2]
-    packet.grid_size_x = global_size[0] * local_size[0]
-    packet.grid_size_y = global_size[1] * local_size[1]
-    packet.grid_size_z = global_size[2] * local_size[2]
-    packet.private_segment_size = prg.private_segment_size
-    packet.group_segment_size = prg.group_segment_size
-    packet.kernel_object = prg.aql_prog_addr
-    packet.kernarg_address = args_state.buf.va_addr
-    packet.setup = 3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
-    DISPATCH_KERNEL_HEADER  = 1 << hsa.HSA_PACKET_HEADER_BARRIER
-    DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
-    DISPATCH_KERNEL_HEADER |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
-    DISPATCH_KERNEL_HEADER |= hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE
-    packet.header = DISPATCH_KERNEL_HEADER
-
-    self._q.append(packet)
+    self._q.append(pkt:=hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
+      setup=3<<hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=prg.private_segment_size,
+      group_segment_size=prg.group_segment_size, kernel_object=prg.aql_prog_addr, kernarg_address=args_state.buf.va_addr))
+    self.bind_sints_to_mem(*local_size, mem=(pkt_view:=MMIOInterface(addr=ctypes.addressof(pkt), nbytes=ctypes.sizeof(pkt))), fmt='H', offset=4)
+    self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
 
   def bind(self, dev:AMDDevice): pass # not supported
   def _submit(self, dev:AMDDevice):
-    cmds = self._q
+    aql_bytes, pm4_batch = bytes(), []
 
-    packets = []
-    def to_packet(cmd):
-      ptr = dev.pm4_ib_alloc.alloc(len(cmd) * 4)
-      dev.pm4_ibs.cpu_view().view(ptr, fmt='I')[:len(cmd)] = array.array('I', cmd)
-      cmd = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(dev.pm4_ibs.va_addr + ptr), len(cmd) | self.pm4.INDIRECT_BUFFER_VALID]
-      assert len(cmd) <= 12
+    def flush_pm4_batch():
+      nonlocal pm4_batch
+      if not pm4_batch: return bytes()
+      dev.pm4_ibs.cpu_view().view(off:=dev.pm4_ib_alloc.alloc(len(pm4_batch) * 4), fmt='I')[:len(pm4_batch)] = array.array('I', pm4_batch)
+      pkt = [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
+        self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(dev.pm4_ibs.va_addr+off), len(pm4_batch)|self.pm4.INDIRECT_BUFFER_VALID, 10]
+      pm4_batch = []
+      return bytes(array.array('I', pkt + [0] * 10))
 
-      header  = hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE
-      header |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
-      header |= hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
-      packet = amd_aql_pm4_packet_t(format=1, header=header)
-      for i, value in enumerate(cmd): packet.pm4_cmds[i] = value
-      packet.pm4_cmds[len(cmd)] = 14 - len(cmd) # remain dwords count
-      return bytes(packet)
+    for cmd in self._q:
+      if isinstance(cmd, hsa.hsa_kernel_dispatch_packet_t): aql_bytes += flush_pm4_batch() + bytes(cmd)
+      else: pm4_batch.append(cmd)
+    aql_bytes += flush_pm4_batch()
 
-    packets = bytes()
-    batch = []
-    for cmd in cmds:
-      if isinstance(cmd, hsa.hsa_kernel_dispatch_packet_t):
-        if batch:
-          packets += to_packet(batch)
-          batch = []
-        packets += bytes(cmd)
-      else: batch.append(cmd)
-
-    if batch:
-      packets += to_packet(batch)
-      batch = []
-
-    dev.compute_queue.ring.view(offset=dev.compute_queue.put_value * 64, fmt='B')[:len(packets)] = packets
-    dev.compute_queue.put_value += len(packets) // 64
+    dev.compute_queue.ring.view(offset=dev.compute_queue.put_value * 64, fmt='B')[:len(aql_bytes)] = aql_bytes
+    dev.compute_queue.put_value += len(aql_bytes) // 64
     dev.compute_queue.signal_doorbell(dev, doorbell_value=dev.compute_queue.put_value-1)
 
 class AMDCopyQueue(HWQueue):
@@ -524,10 +493,6 @@ class AMDProgram(HCQProgram):
     self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
     self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
-
-    # from hexdump import hexdump
-    # hexdump(to_mv(self.aql_prog_addr, 0x200))
-    # print(hex(code.kernel_code_entry_byte_offset))
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
@@ -682,7 +647,7 @@ class KFDIface:
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
     assert stm.n_success == 1
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0, off_rptr=0, off_wptr=0):
+  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, off_rptr=8, off_wptr=0, xcc_id=0):
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
@@ -833,29 +798,32 @@ class AMDDevice(HCQCompiled):
     nbio_pad = (0,) if self.target[0] == 9 else ()
     self.nbio = AMDIP(nbio_name, self.iface.ip_versions[am.NBIF_HWIP], {i:nbio_pad+x for i,x in self.iface.ip_offsets[am.NBIF_HWIP].items()})
 
+    self.is_aql = getenv("AMD_AQL", 0)
     self.pm4_ibs = self.iface.alloc(0x1000, uncached=True, cpu_access=True)
     self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, 0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
+      0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if AMD_LLVM else AMDRenderer(self.arch),
-                     AMDLLVMCompiler(self.arch) if AMD_LLVM else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
-                     AMDSignal, functools.partial(AMDComputeAQLQueue, self), functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
-                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
+      AMDLLVMCompiler(self.arch) if AMD_LLVM else HIPCompiler(self.arch), functools.partial(AMDProgram, self), AMDSignal,
+      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
+      functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
+      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
     # XCC setup
-    # self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
-    # if self.xccs > 1:
-    #   self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
-    #   self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
-    #   AMDComputeQueue(self).xcc_config().submit(self)
+    self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
+    if self.xccs > 1:
+      self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
+      self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
+      self.hw_compute_queue_t().xcc_config().submit(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
@@ -870,49 +838,27 @@ class AMDDevice(HCQCompiled):
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(SQTT_NUM)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.cmd_id = 0
-      AMDComputeQueue(self).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
+      self.hw_compute_queue_t().sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
-      self.amd_aql_queue = hsa.amd_queue_t.from_address(gart.va_addr)
-      self.amd_aql_queue.write_dispatch_id = 0
-      self.amd_aql_queue.read_dispatch_id = 0
-      self.amd_aql_queue.read_dispatch_id_field_base_byte_offset = getattr(hsa.amd_queue_t, 'read_dispatch_id').offset
-      self.amd_aql_queue.queue_properties = hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
-
-      self.amd_aql_queue.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] - 1
-      self.amd_aql_queue.max_wave_id = self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1
-
-      # scratch setup
-      self.max_private_segment_size = 256
-      self.scratch_len = self.max_private_segment_size * (self.amd_aql_queue.max_cu_id + 1) * (self.amd_aql_queue.max_wave_id + 1)
-      self.scratch = self.iface.alloc(self.scratch_len)
-      self.amd_aql_queue.scratch_backing_memory_location = self.scratch.va_addr
-      self.amd_aql_queue.scratch_backing_memory_byte_size = self.scratch_len
-      self.amd_aql_queue.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.amd_aql_queue.max_wave_id + 1) // 64
-      self.amd_aql_queue.scratch_resource_descriptor[0] = self.scratch.va_addr & 0xFFFFFFFF
-      self.amd_aql_queue.scratch_resource_descriptor[1] = ((self.scratch.va_addr >> 32) & 0xFFFF) | (1 << 30) # va_hi | SWIZZLE_ENABLE
-      self.amd_aql_queue.scratch_resource_descriptor[2] = self.scratch_len & 0xFFFFFFFF
-      self.amd_aql_queue.scratch_resource_descriptor[3] = 0x20814fac # FORMAT=BUF_FORMAT_32_UINT,OOB_SELECT=2,ADD_TID_ENABLE=1,TYPE=SQ_RSRC_BUF,SQ_SELs
-
-      wave_scratch = (((self.amd_aql_queue.max_wave_id + 1) * self.max_private_segment_size + 255) // 256)
-      self.amd_aql_queue.compute_tmpring_size = wave_scratch << 12 | (self.amd_aql_queue.max_cu_id + 1)
-
-      print(getattr(hsa.amd_queue_t, 'write_dispatch_id').offset)
-      print(getattr(hsa.amd_queue_t, 'read_dispatch_id').offset)
+      aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
+        read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset, 
+        max_cu_id=self.max_cu_id, max_wave_id=self.max_wave_id)
+      gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
+      self.aql_desc = hsa.amd_queue_t.from_address(gart.va_addr)
 
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.iface.props.get('num_xcc', 1), mmap.PAGESIZE)
     cwsr_buffer = self.iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
     eop_buffer = self.iface.alloc(eop_buffer_size) if eop_buffer_size else None
 
     return AMDQueueDesc.multi(*(self.iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, xcc_id=xcc_id,
-                                                            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size,
-                                                            off_rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-                                                            off_wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset)
-                                for xcc_id in range(self.xccs if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else 1)))
+      ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size,
+      off_rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset, off_wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset)
+      for xcc_id in range(self.xccs if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else 1)))
 
   def _ensure_has_local_memory(self, required):
     if self.max_private_segment_size >= required: return
@@ -930,8 +876,16 @@ class AMDDevice(HCQCompiled):
       self.tmpring_size = waves << 12 | wavesize
       self.max_private_segment_size = required
 
+      if hasattr(self, 'aql_desc'):
+        self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
+        self.aql_desc.scratch_backing_memory_byte_size = self.scratch.size
+        self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
+        self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr), hi32(self.scratch.va_addr) | (1 << 30), lo32(self.scratch.size),
+          0x20814fac] # FORMAT=BUF_FORMAT_32_UINT,OOB_SELECT=2,ADD_TID_ENABLE=1,TYPE=SQ_RSRC_BUF,SQ_SELs
+        self.aql_desc.compute_tmpring_size = self.tmpring_size
+
   def invalidate_caches(self):
-    AMDComputeQueue(self).memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
+    self.hw_compute_queue_t().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
   def on_device_hang(self): self.iface.on_device_hang()
@@ -940,7 +894,7 @@ class AMDDevice(HCQCompiled):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
       wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
-      AMDComputeQueue(self).sqtt_stop(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
+      self.hw_compute_queue_t().sqtt_stop(len(self.sqtt_buffers), wptrs_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG>=2: print('Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
