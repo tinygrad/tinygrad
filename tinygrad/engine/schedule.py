@@ -33,7 +33,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         for ss in s.src:
           if ss.op is Ops.MSELECT: ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
-            assert ss.op is Ops.ASSIGN
+            assert ss.op is Ops.ASSIGN, f"ss.op is not ASSIGN, it's {ss.op}"
             children[ss.src[1]].append(k)
             in_degree[k] += 1
       elif s.op is Ops.BUFFER:

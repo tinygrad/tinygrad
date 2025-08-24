@@ -61,7 +61,8 @@ class PythonProgram:
           i += 1
           continue
         if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
-          assert dtype.fmt is not None and isinstance(dtype, PtrDType)
+          assert isinstance(dtype, PtrDType), dtype
+          if dtype.fmt is None: raise RuntimeError(f"{dtype=} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           if uop is Ops.DEFINE_REG:
             # REGs are per thread

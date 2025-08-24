@@ -364,8 +364,7 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  # TODO: why is REDUCE needed here and just RANGE isn't enough?
-  if any(x.op in {Ops.REDUCE, Ops.RANGE} for x in sink.toposort()): return None
+  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
   return sink.substitute({v:k for k,v in replaces.items()})
 
 def reduce_unparented(red:UOp):

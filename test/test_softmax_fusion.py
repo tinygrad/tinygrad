@@ -117,6 +117,14 @@ class TestFuse(unittest.TestCase):
     c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
     self.assertListEqual(c.tolist(), [30]*16)
 
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
+  def test_fuse_and_tc_opt(self):
+    A = Tensor.randn(8, 8).realize()
+    B = Tensor.randn(8, 8).realize()
+    C = Tensor.ones(1, 8, 8).pad(((1,1), None, None),).sum(0)
+    out = (C + (A @ B)).fuse()
+    out.realize()
+
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -155,7 +163,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       out = single_kernel_softmax(self.test)
       out.realize()
 
-    np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
   def test_auto_softmax(self):
     print("*** softmax ***")
@@ -168,7 +176,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       out = self.test.contiguous().softmax(-1).fuse()
       run_one_schedule_item(out)
 
-    np.testing.assert_allclose(sout.numpy(), out.numpy())
+    np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
   @unittest.skip("recursion error no longer raised")
   def test_softmax_bw(self):

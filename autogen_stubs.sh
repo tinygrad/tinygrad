@@ -198,11 +198,7 @@ generate_amd() {
   clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     extra/hip_gpu_driver/nvd.h \
-    extra/hip_gpu_driver/kfd_pm4_headers_ai.h \
-    extra/hip_gpu_driver/soc21_enum.h \
-    extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
     extra/hip_gpu_driver/gc_11_0_0_offset.h \
-    extra/hip_gpu_driver/gc_10_3_0_offset.h \
     extra/hip_gpu_driver/sienna_cichlid_ip_offset.h \
     --clang-args="-I/opt/rocm/include -x c++" \
     -o $BASE/amd_gpu.py
@@ -375,26 +371,6 @@ generate_am() {
     $AMKERN_AMD/amdgpu/nvd.h \
     -o $BASE/am/pm4_nv.py
   fixup $BASE/am/pm4_nv.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/vega10_enum.h \
-    -o $BASE/am/vega10.py
-  fixup $BASE/am/vega10.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/navi10_enum.h \
-    -o $BASE/am/navi10.py
-  fixup $BASE/am/navi10.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc21_enum.h \
-    -o $BASE/am/soc21.py
-  fixup $BASE/am/soc21.py
-
-  clang2py -k cdefstum \
-    $AMKERN_INC/soc24_enum.h \
-    -o $BASE/am/soc24.py
-  fixup $BASE/am/soc24.py
 
   clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \

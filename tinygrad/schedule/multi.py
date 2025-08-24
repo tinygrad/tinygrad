@@ -13,6 +13,10 @@ def handle_allreduce_multirank(buf:UOp, red:UOp) -> UOp|None:
   for i,dev in enumerate(buf.device):
     groups.setdefault(Device[dev].group_id, []).append(buf.mselect(i))
 
+  # Put reduce leader of each group first
+  reduce_leaders = set(getenv("REDUCE_LEADERS", "").split(","))
+  groups = {gid: sorted(bufs, key=lambda x: (x.device not in reduce_leaders, x.device)) for gid,bufs in groups.items()}
+
   # Skip if only one group or if every group has only one buffer
   if len(groups) <= 1 or not any(len(g) > 1 for g in groups.values()): return None
 
