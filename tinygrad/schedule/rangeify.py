@@ -52,7 +52,7 @@ def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
-def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
+def realize_store(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
 
 do_realize = PatternMatcher([
@@ -62,8 +62,8 @@ do_realize = PatternMatcher([
   (UPat({Ops.STORE, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
-  # realize input to assign (might be optimized out)
-  (UPat(Ops.STORE, name="a"), realize_assign),
+  # realize input to store (might be optimized out)
+  (UPat(Ops.STORE, name="a"), realize_store),
 ])
 
 add_contiguous = PatternMatcher([
@@ -334,10 +334,10 @@ def bufferize_to_store(x:UOp):
   shape = tuple([int(r.vmax+1) for r in rngs])
   sdtype = x.dtype.ptr(size=prod(shape))
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
-  if x.src[0].op is Ops.STORE and x.src[0].arg == "assign":
-    assign_target, assign_src = x.src[0].src
-    assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+  if x.src[0].op is Ops.STORE and not isinstance(x.dtype, PtrDType):
+    store_target, store_src = x.src[0].src
+    assert store_target.op is Ops.INDEX
+    return store_target.replace(dtype=sdtype).store(store_src, *rngs, dtype=sdtype)
   buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
@@ -367,28 +367,29 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   ctx.vars[b] = None
   return b.src[0]
 
-def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
-  buf = assign.as_buf()
+def handle_buf_store(ctx:LocalAddBufferContext, store:UOp):
+  buf = store.as_buf()
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   assert buf not in ctx.map
-  ctx.map[buf] = assign
+  ctx.map[buf] = store
   return buf
 
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat((Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
-  (UPat(Ops.STORE, arg="assign", name="assign"), handle_assign),
+  (UPat((Ops.MSTACK, Ops.MSELECT), name="store"), handle_buf_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()), name="store"), handle_buf_store),
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-   lambda dg,idx: idx.replace(dtype=dg.dtype, arg=None).load() if not isinstance(idx.dtype, PtrDType) and dg.arg != "assign" else None),
+   lambda dg,idx: idx.replace(dtype=dg.dtype, arg=None).load()
+                  if not isinstance(idx.dtype, PtrDType) and (dg.op is not Ops.STORE or dg.src[0].op is not Ops.BUFFER) else None),
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store) if store.arg != "assign" else None),
+    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store)),
 
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
@@ -396,7 +397,7 @@ to_define_global = PatternMatcher([
 ])
 
 def split_store(x:UOp):
-  if len(x.ranges) or x.arg == "assign": return None
+  if len(x.ranges) or x.src[0].op is Ops.BUFFER: return None
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
 
@@ -407,7 +408,7 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
-  return (t:=x.as_buf()).store(kernel, dtype=t.dtype, arg="assign")
+  return (t:=x.as_buf()).store(kernel, dtype=t.dtype)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
