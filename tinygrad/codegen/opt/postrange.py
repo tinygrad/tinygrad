@@ -116,15 +116,30 @@ pm_postrange_opt = PatternMatcher([
 ])
 
 def load_to_locals(l:UOp):
-  if l.tag == 1: return None
-  if l.src[0].dtype.addrspace != AddrSpace.GLOBAL: return None
+  # if already processed or not GLOBAL, skip
+  if l.tag == 1 or l.src[0].dtype.addrspace != AddrSpace.GLOBAL: return None
+
+  # use the global buffer index as the index to create the new load ranges
   load_index = l.src[0].src[0].arg
-  rngs = [x for x in l.toposort() if x.op is Ops.RANGE and x.arg[1] not in {AxisType.GLOBAL, AxisType.REDUCE}]
-  new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0]) for x in rngs]
-  return UOp(Ops.BUFFERIZE, l.dtype, (l.replace(tag=1).substitute(dict(zip(rngs, new_rngs))),)+tuple(new_rngs), arg=AddrSpace.LOCAL).index(*rngs)
+
+  # get all non GLOBAL ranges in the scope of the load
+  rngs = [x for x in l.ranges if x.arg[1] not in {AxisType.GLOBAL, AxisType.REDUCE}]
+
+  # create new ranges for the GLOBAL -> LOCAL copy
+  # NOTE: these don't have to have the same AxisType
+  new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], x.arg[1]) for x in rngs]
+
+  # update the global load to use the new ranges
+  new_global_load = l.replace(tag=1).substitute(dict(zip(rngs, new_rngs)))
+
+  # NOTE: new_rngs/rngs can be permuted as desired if you permute them together
+
+  # BUFFERIZE+INDEX to create a new buffer, store to it, and load from it
+  return UOp(Ops.BUFFERIZE, l.dtype, (new_global_load,)+tuple(new_rngs), arg=AddrSpace.LOCAL).index(*rngs)
 
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 pm_postrange_opt_2 = PatternMatcher([
   (UPat(Ops.LOAD, name="l"), load_to_locals),
 ])+pm_add_buffers+rangeify_codegen
+
