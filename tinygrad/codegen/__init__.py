@@ -18,7 +18,7 @@ from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexin
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt import pm_optimize
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
-from tinygrad.codegen.opt.postrange import pm_postrange_opt
+from tinygrad.codegen.opt.postrange import pm_postrange_opt, pm_postrange_opt_2
 
 @dataclass
 class RewriteStep:
@@ -65,6 +65,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   if _POSTOPT:
     # new optimizer
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
+    ret.append(RewriteStep(pm_postrange_opt_2, ctx=lambda _: opts, name="post optimize ast 2"))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))

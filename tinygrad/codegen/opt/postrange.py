@@ -1,9 +1,9 @@
 from typing import cast
 from dataclasses import replace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, AxisType, sint, ssimplify, KernelInfo
-from tinygrad.helpers import colored, argfix
+from tinygrad.helpers import colored, argfix, prod
 from tinygrad.codegen.opt.kernel import Opt, OptOps, axis_colors, KernelOptError, check
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.device import Device
 
@@ -74,8 +74,13 @@ class RangeManip:
     axis = self.real_axis(opt.op, opt.axis)
     amt = arg if (arg:=cast(int, opt.arg)) != 0 else self.full_shape[axis]
 
-    print(opt.op)
-    if opt.op is OptOps.UNROLL:                     # purple
+    if opt.op is OptOps.LOCAL:    # cyan
+      # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
+      # it's disabled for now since it makes BEAM slow for little gain
+      check(self.opts.has_local, "target does not support local")
+      check(self.axis_types[axis] is AxisType.GLOBAL, "local is for globals")
+      self.shift_to(axis, amt, AxisType.LOCAL, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
+    elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
@@ -109,3 +114,17 @@ pm_postrange_opt = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
   (UPat(Ops.SINK, name="s"), add_name),
 ])
+
+def load_to_locals(l:UOp):
+  if l.tag == 1: return None
+  if l.src[0].dtype.addrspace != AddrSpace.GLOBAL: return None
+  load_index = l.src[0].src[0].arg
+  rngs = [x for x in l.toposort() if x.op is Ops.RANGE and x.arg[1] not in {AxisType.GLOBAL, AxisType.REDUCE}]
+  new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0]) for x in rngs]
+  return UOp(Ops.BUFFERIZE, l.dtype, (l.replace(tag=1).substitute(dict(zip(rngs, new_rngs))),)+tuple(new_rngs), arg=AddrSpace.LOCAL).index(*rngs)
+
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
+
+pm_postrange_opt_2 = PatternMatcher([
+  (UPat(Ops.LOAD, name="l"), load_to_locals),
+])+pm_add_buffers+rangeify_codegen
