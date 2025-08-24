@@ -16,7 +16,7 @@ from tinygrad.codegen.expander import migrate_indexing, expander
 from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.opt import pm_optimize
+from tinygrad.codegen.opt import pm_get_optimization, pm_do_optimize
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 
 @dataclass
@@ -55,7 +55,8 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.extend(rewrites_for_views)
 
   # this is kernel.py
-  ret.append(RewriteStep(pm_optimize, ctx=lambda _: opts, name="optimize ast"))
+  ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
+  ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
 
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
