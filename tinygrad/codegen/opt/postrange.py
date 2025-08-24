@@ -114,6 +114,7 @@ class RangeManip:
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
       self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
+      #self.shift_to(axis, amt, AxisType.LOOP, insert_at=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       # NOTE: assume the first get_local_axes() LOCAL are for TC
@@ -126,6 +127,7 @@ class RangeManip:
     self.applied_opts.append(opt)
 
 def add_name(ctx:Renderer, s:UOp):
+  if s.tag == 1: return None
   manip = RangeManip(s, ctx)
   arg = s.arg if s.arg is not None else KernelInfo()
   if arg.opts_to_apply:
@@ -135,7 +137,7 @@ def add_name(ctx:Renderer, s:UOp):
 
   manip.renumber()
   s = s.substitute(manip.replaces)
-  return s.replace(arg=replace(arg, name=manip.name, opts_to_apply=None))
+  return s.replace(arg=replace(arg, name=manip.name, opts_to_apply=None), tag=1)
 
 def flatten_range(r:UOp):
   off = 2 if r.op is Ops.STORE else 1
@@ -165,13 +167,14 @@ def load_to_locals(l:UOp):
   # NOTE: these don't have to have the same AxisType
   #new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], x.arg[1]) for x in rngs]
   new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], AxisType.LOCAL if x.vmax+1 != 4 else AxisType.LOOP) for x in rngs]
-  assert prod([x.vmax+1 for x in new_rngs if x.arg[1] == AxisType.LOCAL]) == 256
+  ls = prod([x.vmax+1 for x in new_rngs if x.arg[1] == AxisType.LOCAL])
+  assert ls == 256, f"local size is {ls}"
 
   # update the global load to use the new ranges
   new_global_load = l.replace(tag=1).substitute(dict(zip(rngs, new_rngs)))
 
   # NOTE: new_rngs/rngs can be permuted as desired if you permute them together. this puts LOCAL at the end
-  rngs_ordered = sorted(enumerate(rngs), key=lambda x: -x[1].arg[0]+(10000 if x[1].arg[1] == AxisType.LOCAL else 0))
+  rngs_ordered = sorted(enumerate(rngs), key=lambda x: -10000 if x[1].arg[1] in (AxisType.UNROLL, AxisType.LOOP) else 0)
   rngs = [x for _,x in rngs_ordered]
   new_rngs = [new_rngs[i] for i,_ in rngs_ordered]
 
