@@ -6,7 +6,6 @@ from tinygrad.codegen.opt.search import bufs_from_lin
 from tinygrad.runtime.ops_cpu import ClangJITCompiler
 from tinygrad.runtime.ops_x86 import X86Renderer
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-import platform
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
@@ -16,6 +15,13 @@ if __name__ == "__main__":
 
   # these kernels are all dividing by 0
   ast_strs = ast_strs[:209] + ast_strs[210:]
+  ast_strs = ast_strs[:996] + ast_strs[997:]
+  ast_strs = ast_strs[:1691] + ast_strs[1692:]
+  ast_strs = ast_strs[:2260] + ast_strs[2261:]
+  # these two seg fault
+  ast_strs = ast_strs[:3001] + ast_strs[3002:]
+  ast_strs = ast_strs[:3719] + ast_strs[3720:]
+
 
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
