@@ -4,7 +4,7 @@ import z3
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.devectorizer import sym
+from tinygrad.codegen.late.devectorizer import sym
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
@@ -497,8 +497,8 @@ class TestSymbolic(unittest.TestCase):
     gidx0 = Variable("gidx0", 0, 7)
     lidx2 = Variable("lidx2", 0, 12)
     lidx3 = Variable("lidx3", 0, 1)
-    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, ("((lidx2+(gidx0*2))//6)"))
-    self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, ("((lidx2+(gidx0*2))//6)"))
+    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, ("(((lidx2//2)+gidx0)//3)", "((gidx0+(lidx2//2))//3)"))
+    self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, ("(((lidx2//2)+gidx0)//3)", "((gidx0+(lidx2//2))//3)"))
 
   def test_sum_div_complex4(self):
     gidx0 = Variable("gidx0", 0, 2)

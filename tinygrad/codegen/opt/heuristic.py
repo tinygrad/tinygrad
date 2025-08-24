@@ -28,7 +28,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
           return k.applied_opts
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.sts[0].shape[i] for i in k.upcastable_dims) <= 2048, False):
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
     for sz in [16]:
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
@@ -62,7 +62,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.sts[0].shape[i] for i in k.upcastable_dims) >= 1024):
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):

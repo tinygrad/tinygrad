@@ -1,12 +1,12 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, AxisType
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint, AxisType
 
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
@@ -332,13 +332,17 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
-  sdtype = x.dtype.ptr(size=prod(shape))
+  sdtype = x.dtype.ptr(size=prod(shape), addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, AddrSpace) else x.arg)
   assert prod(shape) > 0, f"no zero sized buffers {shape}"
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
-  buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+  if sdtype.addrspace == AddrSpace.GLOBAL:
+    buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+  else:
+    # TODO: how to dedup this
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers = pm_mops+PatternMatcher([
@@ -380,6 +384,12 @@ to_define_global = PatternMatcher([
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat((Ops.ASSIGN, Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
 
+  # HACK in case any CONSTs were replaced
+  # this is only needed if you are using symbolic
+  #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+])
+
+rangeify_codegen = PatternMatcher([
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
@@ -387,21 +397,17 @@ to_define_global = PatternMatcher([
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store)),
-
-  # HACK in case any CONSTs were replaced
-  # this is only needed if you are using symbolic
-  #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
 ])
 
 def split_store(x:UOp):
   if len(x.ranges): return None
   ctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global, ctx=ctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=ctx, name="kernel split", bottom_up=True)
 
-  store_rngs = ret.src[2:]
+  # get name
   rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
-  name = "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), "WHITE" if s in store_rngs else "red") for s in rng])
+  name = "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), "WHITE" if s in ret.src[2:] else "red") for s in rng])
 
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
