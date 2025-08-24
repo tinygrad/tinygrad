@@ -450,7 +450,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
 
   def test_div_numerator_negative(self):
-    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
 
   def test_nest_div_negative_factor(self):
     ridx0=UOp.variable("ridx0", 0, 9)
