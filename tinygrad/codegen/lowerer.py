@@ -18,8 +18,7 @@ def shape_to_idx(s, axis_types, start=0):
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  if len(ast.full_shape) != len(axis_types):
-    axis_types = tuple([AxisType.REDUCE if s is not fs else AxisType.LOOP for s,fs in zip(ast.shape, ast.full_shape)])
+  if len(ast.full_shape) != len(axis_types): axis_types = (AxisType.LOOP,)*len(ast.full_shape)
   return IndexContext(axis_types, [], 0)
 
 # ***** lowering (given index) *****
