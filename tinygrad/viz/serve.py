@@ -131,12 +131,12 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
-# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
-  shapes:list[bytes] = []
+# normalize event timestamps and attach kernel metadata
+def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
+  events:list[bytes] = []
   exec_points:dict[str, dict] = {}
   category_enum:dict[str, int] = {}
-  for st,et,dur,e in events:
+  for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
     name, cat, info = e.name, None, None
@@ -148,9 +148,9 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int,
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append(struct.pack("<IIIfBI", enum_str(name,scache), option(ref), st-start_ts, dur,
-                              option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "",scache)))
-  return struct.pack("<BI", 0, len(shapes))+b"".join(shapes) if shapes else None
+    events.append(struct.pack("<IIIfBI", enum_str(name, scache), option(ref), st-start_ts, dur,
+                              option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "", scache)))
+  return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtypes_map:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
