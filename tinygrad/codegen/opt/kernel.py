@@ -63,7 +63,7 @@ class Kernel:
     self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
+    self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs if x.st is not None]
 
     # add the shapetrackers for each reduce
     # we use this to track which axes are reduced in each reduce
