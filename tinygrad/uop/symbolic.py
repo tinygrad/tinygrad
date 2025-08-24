@@ -194,6 +194,15 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
   return ret*gcd if d.op is Ops.MOD else ret
 
+def remove_nested_div(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # (a//c+b)//y -> (a+b*c)//(c*y)
+  divs, non_divs = partition(split_uop(x, Ops.ADD), lambda u: u.op is Ops.IDIV)
+  if len(divs) != 1: return None
+  (a,c), b = divs[0].src, sum(non_divs)
+  if c.vmin > 0 and y.vmin > 0 and ((a.vmin>=0 and b.vmin>=0) or (a.vmax<=0 and b.vmax<=0)):
+    return (a+b*c)//(c*y)
+  return None
+
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
@@ -201,8 +210,14 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
+  factors = sorted(map(abs, factors), reverse=True)  # from large to small on absolute value
+  div = math.gcd(y.arg, factors[0])
+  if div == 1: return None
+  for f in factors[1:]:
+    if math.gcd(f, div) != 1: div = math.gcd(f, div)
+    else: break
+  if (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
+    return newxs//(c//div)
   return None
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
@@ -335,13 +350,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-    if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), divide_by_gcd),
   (UPat(Ops.MOD, dtypes.sints, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
+  (UPat(Ops.IDIV, dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), remove_nested_div),
   (UPat((Ops.IDIV), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
