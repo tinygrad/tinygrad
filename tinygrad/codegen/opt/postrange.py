@@ -57,9 +57,8 @@ class RKernel(Kernel):
           base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
           tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
 
-          tc_reduce_axes = tuple([self.rng[x].arg[0] for x in tc_reduce_axes])
-          # TODO: remove tc_upcast_axes from the arg
-          #tc_upcast_axes = [(self.rng[x[0]].arg[0], x[1]) for x in tc_upcast_axes]
+          tc_upcast_axes = tuple([tuple([(self.rng[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
+          tc_reduce_axes = tuple([self.rng[a].arg[0] for a in tc_reduce_axes])
 
           # construct the op
           wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
