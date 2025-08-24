@@ -170,7 +170,10 @@ def load_to_locals(l:UOp):
   # update the global load to use the new ranges
   new_global_load = l.replace(tag=1).substitute(dict(zip(rngs, new_rngs)))
 
-  # NOTE: new_rngs/rngs can be permuted as desired if you permute them together
+  # NOTE: new_rngs/rngs can be permuted as desired if you permute them together. this puts LOCAL at the end
+  rngs_ordered = sorted(enumerate(rngs), key=lambda x: -x[1].arg[0]+(10000 if x[1].arg[1] == AxisType.LOCAL else 0))
+  rngs = [x for _,x in rngs_ordered]
+  new_rngs = [new_rngs[i] for i,_ in rngs_ordered]
 
   # BUFFERIZE+INDEX to create a new buffer, store to it, and load from it
   return UOp(Ops.BUFFERIZE, l.dtype, (new_global_load,)+tuple(new_rngs), arg=AddrSpace.LOCAL).index(*rngs)
