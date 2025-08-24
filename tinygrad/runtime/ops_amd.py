@@ -805,8 +805,10 @@ class AMDDevice(HCQCompiled):
     self.nbio = AMDIP(nbio_name, self.iface.ip_versions[am.NBIF_HWIP], {i:nbio_pad+x for i,x in self.iface.ip_offsets[am.NBIF_HWIP].items()})
 
     self.is_aql = getenv("AMD_AQL", 0)
-    self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
-    self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
+    if self.is_aql:
+      self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
+      self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
+
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
       0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
