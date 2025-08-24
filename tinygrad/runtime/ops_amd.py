@@ -825,7 +825,7 @@ class AMDDevice(HCQCompiled):
 
     # XCC setup
     self.xcc_sync: tuple[AMDSignal, AMDSignal]|None = None
-    if self.xccs > 1:
+    if self.xccs > 1 and not self.is_aql:
       self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
       self.xcc_sync = (AMDSignal(base_buf=self.xcc_sync_area), AMDSignal(base_buf=self.xcc_sync_area.offset(256)))
       self.hw_compute_queue_t().xcc_config().submit(self)
