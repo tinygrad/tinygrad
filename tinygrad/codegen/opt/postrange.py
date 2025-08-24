@@ -1,5 +1,6 @@
+import math
 from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo
-from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 
@@ -16,6 +17,66 @@ class RKernel(Kernel):
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
 
+  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
+    reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+    if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
+      tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      for tc in tensor_cores:
+        if tc.dtype_in == dtypes.float and tc.dtype_out == dtypes.float:
+          axes = [0,1]
+          ne = []
+          un, ln = 0, 0
+          ss = []
+          for opt in tc.opts:
+            ne.append(self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], axes[int(opt[1])], 2), append_opt=False))
+            if opt[0] == 'u':
+              ss.append(f"u{un}")
+              un += 1
+            if opt[0] == 'l':
+              ss.append(f"l{ln}")
+              ln += 1
+          for i, (_, amt) in enumerate(tc.get_reduce_axes()):
+            ne.append(self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False)) # TODO: this should be the reduce, not 0
+            ss.append(f"r{i}")
+
+          # early realize for TC
+          self.ast = self.ast.substitute(self.replaces)
+          self.replaces = {}
+          reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+          tne = [x.replace(tag=1) for x in ne]
+          treduceop = reduceop.substitute(dict(zip(ne, tne)))
+          mul = treduceop.src[0]
+          assert mul.op is Ops.MUL
+          p1, p2 = tc.permutes_for_shape_str(ss)
+          m1 = mul.src[0].substitute(dict(zip(tne, [ne[i] for i in p1])))
+          m2 = mul.src[1].substitute(dict(zip(tne, [ne[i] for i in p2])))
+          srcs = [m1, m2]
+
+          # get reduce/upcast axes for the tensor cores
+          tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
+          base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
+          tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
+
+          tc_reduce_axes = tuple([self.rng[x].arg[0] for x in tc_reduce_axes])
+          # TODO: remove tc_upcast_axes from the arg
+          #tc_upcast_axes = [(self.rng[x[0]].arg[0], x[1]) for x in tc_upcast_axes]
+
+          # construct the op
+          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+
+          reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
+          if len(reduce_ranges):
+            tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
+
+          self.ast = self.ast.substitute({reduceop: tc_uop})
+        return True
+    return False
+
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
     old_sz = self.rng[axis].src[0].arg // amount
     assert old_sz > 0, f"bad old_sz on {axis} {amount} {self.rng[axis]}"
@@ -29,9 +90,10 @@ class RKernel(Kernel):
       del self.rng[axis]
     else:
       replaced_rng = self.rng[axis].replace(src=(UOp.const(dtypes.int, old_sz),))
-      self.replaces[self.rng[axis]] = replaced_rng * amount + new_rng
+      self.replaces[self.rng[axis]] = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
       self.rng[axis] = replaced_rng
       self.rng.insert(insert_at if insert_at is not None else len(self.rng), new_rng)
+    return new_rng
 
   @property
   def axis_types(self) -> list[AxisType]: return [x.arg[1] for x in self.rng]
