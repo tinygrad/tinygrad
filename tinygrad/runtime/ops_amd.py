@@ -359,8 +359,9 @@ class AMDComputeAQLQueue(AMDComputeQueue):
       else: pm4_batch.append(cmd)
     aql_bytes += flush_pm4_batch()
 
+    assert len(aql_bytes) < dev.compute_queue.ring.nbytes, "submit is too large for the queue"
     cp_bytes = min(len(aql_bytes), (dev.compute_queue.ring.nbytes - (dev.compute_queue.put_value * 64) % dev.compute_queue.ring.nbytes))
-    dev.compute_queue.ring.view(offset=dev.compute_queue.put_value * 64, fmt='B')[:cp_bytes] = aql_bytes[:cp_bytes]
+    dev.compute_queue.ring.view(offset=(dev.compute_queue.put_value * 64) % dev.compute_queue.ring.nbytes, fmt='B')[:cp_bytes] = aql_bytes[:cp_bytes]
     if (tail_bytes:=(len(aql_bytes) - cp_bytes)) > 0: dev.compute_queue.ring.view(offset=0, fmt='B')[:tail_bytes] = aql_bytes[cp_bytes:]
     dev.compute_queue.put_value += len(aql_bytes) // 64
     dev.compute_queue.signal_doorbell(dev, doorbell_value=dev.compute_queue.put_value-1)
@@ -804,7 +805,7 @@ class AMDDevice(HCQCompiled):
     self.nbio = AMDIP(nbio_name, self.iface.ip_versions[am.NBIF_HWIP], {i:nbio_pad+x for i,x in self.iface.ip_offsets[am.NBIF_HWIP].items()})
 
     self.is_aql = getenv("AMD_AQL", 0)
-    self.pm4_ibs = self.iface.alloc(0x1000, uncached=True, cpu_access=True)
+    self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
     self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
       0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
