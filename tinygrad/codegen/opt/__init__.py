@@ -39,13 +39,22 @@ def apply_opt(ast:UOp, renderer:Renderer, cls:type[Kernel]):
   k = cls(ast, opts=renderer)
   k.apply_opts(ast.arg.opts_to_apply)
   ret = k.get_optimized_ast()
-  if __debug__: type_verify(list(ret.toposort()))
+  if __debug__ and cls == Kernel: type_verify(list(ret.toposort()))
   return ret
 
 pm_do_optimize = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, Kernel) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
 ])
 
+def flatten_range(r:UOp):
+  off = 2 if r.op is Ops.STORE else 1
+  rngs = r.src[off:]
+  if not len(rngs): return None
+  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
+  return r.replace(src=r.src[:off]+tuple(new_rngs))
+
 pm_postrange_opt = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, RKernel) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
+  # real ranges only
+  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
 ])

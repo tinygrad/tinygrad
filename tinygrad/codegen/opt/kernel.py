@@ -86,7 +86,7 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    #self.simplify_merge_adjacent()
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
@@ -122,7 +122,7 @@ class Kernel:
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
   @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
+  def shape_len(self) -> int: return len(self.output_shape)
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
   @property
