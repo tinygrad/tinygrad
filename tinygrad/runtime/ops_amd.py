@@ -334,10 +334,9 @@ class amd_aql_pm4_packet_t(ctypes.Structure):
     _fields_ = [('header', ctypes.c_uint16), ('format', ctypes.c_uint16), ('pm4_cmds', ctypes.c_uint32*13), ('completion_signal', hsa.hsa_signal_t)]
 
 class AMDComputeAQLQueue(AMDComputeQueue):
-  
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
-    
+
     packet = hsa.hsa_kernel_dispatch_packet_t()
     packet.workgroup_size_x = local_size[0]
     packet.workgroup_size_y = local_size[1]
@@ -358,7 +357,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
 
     self._q.append(packet)
 
-  def bind(self, dev:AMDDevice): pass # not supported for now
+  def bind(self, dev:AMDDevice): pass # not supported
   def _submit(self, dev:AMDDevice):
     cmds = self._q
 
@@ -391,10 +390,9 @@ class AMDComputeAQLQueue(AMDComputeQueue):
       packets += to_packet(batch)
       batch = []
 
-    dev.compute_queue.ring.view(fmt='B')[:len(packets)] = packets
+    dev.compute_queue.ring.view(offset=dev.compute_queue.put_value * 64, fmt='B')[:len(packets)] = packets
     dev.compute_queue.put_value += len(packets) // 64
-    dev.amd_aql_queue.write_dispatch_id = dev.compute_queue.put_value
-    dev.compute_queue.signal_doorbell(dev)
+    dev.compute_queue.signal_doorbell(dev, doorbell_value=dev.compute_queue.put_value-1)
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, dev, max_copy_size=0x40000000):
@@ -573,7 +571,7 @@ class AMDQueueDesc:
     return cls(ring=queues[0].ring, put_value=queues[0].put_value, doorbells=flatten(q.doorbells for q in queues),
                read_ptrs=flatten(q.read_ptrs for q in queues), write_ptrs=flatten(q.write_ptrs for q in queues))
 
-  def signal_doorbell(self, dev):
+  def signal_doorbell(self, dev, doorbell_value:int|None=None):
     for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
 
     # Ensure all prior writes are visible to the GPU.
@@ -581,7 +579,7 @@ class AMDQueueDesc:
 
     # Flush hdp if queue is in dev mem.
     if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-    for doorbell in self.doorbells: doorbell[0] = self.put_value
+    for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
 
 class KFDIface:
   kfd:FileIOInterface|None = None
