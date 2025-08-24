@@ -161,7 +161,7 @@ async function renderProfiler() {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypes }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, dtypeSize }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -221,7 +221,7 @@ async function renderProfiler() {
         const length = u32();
         const x = Array.from({ length }, () => timestamps[u32()]);
         const e = {y:Array.from({ length }, u64), arg:{dtype:strings[u32()], sz:u64()}};
-        const nbytes = dtypes[e.arg.dtype]*e.arg.sz;
+        const nbytes = dtypeSize[e.arg.dtype]*e.arg.sz;
         const arg = {tooltipText:`${e.arg.dtype} len:${formatUnit(e.arg.sz)}\n${formatUnit(e.arg.nbytes, "B")}`};
         shapes.push({ x, y0:e.y.map(yscale), y1:e.y.map(y => yscale(y+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
       }
