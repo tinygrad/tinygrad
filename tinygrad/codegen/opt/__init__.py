@@ -37,7 +37,7 @@ pm_get_optimization = PatternMatcher([
 
 def apply_opt(ast:UOp, renderer:Renderer, cls:type[Kernel]):
   k = cls(ast, opts=renderer)
-  k.apply_opts(ast.arg.opts_to_apply)
+  if ast.arg is not None: k.apply_opts(ast.arg.opts_to_apply)
   ret = k.get_optimized_ast()
   if __debug__ and cls == Kernel: type_verify(list(ret.toposort()))
   return ret
@@ -54,7 +54,8 @@ def flatten_range(r:UOp):
   return r.replace(src=r.src[:off]+tuple(new_rngs))
 
 pm_postrange_opt = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, RKernel) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, RKernel) if ast.arg is None or \
+    (ast.arg is not None and ast.arg.opts_to_apply is not None) else None),
   # real ranges only
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
 ])

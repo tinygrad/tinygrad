@@ -1,5 +1,4 @@
-from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo
 from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
@@ -45,7 +44,10 @@ class RKernel(Kernel):
   def output_shape(self) -> tuple[sint, ...]: return tuple([ssimplify(x.src[0]) for x in self.ast.src[0].src[2:]])
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
-    return self.ast.substitute(self.replaces).replace(arg=replace(self.ast.arg, name=self.name, opts_to_apply=None))
+    ret = self.ast
+    kernel_name = ret.arg.name if ret.arg is not None and ret.arg.name != "test" else self.name if name_override is None else name_override
+    rarg = KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts))
+    return ret.substitute(self.replaces).replace(arg=rarg)
 
   # does nothing
   @axis_types.setter

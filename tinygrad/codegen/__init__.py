@@ -44,10 +44,10 @@ rewrites_for_linearizer = [
 
 def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, RANGEIFY.value+POSTOPT.value)
+  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, RANGEIFY.value, POSTOPT.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL, _POSTOPT) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL, _RANGEIFY, _POSTOPT) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
@@ -55,14 +55,14 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.extend(rewrites_for_views)
 
   # this is kernel.py
-  ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
+  if not _RANGEIFY: ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
 
-  if not _POSTOPT: ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
+  if not _POSTOPT and not _RANGEIFY: ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
 
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
-  if _POSTOPT: ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
+  if _POSTOPT or _RANGEIFY: ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
