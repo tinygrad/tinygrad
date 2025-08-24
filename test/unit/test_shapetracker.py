@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
-from tinygrad.codegen.devectorizer import sym
+from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
