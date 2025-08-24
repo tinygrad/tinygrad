@@ -1,7 +1,7 @@
 import unittest, random
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import print_uops, UOp, Ops
-from tinygrad.codegen.linearize import block_reorder
+from tinygrad.codegen.late.linearize import block_reorder
 from tinygrad.renderer.cstyle import OpenCLRenderer
 
 def is_toposorted(lst:list[UOp]):
