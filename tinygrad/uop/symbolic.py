@@ -201,8 +201,13 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
+  factors = sorted(map(abs, factors), reverse=True)  # from large to small on absolute value
+  div = math.gcd(y.arg, factors[0])
+  if div == 1: return None
+  for f in factors[1:]:
+    if math.gcd(f, div) != 1: div = math.gcd(f, div)
+    else: break
+  if (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
     return newxs//(c//div)
   return None
 
