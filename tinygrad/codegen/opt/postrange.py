@@ -19,7 +19,7 @@ class RangeManip:
     self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in {Ops.LOAD, Ops.STORE}][::-1]
 
     self.replaces = {}
-    self.rng = sorted([u for u in ast.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
+    self.rng = sorted([u for u in ast.toposort() if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: x.arg)
     self.tensor_core = None
 
     # convert LOOP to GLOBAL
@@ -67,15 +67,21 @@ class RangeManip:
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
-    replaced_rng = self.rng[axis].replace(src=(UOp.const(dtypes.int, self.rng[axis].src[0].arg // amount),))
+    old_sz = self.rng[axis].src[0].arg // amount
+    assert old_sz > 0, f"bad old_sz on {axis} {amount} {self.rng[axis]}"
 
     maxarg = max([x.arg[0] for x in self.rng])
     new_rng = UOp.range(dtypes.int, amount, maxarg+1, new_type)
 
-    self.replaces[self.rng[axis]] = replaced_rng * amount + new_rng
-
-    self.rng[axis] = replaced_rng
-    self.rng.insert(insert_at if insert_at is not None else len(self.rng), new_rng)
+    if old_sz == 1:
+      self.replaces[self.rng[axis]] = new_rng
+      self.rng.insert(insert_at if insert_at is not None else len(self.rng), new_rng)
+      del self.rng[axis]
+    else:
+      replaced_rng = self.rng[axis].replace(src=(UOp.const(dtypes.int, old_sz),))
+      self.replaces[self.rng[axis]] = replaced_rng * amount + new_rng
+      self.rng[axis] = replaced_rng
+      self.rng.insert(insert_at if insert_at is not None else len(self.rng), new_rng)
 
   def renumber(self):
     # renumber in the order of the self.rng array
@@ -125,10 +131,6 @@ def add_name(ctx:Renderer, s:UOp):
   if arg.opts_to_apply:
     for opt in arg.opts_to_apply: manip.apply_opt(opt)
   else:
-    #from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-    #opts = hand_coded_optimizations(manip)
-    #print(opts)
-    #for opt in opts: manip.apply_opt(opt)
     pass
 
   manip.renumber()
