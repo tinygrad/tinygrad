@@ -427,13 +427,18 @@ class AMDProgram(HCQProgram):
     self.dev, self.name, self.lib = dev, name, lib
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
-    self.dev.allocator._copyin(self.lib_gpu, image)
-    self.dev.synchronize()
 
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
     assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
+
+    # Relo for kernel_code_entry_byte_offset for AMD_LLVM. Comgr doesn't need that, but keep shared code path.
+    image[rodata_entry+0x10:rodata_entry+0x10+8] = struct.pack('<q', text_entry - rodata_entry)
+
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
+
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
@@ -452,7 +457,6 @@ class AMDProgram(HCQProgram):
     self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.rsrc3: int = image[rodata_entry+44:rodata_entry+48].cast("I")[0] # NOTE: kernel descriptor, not in amd_kernel_code_t struct
     self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
-    if code.kernel_code_entry_byte_offset == 0: self.prog_addr = self.lib_gpu.va_addr + text_entry
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
     self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
@@ -612,12 +616,12 @@ class KFDIface:
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
     assert stm.n_success == 1
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
       ctx_save_restore_address=cwsr_buffer.va_addr if cwsr_buffer else 0, ctx_save_restore_size=ctx_save_restore_size,
-      write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8 * (xcc_id + 1))
+      write_pointer_address=gart.va_addr+wptr, read_pointer_address=gart.va_addr+rptr+8*xcc_id)
 
     if not hasattr(self, 'doorbells'):
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
@@ -662,18 +666,18 @@ class PCIIface(PCIIfaceBase):
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.dev_impl.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size}
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+      self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
                                     doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
     else:
-      self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+      self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
-      read_ptrs=[gart.cpu_view().view(size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=0x10, size=8, fmt='Q')])
+      read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')])
 
   def sleep(self, timeout):
     if self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -715,9 +719,9 @@ class USBIface(PCIIface):
     return HCQBuffer(am_mapping.va_addr, size, meta=PCIAllocationMeta(am_mapping, has_cpu_mapping=False),
       view=USBMMIOInterface(self.usb, self.bars[0][0] + am_mapping.paddrs[0][0], size, fmt='B') if cpu_access else None, owner=self.dev)
 
-  def create_queue(self, queue_type, ring, gart, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
-    return super().create_queue(queue_type, ring, gart, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id)
+    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id)
 
   def sleep(self, timeout): pass
 
@@ -808,8 +812,8 @@ class AMDDevice(HCQCompiled):
     cwsr_buffer = self.iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
     eop_buffer = self.iface.alloc(eop_buffer_size) if eop_buffer_size else None
 
-    return AMDQueueDesc.multi(*(self.iface.create_queue(queue_type, ring, gart, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer, xcc_id=xcc_id,
-                                                            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
+    return AMDQueueDesc.multi(*(self.iface.create_queue(queue_type, ring, gart, rptr=0, wptr=0x10, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
+                                xcc_id=xcc_id, ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size)
                                 for xcc_id in range(self.xccs if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else 1)))
 
   def _ensure_has_local_memory(self, required):
