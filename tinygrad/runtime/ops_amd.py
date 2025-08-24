@@ -427,13 +427,18 @@ class AMDProgram(HCQProgram):
     self.dev, self.name, self.lib = dev, name, lib
 
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
-    self.dev.allocator._copyin(self.lib_gpu, image)
-    self.dev.synchronize()
 
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
     assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
+
+    # Relo for kernel_code_entry_byte_offset for AMD_LLVM. Comgr doesn't need that, but keep shared code path.
+    image[rodata_entry+0x10:rodata_entry+0x10+8] = struct.pack('<q', text_entry - rodata_entry)
+
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
+
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
@@ -452,7 +457,6 @@ class AMDProgram(HCQProgram):
     self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.rsrc3: int = image[rodata_entry+44:rodata_entry+48].cast("I")[0] # NOTE: kernel descriptor, not in amd_kernel_code_t struct
     self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
-    if code.kernel_code_entry_byte_offset == 0: self.prog_addr = self.lib_gpu.va_addr + text_entry
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
     self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
