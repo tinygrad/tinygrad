@@ -428,6 +428,10 @@ class AMDProgram(HCQProgram):
 
     image, sections, _ = elf_loader(self.lib)
 
+    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
+    text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
+    assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
+
     # Relo for kernel_code_entry_byte_offset for AMD_LLVM. Comgr doesn't need that, but keep shared code path.
     image[rodata_entry+0x10:rodata_entry+0x10+8] = struct.pack('<q', text_entry - rodata_entry)
 
@@ -435,9 +439,6 @@ class AMDProgram(HCQProgram):
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
-    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
-    text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
-    assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
     self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
