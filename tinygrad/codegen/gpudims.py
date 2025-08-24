@@ -104,8 +104,30 @@ def fix_store_unroll(x:UOp):
   if len(store_expand) == 0: return None
   return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
 
+def add_gpudims_store(s:UOp):
+  rngs = sorted([x for x in s.src[2:] if x.op is Ops.RANGE], key=lambda x: x.arg[0])
+  g = [x for x in rngs if x.arg[1] == AxisType.GLOBAL]
+  l = [x for x in rngs if x.arg[1] == AxisType.LOCAL or (x.arg[1] == AxisType.GROUP_REDUCE and x.arg[0] >= 2000)]
+  if len(g) == 0 and len(l) == 0: return None
+  gs = ssimplify(prod([x.src[0] for x in g]))
+  ls = ssimplify(prod([x.src[0] for x in l]))
+  subs = {}
+  if gs > 1:
+    gr = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", gs))
+    for x in g[::-1]:
+      subs[x] = gr % x.src[0]
+      gr //= x.src[0]
+  if ls > 1:
+    lr = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", ls))
+    for x in l:
+      subs[x] = lr % x.src[0]
+      lr //= x.src[0]
+  print(f"global size {ssimplify(gs)}, local size {ssimplify(ls)}")
+  return s.substitute(subs)
+
 pm_add_gpudims = PatternMatcher([
-  (UPat(Ops.SINK, name="s"), add_gpudims),
+  #(UPat(Ops.SINK, name="s"), add_gpudims),
+  (UPat(Ops.STORE, name="s"), add_gpudims_store),
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
    lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \

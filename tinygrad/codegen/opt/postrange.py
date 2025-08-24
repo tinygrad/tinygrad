@@ -163,7 +163,9 @@ def load_to_locals(l:UOp):
 
   # create new ranges for the GLOBAL -> LOCAL copy
   # NOTE: these don't have to have the same AxisType
-  new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], x.arg[1]) for x in rngs]
+  #new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], x.arg[1]) for x in rngs]
+  new_rngs = [UOp.range(dtypes.int, x.vmax+1, load_index*10000+x.arg[0], AxisType.LOCAL if x.vmax+1 != 4 else AxisType.LOOP) for x in rngs]
+  assert prod([x.vmax+1 for x in new_rngs if x.arg[1] == AxisType.LOCAL]) == 256
 
   # update the global load to use the new ranges
   new_global_load = l.replace(tag=1).substitute(dict(zip(rngs, new_rngs)))
