@@ -1741,15 +1741,15 @@ class TestIndexing(unittest.TestCase):
 
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
-    xt = X[[1, 2], [1, 2]]
-    self.check_schedule(xt, 3)
-    np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
+    xt = X[[1, 2], [-1, 2]]
+    self.check_schedule(xt, 1)
+    np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [-1, 2]])
 
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
-    xt = X[[0]]
-    self.check_schedule(xt, 2)
-    np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
+    xt = X[[0, -1]]
+    self.check_schedule(xt, 1)
+    np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0, -1]])
 
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
@@ -1759,8 +1759,8 @@ class TestIndexing(unittest.TestCase):
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
-    xt = X[1:2, [1, 2]]
-    self.check_schedule(xt, 2)
+    xt = X[1:2, [-1, 2]]
+    self.check_schedule(xt, 1)
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)

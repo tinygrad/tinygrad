@@ -117,6 +117,7 @@ class TestLinearizer(unittest.TestCase):
         if skip and i in skip: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
+  @unittest.skip("broken. should not depends on push_views and implementation details of getitem")
   @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
   def test_indexing_multireduce(self):
     dataset = Tensor.rand(16384, 256).realize()

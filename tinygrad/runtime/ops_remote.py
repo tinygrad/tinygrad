@@ -9,6 +9,7 @@ from typing import Callable, Iterator, Any, cast
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import multiprocessing, threading, functools, itertools, asyncio, http, http.client, hashlib, time, os, binascii, struct, ast, contextlib, weakref
+import traceback, builtins
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable, sint
@@ -37,6 +38,11 @@ class RemoteProperties:
   graph_supported: bool
   graph_supports_multi: bool
   ib_gid: bytes|None
+
+@dataclass(frozen=True)
+class RemoteException:
+  exc: Exception
+  trace: str = ""
 
 @dataclass(frozen=True)
 class GetProperties(RemoteRequest): pass
@@ -119,9 +125,10 @@ class GraphExec(RemoteRequest):
   wait: bool
 
 # for safe deserialization
+eval_excs = [v for k,v in builtins.__dict__.items() if isinstance(v, type) and issubclass(v, Exception) and not k.endswith("Warning")]
 eval_globals = {x.__name__:x for x in [SessionKey, SessionFree, RemoteProperties, GetProperties, Event, Wait, BufferAlloc, BufferOffset, BufferIOVAS,
                                        BufferFree, CopyIn, CopyOut, Transfer, BatchTransfer, IBConnect, ProgramAlloc, ProgramFree, ProgramExec,
-                                       GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes]}
+                                       GraphComputeItem, GraphAlloc, GraphFree, GraphExec, BufferSpec, UOp, Ops, dtypes, RemoteException] + eval_excs}
 attribute_whitelist: dict[Any, set[str]] = {dtypes: {*DTYPES_DICT.keys(), 'imagef', 'imageh'}, Ops: {x.name for x in Ops}}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Dict: lambda x: {safe_eval(k):safe_eval(v) for k,v in zip(x.keys, x.values)},
@@ -182,7 +189,10 @@ class RemoteHandler:
         key, value = hdr.split(':', 1)
         req_headers[key.lower()] = value.strip()
       req_body = await reader.readexactly(int(req_headers.get("content-length", "0")))
-      res_status, res_body = await self.handle(req_method, req_path, req_body)
+      try: res_status, res_body = await self.handle(req_method, req_path, req_body)
+      except Exception as e:
+        res_status, res_body = http.HTTPStatus.INTERNAL_SERVER_ERROR, repr(RemoteException(e, traceback.format_exc())).encode()
+        print(f"{traceback.format_exc()}", flush=True)
       writer.write(f"HTTP/1.1 {res_status.value} {res_status.phrase}\r\nContent-Length: {len(res_body)}\r\n\r\n".encode() + res_body)
 
   async def ib_connect(self, ssession:SessionKey, dsession:SessionKey) -> IBConn|None:
@@ -296,7 +306,10 @@ class RemoteHandler:
           case ProgramAlloc():
             lib = dev.compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = dev.runtime(c.name, lib)
-          case ProgramFree(): del session.programs[(c.name, c.datahash)]
+          case ProgramFree():
+            key = (c.name, c.datahash)
+            # WORKAROUND: should be unconditional once the protocol supports proper exception handling
+            if key in session.programs: del session.programs[key]
           case ProgramExec():
             bufs = [session.buffers[x]._buf for x in c.bufs]
             extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
@@ -411,15 +424,24 @@ class RemoteConnection:
     conns = RemoteConnection.all.keys()
     datas = {conn: conn.req.serialize() for conn in conns}
     reqs, hashes, hash_datas = sum(len(c.req._q) for c in conns), sum(len(c.req._h) for c in conns), sum(len(data) for data in datas.values())
+    resps = []
     with Timing(f"*** send {reqs:-3d} requests {hashes:-3d} hashes with len {hash_datas/1024:.2f} kB in ", enabled=DEBUG>=3):
       for conn,data in datas.items(): conn.conn.request("POST", "/batch", data)
       for conn in datas.keys():
-        response = conn.conn.getresponse()
-        assert response.status == 200, f"POST /batch failed: {response}"
-        resp = response.read()
-        if conn == self: ret = resp
+        resp = conn.conn.getresponse()
+        body = resp.read()
+        resps.append((conn, resp, body))
         conn.req = BatchRequest()
     if take_q: RemoteConnection.q_lock.release()
+    for conn,resp,body in resps:
+      match resp.status:
+        case http.HTTPStatus.OK: pass
+        case http.HTTPStatus.INTERNAL_SERVER_ERROR:
+          exc_wrapper = safe_eval(ast.parse(body.decode(), mode="eval").body)
+          exc_wrapper.exc.add_note(exc_wrapper.trace)
+          raise exc_wrapper.exc
+        case code: raise RuntimeError(f"POST /batch failed with {code}: {body.decode()}")
+      if conn == self: ret = body
     return ret
 
 def parse_hosts(hs:str) -> list[tuple[str, int]]|LazySeq[tuple[str, int]]:
