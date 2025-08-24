@@ -820,10 +820,10 @@ class AMDDevice(HCQCompiled):
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
     super().__init__(device, AMDAllocator(self), AMDLLVMRenderer(self.arch) if AMD_LLVM else AMDRenderer(self.arch),
-      AMDLLVMCompiler(self.arch) if AMD_LLVM else HIPCompiler(self.arch), functools.partial(AMDProgram, self), AMDSignal,
-      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
-      functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
-      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
+                     AMDLLVMCompiler(self.arch) if AMD_LLVM else HIPCompiler(self.arch), functools.partial(AMDProgram, self),
+                     AMDSignal, functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
+                     functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
+                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
     self.max_private_segment_size = 0
