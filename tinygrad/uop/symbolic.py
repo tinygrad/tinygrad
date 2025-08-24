@@ -197,19 +197,13 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  factors = [u.const_factor() for u in split_uop(x.pop_const()[0], Ops.ADD)]
-  # div is the smallest factor of the denominator (greater than 1) out of all "factors"
-  # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
-  # TODO: add same optimization for mod
-  factors = sorted(map(abs, factors), reverse=True)  # from large to small on absolute value
-  div = math.gcd(y.arg, factors[0])
-  if div == 1: return None
-  for f in factors[1:]:
+  factors = sorted([abs(u.const_factor()) for u in split_uop(x.pop_const()[0], Ops.ADD)], reverse=True)  # from large to small on absolute value
+  div = y.arg
+  for f in factors:
     if math.gcd(f, div) != 1: div = math.gcd(f, div)
     else: break
-  if (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
-    return newxs//(c//div)
-  return None
+  if div==y.arg or (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and take out the quotient and see if it allows the numerator to be simplified
