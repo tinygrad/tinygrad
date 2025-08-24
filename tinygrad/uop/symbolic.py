@@ -183,10 +183,9 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
   rems = [min((r:=f%c), r-c, key=abs) for f in factors]
-  if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c and all(f > 0 for f in factors):
-    if d.op is Ops.MOD: return rem - rem.vmin//c*c
-    return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
-  return None
+  if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c!=rem.vmax//c: return None
+  if d.op is Ops.MOD: return rem - rem.vmin//c*c
+  return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
@@ -203,7 +202,8 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   # TODO: add same optimization for mod
   div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
+  if (1 < div < c) and (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
+    return newxs//(c//div)
   return None
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
@@ -280,6 +280,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
+  ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)

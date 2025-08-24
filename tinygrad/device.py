@@ -139,7 +139,7 @@ class Buffer:
       if PROFILE:
         self._prof_num = num = len(Buffer.profile_events)
         ts = decimal.Decimal(time.perf_counter_ns())/1000
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":self.dtype, "sz":self.size}))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"

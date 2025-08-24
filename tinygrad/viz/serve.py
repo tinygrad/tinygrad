@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -79,7 +79,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
         label += f"\n{shape_to_str(u.shape)}"
       elif len(rngs:=u.ranges):
-        label += f"\n{str(sorted([x.arg for x in rngs]))}"
+        label += f"\n{str(sorted([x.arg[0] for x in rngs]))}"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
@@ -106,6 +106,15 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
     if not ctx.bottom_up: next_sink = new_sink
 
+# encoder helpers
+
+def enum_str(s, cache:dict[str, int]) -> int:
+  if (cret:=cache.get(s)) is not None: return cret
+  cache[s] = ret = len(cache)
+  return ret
+
+def option(s:int|None) -> int: return 0 if s is None else s+1
+
 # Profiler API
 
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
@@ -122,18 +131,14 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
-# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
-  shapes:list[dict] = []
-  levels:list[int] = []
+# normalize event timestamps and attach kernel metadata
+def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
+  events:list[bytes] = []
   exec_points:dict[str, dict] = {}
-  for st,et,dur,e in events:
+  category_enum:dict[str, int] = {}
+  for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
-    # find a free level to put the event
-    depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
-    if depth < len(levels): levels[depth] = et
-    else: levels.append(et)
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
@@ -143,10 +148,12 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]]) -> dict:
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st, "dur":dur, "depth":depth, "cat":cat, "info":info})
-  return {"shapes":shapes, "maxDepth":len(levels)}
+    events.append(struct.pack("<IIIfBI", enum_str(name, scache), option(ref), st-start_ts, dur,
+                              option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "", scache)))
+  return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dict:
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtypes_map:dict[str, int],
+               scache:dict[str, int]) -> bytes|None:
   step, peak, mem = 0, 0, 0
   shps:dict[int, dict] = {}
   temp:dict[int, dict] = {}
@@ -154,26 +161,30 @@ def mem_layout(events:list[tuple[int, int, float, DevEvent]], max_ts:int) -> dic
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.ts))
+      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":{"dtype":e.arg["dtype"].name, "sz":e.arg["sz"]}}
+      dtypes_map.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
+      timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem += e.arg["nbytes"]
+      mem += e.arg["sz"]*e.arg["dtype"].itemsize
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.ts))
+      timestamps.append(int(e.ts)-start_ts)
       step += 1
-      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
+      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtypes_map[removed["arg"]["dtype"]])
       removed["x"].append(step)
       removed["y"].append(removed["y"][-1])
       for k,v in temp.items():
         if k > e.key:
           v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
+          v["y"] += [v["y"][-1], v["y"][-1]-free_nbytes]
   for v in temp.values():
     v["x"].append(step)
     v["y"].append(v["y"][-1])
-  timestamps.append(max_ts)
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+  timestamps.append(end_ts-start_ts)
+  peaks.append(peak)
+  bufs = [struct.pack("<I"+str(i:=len(v['x']))+f"I{i}QIQ", i, *v["x"], *v["y"], enum_str(v["arg"]["dtype"], scache),
+                      v["arg"]["sz"]) for v in shps.values()]
+  return struct.pack("<BIQI", 1, len(shps), peak, len(timestamps))+struct.pack(f"<{len(timestamps)}I", *timestamps)+b"".join(bufs) if bufs else None
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
@@ -181,20 +192,25 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
-  min_ts:int|None = None
-  max_ts:int|None = None
+  start_ts:int|None = None
+  end_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if min_ts is None or st < min_ts: min_ts = st
-    if max_ts is None or et > max_ts: max_ts = et
-  if min_ts is None: return None
+    if start_ts is None or st < start_ts: start_ts = st
+    if end_ts is None or et > end_ts: end_ts = et
+  if start_ts is None: return None
   # return layout of per device events
-  layout:dict[str, dict] = {}
+  layout:dict[str, bytes|None] = {}
+  scache:dict[str, int] = {}
+  peaks:list[int] = []
+  dtypes_map:dict[str, int] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v)
-    layout[f"{k} Memory"] = mem_layout(v, unwrap(max_ts))
-  return json.dumps({"layout":layout, "st":min_ts, "et":max_ts}).encode("utf-8")
+    layout[k] = timeline_layout(v, start_ts, scache)
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtypes_map, scache)
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
+  index = json.dumps({"strings":list(scache), "dtypes":dtypes_map}).encode()
+  return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []

@@ -315,8 +315,12 @@ def threefry2x32(x: UOp, key: UOp):
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
-  pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
-           ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
+  pat: list[tuple[UPat, Callable]] = []
+  for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
+    if op not in ops or force_transcendental:
+      pat += [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f),
+              (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
+                lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
