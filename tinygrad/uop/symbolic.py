@@ -1,6 +1,6 @@
 # all of symbolic lives here now
 from typing import Any, cast
-import math, operator, struct, functools
+import math, operator, struct, functools, heapq
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
@@ -32,10 +32,11 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
-    lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
+  (UPat.var("x")%UPat.var("y"), lambda x,y: x-(x//y)*y),
+  # ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
+  # (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
+  # ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
+  #   lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
@@ -194,6 +195,15 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
   return ret*gcd if d.op is Ops.MOD else ret
 
+def remove_nested_div(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # (a//c+b)//y -> (a+b*c)//(c*y)
+  divs, non_divs = partition(split_uop(x, Ops.ADD), lambda u: u.op is Ops.IDIV)
+  if len(divs) != 1: return None
+  (a,c), b = divs[0].src, sum(non_divs)
+  if c.vmin > 0 and y.vmin > 0 and ((a.vmin>=0 and (newx:=(a+b*c)).vmin>=0) or (a.vmax<=0 and newx.vmax<=0)):
+    return newx//(c*y)
+  return None
+
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
@@ -201,8 +211,14 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
   # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
+  factors = sorted(map(abs, factors), reverse=True)  # from large to small on absolute value
+  div = math.gcd(y.arg, factors[0])
+  if div == 1: return None
+  for f in factors[1:]:
+    if math.gcd(f, div) != 1: div = math.gcd(f, div)
+    else: break
+  if (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is not None and x.vmin>=0 and newx.vmin>=0:
+    return newxs//(c//div)
   return None
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
@@ -265,10 +281,17 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.int, name='x'),
+    lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.ADD, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[0].op is not Ops.ADD and \
+          (x.src[1].op is Ops.ADD or (x.src[0].order_add > x.src[1].order_add)) else None),  # a+(b+c) -> (b+c)+a, chain is always on the left
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -328,13 +351,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-    if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), divide_by_gcd),
   (UPat(Ops.MOD, dtypes.sints, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
+  (UPat(Ops.IDIV, dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), remove_nested_div),
   (UPat((Ops.IDIV), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
   (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
@@ -352,6 +374,12 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  # swap terms if they are out of order (a+c)+b -> (a+b)+c
+  (UPat(Ops.ADD, dtype=dtypes.int, src=(UPat(Ops.ADD, name="chain"), UPat(name="b"))),
+    lambda chain,b: chain_insert(chain,b,Ops.ADD) if b.order_add < chain.src[1].order_add else None),
+  # merge/flatten two add chains, (a+c)+(b+d) -> a+b+c+d
+  (UPat(Ops.ADD, dtype=dtypes.int, src=(UPat(Ops.ADD, name='a'), UPat(Ops.ADD, name='b'))), lambda a,b:
+    sum(heapq.merge(split_uop(a, Ops.ADD), split_uop(b, Ops.ADD), key=lambda u: u.order_add))),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
