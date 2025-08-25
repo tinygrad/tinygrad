@@ -68,7 +68,7 @@ store_spec = PatternMatcher([
   (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # STORE has a target and a value. It can also optionally depend on other stores
-  (UPat(Ops.STORE, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.STORE for s in x.src[2:])),
+  (UPat(Ops.STORE, name="x"), lambda x: x.dtype != dtypes.void and len(x.src) >= 2 and all(s.op is Ops.STORE for s in x.src[2:])),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
