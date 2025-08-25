@@ -921,10 +921,7 @@ class TestSymbolicRealWorld(unittest.TestCase):
     #print(idx.render())
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     self.assertIn(idx.render(),
-      ("((((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352))+lidx3)+2207744)",
-       '((lidx3+((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207744)',
-       '((lidx3+((lidx4*100352)+((gidx2*8)+((gidx1*784)+((gidx0*3211264)+((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49)))))))+2207744)',
-      ))
+      ("((lidx3+((((((lidx5*49)+(((lidx5+1)//16)*802032))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207793)",))
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):
