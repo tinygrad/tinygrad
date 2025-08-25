@@ -332,14 +332,15 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
-  sdtype = x.dtype.ptr(size=prod(shape), addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, AddrSpace) else x.arg)
-  assert prod(shape) > 0, f"no zero sized buffers {shape}"
+  size = prod(shape)
+  assert size > 0, f"no zero sized buffers {shape}"
+  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, AddrSpace) else x.arg)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
   if sdtype.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+    buf = UOp.new_buffer(x.arg, size, x.dtype)
   else:
     # TODO: how to dedup this
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
