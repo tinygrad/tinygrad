@@ -86,7 +86,7 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    #self.simplify_merge_adjacent()
+    self.simplify_merge_adjacent()
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
@@ -245,7 +245,7 @@ class Kernel:
       if axis is None: return -1
       if op is OptOps.UNROLL: return self.unrollable_dims[axis]
       if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
-      check(axis < self.shape_len, "invalid axis")
+      check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
     except IndexError as e: raise KernelOptError from e
 

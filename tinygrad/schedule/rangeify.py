@@ -2,11 +2,11 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint, AxisType
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, identity_element, sint, AxisType
 
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 

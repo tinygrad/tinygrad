@@ -1,7 +1,7 @@
 # opt opinionatedly transforms an ast into an optimized ast using either heuristics or beam search
 
 from tinygrad.codegen.opt.kernel import Kernel
-from tinygrad.codegen.opt.postrange import RKernel
+from tinygrad.codegen.opt.postrange import RKernel, pm_flatten_range
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, KernelInfo
 from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv
@@ -46,16 +46,8 @@ pm_do_optimize = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, Kernel) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
 ])
 
-def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
-  rngs = r.src[off:]
-  if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
 
-pm_postrange_opt = PatternMatcher([
+pm_postrange_opt = pm_flatten_range+PatternMatcher([
   (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx, RKernel) if ast.arg is None or \
     (ast.arg is not None and ast.arg.opts_to_apply is not None) else None),
-  # real ranges only
-  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
 ])
