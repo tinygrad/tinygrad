@@ -840,6 +840,7 @@ class TestRender(unittest.TestCase):
     self.assertEqual(valid.render(), "(ridx0<2)")
 
 class TestVariableReshape(unittest.TestCase):
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape(self):
     st = ShapeTracker.from_shape((10,))
     st = st.reshape((Variable("i", 1, 10),))
@@ -852,11 +853,14 @@ class TestVariableReshape(unittest.TestCase):
     st = st.reshape((i,)).reshape((1, i))
     assert len(st.views) == 1
 
+  # Prefer expand
+  @unittest.skip("no longer supported")
   def test_reshape_stride_0(self):
     st = ShapeTracker.from_shape((3,), (0,))
     st = st.reshape((Variable("i", 1, 10).bind(3),))
     assert len(st.views) == 1, f"multiview {st}"
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_bound(self):
     st = ShapeTracker.from_shape((3,))
     st = st.reshape((Variable("i", 1, 10).bind(3),))
