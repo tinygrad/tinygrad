@@ -83,7 +83,6 @@ def add_gpudims(ctx:Renderer, s:UOp):
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0]%1000)
-      if r.arg[0] < 2000 and r.arg[1] == AxisType.GROUP_REDUCE: continue
       if r.arg[1] == AxisType.REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
@@ -109,10 +108,9 @@ def fix_group_for_reduce(x:UOp):
   reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
   if len(reduce_gfr) == 0: return None
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
-  reduce_loop = [x.replace(arg=(x.arg[0]+10000, AxisType.REDUCE)) for x in reduce_gfr]
+  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
   return ret.bufferize(*reduce_gfr, arg=AddrSpace.LOCAL).index(*reduce_loop).reduce(*reduce_loop, arg=x.arg)
 
-from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
@@ -124,4 +122,4 @@ pm_add_gpudims = PatternMatcher([
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
-])+pm_add_buffers+rangeify_codegen
+])
