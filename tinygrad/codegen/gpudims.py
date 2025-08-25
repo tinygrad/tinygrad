@@ -1,4 +1,4 @@
-import math
+import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
 from tinygrad.dtype import dtypes, AddrSpace
@@ -109,7 +109,9 @@ def fix_group_for_reduce(x:UOp):
   if len(reduce_gfr) == 0: return None
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
-  return ret.bufferize(*reduce_gfr, arg=AddrSpace.LOCAL).index(*reduce_loop).reduce(*reduce_loop, arg=x.arg)
+  buf = ret.bufferize(*reduce_gfr, arg=AddrSpace.LOCAL).index(*reduce_loop)
+  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
+  return buf.reduce(*reduce_loop, arg=x.arg)
 
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
