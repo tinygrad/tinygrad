@@ -91,7 +91,8 @@ def add_gpudims(ctx:Renderer, s:UOp):
 def fix_reduce_unroll(x:UOp):
   reduce_range, reduce_expand = partition(x.src[1:], lambda y: y.op is Ops.RANGE)
   if len(reduce_expand) == 0: return None
-  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand} for {x.axis_arg}"
+  reduce_expand = [x for x in reduce_expand if x.op is not Ops.CONST]
+  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand}"
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)

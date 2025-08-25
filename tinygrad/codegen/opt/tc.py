@@ -22,6 +22,15 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def permutes_for_shape_str(self, shape_str:list[str]) -> tuple[tuple[int, ...], tuple[int, ...]]:
     ret = [[shape_str.index(remap[ss]) if ss in remap else i for i,ss in enumerate(shape_str)] for remap in self._remaps()]
     return tuple(ret[0]), tuple(ret[1])
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def base_shape_str(self) -> list[str]:
+    ret = []
+    cnt = {'u': 0, 'l': 0}
+    for opt in self.opts:
+      ret.append(f"{opt[0]}{cnt[opt[0]]}")
+      cnt[opt[0]] += 1
+    # assumes you do the UNROLL after the opts
+    return ret + [f"r{i}" for i in range(len(self.get_reduce_axes()))]
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]

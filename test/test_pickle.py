@@ -20,7 +20,7 @@ class TestPickle(unittest.TestCase):
     self.assertEqual(pm2.rewrite(sink).key, tt.key)
 
   def test_pickle_main_pattern_matcher(self):
-    from tinygrad.codegen.devectorizer import sym
+    from tinygrad.codegen.late.devectorizer import sym
     ssym = pickle.dumps(sym)
     dsym = pickle.loads(ssym)
     self.assertEqual(dsym.patterns[0][0].location, sym.patterns[0][0].location)

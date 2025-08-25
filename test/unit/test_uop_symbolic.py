@@ -4,7 +4,7 @@ import z3
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.devectorizer import sym
+from tinygrad.codegen.late.devectorizer import sym
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
