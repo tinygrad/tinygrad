@@ -1,6 +1,6 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
@@ -394,7 +394,7 @@ rangeify_codegen = PatternMatcher([
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-   lambda dg,idx: idx.replace(dtype=dg.dtype, arg=None).load() if not isinstance(idx.dtype, PtrDType) else None),
+   lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
