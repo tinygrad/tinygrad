@@ -215,7 +215,7 @@ def sum_acc_dtype(dt:DType):
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
 
 def truncate_fp16(x):
-  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
+  try: return struct.unpack('e', struct.pack('e', float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
 def truncate_bf16(x):

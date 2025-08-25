@@ -102,13 +102,18 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_fp16(65504), 65504)
     self.assertEqual(truncate_fp16(65519.999), 65504)
     self.assertEqual(truncate_fp16(65520), math.inf)
+    self.assertEqual(truncate_fp16(1e-8), 0.0)
+    self.assertEqual(truncate_fp16(-65504), -65504)
+    self.assertEqual(truncate_fp16(-65519.999), -65504)
+    self.assertEqual(truncate_fp16(-65520), -math.inf)
+    self.assertTrue(math.isnan(truncate_fp16(math.nan)))
 
   def test_truncate_bf16(self):
     self.assertEqual(truncate_bf16(1), 1)
+    # TODO: rounding, torch bfloat 1.1 gives 1.1015625 instead of 1.09375
     self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
     for a in [1234, 23456, -777.777]:
       self.assertEqual(truncate_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
-    # TODO: torch bfloat 1.1 gives 1.1015625 instead of 1.09375
     max_bf16 = torch.finfo(torch.bfloat16).max
     self.assertEqual(truncate_bf16(max_bf16), max_bf16)
     self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
