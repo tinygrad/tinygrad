@@ -11,10 +11,11 @@ try:
   from tinygrad.schedule.kernelize import get_kernelize_map
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
-  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo, PatternMatcher, UPat, graph_rewrite
   from tinygrad.codegen.opt.kernel import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
   from tinygrad.device import Device
+  from tinygrad.dtype import dtypes
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
@@ -42,9 +43,14 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
+pm_store_to_assign = PatternMatcher([
+  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].assign(s.src[1]) if s.src[0].dtype != dtypes.void else None),
+])
+
 def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
-  new_sink = big_sink.substitute(get_kernelize_map(big_sink))
+  rewritten_sink = graph_rewrite(big_sink, pm_store_to_assign)
+  new_sink = rewritten_sink.substitute(get_kernelize_map(rewritten_sink))
   def to_str(ret:UOp) -> str:
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])

@@ -537,13 +537,13 @@ class TestShapeSpec(unittest.TestCase):
     t = Tensor(vv).uop
     self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
-  # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
+  # ** STORE is STORE(VIEW(BUFFER), new_val)
 
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
-    assert assign_pattern.match(a.uop, {})
+    store_pattern = UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()))
+    assert store_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 
@@ -556,8 +556,8 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
-    assert assign_pattern.match(a.uop, {})
+    store_pattern = UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
+    assert store_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 

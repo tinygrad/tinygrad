@@ -2,7 +2,7 @@ from tinygrad.uop.ops import Ops, UOp, resolve, can_pad, GroupOp, UPat, PatternM
 from tinygrad.helpers import all_int, prod, unwrap, dedup, DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES, FUSE_CONV_BW
 from tinygrad.shape.shapetracker import ShapeTracker
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.STORE, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
@@ -26,8 +26,8 @@ def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # always realize STORE/CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.STORE, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize parents of COPY, MSELECT, MSTACK
@@ -59,10 +59,10 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
 
   # construct children graph (only for bases)
   children: dict[UOp, dict[UOp, None]] = {}
-  assigns: dict[UOp, None] = {}
+  stores: dict[UOp, None] = {}
   for u in (toposort:=sink.toposort()):
     if u.op in {Ops.VIEW, Ops.SINK}: continue
-    if u.op is Ops.ASSIGN: assigns[u.buf_uop] = None
+    if u.op is Ops.STORE: stores[u.buf_uop] = None
     for s in u.src: children.setdefault(s.base, {})[u] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -85,12 +85,12 @@ def group_realizes(sink:UOp) -> dict[UOp, None]:
     forced_realize = r in group
     # can only have one output
     if not forced_realize and len(group) > 1: forced_realize = True
-    # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and (assign_targets:={x.buf_uop for x in group if x.op is Ops.ASSIGN}):
+    # can only fuse store if no other store_target is used in the kernel
+    if not forced_realize and (store_targets:={x.buf_uop for x in group if x.op is Ops.STORE}):
       parents = [r, *group]
       while parents and not forced_realize:
         p = parents.pop().base
-        if p.op is Ops.BUFFER and p in assigns and p not in assign_targets: forced_realize, can_chase = True, False
+        if p.op is Ops.BUFFER and p in stores and p not in store_targets: forced_realize, can_chase = True, False
         if p in realizes: continue
         parents.extend(p.src)
     if forced_realize or not group:
