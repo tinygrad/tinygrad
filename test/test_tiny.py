@@ -76,7 +76,8 @@ class TestTiny(unittest.TestCase):
     ones = Tensor.ones(10).contiguous()
     for s in [2,5]:
       ret = ones[:i.bind(s)] + 1
-      self.assertListEqual(ret.contiguous().reshape(s).tolist(), [2.0]*s)
+      # can't realize symbolic shape so pad to (0, 10) first
+      self.assertListEqual(ret.contiguous().pad((0, 10-i.bind(s)))[:s].tolist(), [2.0]*s)
 
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)

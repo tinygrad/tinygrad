@@ -48,11 +48,11 @@ class TestSymbolic(unittest.TestCase):
     i = Variable("i", 1, 5).bind(3)
     j = Variable("j", 1, 5).bind(3)
     k = Variable("k", 1, 5).bind(3)
-    t = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
+    t = Tensor.rand(5, 4)[:i].cat(Tensor.rand(5, 4)[:j], dim=0).cat(Tensor.rand(5, 4)[:k], dim=0)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (i+j+k, 4))
     assert st.real_strides() == (4, 1)
-    t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
+    t = Tensor.rand(5, 3)[:i].cat(Tensor.rand(5, 3)[:i], dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (2*i+3, 3))
     assert st.real_strides() == (3, 1)
@@ -61,7 +61,7 @@ class TestSymbolic(unittest.TestCase):
     i = Variable("i", 1, 5).bind(4)
     j = Variable("j", 1, 5).bind(4)
     k = Variable("k", 1, 5).bind(4)
-    t = Tensor.rand(3, 4).reshape(3, i).cat(Tensor.rand(3, 4).reshape(3, j), dim=1).cat(Tensor.rand(3, 4).reshape(3, k), dim=1)
+    t = Tensor.rand(3, 5)[:, :i].cat(Tensor.rand(3, 5)[:, :j], dim=1).cat(Tensor.rand(3, 5)[:, :k], dim=1)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (3, i+j+k))
     self.assert_tuple_equal(st.real_strides(), (i+j+k, 1))
@@ -109,6 +109,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     assert unbound_view == View.create(shape=(v, 4))
     assert var_val == {v: 3}
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(3)
@@ -126,6 +127,7 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     assert var_val == {v: 2}
 
 class TestSymbolicReshapeFromContiguous(unittest.TestCase):
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_into_symbols_simple(self):
     for i in range(1, 6):
       vi = Variable("i", 1, 5).bind(i)
@@ -134,6 +136,7 @@ class TestSymbolicReshapeFromContiguous(unittest.TestCase):
       t = Tensor.rand(i, 6).reshape(vi, 2, 3)
       assert t.shape == (vi, 2, 3)
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_symbols_reshape_ints(self):
     for i in range(1, 6):
       vi = Variable("i", 1, 5).bind(i)
@@ -151,6 +154,7 @@ class TestSymbolicReshapeFromContiguous(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_two_symbol_reshape(self):
     for i in range(1, 6):
       for j in range(1, 6):
@@ -176,6 +180,7 @@ class TestSymbolicReshapeFromContiguous(unittest.TestCase):
     assert view.reshape(new_shape) is None
 
 class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_from_const(self):
     vi = Variable("i", 1, 5).bind(4)
     t = Tensor.ones(3, 4).reshape(3, vi)
@@ -183,6 +188,7 @@ class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
     assert not t.uop.st.contiguous
     assert len(t.uop.st.views) == 1
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_not_allowed(self):
     vi = Variable("i", 1, 5).bind(4)
     with self.assertRaises(ValueError):
@@ -192,6 +198,7 @@ class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):
       # size matched, but dimensions do not match
       Tensor.ones(4, 3).reshape(3, vi)
 
+  @unittest.skip("reshaping into symbolic no longer supported")
   def test_reshape_from_padded(self):
     vi = Variable("i", 1, 5).bind(4)
     t = Tensor.ones(3, 4).contiguous().expand(2, 3, 4).pad(((1, 1), None, None)).shrink((None, None, (1, 3)))
@@ -220,9 +227,10 @@ class TestSymbolicExpand(unittest.TestCase):
     assert a.shape == (3, vi, vj)
 
   def test_plus_expands_constant(self):
+    a = Tensor.rand(3, 5)
     for i in range(1, 6):
       vi = Variable("i", 1, 5).bind(i)
-      a = Tensor.rand(3, i).reshape(3, vi)
+      a = a[:, :vi]
       a = a + 1
       self.assertTupleEqual(a.shape, (3, vi))
 
@@ -242,10 +250,11 @@ class TestSymbolicShrink(unittest.TestCase):
 class TestSymbolicPad(unittest.TestCase):
   def test_pad(self):
     v = Variable("v", 1, 100).bind(5)
-    t = Tensor.ones(5).reshape(v).pad(((4, 0),)).reshape(9)
-    assert t.shape == (9,)
-    st = t.uop.st
-    print(st)
+    t = Tensor.ones(100)[:v].pad(((4, 0),))
+    assert t.uop.st.size == 104
+    t = t.pad(((0, 104-v)))[:9]
+    assert t.tolist() == [0,0,0,0,1,1,1,1,1]
+
 
 if __name__ == '__main__':
   unittest.main()
