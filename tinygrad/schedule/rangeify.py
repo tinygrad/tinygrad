@@ -414,7 +414,7 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
-  return (t:=x.as_buf()).store(kernel, dtype=t.dtype)
+  return (b:=x.as_buf()).store(kernel, dtype=b.dtype)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
