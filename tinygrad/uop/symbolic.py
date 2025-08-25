@@ -33,11 +33,12 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (UPat.var("x")%UPat.cvar("d")+(UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c"), lambda x,d,c: x+(c-d)*(x//d)), # (x%c)+(x//c)*c = x
-  ((UPat.var("y")+UPat.var("x")%UPat.cvar("d"))+(UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c"),
-    lambda y,x,d,c: (y+x)+(c-d)*(x//d)), # (x%c)+(x//c)*c = x
-  ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
-    lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
+  (UPat.var("x")%UPat.cvar("d")+(UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c"), lambda x,d,c: x+(c-d)*(x//d)),  # (x%c)+(x//c)*c = x
+  ((UPat.var("y")+UPat.var("x")%UPat.cvar("d")) + (UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c"),
+    lambda y,x,d,c: (y+x)+(c-d)*(x//d)),
+  (UPat.var("x")%UPat.cvar("d")*UPat.cvar("c1") + (UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c2"), lambda x,d,c1,c2: x*c1+(c2-c1*d)*(x//d)),  # (x%c)+(x//c)*c = x
+  ((UPat.var("y")+UPat.var("x")%UPat.cvar("d")*UPat.cvar("c1"))+(UPat.var("x")//UPat.cvar("d"))*UPat.cvar("c2"),
+    lambda y,x,d,c1,c2: y+x*c1+(c2-c1*d)*(x//d)),
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
