@@ -617,6 +617,8 @@ jobs:
       run: CPU=1 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     - name: Test LLVM=1 RANGEIFY=1 (slow tests)
       run: LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testdevectorize:
     name: Linux (devectorize)
