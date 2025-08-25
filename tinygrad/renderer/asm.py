@@ -4,6 +4,7 @@ from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
 from tinygrad.muop import Register, Memory, Immediate, Label, Operand, MUOp, MUOpX86, GPR, VEC
 from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher
+from tinygrad.uop.spec import x86_spec
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu, load_store_folding
 from tinygrad.uop.symbolic import gep_pushing
 from tinygrad.renderer import Renderer
@@ -253,11 +254,11 @@ x86_vec_lowerer = PatternMatcher([
   # int shuffles, broadcast if possible otherwise insert elements individually
   (UPat.var("y", dtypes.ints8+(dtypes.bool,)).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastb", 0x78, ctx[x], ctx[x], 1, 2)]), # noqa: E501
   (UPat.var("y", dtypes.ints16).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastw", 0x79, ctx[x], ctx[x], 1, 2)]), # noqa: E501
-  (UPat.var("y", dtypes.ints32).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastd", 0x58, ctx[x], ctx[x], 1, 2)] if not isinstance(x.src[0].arg, tuple) else None), # noqa: E501
+  (UPat.var("y", dtypes.ints32).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastd", 0x58, ctx[x], ctx[x], 1, 2)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
   (UPat.var("y", dtypes.ints64).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovq", 0x6E, ctx[x], ctx[y], 1, 1, 1), MUOpX86.V_VM("vpbroadcastq", 0x59, ctx[x], ctx[x], 1, 2)]), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrb", 0x20, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints16, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 1) for i,s in enumerate(x.src)]), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not isinstance(x.src[0].arg, tuple) else None), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints64, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrq", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
   # casts
   (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints16, name="x"), lambda ctx,y,x: MUOpX86.V_VM("vpmovzxbw", 0x30, ctx[x], ctx[y], 1, 2)),
@@ -324,7 +325,7 @@ x86_vec_lowerer = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtypes.float32.vec(2)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovq", 0xD6, Memory(ctx[b].size, ctx[a], disp=Immediate(c.arg, 4)), ctx[b], 1, 1)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float32.vec(4)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovups", 0x11, Memory(ctx[b].size, ctx[a], disp=Immediate(c.arg, 4)), ctx[b], 0, 1)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float64.vec(2)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovupd", 0x11, Memory(ctx[b].size, ctx[a], disp=Immediate(c.arg, 4)), ctx[b], 1, 1)), # noqa: E501
-  # float32 shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
+  # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
   (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
    MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
    MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[2]], Immediate(shuf_imm(x), 1), 0, 1) if len(x.src) == 4 and x.src[0].src == x.src[1].src and x.src[2].src == x.src[3].src else \
@@ -499,10 +500,10 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)), # noqa: E501
   # range / endrange
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)),
-                                                           MUOpX86("", -1, Label(f".LOOP_{x.arg}:"))]),
+                                                           MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]),
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
                                                                                                                     MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, 4)), # noqa: E501
-                                                                                                                    MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg}:"),), ins_con=((),))]), # noqa: E501
+                                                                                                                    MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
 ])
 
 class X86Renderer(Renderer):
@@ -511,6 +512,7 @@ class X86Renderer(Renderer):
   global_max = None
   pre_matcher = x86_pre_matcher
   extra_matcher = x86_matcher
+  extra_spec = x86_spec
   lowerer = x86_lowerer
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()

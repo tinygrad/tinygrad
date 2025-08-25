@@ -187,8 +187,8 @@ spec = PatternMatcher([
   (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=(dtypes.bool,)+dtypes.masks), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPGT, Ops.CMPNE, Ops.CMPEQ), dtype=(dtypes.bool,)+dtypes.masks, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
@@ -220,8 +220,15 @@ spec = PatternMatcher([
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  # ASM LOAD
+])
+
+# backend specific specs
+x86_spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.cvar(),)), lambda: True),
+  (UPat(Ops.WHERE, src=(UPat.var("m", dtypes.masks), UPat.var("a"), UPat.var("b")), name="x"),
+   lambda m,a,b,x: a.dtype == b.dtype == x.dtype and m.dtype.itemsize == x.dtype.itemsize),
+  (UPat((Ops.CMPLT, Ops.CMPGT, Ops.CMPNE, Ops.CMPEQ), dtypes.masks, (UPat.var("a"), UPat.var("b")), name="x"),
+   lambda a,b,x: a.dtype == b.dtype and x.dtype.itemsize == a.dtype.itemsize),
 ])
 
 # *** this is the UOp AST spec ***
