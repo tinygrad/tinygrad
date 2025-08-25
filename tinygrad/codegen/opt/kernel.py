@@ -86,15 +86,15 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    #self.simplify_merge_adjacent()
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP
     self.axis_types: list[AxisType] = [AxisType.REDUCE if resolve(x!=y) else global_loops for x,y in zip(self.output_shape, self.full_shape)]
 
     # confirm all reduce axes are at the end
-    if (final_reduces := [x for x in self.axis_types if x == AxisType.REDUCE]) and final_reduces != self.axis_types[-len(final_reduces):]:
-      raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
+    #if (final_reduces := [x for x in self.axis_types if x == AxisType.REDUCE]) and final_reduces != self.axis_types[-len(final_reduces):]:
+    #  raise RuntimeError(f"reduces are not at the end of the shape {self.full_shape} -> {self.output_shape}")
 
   def copy(self):
     ret = type(self).__new__(type(self))
