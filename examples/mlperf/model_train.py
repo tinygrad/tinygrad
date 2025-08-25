@@ -1420,6 +1420,9 @@ def train_stable_diffusion():
   CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+  RESUME_CKPTDIR        = config["RESUME_CKPTDIR"]            = getenv("RESUME_CKPTDIR", "")
+  RESUME_ITR         = config["RESUME_ITR"]             = getenv("RESUME_ITR", 0)
+  if RESUME_ITR or RESUME_CKPTDIR: assert RESUME_ITR and RESUME_CKPTDIR
 
   # ** init wandb **
   WANDB = getenv("WANDB")
@@ -1492,6 +1495,13 @@ def train_stable_diffusion():
     lr_scheduler.step()
     init_scale = 2.0**16
     grad_scaler = GradScaler(optimizer, init_scale)
+    if RESUME_CKPTDIR:
+      ckpt = safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors")
+      for (obj, pat) in [(unet, "model."), (optimizer, "optimizer."), (lr_scheduler, "scheduler."), (grad_scaler, "grad_scaler.")]:
+        sd = {k.split(pat)[1]: v for k,v in ckpt.items() if k.startswith(pat)}
+        with Context(DEBUG=1):
+          print(f"loading {pat}")
+          load_state_dict(obj, sd, strict=False)
 
     # this is most but not all of the tensors that are used only in training, we will offload them to free up memory for eval
     #train_only_tensors = get_parameters([model.cond_stage_model]) + optimizer.m + optimizer.v
@@ -1596,7 +1606,7 @@ def train_stable_diffusion():
     def get_batch(whole:Tensor, i:int, bs:int) -> tuple[Tensor, int]:
       batch = whole[i: i + bs]
       if (unpadded_bs:=batch.shape[0]) < bs:
-        batch = batch.cat(batch[-1:].expand(bs - unpadded_bs, -1))
+        batch = batch.cat(batch[-1:].expand(bs - unpadded_bs, *batch[-1].shape))
       return batch, unpadded_bs 
 
 
@@ -1650,23 +1660,37 @@ def train_stable_diffusion():
         return batch
 
       callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
+      if (limit_eval_samples:=getenv("LIMIT_EVAL_SAMPLES", len(eval_inputs))):
+        eval_inputs = eval_inputs[0:limit_eval_samples]
+      output_shapes = [(ns:=len(eval_inputs),77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
+
       #tokens = outputs = Tensor.cat(*[cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs], dim=0).realize()
-      tokens = outputs = Tensor.cat(*[cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs[0:6]], dim=0).realize()
+      # prevent recursion error in Tensor.cat
+      tokens = []
+      for i in tqdm(range(0, len(eval_inputs), CONTEXT_BS)):
+        subset = [cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs[i: i+CONTEXT_BS]]
+        tokens.append(Tensor.cat(*subset, dim=0).realize())
+      outputs = tokens = Tensor.cat(*tokens, dim=0).realize()
 
       # wrapper code for every model
-      for model, jit, bs, callback in zip(models, jits, all_bs, callbacks):
-        inputs, outputs = outputs, []
+      for model, jit, bs, callback, output_shape in zip(models, jits, all_bs, callbacks, output_shapes):
+        t0 = time.perf_counter()
+        print(f"starting eval with model: {model}")
+        #inputs, outputs = outputs, []
+        inputs, outputs = outputs, Tensor.zeros(*output_shape, device="CPU").contiguous().realize()
         Tensor.realize(*[p.to_(GPUS) for p in get_parameters(model)])
 
-        for batch_idx in range(0, inputs.shape[0], bs):
+        for batch_idx in tqdm(range(0, inputs.shape[0], bs)):
+          t1 = time.perf_counter()
           batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
           if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0])
           else: batch = callback(batch)
           # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
-          outputs.append(batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize())
+          batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
+          outputs[batch_idx: batch_idx+bs].assign(batch).realize()
+          print(f"model: {model}, batch_idx: {batch_idx}, elapsed: {(time.perf_counter() - t1):.2f}")
         del batch
 
-        outputs = Tensor.cat(*outputs).realize()
         if isinstance(model, FidInceptionV3):
           inception_activations = outputs
           outputs = inputs # reuse input images for clip scoring
@@ -1675,6 +1699,8 @@ def train_stable_diffusion():
         
         jit.reset()
         Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
+        print(f"done with model: {model}, elapsed: {(time.perf_counter() - t0):.2f}")
+      del inputs # GC ~94GB of images
 
       # compute final fid score
       if not getenv("EVAL_OVERFIT_SET", ""):
@@ -1706,7 +1732,9 @@ def train_stable_diffusion():
 
   if not getenv("EVAL_ONLY", ""):
     # training loop
-    seen_keys = []
+    if RESUME_CKPTDIR:
+      with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
+    else: seen_keys = []
     dl = batch_load_train_stable_diffusion(BS)
     for i, batch in enumerate(dl, start=1):
     #i = 0
@@ -1714,6 +1742,7 @@ def train_stable_diffusion():
       #batch = pickle.load(f)
     #while True:
       #i += 1
+      i = RESUME_ITR + i
       t0 = time.perf_counter()
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
@@ -1739,19 +1768,34 @@ def train_stable_diffusion():
         wandb_log = {"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
                      "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i}
 
-      if i % CKPT_STEP_INTERVAL == 0:
-        # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
-        # "evaluation is done offline, the time is not counted towards the submission time."
-
-        if i == CKPT_STEP_INTERVAL and WANDB and wandb.run is not None:
+        if i == 1 and wandb.run is not None:
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
             f.write(f"wandb.run.id = {wandb.run.id}")
 
-        fn = f"{UNET_CKPTDIR}/backup.safetensors"
-        print(f"saving training state checkpoint at {fn}")
+      if (BACKUP_INTERVAL:=getenv("BACKUP_INTERVAL", 0)) and i % BACKUP_INTERVAL == 0:
+        prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
+        prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
+        # seen keys from dataset
+        prev_keys = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("keys_")]
+        prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
+        fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
+        print(f"saving training state backup at {fn}")
         safe_save(get_training_state(unet, optimizer, lr_scheduler, grad_scaler), fn)
-        with open(f"{UNET_CKPTDIR}/seen_keys.pickle", "wb") as f:
+        with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
           pickle.dump(seen_keys, f)
+
+        # delete all except above backup, and penultimate backup (prev[-1]):
+        for prev in (prev_ckpt, prev_keys):
+          for to_delete in prev[:-1]:
+            print(f"deleting {to_delete.name}")
+            to_delete.unlink()
+
+      if i % CKPT_STEP_INTERVAL == 0:
+        # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+        # "evaluation is done offline, the time is not counted towards the submission time."
+        fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+        print(f"saving unet checkpoint at {fn}")
+        safe_save(get_state_dict(unet), fn)
 
       if getenv("RUN_EVAL", ""):
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
@@ -1781,10 +1825,15 @@ def train_stable_diffusion():
             wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
       elif p.name.endswith(".safetensors"):
         ckpt_iteration = p.name.split(".safetensors")[0]
+        if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
         if ckpt_iteration.isdigit(): ckpt_iteration = int(ckpt_iteration)
-        unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
+        #unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
+        unet_ckpt = safe_load(p)
+        if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
+          unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
         load_state_dict(unet, unet_ckpt)
         clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
+        print(f"eval results for {p.name}:")
         print(f"clip score: {clip}")
         print(f"fid score: {fid}")
         if WANDB:
