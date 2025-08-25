@@ -189,6 +189,7 @@ def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.int, 0))
     new_ranges.append(ranges[-1])
   ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=x.device)
+  if len(ret.ranges): ret = ret.replace(arg=AddrSpace.LOCAL) # if some ranges are still open, this has to be LOCAL
   return ret.index(*passthrough_idx)
 
 def map_contiguous(ctx:RangeifyContext, x:UOp):
@@ -238,7 +239,10 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   # index based on the shared ranges
   ret = c.index(*out_rngs)
   # if all ranges aren't the same between children, we have to bufferize
-  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
+  if len(idx_ranges) > 0:
+    ret = ret.bufferize(*end_ranges, arg=x.device)
+    if len(ret.ranges): ret = ret.replace(arg=AddrSpace.LOCAL) # if some ranges are still open, this has to be LOCAL
+    ret = ret.index(*[idx.src[1+i] for i in idx_ranges])
   return ret
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
