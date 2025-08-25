@@ -106,12 +106,6 @@ class TestRealDoesntSimplify(unittest.TestCase):
       View.create((8, 6, 11), (66, 11, 1), 0, None)))
     self.assertEqual(self.st.real_strides(), (33, None, 1))
 
-  def test_2(self):
-    self.st = ShapeTracker((
-      View.create((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
-      View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)))
-    self.assertEqual(self.st.real_strides(), (None, 18, -3, -1))
-
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
     st = ShapeTracker((
@@ -155,6 +149,12 @@ class TestRealStrides(unittest.TestCase):
       View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
     ))
     self.assertEqual(st.real_strides(), (132, None, None, None, None))
+
+  def test_6(self):
+    self.st = ShapeTracker((
+      View.create((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
+      View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)))
+    self.assertEqual(self.st.real_strides(), (9, 18, -3, -1))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
