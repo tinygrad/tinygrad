@@ -364,10 +364,5 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
 
   # verify Kernels match the spec
   if __debug__: type_verify(list(sched_sink.toposort()), tensor_uop_spec)
-  # print("\n\n===== get_kernelize_map =====\n\n", sink, "\n\n", sched_sink, "\n")
-  # def to_str(ret:UOp) -> str:
-  #   asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
-  #   return "\n".join([f"{len(asts)} kernels", *asts])
-  # print(to_str(sched_sink), "\n\n=============================\n\n")
 
   return tensor_map
