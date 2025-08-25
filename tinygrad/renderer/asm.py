@@ -4,7 +4,7 @@ from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
 from tinygrad.muop import Register, Memory, Immediate, Label, Operand, MUOp, MUOpX86, GPR, VEC
 from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher
-from tinygrad.codegen.devectorizer import no_vectorized_alu, load_store_folding
+from tinygrad.codegen.late.devectorizer import no_vectorized_alu, load_store_folding
 from tinygrad.uop.symbolic import gep_pushing
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import DEBUG

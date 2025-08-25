@@ -98,7 +98,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, linearizer:bool=False) -> UOp:
   return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), linearizer))
 
-def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, opts:Renderer=Renderer()) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
@@ -111,5 +111,5 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
 
   lst = list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
-  if __debug__: type_verify(lst)
+  if __debug__: type_verify(lst, opts.extra_spec)
   return lst

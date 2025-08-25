@@ -9,14 +9,14 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import spec
-from tinygrad.renderer import ProgramSpec
+from tinygrad.renderer import ProgramSpec, Renderer
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt.kernel import Opt, OptOps
 
-def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
+def to_uops_list(u:list[UOp], opts=Renderer(), skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
 def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
