@@ -217,12 +217,8 @@ spec = PatternMatcher([
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
   (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
-])
-
-# additional backend specific specs
-ptx_spec = PatternMatcher([
+  # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype),
 ])
 
 # *** this is the UOp AST spec ***
