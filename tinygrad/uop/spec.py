@@ -222,6 +222,7 @@ spec = PatternMatcher([
 # additional backend specific specs
 ptx_spec = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: a.dtype == x.dtype),
 ])
 
 # *** this is the UOp AST spec ***
