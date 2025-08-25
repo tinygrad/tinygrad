@@ -155,6 +155,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
+  @unittest.skip("globals/locals are merged now")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
   def test_exec_update_fuzz(self):
     virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
