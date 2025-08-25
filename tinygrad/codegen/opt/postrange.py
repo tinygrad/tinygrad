@@ -13,7 +13,8 @@ class RKernel(Kernel):
     # convert LOOP to GLOBAL
     self.replaces = {}
     if self.opts.has_local:
-      rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP else x for x in self.rng]
+      store_rng = self.ast.src[0].src[2:]
+      rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rng]
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
 
