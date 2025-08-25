@@ -1,7 +1,7 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
 
@@ -84,6 +84,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
     try:
       ii = (global_dims+local_dims).index(r.arg[0]%1000)
       if r.arg[0] < 2000 and r.arg[1] == AxisType.GROUP_REDUCE: continue
+      if r.arg[1] == AxisType.REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)
@@ -104,6 +105,14 @@ def fix_store_unroll(x:UOp):
   if len(store_expand) == 0: return None
   return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
 
+def fix_group_for_reduce(x:UOp):
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
+  if len(reduce_gfr) == 0: return None
+  ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
+  reduce_loop = [x.replace(arg=(x.arg[0]+10000, AxisType.REDUCE)) for x in reduce_gfr]
+  return ret.bufferize(*reduce_gfr, arg=AddrSpace.LOCAL).index(*reduce_loop).reduce(*reduce_loop, arg=x.arg)
+
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 pm_add_gpudims = PatternMatcher([
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
@@ -113,4 +122,6 @@ pm_add_gpudims = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
-])
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+])+pm_add_buffers+rangeify_codegen
