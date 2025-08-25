@@ -154,37 +154,22 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
 
 def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
-  step, peak, mem = 0, 0, 0
-  shps:dict[int, dict] = {}
-  temp:dict[int, dict] = {}
-  timestamps:list[int] = []
+  peak, mem = 0, 0
+  temp:dict[int, int] = {}
+  bufs:list[bytes] = []
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":{"dtype":e.arg["dtype"].name, "sz":e.arg["sz"]}}
+      bufs.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      timestamps.append(int(e.ts)-start_ts)
-      step += 1
-      mem += e.arg["sz"]*e.arg["dtype"].itemsize
+      temp[e.key] = nbytes = e.arg["sz"]*e.arg["dtype"].itemsize
+      mem += nbytes
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.ts)-start_ts)
-      step += 1
-      mem -= (free_nbytes:=(removed:=temp.pop(e.key))["arg"]["sz"]*dtype_size[removed["arg"]["dtype"]])
-      removed["x"].append(step)
-      removed["y"].append(removed["y"][-1])
-      for k,v in temp.items():
-        if k > e.key:
-          v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-free_nbytes]
-  for v in temp.values():
-    v["x"].append(step)
-    v["y"].append(v["y"][-1])
-  timestamps.append(end_ts-start_ts)
+      bufs.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      mem -= temp.pop(e.key)
   peaks.append(peak)
-  bufs = [struct.pack("<I"+str(i:=len(v['x']))+f"I{i}QIQ", i, *v["x"], *v["y"], enum_str(v["arg"]["dtype"], scache),
-                      v["arg"]["sz"]) for v in shps.values()]
-  return struct.pack("<BIQI", 1, len(shps), peak, len(timestamps))+struct.pack(f"<{len(timestamps)}I", *timestamps)+b"".join(bufs) if bufs else None
+  return struct.pack("<BIQ", 1, len(bufs), peak)+b"".join(bufs) if bufs else None
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
