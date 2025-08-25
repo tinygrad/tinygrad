@@ -216,14 +216,40 @@ async function renderProfiler() {
       const peak = u64();
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      const timestamps = Array.from({length:u32()}, u32);
+      let x = 0, y = 0;
+      const buf_shapes = new Map(), temp = new Map();
+      const timestamps = [];
       for (let j=0; j<eventsLen; j++) {
-        const length = u32();
-        const x = Array.from({ length }, () => timestamps[u32()]);
-        const y = Array.from({ length }, u64);
-        const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+        const alloc = u8(), ts = u32(), key = u32();
+        if (alloc) {
+          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+          const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
+          buf_shapes.set(key, shape); temp.set(key, shape);
+          timestamps.push(ts);
+          x += 1; y += nbytes;
+        } else {
+          const free = buf_shapes.get(key);
+          timestamps.push(ts);
+          x += 1; y -= free.nbytes;
+          free.x.push(x);
+          free.y.push(free.y.at(-1));
+          temp.delete(key);
+          for (const [k, v] of temp) {
+            if (k <= key) continue;
+            v.x.push(x, x);
+            v.y.push(v.y.at(-1), v.y.at(-1)-free.nbytes);
+          }
+        }
+      }
+      for (const [_, v] of temp) {
+        v.x.push(x);
+        v.y.push(v.y.at(-1));
+      }
+      timestamps.push(dur);
+      for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+        const x = steps.map(s => timestamps[s]);
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
-        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, j) });
+        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {

@@ -281,10 +281,10 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
     else:
       v["peak"] = u("<Q")[0]
-      v["timestamps"] = list(u(f"<{u('I')[0]}I"))
       for _ in range(event_count):
-        i = u("<I")[0]
-        v["shapes"].append({"x":list(u(f"<{i}I")), "y":list(u(f"<{i}Q")), "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        alloc, ts, key = u("<BII")
+        if alloc: v["shapes"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["shapes"].append({"event":"free", "ts":ts, "key":key})
   return {"dur":dur, "peak":global_peak, "layout":layout}
 
 class TestVizProfiler(unittest.TestCase):
@@ -376,8 +376,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+    self.assertEqual(len(ret["shapes"]), 2)
 
   def test_del_once(self):
     a = _alloc(1)
@@ -386,10 +385,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+    self.assertEqual(len(ret["shapes"]), 3)
 
   def test_alloc_free(self):
     a = _alloc(1)
@@ -399,12 +395,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
-    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
-    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
+    self.assertEqual(len(ret["shapes"]), 4)
 
 if __name__ == "__main__":
   unittest.main()
