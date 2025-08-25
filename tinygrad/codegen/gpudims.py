@@ -107,13 +107,21 @@ def fix_store_unroll(x:UOp):
 def fix_group_for_reduce(x:UOp):
   reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
   if len(reduce_gfr) == 0: return None
+
+  # NOTE: if there's other locals here, we need them in the buffer too
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+
+  # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
-  buf = ret.bufferize(*reduce_gfr, arg=AddrSpace.LOCAL).index(*reduce_loop)
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=AddrSpace.LOCAL).index(*upstream_locals, *reduce_loop)
+
+  # gate with an if on the store + do the final reduce
   buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
   return buf.reduce(*reduce_loop, arg=x.arg)
 
 pm_add_gpudims = PatternMatcher([
+  # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
