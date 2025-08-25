@@ -761,7 +761,7 @@ def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0
 def batch_load_llama3_small(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
   if val:
     dataset = BlendedGPTDataset([
-      base_dir / "c4-validationn-91205-samples.en_text_document",
+      base_dir / "c4-validation-91205-samples.en_text_document",
     ], [
       1.0
     ], samples, seqlen, seed, False)
