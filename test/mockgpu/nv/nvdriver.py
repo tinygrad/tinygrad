@@ -1,4 +1,4 @@
-import ctypes, mmap, collections, functools, os
+import ctypes, mmap, collections, functools, os, threading
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from typing import Any
 from tinygrad.helpers import to_mv
@@ -46,12 +46,16 @@ class NVDevFileDesc(VirtFileDesc):
   def mmap(self, start, sz, prot, flags, fd, offset):
     start = libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
     if self._mapping_userland:
-      self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._gpu_mmio_write(mv, off, self.gpu))
+      self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._exec_event.set())
     return start
 
 class NVDriver(VirtDriver):
   def __init__(self, gpus=6):
     super().__init__()
+
+    self._exec_event = threading.Event()
+    self._exec_thread = threading.Thread(target=self._exec_loop, daemon=True)
+    self._exec_thread.start()
 
     self.tracked_files += [VirtFile('/dev/nvidiactl', functools.partial(NVCtlFileDesc, driver=self)),
                            VirtFile('/dev/nvidia-uvm', functools.partial(NVUVMFileDesc, driver=self))]
@@ -247,11 +251,19 @@ class NVDriver(VirtDriver):
     return 0
 
   def dev_ioctl(self, dev, req, argp): return 0
-  def _gpu_mmio_write(self, mv, off, gpu):
-    any_progress = True
-    while any_progress:
-      any_progress = False
+
+  def _exec_loop(self):
+    while True:
+      self._exec_event.wait()
+      self._exec_event.clear()
+      self._emulate_execute()
+
+  def _emulate_execute(self):
+    any_executing = True
+    while any_executing:
+      any_executing = False
       for gpu in self.gpus.values():
         for q in gpu.queues:
           if q.ctrl.GPGet != q.ctrl.GPPut:
-            any_progress |= q.execute()
+            q.execute()
+            if q.ctrl.GPGet != q.ctrl.GPPut: any_executing = True
