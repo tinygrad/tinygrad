@@ -192,7 +192,7 @@ x86_matcher = PatternMatcher([
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
   # *** FLOAT16 ***
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"),
+  (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count), tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
@@ -513,7 +513,7 @@ class X86Renderer(Renderer):
   extra_matcher = x86_matcher
   lowerer = x86_lowerer
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
-  function_name: str = ""
+  callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
 
   def __getitem__(self, x:UOp) -> Register: # hacky helper
     assert x.op is not Ops.CONST, "const is an immediate"
@@ -531,6 +531,7 @@ class X86Renderer(Renderer):
     muops: list[MUOp] = []
     # not a fan of this being here
     self.stack_size = 0
+    self.name = "test"
     for u in uops:
       if u.op is Ops.SINK:
         if u.arg is not None: self.name = u.arg.function_name
@@ -575,13 +576,16 @@ class X86Renderer(Renderer):
 
     # allocate registers
     reg_pool: list[Register] = [reg for reg in GPR + VEC if reg.name not in ("rbp", "rsp")]
+    callee_saved: list[Register] = []
     live: dict[Register, Register] = {}
     mem: dict[Register, Memory] = {}
     final_muops: list[MUOp] = []
 
     def alloc(cons:tuple[Register, ...]) -> Register:
       # allocate free register, otherwise spill one
-      if (idx:=next((i for i,r in enumerate(reg_pool) if r in cons), None)) is not None: return reg_pool.pop(idx)
+      if (idx:=next((i for i,r in enumerate(reg_pool) if r in cons), None)) is not None:
+        if (reg:=reg_pool.pop(idx)).name in self.callee_saved and reg not in callee_saved: callee_saved.append(reg)
+        return reg
       # choose the virtual with the latest next use
       spilled = max([k for k,v in live.items() if v in cons], key=lambda k: next(j for j in live_range[k] if j >= i))
       if spilled not in mem:
@@ -659,14 +663,16 @@ class X86Renderer(Renderer):
         if isinstance(v, Register) and live_range[v][-1] == i and v in live and isinstance(mu.out, Register): reg_pool.insert(0, live.pop(v))
       # rewrite MUOp with real operands
       final_muops.append(mu.replace(rewrite(mu.out, mu.out_con), ins_rewrite))
+    # align stack to 16 bytes, required on windows
+    self.stack_size += (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16
     return final_muops
 
-  def setup(self, name:str, kernel:list[MUOp], stack_size:int) -> list[MUOp]:
+  def setup(self, kernel:list[MUOp]) -> list[MUOp]:
     prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)),
                 MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1),
-                MUOpX86.RM_I("sub", 0x81, 5, Register("rsp", 4, 8), Immediate(stack_size, 4), 1)]
-    epilogue = [MUOpX86.RM_I("add", 0x81, 0, Register("rsp", 4, 8), Immediate(stack_size, 4), 1),
+                MUOpX86.RM_I("sub", 0x81, 5, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)]
+    epilogue = [MUOpX86.RM_I("add", 0x81, 0, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1),
                 MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
-    kernel = prologue + kernel + epilogue if stack_size > 0 else kernel
-    return kernel + [MUOpX86("ret", 0xC3)]
-  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup("", self.regalloc(self.lower(uops)), self.stack_size)
+    kernel = prologue + kernel + epilogue if self.stack_size > 0 else kernel
+    return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
+  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(self.regalloc(self.lower(uops)))
