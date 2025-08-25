@@ -207,7 +207,7 @@ def copy_multi(multi:UOp, device:UOp):
 
 def store_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
-  return dest.src[0].store(src.src[0], dtype=dest.dtype).multi(src.axis)
+  return dest.src[0].store(src.src[0], dtype=dest.src[0].dtype).multi(src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp):
   return root.replace(src=(multi.src[0],)).multi(multi.axis)

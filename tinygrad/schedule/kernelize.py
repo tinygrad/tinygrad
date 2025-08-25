@@ -83,7 +83,7 @@ kernelize_sym = symbolic_simple+PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,),
     (t.size, x.st.views[0].offset)).reshape(t.shape) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # double STORE to same target is one STORE
-  (UPat(Ops.STORE, src=(UPat.var("t"), UPat(Ops.STORE, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.store(x.contiguous(), dtype=x.dtype)),
+  (UPat(Ops.STORE, src=(UPat.var("t"), UPat(Ops.STORE, src=(UPat.var("t"), UPat.var("x"))))), lambda x,t: t.store(x.contiguous(), dtype=t.dtype)),
   # STORE to unrealized replaces the UOp
   (UPat(Ops.STORE, src=(UPat.var("t"), UPat.var("x"))), lambda x,t: x.contiguous() if t.base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW} and
    not (t.base.op is Ops.MSTACK and all(x.op is Ops.BUFFER for x in t.base.src)) else None),
@@ -119,7 +119,7 @@ def create_kernel(x:UOp, b:UOp|None=None):
   if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
   kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), m if (m:=x.metadata) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
-  return buffer.store(kernel, dtype=x.dtype).reshape(x.shape)
+  return buffer.store(kernel, dtype=buffer.dtype).reshape(x.shape)
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.STORE, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI, Ops.BIND}
 def append_to_kernel(x:UOp):
