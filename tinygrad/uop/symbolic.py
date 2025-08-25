@@ -32,10 +32,11 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
-    lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
+  (UPat.var("x")%UPat.var("y"), lambda x,y: x-(x//y)*y),
+  # ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
+  # (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
+  # ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
+  #   lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
@@ -199,8 +200,8 @@ def remove_nested_div(d: UOp, x: UOp, y: UOp) -> UOp|None:
   divs, non_divs = partition(split_uop(x, Ops.ADD), lambda u: u.op is Ops.IDIV)
   if len(divs) != 1: return None
   (a,c), b = divs[0].src, sum(non_divs)
-  if c.vmin > 0 and y.vmin > 0 and ((a.vmin>=0 and b.vmin>=0) or (a.vmax<=0 and b.vmax<=0)):
-    return (a+b*c)//(c*y)
+  if c.vmin > 0 and y.vmin > 0 and ((a.vmin>=0 and (newx:=(a+b*c)).vmin>=0) or (a.vmax<=0 and newx.vmax<=0)):
+    return newx//(c*y)
   return None
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
