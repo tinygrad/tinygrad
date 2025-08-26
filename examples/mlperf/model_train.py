@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1618,15 +1617,6 @@ def train_stable_diffusion():
       # It doesn't make sense to merge these jits, e.g. unet repeats 50 times in isolation; images fork to separate inception/clip
       # We're generating and scoring 30,000 images per eval, and all the data can flow through one jit at a time
       # To maximize throughput for each jit, we have only one model/jit on the GPU at a time, and pool outputs from each jit on CPU
-      import random
-      rng = [random.randint(0, 5) for _ in range(30000)]
-      eval_inputs = [eval_inputs[i] for i in rng]
-      init_latents = gv.images["init_latent"][rng].realize()
-      print(f"init_latents: {init_latents}")
-      print("eval_inputs[0:20]")
-      print(eval_inputs[0:20])
-      with open(f"{EVAL_CKPT_DIR}/rng.pickle", "wb") as f: pickle.dump({"rng": rng, "eval_inputs": eval_inputs}, f)
-
       for model in (unet, first_stage, inception, clip):
         Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
 
@@ -1656,11 +1646,10 @@ def train_stable_diffusion():
           uc_written = True
         return jit_context(shard_tensor(tokens))
 
-      def generate_latents(embeds:Tensor, init_latents:Tensor) -> Tensor:
+      def generate_latents(embeds:Tensor) -> Tensor:
         uc_c = Tensor.stack(progress["uc"].to("CPU").expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
         uc_c = shard_tensor(uc_c)
-        #x = shard_tensor(Tensor.randn(bs,4,64,64))
-        x = shard_tensor(init_latents)
+        x = shard_tensor(Tensor.randn(bs,4,64,64))
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
@@ -1718,7 +1707,6 @@ def train_stable_diffusion():
           t1 = time.perf_counter()
           batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
           if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0])
-          elif isinstance(model, UNetModel): batch = callback(batch, get_batch(init_latents, batch_idx, bs)[0])
           else: batch = callback(batch)
           # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
           batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
@@ -1862,8 +1850,6 @@ def train_stable_diffusion():
         unet_ckpt = safe_load(p)
         if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
           unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
-        elif "model.diffusion_model.out.2.bias" in unet_ckpt:
-          unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
         load_state_dict(unet, unet_ckpt)
         clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
         print(f"eval results for {p.name}:")
