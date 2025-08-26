@@ -1,6 +1,6 @@
 import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, graph_rewrite
-from tinygrad.helpers import all_int, partition, flatten, prod, dedup
+from tinygrad.helpers import all_int, partition, flatten, prod, dedup, USE_TC
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
@@ -136,6 +136,7 @@ pm_add_gpudims = PatternMatcher([
 ])
 
 def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp, reduceop:UOp):
+  if not USE_TC: return None
   # tensor cores have three ranges. X, Y, and REDUCE
   in0_ranges = [u for u in in0.ranges if u not in in1.ranges]
   in1_ranges = [u for u in in1.ranges if u not in in0.ranges]
@@ -202,5 +203,5 @@ pm_tensor_cores = PatternMatcher([
 
   # replace range
   #(UPat(Ops.RANGE, name="r"), lambda ctx,r: ctx[0].get(r, None)),
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: graph_rewrite(s.substitute(ctx[0]), pm_flatten_range)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: graph_rewrite(s.substitute(ctx[0]), pm_flatten_range, name="flatten")),
 ])
