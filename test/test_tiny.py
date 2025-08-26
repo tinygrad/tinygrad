@@ -33,7 +33,7 @@ class TestTiny(unittest.TestCase):
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
-        self.assertEqual(lst[y][x], 1.0)
+        self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***

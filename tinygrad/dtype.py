@@ -108,7 +108,6 @@ class dtypes:
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
-    # TODO: should truncate here
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
@@ -218,12 +217,11 @@ def truncate_fp16(x):
   try: return struct.unpack('e', struct.pack('e', float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
-def truncate_bf16(x):
-  max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
-  if abs(x) > max_bf16: return math.copysign(math.inf, x)
-  f32_int = struct.unpack('I', struct.pack('f', x))[0]
-  bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
-  return bf
+def float_to_bf16(x):
+  if not math.isfinite(x): return x
+  u = struct.unpack('I', struct.pack('f', x))[0]
+  u = (u + 0x7FFF + ((u >> 16) & 1)) & 0xFFFF0000
+  return struct.unpack('f', struct.pack('I', u))[0]
 
 # fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
 def float_to_fp8(x: float, dtype: DType) -> int:
@@ -288,7 +286,7 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   return float(float32_val)
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  dtypes.float16: truncate_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
