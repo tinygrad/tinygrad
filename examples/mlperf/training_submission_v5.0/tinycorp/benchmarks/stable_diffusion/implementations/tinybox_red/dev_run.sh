@@ -38,6 +38,7 @@ export BACKUP_INTERVAL=413
 
 # mi300x
 # use separate BS for the various jits in eval to maximize throughput
+export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
 export GPUS=8 BS=248
 export CONTEXT_BS=816
 export DENOISE_BS=600
@@ -74,7 +75,7 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
 
-export WANDB=1
+#export WANDB=1
 #export PARALLEL=0
 export PARALLEL=16
 

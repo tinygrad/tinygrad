@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling, flatten
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling, flatten, prod
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1604,7 +1604,7 @@ def train_stable_diffusion():
       return ret
 
     def get_batch(whole:Tensor, i:int, bs:int) -> tuple[Tensor, int]:
-      batch = whole[i: i + bs]
+      batch = whole[i: i + bs].to("CPU")
       if (unpadded_bs:=batch.shape[0]) < bs:
         batch = batch.cat(batch[-1:].expand(bs - unpadded_bs, *batch[-1].shape))
       return batch, unpadded_bs 
@@ -1620,18 +1620,34 @@ def train_stable_diffusion():
       for model in (unet, first_stage, inception, clip):
         Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
 
-      state, inception_activations, clip_scores = {"uc": None}, [], []
+      #state = {"uc": None}
+      uc_written = False
       models = (cond_stage, unet, first_stage, inception, clip)
       jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, decode, jit_inception:=TinyJit(inception), jit_clip:=TinyJit(clip.get_clip_score))
       all_bs = (CONTEXT_BS, DENOISE_BS, DECODE_BS, INCEPTION_BS, CLIP_BS)
+      if (limit_eval_samples:=getenv("LIMIT_EVAL_SAMPLES", len(eval_inputs))):
+        eval_inputs = eval_inputs[0:limit_eval_samples]
+      output_shapes = [(ns:=len(eval_inputs),77), (ns,77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
+      # assume a full eval will always crash on mi300x, and that we'll need to resume from progress
+      stages = ["tokens", "embeds", "latents", "imgs", "inception", "clip"]
+      disk_tensor_names, disk_tensor_shapes = stages + ["end", "uc"], output_shapes + [(6,), (1,77,1024)]
+      if not all(os.path.exists(f"{EVAL_CKPT_DIR}/{name}.bytes") for name in disk_tensor_names):
+        for name, shape in zip(disk_tensor_names, disk_tensor_shapes):
+          file = Path(f"{EVAL_CKPT_DIR}/{name}.bytes")
+          file.unlink(missing_ok=True)
+          with file.open("wb") as f: f.truncate(prod(shape) * 4)
+      progress = {name: Tensor.empty(*shape, device=f"disk:{EVAL_CKPT_DIR}/{name}.bytes", dtype=dtypes.int if name in {"tokens", "end"} else dtypes.float)
+                  for name, shape in zip(disk_tensor_names, disk_tensor_shapes)}
 
       def embed_tokens(tokens:Tensor) -> Tensor:
-        if state.get("uc") is None:
-          with Context(BEAM=0): state["uc"] = cond_stage.embed_tokens(cond_stage.tokenize("").to(GPUS)).to("CPU").realize()
+        nonlocal uc_written
+        if not uc_written:
+          with Context(BEAM=0): progress["uc"].assign(cond_stage.embed_tokens(cond_stage.tokenize("").to(GPUS)).to("CPU").realize()).realize()
+          uc_written = True
         return jit_context(shard_tensor(tokens))
 
       def generate_latents(embeds:Tensor) -> Tensor:
-        uc_c = Tensor.stack(state["uc"].expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
+        uc_c = Tensor.stack(progress["uc"].to("CPU").expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
         uc_c = shard_tensor(uc_c)
         x = shard_tensor(Tensor.randn(bs,4,64,64))
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
@@ -1660,47 +1676,50 @@ def train_stable_diffusion():
         return batch
 
       callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
-      if (limit_eval_samples:=getenv("LIMIT_EVAL_SAMPLES", len(eval_inputs))):
-        eval_inputs = eval_inputs[0:limit_eval_samples]
-      output_shapes = [(ns:=len(eval_inputs),77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
 
-      #tokens = outputs = Tensor.cat(*[cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs], dim=0).realize()
-      # prevent recursion error in Tensor.cat
-      tokens = []
-      for i in tqdm(range(0, len(eval_inputs), CONTEXT_BS)):
-        subset = [cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs[i: i+CONTEXT_BS]]
-        tokens.append(Tensor.cat(*subset, dim=0).realize())
-      outputs = tokens = Tensor.cat(*tokens, dim=0).realize()
+      # save every forward pass output to disk (like on mi300x where crash is likely); NOTE: this needs ~100 GB disk space, 30k images are large
+
+      def stage_progress(stage_idx:int) -> int: return progress["end"].to("CPU")[stage_idx].item()
+      if stage_progress(0) < len(eval_inputs):
+        tokens = []
+        for i in tqdm(range(0, len(eval_inputs), CONTEXT_BS)):
+          subset = [cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs[i: i+CONTEXT_BS]]
+          tokens.append(Tensor.cat(*subset, dim=0).realize())
+        progress["tokens"].assign(Tensor.cat(*tokens, dim=0).realize()).realize()
+        progress["end"][0:1].assign(Tensor([len(eval_inputs)], dtype=dtypes.int)).realize()
+      prev_stage = "tokens"
+      tokens = progress["tokens"]
 
       # wrapper code for every model
-      for model, jit, bs, callback, output_shape in zip(models, jits, all_bs, callbacks, output_shapes):
+      for stage_idx, model, jit, bs, callback in zip(range(1,6), models, jits, all_bs, callbacks):
+        stage = stages[stage_idx]
+        if stage_progress(stage_idx) >= len(eval_inputs):
+          prev_stage = stage
+          continue # use cache
         t0 = time.perf_counter()
         print(f"starting eval with model: {model}")
-        #inputs, outputs = outputs, []
-        inputs, outputs = outputs, Tensor.zeros(*output_shape, device="CPU").contiguous().realize()
-        Tensor.realize(*[p.to_(GPUS) for p in get_parameters(model)])
+        if stage_idx == 1: inputs = tokens
+        elif stage_idx == 5: inputs = progress["imgs"]
+        else: inputs = progress[prev_stage]
 
-        for batch_idx in tqdm(range(0, inputs.shape[0], bs)):
+        Tensor.realize(*[p.to_(GPUS) for p in get_parameters(model)])
+        for batch_idx in tqdm(range(stage_progress(stage_idx), inputs.shape[0], bs)):
           t1 = time.perf_counter()
           batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
           if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0])
           else: batch = callback(batch)
           # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
           batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
-          outputs[batch_idx: batch_idx+bs].assign(batch).realize()
+          progress[stage][batch_idx: batch_idx + bs].assign(batch).realize()
+          # keep track of what our last output was, so we can resume from there if we crash in this loop (which is likely on mi300x)
+          progress["end"][stage_idx: stage_idx + 1].assign(Tensor([batch_idx + bs], dtype=dtypes.int)).realize()
           print(f"model: {model}, batch_idx: {batch_idx}, elapsed: {(time.perf_counter() - t1):.2f}")
         del batch
-
-        if isinstance(model, FidInceptionV3):
-          inception_activations = outputs
-          outputs = inputs # reuse input images for clip scoring
-        elif isinstance(model, OpenClipEncoder):
-          clip_scores = outputs
         
         jit.reset()
         Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
         print(f"done with model: {model}, elapsed: {(time.perf_counter() - t0):.2f}")
-      del inputs # GC ~94GB of images
+        prev_stage = stage
 
       # compute final fid score
       if not getenv("EVAL_OVERFIT_SET", ""):
@@ -1725,9 +1744,9 @@ def train_stable_diffusion():
           sigma = np.cov(activations.numpy(), rowvar=False)
           np.savez_compressed(inception_stats_fn, mu=mu, sigma=sigma)
 
-      fid_score = inception.compute_score(inception_activations, inception_stats_fn)
+      fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
 
-      clip_score = clip_scores.to(GPUS[0]).mean().item()
+      clip_score = progress["clip"].to(GPUS[0]).mean().item()
       return clip_score, fid_score
 
   if not getenv("EVAL_ONLY", ""):
