@@ -202,17 +202,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
-    if self.op in {Ops.BUFFERIZE, Ops.REDUCE}:
-      ret = self.src[0].ranges.copy()
-      for s in self.src[1:]:
-        if s in ret: del ret[s]
-    elif self.op in {Ops.STORE}:
-      ret = self.src[0].ranges.copy()
-      ret.update(self.src[1].ranges)
-      for s in self.src[2:]:
+    range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
+    ret: dict[UOp, None] = {}
+    if self.op in range_start.keys():
+      for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
+      for s in self.src[range_start[self.op]:]:
         if s in ret: del ret[s]
     else:
-      ret = {}
       for s in self.src: ret.update(s.ranges)
     return ret
 
