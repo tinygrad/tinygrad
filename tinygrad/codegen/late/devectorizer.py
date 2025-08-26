@@ -233,15 +233,12 @@ def no_vectorized_alu(alu:UOp):
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
-  new_buf = buf.replace(dtype=buf.dtype.base.scalar().ptr(cast(PtrDType, buf.dtype).size*buf.dtype.count, cast(PtrDType, buf.dtype).addrspace))
-  return new_buf.cast(buf.dtype)
+  dtype = cast(PtrDType, buf.dtype)
+  return buf.replace(dtype=dtype.base.scalar().ptr(dtype.size*dtype.count, dtype.addrspace)).cast(dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
-  if idx.dtype.count != 1:
-    assert cnt == idx.dtype.count
-    new_dtype = cast.dtype.base.scalar().ptr(size=cast.dtype.size, addrspace=cast.dtype.addrspace).vec(cnt)
-    return UOp(Ops.PTRCAT, new_dtype, src=tuple([buf.index(idx.gep(i)) for i in range(cnt)]))
+  assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
   return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
