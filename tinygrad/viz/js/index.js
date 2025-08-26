@@ -61,7 +61,7 @@ async function renderDag(graph, additions, recenter=false) {
         if (d.ref != null) return setCtxWithHistory(d.ref);
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
