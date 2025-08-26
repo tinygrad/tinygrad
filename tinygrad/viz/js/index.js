@@ -78,6 +78,7 @@ async function renderDag(graph, additions, recenter=false) {
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
     });
+    const lineHeight = 14;
     nodeLabels.selectAll("text").data(d => {
       const ret = [[]];
       for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
@@ -87,7 +88,7 @@ async function renderDag(graph, additions, recenter=false) {
         }
       }
       return [ret];
-    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).attr("class", "line").selectAll("tspan").data(d => d).join("tspan")
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", lineHeight).attr("class", "line").selectAll("tspan").data(d => d).join("tspan")
       .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
     // insert a background rect for colored labels
     nodeLabels.each(({ color }, i, nodes) => {
@@ -96,7 +97,7 @@ async function renderDag(graph, additions, recenter=false) {
       if (coloredLines.empty()) return;
       const bgColor = d3.color(d3.interpolateRgb(d3.color(color), d3.color("black"))(0.5)); bgColor.opacity = 0.5;
       g.selectAll("rect.bg").data(coloredLines.nodes().map(e => e.getBBox())).join("rect").attr("x", d => d.x).attr("y", d => d.y)
-        .attr("height", d => d.height).attr("width", d => d.width).attr("fill", bgColor.toString()).lower();
+        .attr("height", d => lineHeight).attr("width", d => d.width).attr("fill", bgColor.toString()).lower();
     });
     addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
