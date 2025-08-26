@@ -83,15 +83,15 @@ async function renderDag(graph, additions, recenter=false) {
     addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
     // draw edges
-    const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis);
-    d3.select("#edges").selectAll("path.edgePath").data(g.edges()).join("path").attr("class", "edgePath").attr("d", (e) => {
+    const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
+    d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
       const edge = g.edge(e);
       const points = edge.points.slice(1, edge.points.length-1);
       points.unshift(intersectRect(g.node(e.v), points[0]));
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    addTags(d3.select("#edge-labels").selectAll("g").data(g.edges().filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
+    addTags(d3.select("#edge-labels").selectAll("g").data(edges.filter(e => g.edge(e).label != null)).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = g.edge(e).points.slice(-2);
       const dx = p2.x-p1.x;
