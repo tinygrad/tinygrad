@@ -165,7 +165,7 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
     lrange = UOp.range(dtypes.int, 2, tc_range, AxisType.UPCAST if o[0] == "u" else AxisType.LOCAL)
     ne.append(lrange)
     tc_range += 1
-    new_range[int(o[1])] = (2 * new_range[int(o[1])]) + lrange
+    new_range[1-int(o[1])] = (2 * new_range[1-int(o[1])]) + lrange
   for _, amt in tc.get_reduce_axes():
     lrange = UOp.range(dtypes.int, amt, tc_range, AxisType.UNROLL)
     ne.append(lrange)
