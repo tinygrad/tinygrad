@@ -109,7 +109,6 @@ async function renderDag(graph, additions, recenter=false) {
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
     addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
-      // get a point near the end
       const p = g.edge(e).points[0];
       return `translate(${p.x+STROKE_WIDTH}, ${p.y})`
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
