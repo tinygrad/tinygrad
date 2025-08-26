@@ -73,8 +73,7 @@
     user-select: auto;
   }
   g.tag circle {
-    fill: #FFD700;
-    stroke: #B8860B;
+    fill: #b3dcc2;
     stroke-width: 0.8;
   }
   g.tag text {
@@ -97,8 +96,14 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  .highlight rect, .edgePath.highlight {
-    stroke: #FFC53D;
+  .highlight rect, .edgePath.highlight, g.tag circle {
+    stroke: #89C9A2;
+  }
+  #edge-labels g.tag.highlight {
+    display: block
+  }
+  #edge-labels g.tag {
+    display: none
   }
   #arrowhead {
     fill: #4a4b57;
