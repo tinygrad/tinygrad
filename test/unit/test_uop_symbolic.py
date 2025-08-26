@@ -8,7 +8,7 @@ from tinygrad.codegen.late.devectorizer import sym
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
-from tinygrad.uop.spec import z3_renderer
+from tinygrad.uop.spec import uops_to_z3
 
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
@@ -32,9 +32,8 @@ class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
     if test_z3:
       solver = z3.Solver()
-      z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
-      expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
-      self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
+      expr, expr_simplified = uops_to_z3(solver, v, v.simplify())
+      self.assertEqual(solver.check(expr != expr_simplified), z3.unsat, "simplified expression not equal to original")
     rendered, nmin, nmax = render(v)
     if isinstance(s, tuple): self.assertIn(rendered, s)
     else: self.assertEqual(rendered, s)
