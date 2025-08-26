@@ -11,6 +11,7 @@ from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
+from tinygrad.codegen.opt.kernel import axis_colors
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -79,7 +80,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
         label += f"\n{shape_to_str(u.shape)}"
       elif len(rngs:=u.ranges):
-        label += f"\n{str(sorted([x.arg[0] for x in rngs]))}"
+        label += f"\n({','.join(sorted([colored(str(x.arg[0]), axis_colors[x.arg[1]]) for x in rngs]))})"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"

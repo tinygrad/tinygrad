@@ -238,6 +238,7 @@ def no_vectorized_buf(buf:UOp):
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
+  if idx.dtype.count > 1: return None
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
   return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
 

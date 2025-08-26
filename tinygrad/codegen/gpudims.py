@@ -181,7 +181,6 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   srcs = [s.substitute(dict(zip(old_range, new_range))).substitute(dict(zip(ne, tne))) for s in (in0, in1)]
   srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
 
-  # get reduce/upcast axes for the tensor cores
   ned = dict(zip(tc.base_shape_str(), ne))
   tc_reduce_axes = tuple([ned[f"r{i}"].arg[0] for i in range(len(tc.get_reduce_axes()))])
   base_upcast_axes = tuple([(ned[s].arg[0], 2) for s in tc.base_upcast_axes()])
@@ -193,9 +192,12 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
     UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
     UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-    UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0))+tuple(red_ranges), arg=wmma_arg)
+    UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
   tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
-  return tc_uop.reduce(new_reduce_range, arg=Ops.ADD)
+  ret = tc_uop.reduce(new_reduce_range, arg=Ops.ADD)
+  # confirm the UNROLLs aren't actually used, these need to be broadcast MUL
+  assert all(u not in red_ranges for u in ret.toposort()), "UNROLLs in TC"
+  return ret
 
 from tinygrad.codegen.opt.postrange import pm_flatten_range
 
