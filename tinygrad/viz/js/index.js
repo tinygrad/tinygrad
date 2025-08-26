@@ -73,11 +73,12 @@ async function renderDag(graph, additions, recenter=false) {
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
-    nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
+    const nodeLabels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
-    }).selectAll("text").data(d => {
+    });
+    nodeLabels.selectAll("text").data(d => {
       const ret = [[]];
       for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
         for (const [i, l] of st.split("\n").entries()) {
@@ -86,8 +87,17 @@ async function renderDag(graph, additions, recenter=false) {
         }
       }
       return [ret];
-    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
+    }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).attr("class", "line").selectAll("tspan").data(d => d).join("tspan")
       .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
+    // insert a background rect for colored labels
+    nodeLabels.each(({ color }, i, nodes) => {
+      const g = d3.select(nodes[i]);
+      const coloredLines = g.selectAll("tspan.line").filter(d => d.some(s => s.color !== "initial"));;
+      if (coloredLines.empty()) return;
+      const bgColor = d3.color(d3.interpolateRgb(d3.color(color), d3.color("black"))(0.5)); bgColor.opacity = 0.5;
+      g.selectAll("rect.bg").data(coloredLines.nodes().map(e => e.getBBox())).join("rect").attr("x", d => d.x).attr("y", d => d.y)
+        .attr("height", d => d.height).attr("width", d => d.width).attr("fill", bgColor.toString()).lower();
+    });
     addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
     // draw edges
