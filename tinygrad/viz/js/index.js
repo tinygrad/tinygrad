@@ -110,18 +110,8 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("marker-end", "url(#arrowhead)");
     addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
       // get a point near the end
-      const [p1, p2] = g.edge(e).points.slice(-2);
-      const dx = p2.x-p1.x;
-      const dy = p2.y-p1.y;
-      // normalize to the unit vector
-      const len = Math.sqrt(dx*dx + dy*dy);
-      const ux = dx / len;
-      const uy = dy / len;
-      // avoid overlap with the arrowhead
-      const offset = 17;
-      const x = p2.x - ux * offset;
-      const y = p2.y - uy * offset;
-      return `translate(${x}, ${y})`
+      const p = g.edge(e).points[0];
+      return `translate(${p.x+STROKE_WIDTH}, ${p.y})`
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
