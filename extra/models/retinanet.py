@@ -123,6 +123,7 @@ class RetinaNet:
       obj.assign(dat)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
+  # @TinyJit
   def postprocess_detections2(self, predictions:Tensor, grid_sizes:list[tuple[int, int]],
                               input_size:tuple[int, int]=(800, 800), image_sizes:list[tuple[int, int]]|None=None,
                               orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05,
@@ -142,19 +143,18 @@ class RetinaNet:
       pred_img = pred_img.split(num_anchors_per_level)
       offsets_img, scores_img = [br[:, :4] for br in pred_img], [cl[:, 4:] for cl in pred_img]
       img_boxes, img_scores, img_labels = [], [], []
+      res = []
 
       for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
         # remove low scoring boxes
         scores_level = scores_level.flatten()
         topk_idxs = _masked_indices(scores_level > score_thresh)
-        scores_level = scores_level.masked_select(scores_level > score_thresh)
         scores_level = scores_level[topk_idxs]
 
         # keep topk
-        if scores_level.numel() > 0:
-          num_topk = min(scores_level.shape[0], topk_candidates)
-          scores_level, idxs = scores_level.topk(num_topk)
-          topk_idxs = topk_idxs[idxs]
+        num_topk = min(len(topk_idxs), topk_candidates)
+        idxs = scores_level.argsort()[-num_topk:][::-1]
+        topk_idxs, scores_level = topk_idxs[idxs], scores_level[idxs]
 
         # bbox coords from offsets
         anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
@@ -203,6 +203,7 @@ class RetinaNet:
       scores_per_image = [cl[:, 4:] for cl in predictions_per_image]
 
       image_boxes, image_scores, image_labels = [], [], []
+      res = []
       for offsets_per_level, scores_per_level, anchors_per_level in zip(offsets_per_image, scores_per_image, anchors):
         # remove low scoring boxes
         scores_per_level = scores_per_level.flatten()
