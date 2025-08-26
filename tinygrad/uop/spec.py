@@ -44,6 +44,10 @@ try:
       UOp(Ops.NOOP, arg=z3.Bool(f"float_cmp{ctx[1].setdefault(x, len(ctx[1]))}",ctx=ctx[0].ctx))),
   ])
 
+  def uops_to_z3(solver, *uops: UOp) -> 'list[z3.ExprRef]':
+    with Context(TRACK_MATCH_STATS=0):  # cant pickle z3 objects
+      return [s.arg for s in graph_rewrite(uops[0].sink(*uops[1:]), z3_renderer, ctx=(solver, {})).src]
+
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
@@ -124,9 +128,8 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
 
   if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
-  z3_idx = z3_sink.src[0].arg
-  solver.add(z3_sink.src[1].arg)
+  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
+  solver.add(z3_mask)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     print(f"idx={idx.src[1].render(simplify=False)}")
     print(f"mask & gate={mask.render(simplify=False)}")
