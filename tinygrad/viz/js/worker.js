@@ -19,8 +19,8 @@ onmessage = (e) => {
     g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ref, id:k, ...rest});
     // add edges
     const edgeCounts = {}
-    for (const s of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
-    for (const s of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? edgeCounts[s] : null });
+    for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
+    for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
   dagre.layout(g);

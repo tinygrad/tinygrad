@@ -50,7 +50,7 @@ def do_expand(root:UOp):
       if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1):
+      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1) or (root.op is Ops.WMMA and i >= 3):
         # for any range args of STORE/REDUCE, pass them through
         new_srcs.append(src)
       elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):

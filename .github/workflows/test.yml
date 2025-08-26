@@ -343,6 +343,8 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
+    - name: Run TYPED=1
+      run: TYPED=1 python -c "import tinygrad"
 
   unittest:
     name: Unit Tests

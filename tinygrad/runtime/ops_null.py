@@ -7,6 +7,7 @@ class NullRenderer(CStyleLanguage):
   device = "NULL"
   has_local = False
   float4 = "float4"
+  barrier = "// BARRIER"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
 class NullProgram:

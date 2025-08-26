@@ -30,7 +30,10 @@ class TestTiny(unittest.TestCase):
   def test_gemm(self, N=64, out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
-    self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
+    lst = (out:=a@b).tolist()
+    for y in range(N):
+      for x in range(N):
+        self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***

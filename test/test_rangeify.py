@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import RANGEIFY
+from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
 
 N = 256
 
@@ -96,14 +96,30 @@ class TestRangeify(unittest.TestCase):
     out.realize()
 
   def test_flash_attention(self):
-    BS = 4
-    HEADS = 2
-    MATDIM = 16
-    EMB = 8
-    q = Tensor.empty(BS, HEADS, MATDIM, EMB)
-    k = Tensor.empty(BS, HEADS, MATDIM, EMB)
-    v = Tensor.empty(BS, HEADS, MATDIM, EMB)
-    q.scaled_dot_product_attention(k, v).realize()
+    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+    # bigger
+    #BS, HEADS, SEQLEN, EMB = 4, 16, 128, 64
+
+    # llama 8B
+    #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+
+    def fa():
+      Tensor.manual_seed(1337)
+      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
+      return q.scaled_dot_product_attention(k, v).realize()
+
+    with Context(DEBUG=4):
+      GlobalCounters.reset()
+      ret = fa()
+    with Context(RANGEIFY=0):
+      with Context(DEBUG=2):
+        GlobalCounters.reset()
+        cmp = fa()
+      with Context(DEBUG=0):
+        mse = ((cmp-ret)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
 
 from tinygrad import dtypes
 from tinygrad.uop.ops import UOp
