@@ -464,7 +464,7 @@ class AMDProgram(HCQProgram):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.dev, self.name, self.lib = dev, name, lib
 
-    image, sections, _ = elf_loader(self.lib)
+    image, sections, relocs = elf_loader(self.lib)
 
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
     assert rodata_entry >= 0, ".rodata section not found"
