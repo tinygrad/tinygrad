@@ -209,12 +209,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
       for s in self.src[range_start[self.op]:]:
         if s in ret: del ret[s]
-    elif self.op in {Ops.WMMA}:
-      ret = self.src[0].ranges.copy()
-      ret.update(self.src[1].ranges)
-      ret.update(self.src[2].ranges)
-      for s in self.src[3:]:
-        if s in ret: del ret[s]
     elif self.op in {Ops.BARRIER}:
       ret = {x:None for x in self.src[0].ranges if x.arg[1] != AxisType.LOCAL}
     else:

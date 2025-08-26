@@ -32,7 +32,8 @@ class RKernel(Kernel):
       store_rngs = self.ast.src[0].src[2:]
 
       # filter any not in local stores
-      local_store_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL]
+      local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL) \
+                          or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
       for ls in local_store_rngs: store_rngs = [x for x in store_rngs if x in ls]
 
       store_rng = [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE] if store_rngs else []

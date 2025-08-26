@@ -356,7 +356,7 @@ pm_add_buffers_local = pm_mops+PatternMatcher([
 ])
 
 pm_add_buffers = pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x)),
+  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
