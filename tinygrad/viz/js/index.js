@@ -4,6 +4,15 @@ const displayGraph = (cls) => {
   for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
 }
 
+const darkenHex = (h, p = 0) =>
+  `#${(
+    c = parseInt(h.slice(1), 16),
+    f = 1 - p / 100,
+    ((c >> 16 & 255) * f | 0) << 16 |
+    ((c >>  8 & 255) * f | 0) <<  8 |
+    ((c       & 255) * f | 0)
+  ).toString(16).padStart(6, '0')}`;
+
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
@@ -87,7 +96,7 @@ async function renderDag(graph, additions, recenter=false) {
       }
       return [ret];
     }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-      .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
+      .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
     addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
     // draw edges
