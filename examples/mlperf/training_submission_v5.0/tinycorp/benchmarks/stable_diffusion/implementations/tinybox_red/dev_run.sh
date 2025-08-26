@@ -38,7 +38,7 @@ export BACKUP_INTERVAL=413
 
 # mi300x
 # use separate BS for the various jits in eval to maximize throughput
-export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
+#export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
 export GPUS=8 BS=248
 export CONTEXT_BS=816
 export DENOISE_BS=600
@@ -56,11 +56,11 @@ export CLIP_BS=240
 ####export DENOISE_BS=144
 ####export DECODE_BS=138
 
-export RUN_EVAL=1
+#export RUN_EVAL=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
-export EVAL_ONLY=1
-export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08241246/run_eval"
+#export EVAL_ONLY=1
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08241246/run_eval"
 #export LIMIT_EVAL_SAMPLES=600
 
 export BASEDIR="/home/hooved/stable_diffusion"
