@@ -63,9 +63,9 @@ async function renderDag(graph, additions, recenter=false) {
         const src = [...g.predecessors(d.id), d.id];
         nodes.classed("highlight", n => src.includes(n.id));
         d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.port").classed("highlight", function () {
-          const [v, w] = this.id.split("-");
-          return src.includes(v) && w === d.id
+        d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
+          const [v, w] = nodes[i].id.split("-");
+          return src.includes(v) && w===d.id;
         });
         e.stopPropagation();
       });
