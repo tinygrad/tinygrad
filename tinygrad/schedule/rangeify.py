@@ -338,13 +338,14 @@ def bufferize_to_store(x:UOp):
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
-  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, tuple) else x.arg[0])
+  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, AddrSpace) else x.arg)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+  # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL: buf = UOp.new_buffer(x.arg, size, x.dtype)
-  else: buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
+  else: buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers = pm_mops+PatternMatcher([

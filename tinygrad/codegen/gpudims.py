@@ -1,9 +1,10 @@
 import math, functools, operator
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, graph_rewrite
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
+from tinygrad.codegen.opt.tc import TensorCore
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
   # TODO: symbolic shape
@@ -114,7 +115,7 @@ def fix_group_for_reduce(x:UOp):
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
-  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=(AddrSpace.LOCAL, reduce_gfr[0].arg[0])).index(*upstream_locals, *reduce_loop)
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=AddrSpace.LOCAL).index(*upstream_locals, *reduce_loop)
 
   # gate with an if on the store + do the final reduce
   buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
@@ -132,4 +133,74 @@ pm_add_gpudims = PatternMatcher([
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+])
+
+def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp, reduceop:UOp):
+  # tensor cores have three ranges. X, Y, and REDUCE
+  in0_ranges = [u for u in in0.ranges if u not in in1.ranges]
+  in1_ranges = [u for u in in1.ranges if u not in in0.ranges]
+  if len(in0_ranges) != 1 or len(in1_ranges) != 1: return None
+  in0_range, in1_range = in0_ranges[0], in1_ranges[0]
+
+  # confirm the dtype and size is good
+  tc_opts: list[TensorCore] = []
+  for tc in ctx[1].tensor_cores:
+    if reduceop.dtype == tc.dtype_out and in0.dtype == tc.dtype_in and in1.dtype == tc.dtype_in:
+      if all(i <= j for i,j in zip(tc.dims, [in0_range.vmax+1, in1_range.vmax+1, r_range.vmax+1])):
+        tc_opts.append(tc)
+  if len(tc_opts) == 0: return None
+  tc = tc_opts[0]
+
+  # create the new ranges as speced by the tensor core
+  old_range = [in0_range, in1_range, r_range]
+  new_range = [r.replace(src=(r.src[0]//tc.dims[i],)) for i,r in enumerate(old_range)]
+  new_reduce_range = new_range[2]
+  tc_range = 9050 + r_range.arg[0]*100
+  red_ranges = []
+
+  ne: list[UOp] = []
+  for o in tc.opts:
+    lrange = UOp.range(dtypes.int, 2, tc_range, AxisType.UPCAST if o[0] == "u" else AxisType.LOCAL)
+    ne.append(lrange)
+    tc_range += 1
+    new_range[int(o[1])] = (2 * new_range[int(o[1])]) + lrange
+  for _, amt in tc.get_reduce_axes():
+    lrange = UOp.range(dtypes.int, amt, tc_range, AxisType.UNROLL)
+    ne.append(lrange)
+    red_ranges.append(lrange)
+    tc_range += 1
+    new_range[2] = (amt * new_range[2]) + lrange
+  tne = [x.replace(tag=1) for x in ne]
+
+  # replace ranges in other parts of the graph
+  for x,y in zip(old_range, new_range): ctx[0][x] = y
+
+  # apply the swizzled ranges to the srcs
+  srcs = [s.substitute(dict(zip(old_range, new_range))).substitute(dict(zip(ne, tne))) for s in (in0, in1)]
+  srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
+
+  # get reduce/upcast axes for the tensor cores
+  ned = dict(zip(tc.base_shape_str(), ne))
+  tc_reduce_axes = tuple([ned[f"r{i}"].arg[0] for i in range(len(tc.get_reduce_axes()))])
+  base_upcast_axes = tuple([(ned[s].arg[0], 2) for s in tc.base_upcast_axes()])
+  tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
+
+  # construct the op
+  # TODO: remove tc_upcast_axes from the arg
+  wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, ctx[1].device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+  wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+    UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+    UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+    UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0))+tuple(red_ranges), arg=wmma_arg)
+  tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+  return tc_uop.reduce(new_reduce_range, arg=Ops.ADD)
+
+from tinygrad.codegen.opt.postrange import pm_flatten_range
+
+pm_tensor_cores = PatternMatcher([
+  ((UPat.var("in0")*UPat.var("in1")).reduce(UPat(Ops.RANGE, name="r_range"), name="reduceop", arg=Ops.ADD), apply_tensor_cores),
+
+  # replace range
+  #(UPat(Ops.RANGE, name="r"), lambda ctx,r: ctx[0].get(r, None)),
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: graph_rewrite(s.substitute(ctx[0]), pm_flatten_range)),
 ])

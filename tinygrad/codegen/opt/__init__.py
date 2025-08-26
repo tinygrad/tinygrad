@@ -37,7 +37,7 @@ pm_get_optimization = PatternMatcher([
 
 def apply_opt(ast:UOp, renderer:Renderer):
   k = Kernel(ast, opts=renderer)
-  if ast.arg is not None: k.apply_opts(ast.arg.opts_to_apply)
+  k.apply_opts(ast.arg.opts_to_apply)
   ret = k.get_optimized_ast()
   if __debug__: type_verify(list(ret.toposort()))
   return ret

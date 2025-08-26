@@ -86,7 +86,7 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    #self.simplify_merge_adjacent()
+    self.simplify_merge_adjacent()
 
     # axis types
     global_loops = AxisType.GLOBAL if self.opts.has_local else AxisType.LOOP

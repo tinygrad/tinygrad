@@ -9,7 +9,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
-from tinygrad.codegen.gpudims import pm_add_gpudims
+from tinygrad.codegen.gpudims import pm_add_gpudims, pm_tensor_cores
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander
@@ -62,6 +62,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
+
+  # add tensor cores
+  if _RANGEIFY: ret.append(RewriteStep(pm_tensor_cores, lambda _: ({}, opts), name="tensor cores"))
 
   if _POSTOPT or _RANGEIFY: ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 

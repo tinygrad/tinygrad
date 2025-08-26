@@ -50,7 +50,7 @@ def do_expand(root:UOp):
       if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1):
+      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1) or (root.op is Ops.WMMA and i >= 3):
         # for any range args of STORE/REDUCE, pass them through
         new_srcs.append(src)
       elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):
@@ -89,9 +89,10 @@ expander = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
          Ops.VECTORIZE, Ops.IF, Ops.REDUCE), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
-  # BARRIERs aren't actually expanded
-  (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
-   lambda ex: UOp(Ops.UNROLL, src=(UOp(Ops.BARRIER, src=ex.src),)*len(ex.src), arg=ex.arg)),
+  # BARRIERs aren't actually expanded, now they even block expands
+  (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)), lambda ex: UOp(Ops.BARRIER, src=ex.src)),
+  #(UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
+  # lambda ex: UOp(Ops.UNROLL, src=(UOp(Ops.BARRIER, src=ex.src),)*len(ex.src), arg=ex.arg)),
   # empty UNROLL is NOOP
   (UPat(Ops.UNROLL, src=(UPat.var('x'),), arg=()), lambda x: x),
   # UNROLL GEP (needed for WMMA, generalize this) -> vectorized ALU

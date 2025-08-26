@@ -1,4 +1,5 @@
 import math
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat, graph_rewrite, _substitute
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
@@ -29,12 +30,18 @@ class RKernel(Kernel):
     self.replaces = {}
     if self.opts.has_local:
       store_rngs = self.ast.src[0].src[2:]
+
+      # filter any not in local stores
+      local_store_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL]
+      for ls in local_store_rngs: store_rngs = [x for x in store_rngs if x in ls]
+
       store_rng = [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE] if store_rngs else []
       rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rng]
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
 
   def simplify_merge_adjacent(self):
+    return
     # NOTE: this one is better than the one in kernel.py, which is kind of a problem
     terminators = [u for u in self.ast.toposort() if u.op in {Ops.REDUCE, Ops.STORE}]
     termination = {}

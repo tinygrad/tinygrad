@@ -142,6 +142,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG,
                                                    Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
+    if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
@@ -210,6 +211,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret = self.src[0].ranges.copy()
       ret.update(self.src[1].ranges)
       for s in self.src[2:]:
+        if s in ret: del ret[s]
+    elif self.op in {Ops.WMMA}:
+      ret = self.src[0].ranges.copy()
+      ret.update(self.src[1].ranges)
+      ret.update(self.src[2].ranges)
+      for s in self.src[3:]:
         if s in ret: del ret[s]
     else:
       ret = {}
