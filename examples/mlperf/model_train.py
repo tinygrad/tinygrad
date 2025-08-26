@@ -1,3 +1,4 @@
+import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1649,7 +1650,8 @@ def train_stable_diffusion():
       def generate_latents(embeds:Tensor) -> Tensor:
         uc_c = Tensor.stack(progress["uc"].to("CPU").expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
         uc_c = shard_tensor(uc_c)
-        x = shard_tensor(Tensor.randn(bs,4,64,64))
+        #x = shard_tensor(Tensor.randn(bs,4,64,64))
+        x = shard_tensor(get_batch(gv.images["init_latent"], 0, bs)[0])
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
@@ -1660,10 +1662,21 @@ def train_stable_diffusion():
           sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[ts].reshape(bs, 1, 1, 1)
           x_x = shard_tensor(Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64))
           x = denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
+        gv.md(get_batch(gv.images['sample'], 0, bs)[0], x.to(GPUS[0]).to("CPU").realize())
+        # diff.abs().mean(): 0.000567183771636337
+        # a.abs().mean(): 0.5318218469619751
+        # diff.abs().max(): 0.008517265319824219
         return x
 
       def decode_latents(latents:Tensor) -> Tensor: return decode(shard_tensor(latents))
-      def generate_inception(imgs:Tensor) -> Tensor: return jit_inception(shard_tensor(imgs))[:,:,0,0]
+      def generate_inception(imgs:Tensor) -> Tensor:
+        #return jit_inception(shard_tensor(imgs))[:,:,0,0]
+        ret = jit_inception(shard_tensor(imgs))[:,:,0,0]
+        gv.md(get_batch(gv.inception['inception_activation'], 0, bs)[0], ret.to(GPUS[0]).to("CPU").realize())
+        # diff.abs().mean(): 0.003514152020215988
+        # a.abs().mean(): 0.494873046875
+        # diff.abs().max(): 0.023799419403076172
+        return ret
 
       def calc_clip_scores(batch:Tensor, batch_tokens:Tensor) -> Tensor:
         # Tensor.interpolate does not yet support bicubic, so we use PIL
@@ -1673,6 +1686,10 @@ def train_stable_diffusion():
         batch = batch.cast(dtypes.float) / 255
         batch = (batch - model.mean) / model.std
         batch = jit_clip(shard_tensor(batch_tokens), batch)
+        gv.md(get_batch(gv.clip['clip_score'].squeeze(1), 0, bs)[0], batch.to(GPUS[0]).to("CPU").realize())
+        # diff.abs().mean(): 0.002837291918694973
+        # a.abs().mean(): 0.04107666015625
+        # diff.abs().max(): 0.004657566547393799
         return batch
 
       callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
@@ -1744,9 +1761,18 @@ def train_stable_diffusion():
           sigma = np.cov(activations.numpy(), rowvar=False)
           np.savez_compressed(inception_stats_fn, mu=mu, sigma=sigma)
 
-      fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
+      #fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
+      fid_score = inception.compute_score(gv.fid['fid_scores'], inception_stats_fn)
+      gv.md(gv.fid['fid_value'], Tensor(fid_score, dtype=dtypes.float64, device="CPU").realize())
+      # diff.abs().mean(): 7.066147134082712e-07
+      # a.abs().mean(): 146.45987514905977
+      # diff.abs().max(): 7.066147134082712e-07
 
       clip_score = progress["clip"].to(GPUS[0]).mean().item()
+      gv.md(gv.clip['clip_score'].squeeze(1).mean(), progress["clip"].to(GPUS[0]).mean().to("CPU"))
+      # diff.abs().mean(): 0.0010159648954868317
+      # a.abs().mean(): 0.0477294921875
+      # diff.abs().max(): 0.0010159648954868317
       return clip_score, fid_score
 
   if not getenv("EVAL_ONLY", ""):
@@ -1850,6 +1876,8 @@ def train_stable_diffusion():
         unet_ckpt = safe_load(p)
         if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
           unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
+        elif "model.diffusion_model.out.2.bias" in unet_ckpt:
+          unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
         load_state_dict(unet, unet_ckpt)
         clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
         print(f"eval results for {p.name}:")
