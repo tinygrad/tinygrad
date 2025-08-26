@@ -333,7 +333,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp):
+def bufferize_to_store(x:UOp, locals_allowed=False):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
@@ -344,12 +344,19 @@ def bufferize_to_store(x:UOp):
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
-  if sdtype.addrspace == AddrSpace.GLOBAL: buf = UOp.new_buffer(x.arg, size, x.dtype)
-  else: buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
+  if sdtype.addrspace == AddrSpace.GLOBAL:
+    buf = UOp.new_buffer(x.arg, size, x.dtype)
+  else:
+    if not locals_allowed: return None
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
+pm_add_buffers_local = pm_mops+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
+])
+
 pm_add_buffers = pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),

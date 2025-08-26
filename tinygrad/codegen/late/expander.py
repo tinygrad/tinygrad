@@ -89,10 +89,9 @@ expander = PatternMatcher([
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
          Ops.VECTORIZE, Ops.IF, Ops.REDUCE), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
-  # BARRIERs aren't actually expanded, now they even block expands
-  (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)), lambda ex: UOp(Ops.BARRIER, src=ex.src)),
-  #(UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
-  # lambda ex: UOp(Ops.UNROLL, src=(UOp(Ops.BARRIER, src=ex.src),)*len(ex.src), arg=ex.arg)),
+  # BARRIERs aren't actually expanded
+  (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
+   lambda ex: UOp(Ops.UNROLL, src=(UOp(Ops.BARRIER, src=ex.src),)*len(ex.src), arg=ex.arg)),
   # empty UNROLL is NOOP
   (UPat(Ops.UNROLL, src=(UPat.var('x'),), arg=()), lambda x: x),
   # UNROLL GEP (needed for WMMA, generalize this) -> vectorized ALU

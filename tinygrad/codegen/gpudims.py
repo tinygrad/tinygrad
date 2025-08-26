@@ -1,6 +1,6 @@
 import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, graph_rewrite
-from tinygrad.helpers import all_int, partition, flatten, prod, dedup, USE_TC
+from tinygrad.helpers import all_int, partition, flatten, prod, dedup, USE_TC, DEBUG
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
@@ -142,6 +142,7 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   in1_ranges = [u for u in in1.ranges if u not in in0.ranges]
   if len(in0_ranges) != 1 or len(in1_ranges) != 1: return None
   in0_range, in1_range = in0_ranges[0], in1_ranges[0]
+  if DEBUG >= 2: print('TC', in0_range.arg, in1_range.arg, r_range.arg)
 
   # confirm the dtype and size is good
   tc_opts: list[TensorCore] = []
