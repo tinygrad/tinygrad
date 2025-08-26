@@ -232,12 +232,6 @@ def no_vectorized_alu(alu:UOp):
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
-def no_vectorized_acc(acc:UOp, c:UOp):
-  if acc.dtype.count == 1: return None
-  assert c.arg == 0, "this only supports index 0"
-  new_acc = acc.replace(dtype=acc.dtype.base.scalar().ptr(acc.dtype.count, cast(PtrDType, acc.dtype).addrspace))
-  return UOp(Ops.PTRCAT, acc.dtype, tuple([new_acc.index(UOp.const(dtypes.int, i)) for i in range(acc.dtype.count)]))
-
 def no_vectorized_buf(buf:UOp, idx:UOp):
   # NOTE: this should work for define reg too
   if (cnt:=buf.dtype.count) == 1: return None
@@ -248,8 +242,7 @@ devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-  (UPat(Ops.DEFINE_REG, name="acc").index(UPat.cvar("c")), no_vectorized_acc),
-  (UPat(Ops.DEFINE_LOCAL, name="buf").index(UPat.var("idx")), no_vectorized_buf),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf").index(UPat.var("idx")), no_vectorized_buf),
 ])
 
 pm_render = PatternMatcher([
