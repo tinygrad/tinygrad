@@ -16,7 +16,7 @@ onmessage = (e) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ref, ...rest});
+    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ref, id:k, ...rest});
     // add edges
     const edgeCounts = {}
     for (const s of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
