@@ -60,9 +60,10 @@ export RUN_EVAL=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
 export EVAL_ONLY=1
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08241246/run_eval"
-export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_298669"
-export LIMIT_EVAL_SAMPLES=6
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08241246/run_eval_2"
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_298669"
+export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08051713/run_eval_298669_rng"
+#export LIMIT_EVAL_SAMPLES=6
 
 export BASEDIR="/home/hooved/stable_diffusion"
 

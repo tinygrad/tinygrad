@@ -1618,6 +1618,15 @@ def train_stable_diffusion():
       # It doesn't make sense to merge these jits, e.g. unet repeats 50 times in isolation; images fork to separate inception/clip
       # We're generating and scoring 30,000 images per eval, and all the data can flow through one jit at a time
       # To maximize throughput for each jit, we have only one model/jit on the GPU at a time, and pool outputs from each jit on CPU
+      import random
+      rng = [random.randint(0, 5) for _ in range(30000)]
+      eval_inputs = [eval_inputs[i] for i in rng]
+      init_latents = gv.images["init_latent"][rng].realize()
+      print(f"init_latents: {init_latents}")
+      print("eval_inputs[0:20]")
+      print(eval_inputs[0:20])
+      with open(f"{EVAL_CKPT_DIR}/rng.pickle", "wb") as f: pickle.dump({"rng": rng, "eval_inputs": eval_inputs}, f)
+
       for model in (unet, first_stage, inception, clip):
         Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
 
@@ -1647,11 +1656,11 @@ def train_stable_diffusion():
           uc_written = True
         return jit_context(shard_tensor(tokens))
 
-      def generate_latents(embeds:Tensor) -> Tensor:
+      def generate_latents(embeds:Tensor, init_latents:Tensor) -> Tensor:
         uc_c = Tensor.stack(progress["uc"].to("CPU").expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
         uc_c = shard_tensor(uc_c)
         #x = shard_tensor(Tensor.randn(bs,4,64,64))
-        x = shard_tensor(get_batch(gv.images["init_latent"], 0, bs)[0])
+        x = shard_tensor(init_latents)
         for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
           reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
           alpha_prev = eval_alphas_prev[reversed_idx]
@@ -1662,21 +1671,10 @@ def train_stable_diffusion():
           sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[ts].reshape(bs, 1, 1, 1)
           x_x = shard_tensor(Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64))
           x = denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)
-        gv.md(get_batch(gv.images['sample'], 0, bs)[0], x.to(GPUS[0]).to("CPU").realize())
-        # diff.abs().mean(): 0.000567183771636337
-        # a.abs().mean(): 0.5318218469619751
-        # diff.abs().max(): 0.008517265319824219
         return x
 
       def decode_latents(latents:Tensor) -> Tensor: return decode(shard_tensor(latents))
-      def generate_inception(imgs:Tensor) -> Tensor:
-        #return jit_inception(shard_tensor(imgs))[:,:,0,0]
-        ret = jit_inception(shard_tensor(imgs))[:,:,0,0]
-        gv.md(get_batch(gv.inception['inception_activation'], 0, bs)[0], ret.to(GPUS[0]).to("CPU").realize())
-        # diff.abs().mean(): 0.003514152020215988
-        # a.abs().mean(): 0.494873046875
-        # diff.abs().max(): 0.023799419403076172
-        return ret
+      def generate_inception(imgs:Tensor) -> Tensor: return jit_inception(shard_tensor(imgs))[:,:,0,0]
 
       def calc_clip_scores(batch:Tensor, batch_tokens:Tensor) -> Tensor:
         # Tensor.interpolate does not yet support bicubic, so we use PIL
@@ -1686,10 +1684,6 @@ def train_stable_diffusion():
         batch = batch.cast(dtypes.float) / 255
         batch = (batch - model.mean) / model.std
         batch = jit_clip(shard_tensor(batch_tokens), batch)
-        gv.md(get_batch(gv.clip['clip_score'].squeeze(1), 0, bs)[0], batch.to(GPUS[0]).to("CPU").realize())
-        # diff.abs().mean(): 0.002837291918694973
-        # a.abs().mean(): 0.04107666015625
-        # diff.abs().max(): 0.004657566547393799
         return batch
 
       callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
@@ -1724,6 +1718,7 @@ def train_stable_diffusion():
           t1 = time.perf_counter()
           batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
           if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0])
+          elif isinstance(model, UNetModel): batch = callback(batch, get_batch(init_latents, batch_idx, bs)[0])
           else: batch = callback(batch)
           # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
           batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
@@ -1761,18 +1756,9 @@ def train_stable_diffusion():
           sigma = np.cov(activations.numpy(), rowvar=False)
           np.savez_compressed(inception_stats_fn, mu=mu, sigma=sigma)
 
-      #fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
-      fid_score = inception.compute_score(gv.fid['fid_scores'], inception_stats_fn)
-      gv.md(gv.fid['fid_value'], Tensor(fid_score, dtype=dtypes.float64, device="CPU").realize())
-      # diff.abs().mean(): 7.066147134082712e-07
-      # a.abs().mean(): 146.45987514905977
-      # diff.abs().max(): 7.066147134082712e-07
+      fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
 
       clip_score = progress["clip"].to(GPUS[0]).mean().item()
-      gv.md(gv.clip['clip_score'].squeeze(1).mean(), progress["clip"].to(GPUS[0]).mean().to("CPU"))
-      # diff.abs().mean(): 0.0010159648954868317
-      # a.abs().mean(): 0.0477294921875
-      # diff.abs().max(): 0.0010159648954868317
       return clip_score, fid_score
 
   if not getenv("EVAL_ONLY", ""):
