@@ -381,8 +381,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  canvasZoom = d3.zoom().filter(e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button)
-    .scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
@@ -419,7 +418,8 @@ async function renderProfiler() {
 
 // ** zoom and recentering
 
-const svgZoom = d3.zoom().on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
+const vizZoomFilter = e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button && e.type !== 'dblclick';
+const svgZoom = d3.zoom().filter(vizZoomFilter).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(svgZoom);
 
 // zoom to fit into view
