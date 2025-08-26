@@ -218,6 +218,7 @@ def truncate_fp16(x):
   except OverflowError: return math.copysign(math.inf, x)
 
 def float_to_bf16(x):
+  if not math.isfinite(x): return x
   u = struct.unpack('I', struct.pack('f', x))[0]
   u = (u + 0x7FFF + ((u >> 16) & 1)) & 0xFFFF0000
   return struct.unpack('f', struct.pack('I', u))[0]
