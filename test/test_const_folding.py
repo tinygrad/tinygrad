@@ -1,11 +1,10 @@
 import unittest, itertools, math
-from typing import Any
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
-import numpy as np
 from tinygrad.device import is_dtype_supported
+import numpy as np
 from test.helpers import not_support_multi_device
 
 def _check_ast_count(desired_count:int, t:Tensor):
@@ -25,7 +24,7 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
-  @unittest.expectedFailure  # no two level fold at lazybuffer
+  @unittest.expectedFailure  # no two level fold
   def test_neg_folding(self):
     _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
     _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
@@ -104,7 +103,7 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
 
 class TestBitcastConstFolding(unittest.TestCase):
   def test_scalar_bitcast(self):
-    def t(cases: dict[DType, Any]):
+    def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
           r = full_rewrite_to_sink(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
@@ -165,7 +164,6 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_cast_padded(self):
-    # NOTE: this is folded due to CAST_BEFORE_VIEW
     if is_dtype_supported(dtypes.int16):
       _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
