@@ -73,10 +73,16 @@
     user-select: auto;
   }
   g.tag circle {
+    fill: #FFD700;
+    stroke: #B8860B;
+  }
+  g.port circle {
     fill: #b3dcc2;
+  }
+  #edge-labels circle {
     stroke-width: 0.8;
   }
-  g.tag text {
+  #edge-labels text {
     text-anchor: middle;
     font-size: 6px;
     fill: #08090e;
@@ -96,13 +102,13 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  .highlight rect, .edgePath.highlight, g.tag circle {
+  .highlight rect, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }
-  #edge-labels g.tag.highlight {
+  #edge-labels g.port.highlight {
     display: block
   }
-  #edge-labels g.tag {
+  #edge-labels g.port {
     display: none
   }
   #arrowhead {

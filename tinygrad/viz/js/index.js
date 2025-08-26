@@ -63,7 +63,7 @@ async function renderDag(graph, additions, recenter=false) {
         const src = [...g.predecessors(d.id), d.id];
         nodes.classed("highlight", n => src.includes(n.id));
         d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.tag").classed("highlight", function () {
+        d3.select("#edge-labels").selectAll("g.port").classed("highlight", function () {
           const [v, w] = this.id.split("-");
           return src.includes(v) && w === d.id
         });
@@ -111,7 +111,7 @@ async function renderDag(graph, additions, recenter=false) {
       const x = p2.x - ux * offset;
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
-    }).attr("class", "tag").attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).ports));
+    }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 
