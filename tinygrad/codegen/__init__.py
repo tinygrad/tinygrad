@@ -18,6 +18,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt import pm_get_optimization, pm_do_optimize, pm_postrange_opt
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 @dataclass
 class RewriteStep:
@@ -72,6 +73,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   # expand
   ret.append(RewriteStep(sym+expander, name="expander"))
+
+  # add locals
+  ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
