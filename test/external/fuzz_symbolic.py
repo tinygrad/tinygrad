@@ -2,7 +2,7 @@ import random, operator
 import z3
 from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp, graph_rewrite
-from tinygrad.uop.spec import z3_renderer
+from tinygrad.uop.spec import uops_to_z3
 from tinygrad.helpers import DEBUG, Context
 
 seed = random.randint(0, 100)
@@ -57,8 +57,7 @@ if __name__ == "__main__":
 
     solver = z3.Solver()
     solver.set(timeout=5000)  # some expressions take very long verify, but its very unlikely they actually return sat
-    z3_sink = graph_rewrite(expr.sink(simplified_expr, u1, u2, u3), z3_renderer, ctx=(solver, {}))
-    z3_expr, z3_simplified_expr = z3_sink.src[0].arg, z3_sink.src[1].arg
+    z3_expr, z3_simplified_expr = uops_to_z3(solver, expr, simplified_expr)
     check = solver.check(z3_simplified_expr != z3_expr)
     if check == z3.unknown and DEBUG>=1:
       skipped += 1
