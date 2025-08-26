@@ -59,7 +59,7 @@ async function renderDag(graph, additions, recenter=false) {
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (_,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
-        const src = g.predecessors(d.id) || [];
+        const src = [...g.predecessors(d.id), d.id];
         nodes.classed("highlight", n => src.includes(n.id));
         d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
       });
