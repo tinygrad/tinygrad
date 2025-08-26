@@ -148,10 +148,24 @@ class MUOpX86(MUOp):
     if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
     return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
             Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7), Ops.CMPEQ: ("cmp", 0x81, 7)}[op]
-  #def idiv(out:Register, in0:Register, in1:Register, is_signed:bool) -> MUOp:
-  #  in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
-  #  move = MUOpX86("mov", 0x8B, out, (in0,), (Register("rax", 0, 8),), (GPR,), out, in0, w=int(out.size == 8), prefix=int(out.size == 2))
-  #  extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+  def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
+    in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
+    move = MUOpX86("mov", 0x8B, x, (a,), (Register("rax", 0, 8),), (GPR,), x, a, w=1)
+    push = MUOpX86._RM("push", 0xFF, 6, Register("rdx", 2, 8))
+    if x.size == 1:
+      extend = MUOpX86("cbw", 0x98) if is_signed else MUOpX86.R_RM(MUOpX86.R_RM("movzx", 0x0FB6, x, x))
+      div = MUOpX86._RM("idiv", 0xF6, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF6, 6, b, in_cons=in_cons)
+    elif x.size == 2:
+      extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, prefix=0x66, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, prefix=0x66, in_cons=in_cons)
+    elif x.size == 4:
+      extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
+    elif x.size == 8:
+      extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
+    pop = MUOpX86._RM("pop", 0x8F, 0, Register("rdx", 2, 8))
+    return [move, push, extend, div, pop]
   # TODO: for vectors < 4 bytes could use extract
   def load(dest:Register, src:Memory) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
@@ -223,9 +237,9 @@ class MUOpX86(MUOp):
     inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8))
     # *** MODR/M byte ***
     # reg field can be register or opcode extension
-    reg = self.reg.index & 0b111 if isinstance(self.reg, Register) else self.reg
     # r/m field can be register, base register in memory or signal a sib byte is required
-    rm = 0b000
+    reg, rm = self.reg, 0b000
+    if isinstance(self.reg, Register): reg = self.reg.index & 0b111
     if isinstance(self.rm, Register): rm = self.rm.index & 0b111
     elif isinstance(self.rm, Memory): rm = self.rm.base.index & 0b111 if self.rm.index is None else 0b100
     # specifies operand types
