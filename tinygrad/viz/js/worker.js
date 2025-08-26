@@ -8,7 +8,7 @@ onmessage = (e) => {
   const { graph, additions, ctxs } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-  if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
+  if (additions.length !== 0) g.setNode("addition", {label:"", className:"overlay", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
