@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-from typing import Any, cast
+from typing import cast
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
@@ -19,7 +19,7 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
-  def convert(v:Any): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
+  def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
 symbolic_simple = PatternMatcher([
@@ -295,6 +295,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+  # if its a plus we add the associative variation too
+  ((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff")), \
+   lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # ALU/variable min==max -> CONST (slow!)
   (UPat(GroupOp.ALU|{Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
