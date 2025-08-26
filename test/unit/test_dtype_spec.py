@@ -1,6 +1,6 @@
 import unittest, math, operator, subprocess
 from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, truncate_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
+from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, CI, DEBUG
 from hypothesis import given, settings, strategies as strat
@@ -108,17 +108,12 @@ class TestHelpers(unittest.TestCase):
     self.assertEqual(truncate_fp16(-65520), -math.inf)
     self.assertTrue(math.isnan(truncate_fp16(math.nan)))
 
-  def test_truncate_bf16(self):
-    self.assertEqual(truncate_bf16(1), 1)
-    # TODO: rounding, torch bfloat 1.1 gives 1.1015625 instead of 1.09375
-    self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
-    for a in [1234, 23456, -777.777]:
-      self.assertEqual(truncate_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
+  def test_float_to_bf16(self):
+    # TODO: fuzz this better
     max_bf16 = torch.finfo(torch.bfloat16).max
-    self.assertEqual(truncate_bf16(max_bf16), max_bf16)
-    self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
-    self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
-    self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
+    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001, math.inf, -math.inf]:
+      self.assertEqual(float_to_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
+    self.assertTrue(math.isnan(float_to_bf16(math.nan)))
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
   def test_truncate_fp8e4m3(self, x):
