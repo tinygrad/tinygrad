@@ -57,8 +57,9 @@ async function renderDag(graph, additions, recenter=false) {
     // draw nodes
     const STROKE_WIDTH = 1.4;
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
-      .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null)
-      .on("click", (_,d) => setCtxWithHistory(d.ref));
+      .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (_,d) => {
+        if (d.ref != null) return setCtxWithHistory(d.ref);
+      });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("style", d => d.style ?? `stroke:#4a4b57; stroke-width:${STROKE_WIDTH}px;`);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
@@ -511,7 +512,6 @@ function setState(ns) {
 
 // set a new context and keep the old one in browser history
 function setCtxWithHistory(newCtx, step=0) {
-  if (newCtx == null) return;
   // NOTE: browser does a structured clone, passing a mutable object is safe.
   history.replaceState(state, "");
   history.pushState(state, "");
