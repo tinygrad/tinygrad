@@ -5,14 +5,13 @@ const displayGraph = (cls) => {
 }
 
 const darkenHex = (h, p = 0) =>
-  p <= 0 ? h
-  : `#${((i => {
-        const f = 1 - p / 100;
-        const r = Math.round(((i >> 16) & 0xff) * f);
-        const g = Math.round(((i >> 8)  & 0xff) * f);
-        const b = Math.round(( i        & 0xff) * f);
-        return (r << 16) | (g << 8) | b;
-      })(parseInt(h.slice(1), 16))).toString(16).padStart(6, '0')}`;
+  `#${(
+    c = parseInt(h.slice(1), 16),
+    f = 1 - p / 100,
+    ((c >> 16 & 255) * f | 0) << 16 |
+    ((c >>  8 & 255) * f | 0) <<  8 |
+    ((c       & 255) * f | 0)
+  ).toString(16).padStart(6, '0')}`;
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
