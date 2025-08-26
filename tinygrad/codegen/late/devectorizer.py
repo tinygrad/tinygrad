@@ -237,8 +237,11 @@ def no_vectorized_buf(buf:UOp):
   return new_buf.cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
-  if idx.dtype.count != 1: return None
   cnt = cast.dtype.count
+  if idx.dtype.count != 1:
+    assert cnt == idx.dtype.count
+    new_dtype = cast.dtype.base.scalar().ptr(size=cast.dtype.size, addrspace=cast.dtype.addrspace).vec(cnt)
+    return UOp(Ops.PTRCAT, new_dtype, src=tuple([buf.index(idx.gep(i)) for i in range(cnt)]))
   return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
