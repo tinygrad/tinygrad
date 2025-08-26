@@ -709,7 +709,7 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.arange(4).realize().uop
     kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
-    run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
+    run_schedule(check_schedule(UOp.sink(a.store(kernel, dtype=a.dtype), b.store(kernel, dtype=b.dtype)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
 
@@ -1981,7 +1981,7 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
 def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
+  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.STORE}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
