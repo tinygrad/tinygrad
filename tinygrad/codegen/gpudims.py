@@ -211,3 +211,19 @@ pm_tensor_cores = PatternMatcher([
   #(UPat(Ops.RANGE, name="r"), lambda ctx,r: ctx[0].get(r, None)),
   (UPat(Ops.SINK, name="s"), lambda ctx,s: graph_rewrite(s.substitute(ctx[0]), pm_flatten_range, name="flatten")),
 ])
+
+def fix_bufferize(x:UOp):
+  if x.arg != AddrSpace.LOCAL: return None
+  locals_left = [r for r in x.ranges if r.arg[1] == AxisType.LOCAL]
+  if not len(locals_left): return None
+  acc = x.size
+  st = []
+  for l in locals_left:
+    st.append(l*acc)
+    acc *= l.vmax+1
+  return x.replace(src=(x.src[0],) + tuple(locals_left[::-1]) + x.src[1:]).index(sum(st))
+
+pm_fix_locals = PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), fix_bufferize),
+  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("x"))), UPat.var("y"))), lambda b,x,y: b.index(x+y)),
+])

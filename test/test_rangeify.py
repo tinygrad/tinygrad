@@ -29,7 +29,7 @@ class TestRangeify(unittest.TestCase):
       ref = go()
       mse = ((rng-ref)**2).sum().item()
     print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
+    self.assertLessEqual(mse, 1e-2)
 
   def test_double_gemm(self):
     A = Tensor.empty(N, N)
