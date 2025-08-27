@@ -2,18 +2,9 @@ import unittest
 
 from test.helpers import assert_jit_cache_len
 from tinygrad import Variable, Tensor, TinyJit
-from tinygrad.helpers import Context
 import numpy as np
 
 class TestSymbolicJit(unittest.TestCase):
-  def setUp(self):
-    # A lot of these test are out of bounds, so we ignore the bounds check
-    self.context = Context(IGNORE_OOB=1)
-    self.context.__enter__()
-
-  def tearDown(self):
-    self.context.__exit__(None, None, None)
-
   def test_plus1(self):
     def f(a): return (a+1).realize()
     jf = TinyJit(f)
