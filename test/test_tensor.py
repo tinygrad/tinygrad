@@ -867,7 +867,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = full_rewrite(s.ast, renderer)
-        renderer.render(uops)
+        renderer.render(uops) if s.bufs[0].device not in ("X86",) else renderer.to_muops(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):
@@ -894,13 +894,16 @@ class TestIdxUpcast(unittest.TestCase):
   def test_overflow_sym(self):
     self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
+  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
   def test_regular(self):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
+  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)
