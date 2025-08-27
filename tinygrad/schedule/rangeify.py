@@ -348,7 +348,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     buf = UOp.new_buffer(x.arg, size, x.dtype)
   else:
     if not locals_allowed: return None
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=0) #UOp.unique().arg)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([

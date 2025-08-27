@@ -119,7 +119,7 @@ class TestRangeify(unittest.TestCase):
     #BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     # bigger
-    BS, HEADS, SEQLEN, EMB = 4, 16, 128, 64
+    BS, HEADS, SEQLEN, EMB = 4, 32, 128, 64
 
     # llama 8B
     #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128

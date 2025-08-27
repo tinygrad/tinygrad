@@ -141,9 +141,10 @@ pm_add_gpudims = PatternMatcher([
 def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp, reduceop:UOp):
   if not USE_TC: return None
   # tensor cores have three ranges. X, Y, and REDUCE
-  in0_ranges = [u for u in in0.ranges if u not in in1.ranges]
-  in1_ranges = [u for u in in1.ranges if u not in in0.ranges]
-  if len(in0_ranges) != 1 or len(in1_ranges) != 1: return None
+  in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
+  in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
+  #print(len(in0_ranges), len(in1_ranges))
+  if not len(in0_ranges) or not len(in1_ranges): return None
   in0_range, in1_range = in0_ranges[0], in1_ranges[0]
   if DEBUG >= 2: print('TC', in0_range.arg, in1_range.arg, r_range.arg)
 
@@ -160,7 +161,7 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   old_range = [in0_range, in1_range, r_range]
   new_range = [r.replace(src=(r.src[0]//tc.dims[i],)) for i,r in enumerate(old_range)]
   new_reduce_range = new_range[2]
-  tc_range = 9050 + r_range.arg[0]*100
+  tc_range = 9050 #+ r_range.arg[0]*100
   red_ranges = []
 
   ne: list[UOp] = []
@@ -223,7 +224,46 @@ def fix_bufferize(x:UOp):
     acc *= l.vmax+1
   return x.replace(src=(x.src[0],) + tuple(locals_left[::-1]) + x.src[1:]).index(sum(st))
 
-pm_fix_locals = PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), fix_bufferize),
+
+pm_double_index = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("x"))), UPat.var("y"))), lambda b,x,y: b.index(x+y)),
+])
+
+pm_fix_locals = pm_double_index+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), fix_bufferize),
+])
+
+B = 8
+
+def loop_store(x:UOp):
+  r_maybe = [r for r in x.src[0].ranges if r.arg[0] == 2 and r.tag is None]
+  ur_maybe = [r for r in x.ranges if r.arg[0] < 0]
+  #print("store", len(r_maybe), len(ur_maybe))
+  if not len(r_maybe) or not len(ur_maybe): return None
+
+  r = r_maybe[0]
+  ur = ur_maybe[0]
+  rr = r.replace(src=(r.src[0]//B,), tag=1)
+  return x.substitute({r:rr*B+ur})
+
+def loop_bufferize(x:UOp):
+  if x.arg != AddrSpace.LOCAL: return None
+  r_maybe = [r for r in x.ranges if r.arg[0] == 2 and r.tag is None]
+  ur_maybe = [r for r in x.ranges if r.arg[0] < 0]
+
+  if len(ur_maybe):
+    ur = ur_maybe[0]
+  else:
+    if len(r_maybe) == 0: return None
+    r = r_maybe[0]
+    ur = UOp.range(dtypes.int, B, -2010)
+    rr = r.replace(src=(r.src[0]//B,), tag=1)
+    x = x.substitute({r:rr*B + ur})
+
+  ur1 = UOp.range(dtypes.int, B, ur.arg[0]+1)
+  return x.replace(src=(x.src[0],ur)+x.src[1:]).index(x.size*ur1)
+
+pm_bufferize_loop = pm_double_index+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), loop_bufferize),
+  (UPat(Ops.STORE, name="x"), loop_store),
 ])

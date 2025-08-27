@@ -316,7 +316,9 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops): prefix.append(
+    wargs = wmma_args(uops)
+    if len(wargs) > 0: wargs = wargs[0:1]
+    for name, _, dtype_in, dtype_out, _, _, _, _ in wargs: prefix.append(
   f"""{(dstr_out:=self.render_dtype(dtype_out.vec(2)))} __{name}({(dstr_in:=self.render_dtype(dtype_in.vec(2)))} a, {dstr_in} b, {dstr_out} c){{
   simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
