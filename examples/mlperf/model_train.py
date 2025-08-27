@@ -1747,6 +1747,9 @@ def train_stable_diffusion():
       fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
 
       clip_score = progress["clip"].to(GPUS[0]).mean().item()
+      if not getenv("KEEP_EVAL_CACHE", ""):
+        for name in disk_tensor_names:
+          Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
       return clip_score, fid_score
 
   if not getenv("EVAL_ONLY", ""):
