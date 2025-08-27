@@ -2972,7 +2972,9 @@ class Tensor(MathTrait):
     print(Tensor([1., 2., 4., 8.]).log().numpy())
     ```
     """
-    return self.log2()*math.log(2)
+    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).log2().mul(math.log(2)).cast(self.dtype)
+
+    return self.log2().mul(math.log(2))
 
   def log2(self) -> Tensor:
     """
@@ -3099,7 +3101,9 @@ class Tensor(MathTrait):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
     ```
     """
-    return ((math.pi/2)-self).sin()
+    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).sub(math.pi/2, reverse=True).sin().cast(self.dtype)
+
+    return self.sub(math.pi/2,reverse=True).sin()
 
   def tan(self) -> Tensor:
     """
