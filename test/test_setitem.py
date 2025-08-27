@@ -186,8 +186,8 @@ class TestWithGrad(unittest.TestCase):
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
-    cmp = Tensor.empty(N)
-    for i in range(N): cmp[i] = i
+    cmp = Tensor.arange(N, dtype="float32")
+    for i in range(N): cmp[i:i+1] = i
     self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
 
 if __name__ == '__main__':
