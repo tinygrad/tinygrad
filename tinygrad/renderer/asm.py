@@ -529,7 +529,7 @@ class X86Renderer(Renderer):
   extra_matcher = x86_matcher
   extra_spec = x86_spec
   lowerer = x86_lowerer
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
 
   def __getitem__(self, x:UOp) -> Register: # hacky helper
@@ -562,7 +562,7 @@ class X86Renderer(Renderer):
     if DEBUG >= 8: print("\n".join([str(mu) for mu in muops] + ["\n"]))
     return muops
 
-  def regalloc(self, muops: list[MUOp]) -> list[MUOp]:
+  def regalloc(self, muops: list[MUOp]) -> tuple[list[MUOp], list[Register]]:
     # live ranges
     def is_range(x:Operand) -> bool: return isinstance(x, Label) and x.name.startswith(".LOOP")
     def virtuals(n:tuple[Operand, ...]) -> list[Register]:
@@ -682,14 +682,14 @@ class X86Renderer(Renderer):
       final_muops.append(mu.replace(rewrite(mu.out, mu.out_con), ins_rewrite))
     # align stack to 16 bytes, required on windows
     self.stack_size += (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16
-    return final_muops
+    return (final_muops, callee_saved)
 
-  def setup(self, kernel:list[MUOp]) -> list[MUOp]:
-    prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)),
-                MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1),
-                MUOpX86.RM_I("sub", 0x81, 5, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)]
-    epilogue = [MUOpX86.RM_I("add", 0x81, 0, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1),
-                MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
-    kernel = prologue + kernel + epilogue if self.stack_size > 0 else kernel
+  def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
+    prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
+               [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
+               [MUOpX86.RM_I("sub", 0x81, 5, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)]
+    epilogue = [MUOpX86.RM_I("add", 0x81, 0, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)] + \
+               [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
+    kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
     return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
-  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(self.regalloc(self.lower(uops)))
+  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
