@@ -11,6 +11,11 @@ class TestRangeify(unittest.TestCase):
     ba = A.expand(N, N)
     ((ba+1).sum(axis=1) + (ba+2).sum(axis=0)).realize()
 
+  def test_partial_contig(self):
+    A = Tensor.empty(64, 64, 64)
+    ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
+    ret.realize()
+
   def test_double_gemm(self):
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)

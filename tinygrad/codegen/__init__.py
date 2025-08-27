@@ -72,14 +72,14 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
 
-  # expand
-  ret.append(RewriteStep(sym+expander, name="expander"))
+  # add locals
+  ret.append(RewriteStep(pm_flatten_range+pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
 
   # add gpu dims (late). this also handles UNROLL range
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
-  # add locals
-  ret.append(RewriteStep(pm_flatten_range+pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
+  # expand
+  ret.append(RewriteStep(sym+expander, name="expander"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
