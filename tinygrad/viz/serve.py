@@ -258,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
       else: return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
-    elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/octet-stream"
+    elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 
     # send response
@@ -291,8 +291,8 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:str|None) -> list|None:
-  if path is None or not os.path.exists(path): return None
+def load_pickle(path:str|None) -> list:
+  if path is None or not os.path.exists(path): return []
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -315,9 +315,9 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
+  ctxs = get_metadata(*contexts[:2]) if contexts else []
 
-  profile_ret = get_profile(profile) if profile is not None else None
+  profile_ret = get_profile(profile)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
