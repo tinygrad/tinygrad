@@ -12,7 +12,7 @@ from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
-from tinygrad.codegen.late.expander import migrate_indexing, expander
+from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
@@ -65,11 +65,8 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
 
-  # add gpu dims (late). this also handles UNROLL range
-  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
-
   # expand
-  ret.append(RewriteStep(sym+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
@@ -77,6 +74,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # add gpu dims (late). this works after devectorize, but it's faster here
+  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
