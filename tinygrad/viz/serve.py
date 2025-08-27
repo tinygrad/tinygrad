@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes
+import subprocess, ctypes, pathlib
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -293,6 +293,17 @@ def reloader():
 
 def load_pickle(path:str|None) -> list:
   if path is None or not os.path.exists(path): return []
+  if (p:=pathlib.Path(path)).is_dir():
+    start_time = (p/"start").stat().st_mtime_ns
+    proc_trace:list[list] = []
+    for e in os.scandir(p):
+      if (stat:=e.stat()).st_mtime_ns < start_time: os.remove(e.path)
+      elif stat.st_size != 0:
+        with open(e, "rb") as f: trace = pickle.load(f)
+        proc_trace.append(trace)
+    os.remove(p/"start")
+    # TODO: merge traces
+    return proc_trace[0]
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
