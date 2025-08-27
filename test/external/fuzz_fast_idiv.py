@@ -1,8 +1,8 @@
 import random
 import z3
 from tinygrad import dtypes
-from tinygrad.uop.spec import z3_renderer, z3_cdiv
-from tinygrad.uop.ops import UOp, graph_rewrite
+from tinygrad.uop.spec import uops_to_z3, z3_cdiv
+from tinygrad.uop.ops import UOp
 from tinygrad.uop.decompositions import fast_idiv
 random.seed(42)
 
@@ -19,8 +19,7 @@ if __name__ == "__main__":
     if expr is None: continue
 
     solver = z3.Solver()
-    z3_sink = graph_rewrite(expr.sink(u), z3_renderer, ctx=(solver, {}))
-    z3_expr, x = z3_sink.src[0].arg, z3_sink.src[1].arg
+    z3_expr, x =uops_to_z3(solver, expr, u)
 
     if solver.check(z3_expr != z3_cdiv(x, d)) == z3.sat:
       assert False, f"Failed: {expr.render()} != x//{d} at x={solver.model()}\nx={u}\nd={d}\n{z3_expr=}\n{x/d=}"

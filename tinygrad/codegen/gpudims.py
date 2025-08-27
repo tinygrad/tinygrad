@@ -1,7 +1,7 @@
-import math
+import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
 from tinygrad.helpers import all_int, partition, flatten, prod, dedup
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
 
@@ -83,7 +83,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0]%1000)
-      if r.arg[0] < 2000 and r.arg[1] == AxisType.GROUP_REDUCE: continue
+      if r.arg[1] == AxisType.REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)
@@ -104,7 +104,24 @@ def fix_store_unroll(x:UOp):
   if len(store_expand) == 0: return None
   return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
 
+def fix_group_for_reduce(x:UOp):
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
+  if len(reduce_gfr) == 0: return None
+
+  # NOTE: if there's other locals here, we need them in the buffer too
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+
+  # do only the non grouped reduces early
+  ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
+  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=(AddrSpace.LOCAL, reduce_gfr[0].arg[0])).index(*upstream_locals, *reduce_loop)
+
+  # gate with an if on the store + do the final reduce
+  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
+  return buf.reduce(*reduce_loop, arg=x.arg)
+
 pm_add_gpudims = PatternMatcher([
+  # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
@@ -113,4 +130,6 @@ pm_add_gpudims = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])

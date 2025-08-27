@@ -464,14 +464,14 @@ class AMDProgram(HCQProgram):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.dev, self.name, self.lib = dev, name, lib
 
-    image, sections, _ = elf_loader(self.lib)
+    image, sections, relocs = elf_loader(self.lib)
 
     rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
-    text_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".text"), -1)
-    assert rodata_entry >= 0 and text_entry >= 0, ".text or .rodata section not found"
+    assert rodata_entry >= 0, ".rodata section not found"
 
-    # Relo for kernel_code_entry_byte_offset for AMD_LLVM. Comgr doesn't need that, but keep shared code path.
-    image[rodata_entry+0x10:rodata_entry+0x10+8] = struct.pack('<q', text_entry - rodata_entry)
+    for apply_image_offset, rel_sym_offset, typ, addent in relocs:
+      if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
+      else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     self.dev.allocator._copyin(self.lib_gpu, image)
@@ -807,7 +807,7 @@ class AMDDevice(HCQCompiled):
     nbio_pad = (0,) if self.target[0] == 9 else ()
     self.nbio = AMDIP(nbio_name, self.iface.ip_versions[am.NBIF_HWIP], {i:nbio_pad+x for i,x in self.iface.ip_offsets[am.NBIF_HWIP].items()})
 
-    self.is_aql = getenv("AMD_AQL", 0)
+    self.is_aql = getenv("AMD_AQL", self.xccs > 1)
     if self.is_aql:
       self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
       self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
