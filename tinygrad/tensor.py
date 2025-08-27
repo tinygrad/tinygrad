@@ -1,6 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+from typing import List, Any
 from contextlib import ContextDecorator
 from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -1322,7 +1323,10 @@ class Tensor(MathTrait):
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
+    pad_spec: List[Any] = [[None]*t.ndim for t in tensors]
+    for i in range(len(pad_spec)):
+      pad_spec[i][dim] = (dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1])
+    for i,t in enumerate(tensors): tensors[i] = t.pad(pad_spec[i])
     return functools.reduce(Tensor.add, tensors)
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
