@@ -283,8 +283,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t[:dtype.itemsize * n].bitcast(dtype)
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
-    # TODO: rewrite with arange?
-    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
+    shift_tensor, bitmask = Tensor.arange(8//b, device=t.device, dtype=t.dtype).mul(b).exp2(), 0xff >> (8 - b)
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
