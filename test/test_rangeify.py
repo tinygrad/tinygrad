@@ -16,6 +16,21 @@ class TestRangeify(unittest.TestCase):
     ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
     ret.realize()
 
+  def test_double_gemm_real(self):
+    def go():
+      with Context(DEBUG=0):
+        Tensor.manual_seed(1337)
+        A,B,C = [Tensor.randn(N, N) for _ in range(3)]
+        Tensor.realize(A, B, C)
+      GlobalCounters.reset()
+      return (A@B@C).realize()
+    rng = go()
+    with Context(RANGEIFY=0, DEBUG=2):
+      ref = go()
+      mse = ((rng-ref)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
   def test_double_gemm(self):
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)

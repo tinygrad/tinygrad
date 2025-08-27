@@ -9,7 +9,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
-from tinygrad.codegen.gpudims import pm_add_gpudims, pm_tensor_cores
+from tinygrad.codegen.gpudims import pm_add_gpudims, pm_tensor_cores, pm_group_for_reduce
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander
@@ -73,7 +73,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
 
   # add locals
-  ret.append(RewriteStep(pm_flatten_range+pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
+  ret.append(RewriteStep(pm_flatten_range+pm_add_buffers_local+rangeify_codegen+pm_group_for_reduce, name="add local buffers"))
 
   # add gpu dims (late). this also handles UNROLL range
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))

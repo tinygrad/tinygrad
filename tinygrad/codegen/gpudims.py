@@ -121,6 +121,11 @@ def fix_group_for_reduce(x:UOp):
   buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
   return buf.reduce(*reduce_loop, arg=x.arg)
 
+pm_group_for_reduce = PatternMatcher([
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+])
+
 pm_add_gpudims = PatternMatcher([
   # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
@@ -131,8 +136,6 @@ pm_add_gpudims = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
-  # fix group for reduce
-  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
 
 def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp, reduceop:UOp):
