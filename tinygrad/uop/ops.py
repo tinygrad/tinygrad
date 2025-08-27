@@ -211,8 +211,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if len(delete_ranges):
         for s in UOp.sink(*delete_ranges).ranges:
           if s in ret: del ret[s]
-    elif self.op in {Ops.BARRIER}:
-      ret = {x:None for x in self.src[0].ranges if x.arg[1] != AxisType.LOCAL}
     else:
       for s in self.src: ret.update(s.ranges)
     return ret
