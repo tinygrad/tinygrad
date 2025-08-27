@@ -288,6 +288,14 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
+  # Pattern 1: c1?(c2?x:y):y -> (c1&c2)?x:y
+  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
+  # Pattern 2: c1?(c2?y:x):y -> (c1&!c2)?x:y
+  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("y"), UPat.var("x")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2.logical_not()).where(x,y)),
+  # Pattern 3: c1?y:(c2?x:y) -> (!c1&c2)?x:y
+  (UPat.var("c1").where(UPat.var("y"), UPat.var("c2").where(UPat.var("x"), UPat.var("y"))), lambda c1,c2,x,y: (c1.logical_not()&c2).where(x,y)),
+  # Pattern 4: c1?y:(c2?y:x) -> (!c1&!c2)?x:y
+  (UPat.var("c1").where(UPat.var("y"), UPat.var("c2").where(UPat.var("y"), UPat.var("x"))), lambda c1,c2,x,y: (c1.logical_not()&c2.logical_not()).where(x,y)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
