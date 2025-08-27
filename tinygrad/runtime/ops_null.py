@@ -1,12 +1,14 @@
-from tinygrad.device import Compiled, Compiler, Renderer, Allocator
-from tinygrad.uop.ops import Ops
+from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.uop.ops import Ops
 
-class NullRenderer(Renderer):
+class NullRenderer(CStyleLanguage):
   device = "NULL"
-  code_for_op = {k:lambda:None for k in [Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT]}
   has_local = False
-  def render(self, uops:list) -> str: return ""
+  float4 = "float4"
+  barrier = "// BARRIER"
+  code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
 class NullProgram:
   def __init__(self, name:str, lib:bytes): pass
@@ -18,6 +20,7 @@ class NullAllocator(Allocator['NullDevice']):
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev): pass
+  def _offset(self, buf, offset:int, size:int): pass
 
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3

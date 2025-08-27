@@ -8,7 +8,7 @@ import numpy as np
 from typing import Optional
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit, Variable
-from tinygrad.nn.state import get_state_dict, get_parameters
+from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, prod
 from extra.bench_log import BenchEvent, WallTimeEvent
@@ -118,7 +118,7 @@ class SpeedyResNet:
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
 hyp = {
-  'seed' : 200,
+  'seed' : 201,
   'opt': {
     'bias_lr':            1.76 * bias_scaler/512,
     'non_bias_lr':        1.76 / 512,

@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 from io import StringIO
 from contextlib import redirect_stdout
-from tinygrad import Tensor, nn, Device, dtypes
+from tinygrad import Tensor, nn
 from tinygrad.helpers import Timing, colored, getenv, fetch
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor

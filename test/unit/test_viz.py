@@ -1,11 +1,11 @@
-import unittest, decimal, json
+import unittest, decimal, json, struct
 from dataclasses import dataclass
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -15,11 +15,13 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 pickles these tracked values
-from tinygrad.viz.serve import get_metadata, uop_to_json
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, active_rewrites, _name_cnt
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
+from tinygrad.viz import serve
+serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
+from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
 def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
 
-class TestViz(unittest.TestCase):
+class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
@@ -32,6 +34,7 @@ class TestViz(unittest.TestCase):
     TRACK_MATCH_STATS.value = self.tms
     PROFILE.value = self.profile
 
+class TestViz(BaseTestViz):
   def test_simple(self):
     a = UOp.variable("a", 0, 10)
     exec_rewrite((a+0)*1, [sym])
@@ -73,7 +76,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(lineno, inner.__code__.co_firstlineno)
 
   def test_exceptions(self):
-    # VIZ tracks rewrites up to the error
+    # VIZ tracks rewrites up to and including the error
     def count_3(x:UOp):
       assert x.arg <= 3
       return x.replace(arg=x.arg+1)
@@ -82,7 +85,7 @@ class TestViz(unittest.TestCase):
     with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
     lst = get_viz_list()
     err_step = lst[0]["steps"][0]
-    self.assertEqual(err_step["match_count"], 3)
+    self.assertEqual(err_step["match_count"], 4) # 3 successful rewrites + 1 err
 
   def test_default_name(self):
     a = UOp.variable("a", 1, 10)
@@ -92,21 +95,23 @@ class TestViz(unittest.TestCase):
     lst = get_viz_list()
     self.assertEqual(lst[0]["name"], "name_default n1")
 
-  # name can also be the first arg
-  def test_self_name(self):
-    @track_rewrites()
-    def name_is_self(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_is_self(arg:=UOp.variable("a", 1, 10))
-    lst = get_viz_list()
-    self.assertEqual(lst[0]["name"], str(arg))
-
-  # name can also come from a function
+  # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
-    @track_rewrites(name=lambda a,ret: a.render())
-    def name_from_fxn(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    name_from_fxn(UOp.variable("a", 1, 10)+1)
+    @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
+    def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
+    name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
     lst = get_viz_list()
+    # name gets deduped by the function call counter
     self.assertEqual(lst[0]["name"], "(a+1) n1")
+
+  # name can also come from a function that returns a TracingKey
+  def test_tracing_key(self):
+    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
+    def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
+    test(UOp.variable("a", 1, 10)+1)
+    lst = get_viz_list()
+    # NOTE: names from TracingKey do not get deduped
+    self.assertEqual(lst[0]["name"], "custom_name")
 
   def test_colored_label(self):
     # NOTE: dataclass repr prints literal escape codes instead of unicode chars
@@ -116,6 +121,31 @@ class TestViz(unittest.TestCase):
     a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+
+  def test_inf_loop(self):
+    a = UOp.variable('a', 0, 10)
+    b = a.replace(op=Ops.CONST)
+    pm = PatternMatcher([
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+    ])
+    with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
+    graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
+    self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
+    # fallback to NOOP with the error message
+    nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
+    self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
+
+  def test_const_node_visibility(self):
+    a = UOp.variable("a", 0, 10)
+    z = UOp.const(dtypes.int, 0)
+    alu = a*z
+    exec_rewrite(alu, [sym])
+    graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
+    # embed const in the parent node when possible
+    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
+    self.assertEqual(list(graphs[1]), [id(z)])
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -134,7 +164,7 @@ def root_rewrite(root:UOp):
   return root.replace(src=new_src)
 root = TrackedPatternMatcher([(UPat(Ops.SINK, src=UPat(Ops.ADD), name="root"), root_rewrite),])
 
-class TestVizTree(TestViz):
+class TestVizTree(BaseTestViz):
   def assertStepEqual(self, step:dict, want:dict):
     for k,v in want.items():
       self.assertEqual(step[k], v, f"failed at '{k}': {v} != {step[k]}\n{step=}")
@@ -165,7 +195,7 @@ def bufs_allocated() -> int:
   gc.collect()
   return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
-class TestVizGC(TestViz):
+class TestVizGC(BaseTestViz):
   def test_gc(self):
     init = bufs_allocated()
     a = UOp.new_buffer("NULL", 10, dtypes.char)
@@ -192,7 +222,7 @@ class TestVizGC(TestViz):
 from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
-class TestVizIntegration(TestViz):
+class TestVizIntegration(BaseTestViz):
   # kernelize has a custom name function in VIZ
   def test_kernelize_tracing(self):
     a = Tensor.empty(4, 4)
@@ -210,33 +240,83 @@ class TestVizIntegration(TestViz):
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
 
-from tinygrad.device import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent, ProfileGraphEntry
+  def test_metadata_tracing(self):
+    with Context(TRACEMETA=2):
+      a = Tensor.empty(1)
+      b = Tensor.empty(1)
+      metadata = (alu:=a+b).uop.metadata
+      alu.kernelize()
+      graph = next(get_details(tracked_ctxs[0][0]))["graph"]
+    self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
+
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
+
+class TinyUnpacker:
+  def __init__(self, buf): self.buf, self.offset = buf, 0
+  def __call__(self, fmt:str) -> tuple:
+    ret = struct.unpack_from(fmt, self.buf, self.offset)
+    self.offset += struct.calcsize(fmt)
+    return ret
+
+# 0 means None, otherwise it's an enum value
+def option(i:int) -> int|None: return None if i == 0 else i-1
+
+def load_profile(lst:list[ProfileEvent]) -> dict:
+  ret = get_profile(lst)
+  u = TinyUnpacker(ret)
+  dur, global_peak, index_len, layout_len = u("<IQII")
+  strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
+  u.offset += index_len
+  layout:dict[str, dict] = {}
+  for _ in range(layout_len):
+    klen = u("<B")[0]
+    k = ret[u.offset:u.offset+klen].decode()
+    u.offset += klen
+    layout[k] = v = {"shapes":[]}
+    event_type, event_count = u("<BI")
+    if event_type == 0:
+      for _ in range(event_count):
+        name, ref, st, dur, cat, _ = u("<IIIfBI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
+    else:
+      v["peak"] = u("<Q")[0]
+      for _ in range(event_count):
+        alloc, ts, key = u("<BII")
+        if alloc: v["shapes"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["shapes"].append({"event":"free", "ts":ts, "key":key})
+  return {"dur":dur, "peak":global_peak, "layout":layout}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
-    dev_events = j['layout']['NV']['timeline']['shapes']
+    dev_events = j['layout']['NV']['shapes']
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
     self.assertEqual(event['st'], 0)
     self.assertEqual(event['dur'], 10)
+    assert event['ref'] is None
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
-            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
+            ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
+            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
+            ProfileDeviceEvent(device='NV:2', comp_tdiff=decimal.Decimal(-800), copy_tdiff=decimal.Decimal(-80))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
-    event = j['layout']['NV']['timeline']['shapes'][0]
+    event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
-    self.assertEqual(event['st'], 900) # diff clock
+    self.assertEqual(event['st'], 0)   # first event
     self.assertEqual(event['dur'], 10)
+
+    event2 = j['layout']['NV:2']['shapes'][0]
+    self.assertEqual(event2['st'], 20) # second event, diff clock
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -246,64 +326,76 @@ class TestVizProfiler(unittest.TestCase):
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
-    devices = list(j['layout'])
-    self.assertEqual(devices[0], 'NV')
-    self.assertEqual(devices[1], 'NV:1')
+    tracks = list(j['layout'])
+    self.assertEqual(tracks[0], 'NV Graph')
+    self.assertEqual(tracks[1], 'NV')
+    self.assertEqual(tracks[2], 'NV:1')
 
-    nv_events = j['layout']['NV']['timeline']['shapes']
+    nv_events = j['layout']['NV']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
     self.assertEqual(nv_events[0]['st'], 0)
     self.assertEqual(nv_events[0]['dur'], 2)
     #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    nv1_events = j['layout']['NV:1']['timeline']['shapes']
+    nv1_events = j['layout']['NV:1']['shapes']
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+
+    graph_events = j['layout']['NV Graph']['shapes']
+    self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
+    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
+
+  def test_bytes_per_kernel(self):
+    step = 10
+    n_events = 1_000
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    sz = len(get_profile(prof))
+    self.assertLessEqual(sz/n_events, 26)
+
+  # can pack up to 1hr 11 min of trace events
+  def test_trace_duration(self):
+    dur_mins = 72
+    n_events = 1_000
+    step = decimal.Decimal(dur_mins*60*1e6//n_events)
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    with self.assertRaises(struct.error):
+      get_profile(prof)
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
   a.uop.buffer.allocate()
   return a
 
-class TestVizMemoryLayout(TestViz):
+class TestVizMemoryLayout(BaseTestViz):
   def test_double_alloc(self):
     a = _alloc(1)
     _b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][a.device]["mem"]
+    profile_ret = load_profile(Buffer.profile_events)
+    ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+    self.assertEqual(len(ret["shapes"]), 2)
 
   def test_del_once(self):
     a = _alloc(1)
     del a
     b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][b.device]["mem"]
+    profile_ret = load_profile(Buffer.profile_events)
+    ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+    self.assertEqual(len(ret["shapes"]), 3)
 
   def test_alloc_free(self):
     a = _alloc(1)
     _b = _alloc(1)
     del a
     c = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
-    ret = profile_ret["layout"][c.device]["mem"]
+    profile_ret = load_profile(Buffer.profile_events)
+    ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
-    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
-    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
+    self.assertEqual(len(ret["shapes"]), 4)
 
 if __name__ == "__main__":
   unittest.main()

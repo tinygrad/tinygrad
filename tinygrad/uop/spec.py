@@ -1,7 +1,8 @@
 from typing import cast, Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, resolve
-from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
+from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
+from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
 
@@ -9,26 +10,45 @@ try:
   def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
     Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
-    Ops.MAX: lambda a,b: z3.If(a<b, b, a)}
+    Ops.MAX: lambda a,b: z3.If(a<b, b, a), Ops.TRUNC: lambda a: a if a.is_int() else z3.ToReal(z3.If(a >= 0, z3.ToInt(a), -z3.ToInt(-a)))}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
     solver.add(vmin <= s, s <= vmax)
     return s
 
   # ctx is (solver, load_number_dict)
+  # each uop gets rewritten to NOOP(arg=(solver, z3_object)), the arg has the solver first due to UOpMetaClass caching. z3 objects from different
+  # contexts can have the same hash but error on comparison
   z3_renderer = PatternMatcher([
     # Ops.SPECIAL can have symbolic arg but it wont be in the toposort beacuse its not a src, we need to add it manually
     (UPat(Ops.SPECIAL, src=(), name="x"), lambda x: UOp(Ops.SPECIAL, arg=x.arg[0], src=(x.ufix(x.arg[1]),))),
-    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg, 0, x.src[0].arg-1, ctx[0]))),
-    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0]))),
-    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"ridx{x.arg}", 0, x.src[0].arg-1, ctx[0]))),
-    (UPat(Ops.LOAD, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.vmin, x.vmax, ctx[0]))),
-    (UPat(Ops.CONST, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx))),
-    (UPat(Ops.CAST, name="x"), lambda x: x.src[0]),
+    (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg, 0, x.src[0].arg[1]-1, ctx[0])))),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0])))),
+    (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"ridx{x.arg}", 0, x.src[0].arg[1]-1, ctx[0])))),
+    # float loads only become a variable when they get cast to int/bool
+    (UPat(Ops.LOAD, dtypes.ints, name="x"),
+      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0])))),
+    (UPat(Ops.CONST, dtype=dtypes.ints+(dtypes.bool,), name="x"),
+      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx)))),
+    # z3 can cast from bool to int automatically
+    (UPat(Ops.CAST, dtype=dtypes.ints, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
+    (UPat(Ops.CAST, dtype=dtypes.bool, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], x.src[0].arg[1]!=0))),
+    # if the source of the cast is not a noop it means that it is a float and so we create a new variable
+    (UPat(Ops.CAST, dtype=dtypes.ints, name="x"), lambda x,ctx:
+      UOp(Ops.NOOP, arg=(ctx[0], create_bounded(f"cast{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0])))),
+    (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x,ctx:
+      UOp(Ops.NOOP, arg=(ctx[0], z3.Bool(f"cast{ctx[1].setdefault(x, len(ctx[1]))}",ctx=ctx[0].ctx)))),
     (UPat(Ops.XOR, src=UPat(Ops.NOOP), name="x"),
-      lambda x: UOp(Ops.NOOP, arg=z3.BV2Int(z3_alu[x.op](*(z3.Int2BV(s.arg, x.dtype.itemsize*8) for s in x.src))))),
-    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=z3_alu[x.op](*(s.arg for s in x.src)))),
+      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], z3.BV2Int(z3_alu[x.op](*(z3.Int2BV(s.arg[1], x.dtype.itemsize*8) for s in x.src)))))),
+    (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], z3_alu[x.op](*(s.arg[1] for s in x.src))))),
+    # A comparison between floats introduces a new bool variable
+    (UPat(GroupOp.Comparison, src=UPat(dtype=dtypes.floats), name="x"), lambda x,ctx:
+      UOp(Ops.NOOP, arg=(ctx[0], z3.Bool(f"float_cmp{ctx[1].setdefault(x, len(ctx[1]))}",ctx=ctx[0].ctx)))),
   ])
+
+  def uops_to_z3(solver, *uops: UOp) -> 'list[z3.ExprRef]':
+    with Context(TRACK_MATCH_STATS=0):  # cant pickle z3 objects
+      return [s.arg[1] for s in graph_rewrite(uops[0].sink(*uops[1:]), z3_renderer, ctx=(solver, {})).src]
 
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
@@ -51,7 +71,7 @@ buffer_spec = PatternMatcher([
 
 assign_spec = PatternMatcher([
   # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -87,6 +107,10 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="root", src=(UPat.var("x"),), arg=None),
    lambda root,x: root.dtype == x.dtype),
 
+  # CONTIGUOUS with a range
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat.var("x"),), allow_any_len=True, arg=None),
+   lambda root,x: root.dtype == x.dtype and all(u.op is Ops.RANGE for u in root.src[1:])),
+
   # COPY/ALLREDUCE/MULTI
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
@@ -106,9 +130,8 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
 
   if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_sink = graph_rewrite(idx.src[1].sink(mask), z3_renderer, ctx=(solver, {}))
-  z3_idx = z3_sink.src[0].arg
-  solver.add(z3_sink.src[1].arg)
+  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
+  solver.add(z3_mask)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
     print(f"idx={idx.src[1].render(simplify=False)}")
     print(f"mask & gate={mask.render(simplify=False)}")
@@ -128,56 +151,54 @@ index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
-  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
-  (UPat(Ops.DEFINE_REG, src=(UPat.var("c"),), name="x", allow_any_len=True),
-   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
+  (UPat(Ops.DEFINE_REG, src=()), lambda: True),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, int)),
+  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
-  # TODO: confirm the args of both of these are shapetrackers
-  (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
+  (UPat(Ops.VIEW, dtypes.void, src=(), name="x"), lambda x: isinstance(x.arg, ShapeTracker)),
+  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"),
+   lambda x,src: isinstance(x.arg, ShapeTracker) and src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
   # early LOAD has a <bufview, store?>
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)),)), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat(Ops.STORE))), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)),)), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat(Ops.STORE))), lambda: True),
 
   # early STORE has a <bufview, val>
-  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),)), UPat())), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat())), lambda: True),
 
   # **** new style load/store ****
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+
+  # LOAD on STORE
+  (UPat(Ops.LOAD, src=(UPat(Ops.STORE),), allow_any_len=True), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
-  (UPat(Ops.LOAD, src=(index_pat,)), validate_index),
-  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.BARRIER))), validate_index),
-  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond"))), lambda idx,cond: validate_index(idx,cond.src[0])),
-  (UPat(Ops.LOAD, src=(index_pat, UPat.var("alt")), name="ld"), lambda ld,alt,idx: ld.dtype == alt.dtype and validate_index(idx)),
+  (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond")), allow_any_len=True), lambda idx,cond: validate_index(idx,cond.src[0])),
+  (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"))), validate_store),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(dtype=dtypes.bool, name="gate"))), validate_store),
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate"))), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
-  (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_REG, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # WMMA has a <a, b, acc>
@@ -200,7 +221,7 @@ spec = PatternMatcher([
   # NOTE: for testing, we let sinks be anything
   #(UPat(Ops.SINK, src=UPat(Ops.STORE)), lambda: True),
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
+  (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
@@ -208,16 +229,7 @@ spec = PatternMatcher([
 
 # *** this is the UOp AST spec ***
 
-def verify_sink_dims(sink:UOp):
-  if not all_same([s.shape for s in sink.src]): return False
-  for dims in zip(*[x.shape for x in sink.toposort() if x.st is not None]):
-    if len(n_dims:={s for s in dims if resolve(s!=1)}) > 1:
-      print(f"# INVALID KERNEL DIMS: can only have 1 or n in each dimension: {n_dims}")
-      return False
-
 ast_spec = PatternMatcher([
-  # shapes must have either 1 or n in each dimension
-  (UPat(Ops.SINK, src=UPat(Ops.STORE), name="sink"), verify_sink_dims),
   # VIEW can only exist in the edges
   (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
   (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
@@ -233,4 +245,4 @@ def type_verify(uops:list[UOp], extra_spec:PatternMatcher|None=None):
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(uops)
-      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")

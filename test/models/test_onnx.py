@@ -7,9 +7,17 @@ try:
   import onnx
 except ModuleNotFoundError:
   raise unittest.SkipTest("onnx not installed, skipping onnx test")
-from tinygrad.frontend.onnx import OnnxRunner, onnx_load
+from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI, fetch, temp
+from tinygrad.device import Device
+from tinygrad.helpers import CI, fetch, temp, Context
+
+try:
+  from extra.onnx_helpers import validate
+  from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
+  HUGGINGFACE_AVAILABLE = True
+except ModuleNotFoundError:
+  HUGGINGFACE_AVAILABLE = False
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -24,8 +32,9 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
+  @unittest.skip("this isn't a test, it can't fail")
   def test_benchmark_openpilot_model(self):
-    onnx_model = onnx_load(fetch(OPENPILOT_MODEL))
+    onnx_model = fetch(OPENPILOT_MODEL)
     run_onnx = OnnxRunner(onnx_model)
     def get_inputs():
       np_inputs = {
@@ -69,7 +78,7 @@ class TestOnnxModel(unittest.TestCase):
       ps.print_stats(30)
 
   def test_openpilot_model(self):
-    onnx_model = onnx_load(fetch(OPENPILOT_MODEL))
+    onnx_model = fetch(OPENPILOT_MODEL)
     run_onnx = OnnxRunner(onnx_model)
     print("got run_onnx")
     inputs = {
@@ -121,10 +130,9 @@ class TestOnnxModel(unittest.TestCase):
       input_name, input_new)
 
   def _test_model(self, fn, input_name, input_new, debug=False):
-    onnx_model = onnx_load(fn)
+    run_onnx = OnnxRunner(fn)
     print("onnx loaded")
     from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
-    run_onnx = OnnxRunner(onnx_model)
 
     def run(img):
       inputs = {input_name: preprocess(img, new=input_new)}
@@ -137,6 +145,37 @@ class TestOnnxModel(unittest.TestCase):
     cls = run(car_img)
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
+
+@unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "METAL", "only run on METAL")
+class TestHuggingFaceOnnxModels(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls._ctx = Context(MAX_BUFFER_SIZE=0)
+    cls._ctx.__enter__()
+
+  @classmethod
+  def tearDownClass(cls):
+    cls._ctx.__exit__()
+
+  def _validate(self, repo_id, model_file, custom_inputs, rtol=1e-4, atol=1e-4):
+    onnx_model_path = snapshot_download_with_retry(
+      repo_id=repo_id,
+      allow_patterns=["*.onnx", "*.onnx_data"],
+      cache_dir=str(DOWNLOADS_DIR)
+    )
+    onnx_model_path = onnx_model_path / model_file
+    file_size = onnx_model_path.stat().st_size
+    print(f"Validating model: {repo_id}/{model_file} ({file_size/1e6:.2f}M)")
+    validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
+
+  def test_xlm_roberta_large(self):
+    repo_id = "FacebookAI/xlm-roberta-large"
+    model_file = "onnx/model.onnx"
+    custom_inputs = {
+      "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
+      "attention_mask": np.ones((1, 11), dtype=np.int64),
+    }
+    self._validate(repo_id, model_file, custom_inputs)
 
 if __name__ == "__main__":
   unittest.main()
