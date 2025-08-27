@@ -311,16 +311,13 @@ class View:
 
     if not all(x >= 0 for x in new_shape): raise ValueError(f"shape can't contain negative numbers {new_shape}")
     # check for the same size
-    if (self_all_int := all_int(self.shape)):
+    if all_int(self.shape):
       # reshapes cannot introduce symbolic shape
       assert all_int(new_shape), f"{self.shape=} -> {new_shape=} contains non int dims"
       if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if 0 in self.shape: return View.create(new_shape)
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
-
-    if not self_all_int and resolve(prod(self.shape) < prod(new_shape), True):
-      raise ValueError(f"symbolic reshape might lead to OOB: {self.shape=} -> {new_shape=}")
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
