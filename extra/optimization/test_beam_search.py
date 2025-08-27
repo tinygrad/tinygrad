@@ -16,11 +16,9 @@ class TestBeamSearch(unittest.TestCase):
     BEAM.value = self.old_beam
 
   def test_variable_ast_beam(self):
-    v = Variable("a", 1, 10).bind(3)
-    a = rand(10, 3)
-    a = a[:v]
-    a = (a+1)
-    a = a.pad(((0,10-v),(0,0)))[:3].realize()
+    vi = Variable("a", 1, 10).bind(3)
+    a = rand(10, 3)[:vi]
+    a = (a+1).realize()
 
   def test_big_prime_number(self):
     a = rand(367, 367)
@@ -44,7 +42,6 @@ class TestBeamSearch(unittest.TestCase):
 
   def test_variable_big_prime_number(self):
     v = Variable("v", 1, 400).bind(367)
-    # TODO: UOp verification fails?? with <400 inner dim -- better error needed
     a = rand(367, 400)
     b = rand(400, 367)
     c = (a[:, :v] @ b[:v, :]).realize()
@@ -53,8 +50,7 @@ class TestBeamSearch(unittest.TestCase):
   def test_variable_shrink_prime_number(self):
     v = Variable("v", 1, 400).bind(367)
     a = rand(400, 367)
-    b = (a.shrink(((0,v), None))+1)
-    b = b.pad(((0, 400-v),(0,0)))[:367].realize()
+    b = (a.shrink(((0,v), None))+1).reshape(367,367).realize()
     np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
 
   def test_no_mutate_rawbuffers(self):
