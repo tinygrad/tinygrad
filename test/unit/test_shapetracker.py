@@ -841,14 +841,14 @@ class TestRender(unittest.TestCase):
 
 class TestVariableShrink(unittest.TestCase):
   def test_shrink(self):
-      st = ShapeTracker.from_shape((10,))
-      st = st.shrink(((0, Variable("i", 1, 10)),))
-      assert len(st.views) == 1
+    st = ShapeTracker.from_shape((10,))
+    st = st.shrink(((0, Variable("i", 1, 10)),))
+    assert len(st.views) == 1
 
   def test_shrink_bound(self):
-      st = ShapeTracker.from_shape((10,))
-      st = st.shrink(((0, Variable("i", 1, 10).bind(3)),))
-      assert len(st.views) == 1
+    st = ShapeTracker.from_shape((10,))
+    st = st.shrink(((0, Variable("i", 1, 10).bind(3)),))
+    assert len(st.views) == 1
 
 class TestVariableMerge(unittest.TestCase):
   def test_add_reshape(self):
