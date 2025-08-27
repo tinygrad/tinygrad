@@ -69,7 +69,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
+    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtypes.as_const(xi, dtype)) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
@@ -3522,16 +3522,15 @@ class Tensor(MathTrait):
     """
     return self * self.softplus().tanh()
 
-  def softplus(self, beta=1.0, threshold=20.0) -> Tensor:
+  def softplus(self, beta=1.0) -> Tensor:
     """
     Applies the Softplus function element-wise.
-    For numerical stability, the implementation folds into identity function when `self * beta > threshold`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
     ```
     """
-    return (self * beta > threshold).where(self, (1/beta) * (1 + (self*beta).exp()).log())
+    return (1/beta) * (self*beta).logaddexp(0.0)
 
   def softsign(self) -> Tensor:
     """
@@ -3762,6 +3761,13 @@ class Tensor(MathTrait):
     other = self._broadcasted(other)[1]
     # TODO: remove other*0?
     return (other < 0).where(-self.abs(), self.abs()) + other*0
+
+  def logaddexp(self, other) -> Tensor:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   # ***** op wrappers *****
 

@@ -6,7 +6,7 @@ from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
-from tinygrad.codegen.devectorizer import no_vectorized_alu
+from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
@@ -157,7 +157,7 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg[0]
-      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg}" if u.arg >= 0 else f"ridxm{-u.arg}"
+      elif u.op is Ops.RANGE: r[u] = f"ridx{u.arg[0]}" if u.arg[0] >= 0 else f"ridxm{-u.arg[0]}"
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.PRECAST: "precast",

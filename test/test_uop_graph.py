@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG, Context
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
-from tinygrad.codegen.expander import expander
+from tinygrad.codegen.late.expander import expander
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -591,10 +591,9 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_switched_range_order(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    c2 = UOp.const(dtypes.int, 2)
     cf = UOp.const(dtypes.float, 0.0)
-    r1 = UOp(Ops.RANGE, dtypes.int, (c2,), 0)
-    r2 = UOp(Ops.RANGE, dtypes.int, (c2,), 1)
+    r1 = UOp.range(dtypes.int, 2, 0)
+    r2 = UOp.range(dtypes.int, 2, 1)
     alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
     store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
     uops = to_uops_list([store])

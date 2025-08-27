@@ -1,6 +1,7 @@
 # this converts a lowerer program into a vectorized program
 
 import functools, itertools, operator
+from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
 
@@ -46,11 +47,13 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-UNROLL input
-      if root.op is Ops.IF:
+      if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif root.op in {Ops.REDUCE, Ops.STORE} and src.op is Ops.RANGE:
-        # for any range args of REDUCE, pass them through
+      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1) or (root.op is Ops.WMMA and i >= 3):
+        # for any range args of STORE/REDUCE, pass them through
+        new_srcs.append(src)
+      elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -72,7 +75,7 @@ def do_contract(con:UOp):
   # CONTRACT without UNROLL repeats the element VECTORIZED
   if ex.op is not Ops.UNROLL: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from UNROLL
-  assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
+  assert con.dtype == dtypes.void or con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
@@ -83,7 +86,7 @@ expander = PatternMatcher([
   (UPat(Ops.UNROLL, name="outer", src=(UPat(Ops.UNROLL, name="inner"),)),
    lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX,
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
          Ops.VECTORIZE, Ops.IF, Ops.REDUCE), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # BARRIERs aren't actually expanded
