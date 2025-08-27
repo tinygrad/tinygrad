@@ -294,16 +294,13 @@ def reloader():
 def load_pickle(path:str|None) -> list:
   if path is None or not os.path.exists(path): return []
   if (p:=pathlib.Path(path)).is_dir():
-    start_time = (p/"start").stat().st_mtime_ns
-    proc_trace:list[list] = []
-    for e in os.scandir(p):
-      if (stat:=e.stat()).st_mtime_ns < start_time: os.remove(e.path)
-      elif stat.st_size != 0:
-        with open(e, "rb") as f: trace = pickle.load(f)
-        proc_trace.append(trace)
-    os.remove(p/"start")
-    # TODO: merge traces
-    return proc_trace[0]
+    start_time, traces = (p/"start").stat().st_mtime_ns, []
+    for e in p.iterdir():
+      if (stat:=e.stat()).st_mtime_ns < start_time: e.unlink(missing_ok=True)
+      elif stat.st_size:
+        with e.open("rb") as f: traces.append(pickle.load(f))
+    (p/"start").unlink(missing_ok=True)
+    return traces[0] # TODO: merge these
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
