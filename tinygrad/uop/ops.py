@@ -892,14 +892,18 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
+  # only the main process can enable VIZ
+  if VIZ:
+    os.makedirs(dest:=pathlib.Path(temp("tinygrad_trace", append_user=True)), exist_ok=True)
+    (dest/"start").touch()
   import atexit
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
+      with open(fn:=(dest/f"rewrites_{os.getpid()}.pkl"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump((tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ: launch_viz(VIZ, temp("rewrites.pkl", append_user=True))
+    if VIZ: launch_viz(VIZ, str(fn))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
