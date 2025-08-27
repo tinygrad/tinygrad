@@ -660,6 +660,7 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
+  @unittest.expectedFailure # "this is now a late rewrite so doesnt show in simplify"
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
     a = Variable("a", 0, 3)
