@@ -186,7 +186,7 @@ class TestWithGrad(unittest.TestCase):
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
-    cmp = Tensor.arange(N, dtype="float32")
+    cmp = Tensor.arange(N, dtype=dtypes.float)
     for i in range(N): cmp[i:i+1] = i
     self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
 
