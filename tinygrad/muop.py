@@ -153,7 +153,7 @@ class MUOpX86(MUOp):
     move = MUOpX86("mov", 0x8B, x, (a,), (Register("rax", 0, 8),), (GPR,), x, a, w=1)
     push = MUOpX86._RM("push", 0xFF, 6, Register("rdx", 2, 8))
     if x.size == 1:
-      extend = MUOpX86("cbw", 0x98) if is_signed else MUOpX86.R_RM(MUOpX86.R_RM("movzx", 0x0FB6, x, x))
+      extend = MUOpX86("cbw", 0x98) if is_signed else MUOpX86.R_RM("movzx", 0x0FB6, x, x)
       div = MUOpX86._RM("idiv", 0xF6, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF6, 6, b, in_cons=in_cons)
     elif x.size == 2:
       extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
