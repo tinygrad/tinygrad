@@ -445,6 +445,7 @@ class Kernel:
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
+    if self.applied_opts: raise RuntimeError("not supported")
     @functools.cache
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src)) # noqa: F821
