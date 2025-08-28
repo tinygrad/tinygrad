@@ -115,13 +115,6 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def xcc_config(self):
-    self.wreg(self.gc.regCOMPUTE_TG_CHUNK_SIZE, 1)
-    for xcc_id in range(self.dev.xccs):
-      with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.wreg(self.dev.regCOMPUTE_CURRENT_LOGIC_XCC_ID, xcc_id)
-    return self
-
   def spi_config(self, tracing:bool):
     self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
               enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
@@ -775,9 +768,6 @@ class AMDDevice(HCQCompiled):
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     self.gc = AMDIP('gc', self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
-
-    # Define the regCOMPUTE_CURRENT_LOGIC_XCC_ID register, which is missing from the asic_regs files.
-    if self.target[:2] in {(9,4),(9,5)}: self.regCOMPUTE_CURRENT_LOGIC_XCC_ID = AMDReg("regCOMPUTE_CURRENT_LOGIC_XCC_ID", 0xe25, 0, {}, self.gc.bases)
 
     nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
     nbio_pad = (0,) if self.target[0] == 9 else ()
