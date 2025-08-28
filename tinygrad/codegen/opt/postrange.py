@@ -85,7 +85,8 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   new_reduce_range = new_range[2]
   red_ranges = []
 
-  locals_range = 90
+  # place the warp at -99
+  warp_range = -99
 
   ne: list[UOp] = []
   for o in tc.opts:
@@ -94,8 +95,8 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
       new_range_args[axis][-1] += 1
       lrange = UOp.range(dtypes.int, 2, *new_range_args[axis], AxisType.UPCAST)
     else:
-      lrange = UOp.range(dtypes.int, 2, locals_range, AxisType.LOCAL)
-      locals_range += 1
+      lrange = UOp.range(dtypes.int, 2, warp_range, AxisType.LOCAL)
+      warp_range += 1
     ne.append(lrange)
     new_range[axis] = (2 * new_range[axis]) + lrange
   for _, amt in tc.get_reduce_axes():
@@ -141,7 +142,7 @@ def early_sink(ctx:tuple[dict, Renderer], s:UOp):
 
 pm_postrange_opt_early = PatternMatcher([
   # TODO: this is optional (and can have internal options) and we need a way to express that
-  #((UPat.var("in0")*UPat.var("in1")).reduce(UPat(Ops.RANGE, name="r_range"), name="reduceop", arg=Ops.ADD), apply_tensor_cores),
+  ((UPat.var("in0")*UPat.var("in1")).reduce(UPat(Ops.RANGE, name="r_range"), name="reduceop", arg=Ops.ADD), apply_tensor_cores),
   (UPat(Ops.SINK, name="s"), early_sink),
 ])
 
@@ -155,7 +156,7 @@ def split_range(r:UOp):
   if r.arg[-1] not in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}: return None
   if r.tag is not None: return None
   # any divisor is an option
-  is_local = False if r.arg[-1] is AxisType.REDUCE else True
+  is_local = False if r.arg[-1] is AxisType.REDUCE else False
   N = 4
   rd = r.src[0].divides(N)
   if rd is None: return None
