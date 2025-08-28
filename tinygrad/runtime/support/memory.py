@@ -77,11 +77,10 @@ class TLSFAllocator:
       if self.lv1_entries[l1] == 0: continue
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
-          nsize = self.blocks[self.storage[l1][l2][0]][0]
-          assert nsize >= size, "block must be larger"
-
           # Block start address.
           start = self.storage[l1][l2][0]
+          nsize = self.blocks[start][0]
+          assert nsize >= size, "block must be larger"
 
           # If request contains alignment, split the block into two parts.
           if (new_start:=round_up(start, align)) != start:

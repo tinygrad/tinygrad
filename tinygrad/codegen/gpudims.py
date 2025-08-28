@@ -1,7 +1,7 @@
-import math, functools, operator
+import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
-from tinygrad.helpers import all_int, partition, flatten, prod, dedup
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.helpers import all_int, dedup
+from tinygrad.dtype import dtypes
 from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
 
@@ -56,17 +56,17 @@ def add_gpudims(ctx:Renderer, s:UOp):
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
   # get ranges
-  all_ranges = {x.arg[0]%1000:x for x in s_topo if x.op is Ops.RANGE}
+  all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted(dedup([x.arg[0]%1000 for x in all_ranges.values() if x.arg[1] is AxisType.GLOBAL]))
-  local_dims = sorted(dedup([x.arg[0]%1000 for x in all_ranges.values() if x.arg[1] in (AxisType.LOCAL, AxisType.GROUP_REDUCE)]))
+  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] is AxisType.GLOBAL]))
+  local_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.LOCAL, AxisType.GROUP_REDUCE)]))
   if not global_dims and not local_dims: return None
 
   # get global and local shape
   ranges = [all_ranges[r] for r in global_dims+local_dims if r in all_ranges]
-  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in global_dims])
-  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0]%1000 in local_dims])
+  global_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0:-1] in global_dims])
+  local_shape = tuple([ssimplify(r.src[0]) for r in ranges if r.arg[0:-1] in local_dims])
 
   # get the idxs
   ki: KernelInfo = s.arg
@@ -82,54 +82,13 @@ def add_gpudims(ctx:Renderer, s:UOp):
   for r in s_topo:
     if r.op is not Ops.RANGE: continue
     try:
-      ii = (global_dims+local_dims).index(r.arg[0]%1000)
+      ii = (global_dims+local_dims).index(r.arg[0:-1])
       if r.arg[1] == AxisType.REDUCE: continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)
 
-def fix_reduce_unroll(x:UOp):
-  reduce_range, reduce_expand = partition(x.src[1:], lambda y: y.op is Ops.RANGE)
-  if len(reduce_expand) == 0: return None
-  reduce_expand = [x for x in reduce_expand if x.op is not Ops.CONST]
-  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand}"
-  ret = x.src[0]
-  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
-    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)
-  # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
-  return x.replace(src=(ret,)+tuple(reduce_range))
-
-def fix_store_unroll(x:UOp):
-  store_expand, store_range = partition(x.src[2:], lambda y: y.op is Ops.UNROLL)
-  if len(store_expand) == 0: return None
-  return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
-
-def fix_group_for_reduce(x:UOp):
-  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
-  if len(reduce_gfr) == 0: return None
-
-  # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
-
-  # do only the non grouped reduces early
-  ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
-  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
-  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=(AddrSpace.LOCAL, reduce_gfr[0].arg[0])).index(*upstream_locals, *reduce_loop)
-
-  # gate with an if on the store + do the final reduce
-  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
-  return buf.reduce(*reduce_loop, arg=x.arg)
-
 pm_add_gpudims = PatternMatcher([
   # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
-  # rewrite UPCAST/UNROLL range to something to be expanded
-  (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
-    if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
-  # fix REDUCEs with UNROLLs
-  (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
-  (UPat(Ops.STORE, name="x"), fix_store_unroll),
-  # fix group for reduce
-  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])

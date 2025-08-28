@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
-from tinygrad.dtype import DType, dtypes, AddrSpace
+from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
 def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
@@ -134,7 +134,7 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> LOAD -> RANGE -> ASSIGN
+    # RANGE -> LOAD -> RANGE -> STORE
     #assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
@@ -144,7 +144,7 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> RANGE -> LOAD -> RANGE -> ASSIGN
+    # RANGE -> RANGE -> LOAD -> RANGE -> STORE
     # NOTE: nothing should toposort between the first two ranges
     #assert ranges[0]+1 == ranges[1]
     #assert any(x.op is Ops.LOAD for x in uops[ranges[1]:ranges[2]])
@@ -155,7 +155,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
+    # RANGE -> ALU -> RANGE -> ALU + LOAD -> STORE
     assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
     assert not any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
     assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
@@ -167,7 +167,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    # LOAD -> RANGE -> LOAD -> ASSIGN
+    # LOAD -> RANGE -> LOAD -> STORE
     assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
@@ -179,11 +179,11 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
     #if getenv("PTX"):
-    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> ASSIGN
+    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> STORE
     #  assert uops[ranges[0]-2].op is Ops.LOAD
     #  assert ranges[1] == ranges[0]+6
     #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
-    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> ASSIGN
+    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> STORE
     #else:
     #  assert uops[ranges[0]-2].op is Ops.LOAD
     #  assert ranges[1] == ranges[0]+3
@@ -195,7 +195,7 @@ class TestLinearizer(unittest.TestCase):
     out = a.sum() * a.sum()
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> ASSIGN -> ALU
+    # RANGE -> LOAD -> STORE -> ALU
     end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
     # the INDEX can be first
     assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
@@ -206,7 +206,7 @@ class TestLinearizer(unittest.TestCase):
     out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> ASSIGN -> ALU
+    # RANGE -> LOAD -> STORE -> ALU
     end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
     # the INDEX can be first
     assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
@@ -425,7 +425,7 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
     for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
@@ -437,12 +437,12 @@ class TestLinearizer(unittest.TestCase):
     for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
-    # all ASSIGN children are outside the loop
+    # all STORE children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
@@ -450,21 +450,27 @@ class TestLinearizer(unittest.TestCase):
     for u in get_program(k.get_optimized_ast(), k.opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.ASSIGN
+        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
-    # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x ASSIGN -> ENDRANGE
+    # the uops graph is DEFINE_REG -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = get_program(k.get_optimized_ast(), k.opts).uops
+    begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
+    end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
+    for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
-      if u.op is Ops.ASSIGN:
-        assert u.src[1].op in GroupOp.ALU
-      # children of ASSIGN are placed after ENDRANGE
-      if any(x.op is Ops.ASSIGN for x in u.src):
-        end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
+      if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace is AddrSpace.REG:
+        if uops.index(u) < begin_range:
+          assert u.src[1].op is Ops.CONST
+        else:
+          assert u.src[1].op in GroupOp.ALU
+          assert begin_range < uops.index(u) < end_range
+      # children of STORE are placed after ENDRANGE
+      if any(x.op is Ops.STORE and x.src[1].op in GroupOp.ALU for x in u.src):
         assert end_range < uops.index(u)
 
   def test_grouped_dims(self):
@@ -588,7 +594,8 @@ class TestLinearizer(unittest.TestCase):
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
-      assert len([u for u in uops if u.op is Ops.ASSIGN]) == 0, "ASSIGN should have been simplified"
+      reg_stores = [u for u in uops if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace == AddrSpace.REG]
+      assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       # TODO: once uops track min/max this will be fixed
       #assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 

@@ -120,5 +120,19 @@ class TestMemoryPlanner(unittest.TestCase):
     ]
     check_assign(bs)
 
+  def test_very_small_buffers(self):
+    bs = [
+      [b(0, pin=True), b(1, size=32)],
+      [b(3, size=4), b(4, size=6)],
+    ]
+    check_assign(bs)
+
+  def test_very_big_buffers(self):
+    bs = [
+      [b(0, pin=True), b(1, size=34359738368000)],
+      [b(3, size=1 << 128), b(4, size=1 << 64)],
+    ]
+    check_assign(bs)
+
 if __name__ == "__main__":
   unittest.main()

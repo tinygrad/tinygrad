@@ -140,7 +140,7 @@ DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), 
 QUANTIZE, VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0), ContextVar("AMD_LLVM", 1)
-RANGEIFY = ContextVar("RANGEIFY", 0)
+RANGEIFY, POSTOPT, FUSE_ATTENTION = ContextVar("RANGEIFY", 0), ContextVar("POSTOPT", 0), ContextVar("FUSE_ATTENTION", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -196,7 +196,7 @@ class Profiling(contextlib.ContextDecorator):
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
-  keys:tuple[str, ...]=()                # optional keys to search for related traces
+  keys:tuple[Any, ...]=()                # optional keys to search for related traces
   cat:str|None=None                      # optional category to color this by
   ret:Any=None
 

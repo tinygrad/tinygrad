@@ -81,5 +81,16 @@ class TestUOpSpec(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
       type_verify([a], tensor_uop_spec)
 
+class TestUOpSink(unittest.TestCase):
+  def test_0(self):
+    s = UOp.sink()
+    self.assertEqual(len(s.src), 0)
+
+  def test_1(self):
+    a = UOp.const(dtypes.int, 0)
+    s1 = UOp.sink(a)
+    s2 = a.sink()
+    self.assertIs(s1, s2)
+
 if __name__ == '__main__':
   unittest.main()
