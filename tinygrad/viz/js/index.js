@@ -314,12 +314,12 @@ async function renderProfiler() {
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
-          ctx.beginPath();
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) ctx.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fill();
+          const p = new Path2D();
+          p.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
+          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
+          p.closePath();
+          ctx.fill(p);
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
             let tooltipText = e.arg.tooltipText;
