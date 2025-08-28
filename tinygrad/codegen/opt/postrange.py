@@ -2,7 +2,7 @@ import math, itertools
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat
 from tinygrad.helpers import DEBUG
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 
@@ -38,6 +38,9 @@ class RKernel(Kernel):
       rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rng]
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
+
+      # NOTE: needed for tensor cores
+      self.substitute()
 
     self.maxarg = max([x.arg[0] for x in self.rng]) if len(self.rng) else 0
 
@@ -80,14 +83,19 @@ class RKernel(Kernel):
     return tuple([ssimplify(x.src[0]) for x in self.ast.src[0].src[2:]])
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
-    ret = self.ast
+    ret = self.substitute()
     kernel_name = ret.arg.name if ret.arg is not None and ret.arg.name != "test" else self.name if name_override is None else name_override
     rarg = KernelInfo(kernel_name, tuple(self.axis_types), self.dont_use_locals, tuple(self.applied_opts))
-    return ret.substitute(self.replaces).replace(arg=rarg)
+    return ret.replace(arg=rarg)
 
   # does nothing
   @axis_types.setter
   def axis_types(self, value): pass
+
+  def substitute(self) -> UOp:
+    self.ast = self.ast.substitute(self.replaces)
+    self.replaces = {}
+    return self.ast
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
     reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
@@ -97,20 +105,26 @@ class RKernel(Kernel):
         in0, in1 = list((reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]).src)
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
-          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges and u.vmax+1 >= tc.dims[1]], key=lambda x: x.arg[0])
-          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges and u.vmax+1 >= tc.dims[0]], key=lambda x: x.arg[0])
-          red_ranges = sorted([u for u in reduceop.src[1:] if u.vmax+1 >= tc.dims[2]], key=lambda x: x.arg[0])
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
+          red_ranges = sorted([u for u in reduceop.src[1:]], key=lambda x: x.arg[0])
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                                "{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
           if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): return None
 
           # pick ranges
+          # NOTE: why are in1 and in0 switched?
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): return None
           axes = axis_choices[axis]
 
           # do optimizations and save the ranges
+          try:
+            for i,a in enumerate(axes):
+              if a.src[0].divides(tc.dims[i]) is None:
+                self.apply_opt(Opt(OptOps.PADTO, self.rng.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
+          except KernelOptError: continue
           ne: list[UOp] = []
           for opt in tc.opts:
             ne.append(self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], axes[int(opt[1])].arg[0], 2), append_opt=False))
@@ -119,8 +133,7 @@ class RKernel(Kernel):
             ne.append(self.apply_opt(Opt(OptOps.UNROLL, reduce_axis, amt), append_opt=False))
 
           # early realize for TC
-          self.ast = self.ast.substitute(self.replaces)
-          self.replaces = {}
+          self.substitute()
 
           # fix the srcs
           reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
