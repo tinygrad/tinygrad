@@ -88,7 +88,7 @@ class TestLinearizerDumb(unittest.TestCase):
             UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False))), src=(
               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(25), arg=1, src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
-    prg = get_program(k.get_optimized_ast(), Device[Device.DEFAULT].renderer, opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
     if_uops = [u for u in prg.uops if u.op is Ops.IF]
     self.assertIn(len(if_uops), {1,2,3})
@@ -157,7 +157,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0)]
     prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
-    load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
+    load_idxs = [x.src[1] for x in prg.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
   @unittest.expectedFailure
@@ -177,9 +177,9 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.float.ptr(1040), arg=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 4, 1, 4, 3, 3), strides=(260, 13, 1, 0, 0, 0, 65, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1040), arg=2, src=()),)),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=3, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=0)]
-    prg = get_program(k.get_optimized_ast(), Device[Device.DEFAULT].renderer, opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
-    store_idxs = [x.src[1] for x in k.uops if x.op is Ops.STORE]
+    store_idxs = [x.src[1] for x in prg.uops if x.op is Ops.STORE]
     for i in range(len(store_idxs) - 1):
       first_bounds = store_idxs[i].vmin+store_idxs[i].vmax
       next_bounds = store_idxs[i+1].vmin+store_idxs[i+1].vmax
