@@ -284,8 +284,8 @@ def eval_llama3():
     losses += eval_step(model, tokens).tolist()
     tqdm.write(f"loss: {np.mean(losses)}")
 
-  log_perplexity = Tensor(losses).mean()
-  print(f"Log Perplexity: {log_perplexity.item()}")
+  log_perplexity = np.mean(losses)
+  print(f"Log Perplexity: {log_perplexity}")
 
 if __name__ == "__main__":
   # inference only
