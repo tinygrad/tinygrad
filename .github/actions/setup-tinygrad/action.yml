@@ -231,7 +231,7 @@ runs:
       id: cache-build
       uses: actions/cache@v4
       env:
-        cache-name: cache-gpuocelot-build
+        cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
         key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.BUILD_CACHE_VERSION }}
