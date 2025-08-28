@@ -10,7 +10,7 @@ def rename_sink(s:UOp):
   rngs = sorted([u for u in s.parents if u.op is Ops.RANGE], key=lambda x: x.arg[0:-1])
 
   # add name to kernel
-  name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[1]]) for x in rngs])
+  name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in rngs])
   return s.replace(arg=KernelInfo(name=name) if s.arg is None else replace(s.arg, name=name))
 
 pm_postrange_opt = PatternMatcher([
