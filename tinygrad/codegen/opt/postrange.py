@@ -1,7 +1,6 @@
-from typing import cast
 import math
 from dataclasses import replace
-from tinygrad.dtype import dtypes, AddrSpace, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo
 from tinygrad.helpers import colored, USE_TC, DEBUG
 from tinygrad.codegen.opt.kernel import axis_colors, AxisType
@@ -79,17 +78,43 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   assert all(u not in red_ranges for u in ret.toposort()), "UNROLLs in TC"
   return ret
 
+def early_sink(ctx:tuple[dict, Renderer], s:UOp):
+  s = s.substitute(ctx[0])
+  # global_stores_are_global
+  if ctx[1].has_local:
+    rngs = UOp.sink(*s.src[0].src[2:]).parents
+    s = s.substitute({u:u.replace(arg=u.arg[0:-1]+(AxisType.GLOBAL,)) for u in rngs if u.op is Ops.RANGE and u.arg[-1] is AxisType.LOOP})
+  return s
+
 pm_postrange_opt_early = PatternMatcher([
   # TODO: this is optional (and can have internal options) and we need a way to express that
   ((UPat.var("in0")*UPat.var("in1")).reduce(UPat(Ops.RANGE, name="r_range"), name="reduceop", arg=Ops.ADD), apply_tensor_cores),
-  (UPat(Ops.SINK, name="s"), lambda ctx,s: s.substitute(ctx[0])),
+  (UPat(Ops.SINK, name="s"), early_sink),
 ])
 
-# *** late ***
+# *** late (BEAM goes here) ***
 
-def global_stores_are_global(s:UOp):
-  if cast(PtrDType, s.src[0].dtype).addrspace != AddrSpace.GLOBAL: return None
-  return s.substitute({u:u.replace(arg=u.arg[0:-1]+(AxisType.GLOBAL,)) for u in s.src[2:] if u.op is Ops.RANGE and u.arg[-1] is AxisType.LOOP})
+axis_typemap = { # (is_reduce, is_local)
+  (False,False): AxisType.UPCAST, (False,True): AxisType.LOCAL,
+  (True, False): AxisType.UNROLL, (True, True): AxisType.GROUP_REDUCE}
+
+def split_range(r:UOp):
+  if r.arg[-1] not in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}: return None
+  if len(r.arg) > 2: return None
+  # any divisor is an option
+  N = 4
+  rd = r.src[0].divides(N)
+  if rd is None: return None
+  sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0, r.arg[-1]))
+  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, axis_typemap[(r.arg[-1] is AxisType.REDUCE, False)]))
+  return sr*N+er
+
+def flatten_range_in_terminators(r:UOp):
+  off = 2 if r.op is Ops.STORE else 1
+  rngs = r.src[off:]
+  if not len(rngs): return None
+  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
+  return r.replace(src=r.src[:off]+tuple(new_rngs))
 
 def rename_sink(s:UOp):
   if s.arg is not None and s.arg.name != "test": return None
@@ -101,32 +126,11 @@ def rename_sink(s:UOp):
   name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in rngs])
   return s.replace(arg=KernelInfo(name=name) if s.arg is None else replace(s.arg, name=name))
 
-def split_range(r:UOp):
-  if len(r.arg) > 2: return None
-  # any divisor is an option
-  N = 4
-  rd = r.src[0].divides(N)
-  if rd is None: return None
-  sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0,r.arg[-1]))
-  at_map = { # (is_reduce, is_local)
-    (False,False): AxisType.UPCAST, (False,True): AxisType.LOCAL,
-    (True, False): AxisType.UNROLL, (True, True): AxisType.GROUP_REDUCE}
-  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, at_map[(r.arg[-1] is AxisType.REDUCE, True)]))
-  return sr*N+er
-
-def flatten_range_in_terminators(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
-  rngs = r.src[off:]
-  if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
-
 pm_postrange_opt = PatternMatcher([
-  # flatten ranges
-  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range_in_terminators),
-  (UPat(Ops.STORE, name="s"), global_stores_are_global),
   # TODO: this is optional (and can have internal options) and we need a way to express that
   (UPat(Ops.RANGE, name="r"), split_range),
+  # flatten ranges
+  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range_in_terminators),
   # run this last
   (UPat(Ops.SINK, name="s"), rename_sink),
 ])
