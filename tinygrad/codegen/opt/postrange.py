@@ -132,38 +132,39 @@ class RKernel(Kernel):
           for _, amt in tc.get_reduce_axes():
             ne.append(self.apply_opt(Opt(OptOps.UNROLL, reduce_axis, amt), append_opt=False))
 
-          # early realize for TC
-          self.substitute()
+          if use_tensor_cores != 2:
+            # early realize for TC
+            self.substitute()
 
-          # fix the srcs
-          reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
-          tne = [x.replace(tag=1) for x in ne]
-          ret = reduceop.substitute(dict(zip(ne, tne)))
-          srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
+            # fix the srcs
+            reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+            tne = [x.replace(tag=1) for x in ne]
+            ret = reduceop.substitute(dict(zip(ne, tne)))
+            srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
 
-          # get reduce/upcast axes for the tensor cores
-          tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
-          base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
-          tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
+            # get reduce/upcast axes for the tensor cores
+            tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
+            base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
+            tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
 
-          # axes to range number (was done in lowerer)
-          tc_upcast_axes = tuple([tuple([(self.rng[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
-          tc_reduce_axes = tuple([self.rng[a].arg[0] for a in tc_reduce_axes])
+            # axes to range number (was done in lowerer)
+            tc_upcast_axes = tuple([tuple([(self.rng[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
+            tc_reduce_axes = tuple([self.rng[a].arg[0] for a in tc_reduce_axes])
 
-          # construct the op
-          # TODO: remove tc_upcast_axes from the arg
-          wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
-          wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
-            UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
-            UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
-            UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
-          tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
+            # construct the op
+            # TODO: remove tc_upcast_axes from the arg
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg)
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
-          # preserve extra reduces
-          reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
-          if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
-          self.ast = self.ast.substitute({reduceop: tc_uop})
+            # preserve extra reduces
+            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
+            if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
+            self.ast = self.ast.substitute({reduceop: tc_uop})
           return True
     return False
 
