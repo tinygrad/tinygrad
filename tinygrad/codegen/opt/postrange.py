@@ -41,6 +41,9 @@ class RKernel(Kernel):
   # must be done earlier
   def simplify_merge_adjacent(self): return
 
+  def apply_opt(self, opt:Opt, append_opt:bool=True) -> int|None:
+    return super().apply_opt(opt, append_opt)
+
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
     old_sz = self.rng[axis].src[0].arg // amount
     assert old_sz > 0, f"bad old_sz on {axis} {amount} {self.rng[axis]}"

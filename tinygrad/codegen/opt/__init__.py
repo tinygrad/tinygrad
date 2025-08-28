@@ -32,6 +32,7 @@ def get_optimized_ast(ctx:Renderer, ast:UOp) -> UOp:
         rawbufs = bufs_from_lin(kb, allocate=False)
         k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
     new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
+  elif len(new_arg.applied_opts): return None
   return Kernel(ast.replace(arg=None), opts=ctx).get_optimized_ast().replace(arg=new_arg)
 
 pm_get_optimization = PatternMatcher([
