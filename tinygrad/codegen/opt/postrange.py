@@ -43,6 +43,7 @@ class RKernel(Kernel):
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> int|None:
     if opt.op == OptOps.PADTO: raise RuntimeError("PAD is not supported yet. needs INVALID")
+    if opt.op == OptOps.SWAP: raise RuntimeError("SWAP is not supported yet")
     return super().apply_opt(opt, append_opt)
 
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
@@ -95,10 +96,12 @@ class RKernel(Kernel):
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges and u.vmax+1 >= tc.dims[1]], key=lambda x: x.arg[0])
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges and u.vmax+1 >= tc.dims[0]], key=lambda x: x.arg[0])
-          if not len(in0_ranges) or not len(in1_ranges): return None
+          red_ranges = sorted([u for u in reduceop.src[1:] if u.vmax+1 >= tc.dims[2]], key=lambda x: x.arg[0])
+          print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]} {[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
+          if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): return None
 
           # pick ranges
-          axis_choices = list(itertools.product(in1_ranges, in0_ranges))
+          axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): return None
           axes = axis_choices[axis]
 
