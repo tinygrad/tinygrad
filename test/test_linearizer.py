@@ -348,7 +348,6 @@ class TestLinearizer(unittest.TestCase):
   # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
   @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and getenv("EMULATE_AMD")), "test for AMD's tc")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.expectedFailure
   def test_tensor_cores_padded_amd(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
