@@ -56,10 +56,10 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # view pushing
   ret.extend(rewrites_for_views)
 
-  if not _POSTOPT and not _RANGEIFY:
-    # this is kernel.py
-    ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
-    ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
+  # this is kernel.py
+  ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
+
+  if not _POSTOPT and not _RANGEIFY: ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
 
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))

@@ -56,7 +56,7 @@ def simplify_merge_adjacent(ast:UOp):
     i += 1
   return ast.substitute(replaces, name="simplify_merge_adjacent")
 
-pm_postrange_opt_merge = PatternMatcher([
+pm_postrange_opt_merge = pm_flatten_range+PatternMatcher([
   (UPat(Ops.SINK, name="ast"), simplify_merge_adjacent),
 ])
 
