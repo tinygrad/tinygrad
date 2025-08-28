@@ -127,12 +127,12 @@ class TestSymbolicReshape(unittest.TestCase):
     b = Tensor.rand(5, 6)
     for i in range(1, 6):
       vi = Variable("i", 1, 5).bind(i)
-      a = a[:vi]
-      a = a.reshape((vi, 4))
-      assert a.shape == (vi, 4)
-      b = b[:vi]
-      b = b.reshape((vi, 2, 3))
-      assert b.shape == (vi, 2, 3)
+      ret = a[:vi]
+      ret = ret.reshape((vi, 4))
+      assert ret.shape == (vi, 4)
+      ret = b[:vi]
+      ret = ret.reshape((vi, 2, 3))
+      assert ret.shape == (vi, 2, 3)
 
   def test_two_symbol_reshape(self):
     t = Tensor.rand(5, 5)
@@ -140,13 +140,13 @@ class TestSymbolicReshape(unittest.TestCase):
       for j in range(1, 6):
         vi = Variable("i", 1, 5).bind(i)
         vj = Variable("j", 1, 5).bind(j)
-        t = t[:vi, :vj]
-        t = t.reshape(vj, vi)
-        assert t.shape == (vj, vi)
-        t = t.reshape(vi, vj)
-        assert t.shape == (vi, vj)
-        t = t.reshape(1, vi*vj)
-        assert t.shape == (1, vi*vj)
+        ret = t[:vi, :vj]
+        ret = ret.reshape(vj, vi)
+        assert ret.shape == (vj, vi)
+        ret = ret.reshape(vi, vj)
+        assert ret.shape == (vi, vj)
+        ret = ret.reshape(1, vi*vj)
+        assert ret.shape == (1, vi*vj)
 
   def test_symbolic_mask(self):
     # taken from gpt2 single kvcache
@@ -172,9 +172,9 @@ class TestSymbolicExpand(unittest.TestCase):
     a = Tensor.rand(3, 5)
     for i in range(1, 6):
       vi = Variable("i", 1, 5).bind(i)
-      a = a[:, :vi]
-      a = a + 1
-      self.assertTupleEqual(a.shape, (3, vi))
+      ret = a[:, :vi]
+      ret = ret + 1
+      self.assertTupleEqual(ret.shape, (3, vi))
 
   def test_pad_then_expand_into_symbols(self):
     vi = Variable("i", 1, 10).bind(3)
