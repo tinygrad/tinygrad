@@ -7,7 +7,7 @@ from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.uop.spec import type_verify
 
-def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
+def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
   """
   Optimize an AST based on heuristics or BEAM search.
 
