@@ -2,7 +2,7 @@ import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, Variable
 from tinygrad.tensor import _METADATA
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -554,6 +554,16 @@ class TestTinygrad(unittest.TestCase):
   def test_shrink(self):
     t = Tensor.arange(32).contiguous().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
+
+  def test_variable_empty(self):
+    v = Variable("i", 1, 10)
+    t = Tensor.empty(3, v)
+    assert t.uop.base.buffer.size == 30
+    assert t.uop.st.shape == (3, v)
+    vb = v.bind(3)
+    t = Tensor.empty(3, vb)
+    assert t.uop.base.buffer.size == 30
+    assert t.uop.st.shape == (3, vb)
 
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
