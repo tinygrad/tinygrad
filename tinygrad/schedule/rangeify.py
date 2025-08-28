@@ -1,12 +1,12 @@
 from typing import Any
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint, AxisType
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, identity_element, sint, AxisType
 
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
@@ -329,21 +329,27 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp):
+def bufferize_to_store(x:UOp, locals_allowed=False):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
-  sdtype = x.dtype.ptr(size=prod(shape), addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, AddrSpace) else x.arg)
-  assert prod(shape) > 0, f"no zero sized buffers {shape}"
+  size = prod(shape)
+  assert size > 0, f"no zero sized buffers {shape}"
+  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, tuple) else x.arg[0])
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+  # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.new_buffer(x.arg, prod(shape), x.dtype)
+    buf = UOp.new_buffer(x.arg, size, x.dtype)
   else:
-    # TODO: how to dedup this
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=UOp.unique().arg)
+    if not locals_allowed: return None
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+
+pm_add_buffers_local = pm_mops+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
+])
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
@@ -393,11 +399,15 @@ rangeify_codegen = PatternMatcher([
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-   lambda dg,idx: idx.replace(dtype=dg.dtype, arg=None).load() if not isinstance(idx.dtype, PtrDType) else None),
+   lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
 
   # TODO: this can be moved into codegen
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
     lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
+
+  # TODO: hack for group for reduce
+  (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
+   lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
 ])
 
 def split_store(x:UOp):
@@ -405,12 +415,8 @@ def split_store(x:UOp):
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=ctx, name="kernel split", bottom_up=True)
 
-  # get name
-  rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
-  name = "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), "WHITE" if s in ret.src[2:] else "red") for s in rng])
-
   # NOTE: the hack for COPY is here
-  ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
+  ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
   return x.as_buf().assign(kernel)
 

@@ -1,8 +1,6 @@
 # the job of the lowerer is to do indexing
-import functools, operator
-from typing import cast
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, AddrSpace, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite
 
 # ***** indexing *****
@@ -50,15 +48,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
 
   stored = subblock(ctx, real_new_idxs, x.src[1])
   used_ranges = [x for x in used_idxs if x.op is Ops.RANGE]
-  ret = buf.index(idx, valid).store(stored, *used_ranges)
-
-  # insert BARRIER if we are ending a LOCAL, IF if we are ending a GROUP_REDUCE
-  if cast(PtrDType, buf.dtype).addrspace == AddrSpace.LOCAL and \
-      any(ctx.axis_types[x.arg[0]%1000] in {AxisType.GROUP_REDUCE, AxisType.LOCAL} for x in used_ranges):
-    ret = ret.barrier()
-    range_gates = [x.eq(0) for x in used_ranges if ctx.axis_types[x.arg[0]%1000] == AxisType.GROUP_REDUCE]
-    if len(range_gates): ret = UOp(Ops.IF, src=(functools.reduce(operator.and_, range_gates), ret))
-  return ret
+  return buf.index(idx, valid).store(stored, *used_ranges)
 
 def fixup_wmma(ctx:IndexContext, x:UOp):
   if x.tag is not None: return None
