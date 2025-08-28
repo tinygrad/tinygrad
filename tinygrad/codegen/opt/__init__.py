@@ -28,7 +28,7 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
       kb = Kernel(ast, opts=renderer)
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  return ast.replace(arg=KernelInfo(opts_to_apply=tuple(k.applied_opts)))
+  return Kernel(ast, opts=renderer).get_optimized_ast().replace(arg=KernelInfo(opts_to_apply=tuple(k.applied_opts)))
 
 pm_get_optimization = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx) if ast.arg is None and ast.src[0].st is not None else None),
