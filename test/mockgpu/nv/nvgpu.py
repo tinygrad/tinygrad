@@ -2,6 +2,7 @@ import ctypes, ctypes.util, time
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from enum import Enum, auto
 from test.mockgpu.gpu import VirtGPU
+from test.mockgpu.helpers import _try_dlopen_gpuocelot
 from tinygrad.helpers import to_mv, init_c_struct_t
 
 def make_qmd_struct_type():
@@ -16,10 +17,7 @@ def make_qmd_struct_type():
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
-try:
-  gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-except Exception: pass
+gpuocelot_lib = _try_dlopen_gpuocelot()
 
 class SchedResult(Enum): CONT = auto(); YIELD = auto() # noqa: E702
 

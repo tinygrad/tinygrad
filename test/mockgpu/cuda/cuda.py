@@ -2,16 +2,14 @@ from __future__ import annotations
 from typing import Any
 import ctypes, time
 from tinygrad.runtime.autogen import cuda as orig_cuda
+from test.mockgpu.helpers import _try_dlopen_gpuocelot
 from tinygrad.helpers import mv_address
 
 for attr in dir(orig_cuda):
   if not attr.startswith('__'):
     globals()[attr] = getattr(orig_cuda, attr)
 
-try:
-  gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-except Exception: pass
+gpuocelot_lib = _try_dlopen_gpuocelot()
 
 # Global state
 class CUDAState:
