@@ -92,5 +92,15 @@ class TestTensorVariable(unittest.TestCase):
     ret = Tensor.arange(begin.bind(4), end.bind(7))
     self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
 
+  def test_variable_empty(self):
+    v = Variable("i", 1, 10)
+    # TODO: Tensor creation from unbound variable should assert
+    # with self.assertRaises(AssertionError): t = Tensor.empty(3, v)
+    vb = v.bind(3)
+    t = Tensor.empty(3, vb)
+    assert t.uop.base.buffer.size == 30
+    assert t.uop.st.shape == (3, vb)
+
+
 if __name__ == '__main__':
   unittest.main()
