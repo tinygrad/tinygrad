@@ -97,7 +97,7 @@ class TestTensorUopRepresentation(unittest.TestCase):
     is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
     vi = UOp.variable("i", 1, 3).bind(1)
     a = Tensor.empty(3, vi)
-    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
+    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),))),))
     self.assertEqual(a.uop.base.buffer.size, 9)
 
 if __name__ == '__main__':
