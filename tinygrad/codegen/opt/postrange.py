@@ -61,8 +61,8 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
 
   ned = dict(zip(tc.base_shape_str(), ne))
-  tc_reduce_axes = tuple([ned[f"r{i}"].arg[0] for i in range(len(tc.get_reduce_axes()))])
-  base_upcast_axes = tuple([(ned[s].arg[0], 2) for s in tc.base_upcast_axes()])
+  tc_reduce_axes = tuple([ned[f"r{i}"].arg[0:-1] for i in range(len(tc.get_reduce_axes()))])
+  base_upcast_axes = tuple([(ned[s].arg[0:-1], 2) for s in tc.base_upcast_axes()])
   tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
 
   # construct the op
@@ -100,12 +100,12 @@ axis_typemap = { # (is_reduce, is_local)
 
 def split_range(r:UOp):
   if r.arg[-1] not in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}: return None
-  if len(r.arg) > 2: return None
+  if r.tag is not None: return None
   # any divisor is an option
   N = 4
   rd = r.src[0].divides(N)
   if rd is None: return None
-  sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0, r.arg[-1]))
+  sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0, r.arg[-1]), tag=1)
   er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, axis_typemap[(r.arg[-1] is AxisType.REDUCE, False)]))
   return sr*N+er
 

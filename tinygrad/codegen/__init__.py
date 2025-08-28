@@ -69,6 +69,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   if _POSTOPT or _RANGEIFY:
     ret.append(RewriteStep(pm_postrange_opt_early, ctx=lambda _: ({}, opts), name="early post opt ast"))
+    ret.append(RewriteStep(sym, name="mid symbolic"))
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **

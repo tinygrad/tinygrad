@@ -83,5 +83,5 @@ pm_lowerer = PatternMatcher([
 
   # axis fixups for WMMA
   (UPat((Ops.CONTRACT, Ops.UNROLL), name="x"),
-   lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0], sz) for a,sz in x.arg])) if x.tag is None else None),
+   lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0:-1], sz) for a,sz in x.arg])) if x.tag is None else None),
 ])
