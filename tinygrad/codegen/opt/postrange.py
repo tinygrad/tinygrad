@@ -111,7 +111,7 @@ def split_range(r:UOp):
   at_map = { # (is_reduce, is_local)
     (False,False): AxisType.UPCAST, (False,True): AxisType.LOCAL,
     (True, False): AxisType.UNROLL, (True, True): AxisType.GROUP_REDUCE}
-  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, at_map[(r.arg[-1] is AxisType.REDUCE, False)]))
+  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, at_map[(r.arg[-1] is AxisType.REDUCE, True)]))
   return sr*N+er
 
 def flatten_range_in_terminators(r:UOp):
