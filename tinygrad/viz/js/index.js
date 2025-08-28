@@ -71,7 +71,7 @@ async function renderDag(graph, additions, recenter=false) {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
         if (parents == null) return;
-        const src = [...parents, d.id];
+        const src = e.currentTarget.classList.contains("highlight") ? [] : [...parents, d.id];
         nodes.classed("highlight", n => src.includes(n.id));
         d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
         d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
