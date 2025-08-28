@@ -13,11 +13,11 @@ import math
 # - uses erf for gelu instead of the default tanh approximation
 
 class AutocastLinear(Linear):
-  def __call__(self, x:Tensor, dtype=dtypes.float16) -> Tensor:
+  def __call__(self, x:Tensor, dtype=dtypes.bfloat16) -> Tensor:
     return x.cast(dtype).linear(self.weight.cast(dtype).transpose(), self.bias.cast(dtype) if self.bias is not None else None)
 
 class AutocastConv2d(Conv2d):
-  def __call__(self, x:Tensor, dtype=dtypes.float16) -> Tensor:
+  def __call__(self, x:Tensor, dtype=dtypes.bfloat16) -> Tensor:
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
 
 linear, conv2d = Linear, Conv2d
@@ -28,7 +28,7 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
-  return out.cast(dtypes.float16) if is_dtype_supported(dtypes.float16) else out
+  return out.cast(dtypes.bfloat16) if is_dtype_supported(dtypes.bfloat16) else out
 
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int, num_groups:int=32):
@@ -257,10 +257,10 @@ class UNetModel:
       assert y.shape[0] == x.shape[0]
       emb = emb + y.sequential(self.label_emb[0])
 
-    if is_dtype_supported(dtypes.float16):
-      emb = emb.cast(dtypes.float16)
-      ctx = ctx.cast(dtypes.float16)
-      x   = x  .cast(dtypes.float16)
+    if is_dtype_supported(dtypes.bfloat16):
+      emb = emb.cast(dtypes.bfloat16)
+      ctx = ctx.cast(dtypes.bfloat16)
+      x   = x  .cast(dtypes.bfloat16)
 
     def run(x:Tensor, bb, softmax_dtype:DTypeLike|None=None) -> Tensor:
       if isinstance(bb, ResBlock): x = bb(x, emb)

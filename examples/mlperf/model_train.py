@@ -1380,7 +1380,6 @@ def train_stable_diffusion():
   from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
-  from examples.mlperf.helpers import GradScaler
   from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
@@ -1388,7 +1387,6 @@ def train_stable_diffusion():
   from examples.mlperf.helpers import get_training_state
   import csv, PIL, pickle
   import numpy as np
-  from typing import Callable
 
   config = {}
 
@@ -1493,11 +1491,9 @@ def train_stable_diffusion():
     lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
     # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
     lr_scheduler.step()
-    init_scale = 2.0**16
-    grad_scaler = GradScaler(optimizer, init_scale)
     if RESUME_CKPTDIR:
       ckpt = safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors")
-      for (obj, pat) in [(unet, "model."), (optimizer, "optimizer."), (lr_scheduler, "scheduler."), (grad_scaler, "grad_scaler.")]:
+      for (obj, pat) in [(unet, "model."), (optimizer, "optimizer."), (lr_scheduler, "scheduler.")]:
         sd = {k.split(pat)[1]: v for k,v in ckpt.items() if k.startswith(pat)}
         with Context(DEBUG=1):
           print(f"loading {pat}")
@@ -1512,11 +1508,11 @@ def train_stable_diffusion():
 
   @TinyJit
   def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep:Tensor, latent_randn:Tensor, noise:Tensor, unet:UNetModel,
-                 optimizer:LAMB, grad_scaler:GradScaler, lr_scheduler:LambdaLR) -> Tensor:
+                 optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * latent_randn).cast(dtypes.half) * 0.18215
+    latent = (mean + std * latent_randn).cast(dtypes.bfloat16) * 0.18215
 
     sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
     sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
@@ -1527,17 +1523,12 @@ def train_stable_diffusion():
 
     del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
-    loss = ((out - v_true) ** 2).mean() * grad_scaler.scale
+    loss = ((out - v_true) ** 2).mean()
     del out, v_true, context
     loss.backward()
-    for p in optimizer.params: p.grad = p.grad / grad_scaler.scale
-    loss = loss.detach() / grad_scaler.scale
 
-    # skip the optimizer step if non-finite grads are detected
-    grad_scaler.step()
-    # the lr still updates even if we skipped an optimizer step
+    optimizer.step()
     lr_scheduler.step()
-
     return loss
 
   if getenv("RUN_EVAL", ""):
@@ -1770,7 +1761,7 @@ def train_stable_diffusion():
       seen_keys += batch["__key__"]
 
       mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
-      mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
+      mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.bfloat16), 2, dim=1)
       tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
       timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
       latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
@@ -1779,15 +1770,14 @@ def train_stable_diffusion():
       for t in (mean, logvar, tokens, timestep, latent_randn, noise):
         t.shard_(GPUS,axis=0)
 
-      loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, grad_scaler, lr_scheduler)
+      loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
 
       elapsed = time.perf_counter() - t0
       print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
-    loss scale:{grad_scaler.scale.item():0.3f}, gt:{grad_scaler.growth_tracker.item()}, {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS,
-    mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
+    {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
 
       if WANDB:
-        wandb_log = {"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(), "train/loss_scale": grad_scaler.scale.item(),
+        wandb_log = {"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(),
                      "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i}
 
         if i == 1 and wandb.run is not None:
@@ -1802,7 +1792,7 @@ def train_stable_diffusion():
         prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
         fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
         print(f"saving training state backup at {fn}")
-        safe_save(get_training_state(unet, optimizer, lr_scheduler, grad_scaler), fn)
+        safe_save(get_training_state(unet, optimizer, lr_scheduler), fn)
         with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
           pickle.dump(seen_keys, f)
 
@@ -1834,6 +1824,10 @@ def train_stable_diffusion():
           Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
 
       if WANDB: wandb.log(wandb_log)
+      if i > 50:
+        # just for testing/beaming
+        import sys
+        sys.exit()
 
   else:
     EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
