@@ -32,11 +32,12 @@ def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
-  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
+  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(1), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -48,10 +49,11 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
-  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
+  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(1), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -63,7 +65,8 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -248,7 +251,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gate = gidx0<UOp.const(dtypes.int, 1)
     idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2), gate))
     val = UOp.const(dtypes.float, 42.0)
-    store = UOp(Ops.STORE, dtypes.void, (idx, val))
+    store = UOp(Ops.STORE, idx.dtype, (idx, val))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
@@ -304,7 +307,8 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
-    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    idx = smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+    st = uop(uops, Ops.STORE, idx.dtype, (idx, uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
@@ -537,13 +541,13 @@ class TestShapeSpec(unittest.TestCase):
     t = Tensor(vv).uop
     self.assertEqual(t.st, ShapeTracker.from_shape(()))
 
-  # ** ASSIGN is ASSIGN(VIEW(BUFFER), new_val)
+  # ** STORE is STORE(VIEW(BUFFER), new_val)
 
   def test_assign_flat(self):
     buffer = Tensor.arange(4).realize()
     a = buffer.assign(Tensor.zeros((4,), dtype=dtypes.int))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.BUFFER), UPat()))
-    assert assign_pattern.match(a.uop, {})
+    store_pattern = UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()))
+    assert store_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 
@@ -556,8 +560,8 @@ class TestShapeSpec(unittest.TestCase):
   def test_assign_reshaped(self):
     buffer = Tensor.ones((4,)).contiguous().realize()
     a = buffer.reshape((2, 2)).assign(Tensor.zeros((2, 2)))
-    assign_pattern = UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
-    assert assign_pattern.match(a.uop, {})
+    store_pattern = UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER))), UPat()))
+    assert store_pattern.match(a.uop, {})
     a.realize()
     self.assertEqual(buffer.tolist(), [0, 0, 0, 0])
 

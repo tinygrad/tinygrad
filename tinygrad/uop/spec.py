@@ -69,12 +69,12 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.VIEW), lambda: True),
 ])
 
-assign_spec = PatternMatcher([
-  # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+store_spec = PatternMatcher([
+  # KERNEL can attach to an STORE to describe the compute required to realize a BUFFER
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
-  # ASSIGN has a target and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+  # STORE has a target and a value. It can also optionally depend on other stores
+  (UPat(Ops.STORE, name="x"), lambda x: x.dtype != dtypes.void and len(x.src) >= 2 and all(s.op is Ops.STORE for s in x.src[2:])),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
@@ -85,14 +85,14 @@ assign_spec = PatternMatcher([
 
 # *** this is the spec of a Tensor in UOp ***
 
-tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
+tensor_uop_spec = buffer_spec+store_spec+PatternMatcher([
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
    # this is fine as long as it's a realized buffer and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
+  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.STORE, Ops.CONST, Ops.DEVICE}),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, dtypes.int, (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=dtypes.int)), arg=None), lambda: True),
@@ -139,12 +139,12 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
     return False
   return True
 
-def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
+def validate_store(store:UOp, idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   if gate.op is Ops.IF: gate = gate.src[0]
   # we need to find the implicit gates, inverse of delete_redundant_gates
   for u in val.toposort():
     if u.op is Ops.IF: gate &= u.src[0]
-  return validate_index(idx, gate)
+  return isinstance(store.dtype, PtrDType) and validate_index(idx, gate)
 
 index_pat = UPat(Ops.INDEX, name="idx").or_casted()
 
@@ -188,8 +188,8 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
   # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True, name="store"), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True, name="store"), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
