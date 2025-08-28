@@ -225,7 +225,12 @@ runs:
     - name: Install gpuocelot dependencies (MacOS)
       if: inputs.ocelot == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+      run: |
+        for pkg in cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses; do
+          if ! brew list --versions "$pkg" >/dev/null 2>&1; then
+            brew install --quiet "$pkg"
+          fi
+        done
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true'
       id: cache-build
