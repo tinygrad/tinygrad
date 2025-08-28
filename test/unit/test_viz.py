@@ -1,11 +1,11 @@
-import unittest, decimal, json
+import unittest, decimal, json, struct
 from dataclasses import dataclass
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, Context
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -252,12 +252,47 @@ class TestVizIntegration(BaseTestViz):
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
+class TinyUnpacker:
+  def __init__(self, buf): self.buf, self.offset = buf, 0
+  def __call__(self, fmt:str) -> tuple:
+    ret = struct.unpack_from(fmt, self.buf, self.offset)
+    self.offset += struct.calcsize(fmt)
+    return ret
+
+# 0 means None, otherwise it's an enum value
+def option(i:int) -> int|None: return None if i == 0 else i-1
+
+def load_profile(lst:list[ProfileEvent]) -> dict:
+  ret = get_profile(lst)
+  u = TinyUnpacker(ret)
+  dur, global_peak, index_len, layout_len = u("<IQII")
+  strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
+  u.offset += index_len
+  layout:dict[str, dict] = {}
+  for _ in range(layout_len):
+    klen = u("<B")[0]
+    k = ret[u.offset:u.offset+klen].decode()
+    u.offset += klen
+    layout[k] = v = {"shapes":[]}
+    event_type, event_count = u("<BI")
+    if event_type == 0:
+      for _ in range(event_count):
+        name, ref, st, dur, cat, _ = u("<IIIfBI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
+    else:
+      v["peak"] = u("<Q")[0]
+      for _ in range(event_count):
+        alloc, ts, key = u("<BII")
+        if alloc: v["shapes"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["shapes"].append({"event":"free", "ts":ts, "key":key})
+  return {"dur":dur, "peak":global_peak, "layout":layout}
+
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     dev_events = j['layout']['NV']['shapes']
     self.assertEqual(len(dev_events), 1)
@@ -265,6 +300,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(event['name'], 'E_2')
     self.assertEqual(event['st'], 0)
     self.assertEqual(event['dur'], 10)
+    assert event['ref'] is None
 
   def test_perfetto_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
@@ -272,7 +308,7 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:2', comp_tdiff=decimal.Decimal(-800), copy_tdiff=decimal.Decimal(-80))]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     event = j['layout']['NV']['shapes'][0]
     self.assertEqual(event['name'], 'COPYxx')
@@ -290,12 +326,12 @@ class TestVizProfiler(unittest.TestCase):
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
-    j = json.loads(get_profile(prof))
+    j = load_profile(prof)
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV Graph')
-    self.assertEqual(tracks[2], 'NV')
-    self.assertEqual(tracks[4], 'NV:1')
+    self.assertEqual(tracks[1], 'NV')
+    self.assertEqual(tracks[2], 'NV:1')
 
     nv_events = j['layout']['NV']['shapes']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -312,6 +348,22 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
+  def test_bytes_per_kernel(self):
+    step = 10
+    n_events = 1_000
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    sz = len(get_profile(prof))
+    self.assertLessEqual(sz/n_events, 26)
+
+  # can pack up to 1hr 11 min of trace events
+  def test_trace_duration(self):
+    dur_mins = 72
+    n_events = 1_000
+    step = decimal.Decimal(dur_mins*60*1e6//n_events)
+    prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
+    with self.assertRaises(struct.error):
+      get_profile(prof)
+
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
   a.uop.buffer.allocate()
@@ -321,38 +373,29 @@ class TestVizMemoryLayout(BaseTestViz):
   def test_double_alloc(self):
     a = _alloc(1)
     _b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 2])
+    self.assertEqual(len(ret["shapes"]), 2)
 
   def test_del_once(self):
     a = _alloc(1)
     del a
     b = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 2])
-    self.assertEqual(ret["shapes"][1]["x"], [2, 3])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [0, 0])
+    self.assertEqual(len(ret["shapes"]), 3)
 
   def test_alloc_free(self):
     a = _alloc(1)
     _b = _alloc(1)
     del a
     c = _alloc(1)
-    profile_ret = json.loads(get_profile(Buffer.profile_events))
+    profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(ret["shapes"][0]["x"], [0, 3])
-    self.assertEqual(ret["shapes"][1]["x"], [1, 3, 3, 4])
-    self.assertEqual(ret["shapes"][0]["y"], [0, 0])
-    self.assertEqual(ret["shapes"][1]["y"], [1, 1, 0, 0])
-    self.assertEqual(ret["shapes"][2]["x"], [3, 4])
-    self.assertEqual(ret["shapes"][2]["y"], [1, 1])
+    self.assertEqual(len(ret["shapes"]), 4)
 
 if __name__ == "__main__":
   unittest.main()

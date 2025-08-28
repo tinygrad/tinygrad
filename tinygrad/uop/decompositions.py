@@ -280,7 +280,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
+def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
   assert d>0, "Sign should have been taken out of divisor"
@@ -288,6 +288,10 @@ def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
   m,s = magicgu(max(vmax, abs(vmin)), d)
   if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
+  # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
+  if (largest_factor_of_two_in_d := (d & -d)) > 1:
+    if (ret:=fast_idiv(device, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+  if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, None if device=='' else device):
     if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
@@ -315,8 +319,12 @@ def threefry2x32(x: UOp, key: UOp):
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
-  pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
-           ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
+  pat: list[tuple[UPat, Callable]] = []
+  for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
+    if op not in ops or force_transcendental:
+      pat += [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f),
+              (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
+                lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
@@ -325,6 +333,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
   if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
+  if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
+    lambda x,y: (x | y).logical_not())]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:

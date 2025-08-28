@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -11,6 +11,7 @@ from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
+from tinygrad.codegen.opt.kernel import axis_colors
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -79,13 +80,13 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
         label += f"\n{shape_to_str(u.shape)}"
       elif len(rngs:=u.ranges):
-        label += f"\n{str(sorted([x.arg for x in rngs]))}"
+        label += f"\n({','.join([colored(str(x.arg[0]), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
-    graph[id(u)] = {"label":label, "src":[id(x) for x in u.src if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
+    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src) if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
                     "ref":ref, "tag":u.tag}
   return graph
 
@@ -106,6 +107,15 @@ def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None,
            "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
     if not ctx.bottom_up: next_sink = new_sink
 
+# encoder helpers
+
+def enum_str(s, cache:dict[str, int]) -> int:
+  if (cret:=cache.get(s)) is not None: return cret
+  cache[s] = ret = len(cache)
+  return ret
+
+def option(s:int|None) -> int: return 0 if s is None else s+1
+
 # Profiler API
 
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
@@ -122,18 +132,14 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
-# timeline layout stacks events in a contiguous block. When a late starter finishes late, there is whitespace in the higher levels.
-def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int) -> dict:
-  shapes:list[dict] = []
-  levels:list[int] = []
+# normalize event timestamps and attach kernel metadata
+def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
+  events:list[bytes] = []
   exec_points:dict[str, dict] = {}
-  for st,et,dur,e in events:
+  category_enum:dict[str, int] = {}
+  for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
     if dur == 0: continue
-    # find a free level to put the event
-    depth = next((i for i,level_et in enumerate(levels) if st>=level_et), len(levels))
-    if depth < len(levels): levels[depth] = et
-    else: levels.append(et)
     name, cat, info = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
@@ -143,37 +149,28 @@ def timeline_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int)
     elif isinstance(e.name, TracingKey):
       name, cat = e.name.display_name, e.name.cat
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    shapes.append({"name":name, "ref":ref, "st":st-start_ts, "dur":dur, "depth":depth, "cat":cat, "info":info})
-  return {"shapes":shapes, "maxDepth":len(levels)}
+    events.append(struct.pack("<IIIfBI", enum_str(name, scache), option(ref), st-start_ts, dur,
+                              option(None if cat is None else enum_str(cat, category_enum)), enum_str(info or "", scache)))
+  return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int) -> dict:
-  step, peak, mem = 0, 0, 0
-  shps:dict[int, dict] = {}
-  temp:dict[int, dict] = {}
-  timestamps:list[int] = []
+def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+               scache:dict[str, int]) -> bytes|None:
+  peak, mem = 0, 0
+  temp:dict[int, int] = {}
+  bufs:list[bytes] = []
   for st,_,_,e in events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      shps[e.key] = temp[e.key] = {"x":[step], "y":[mem], "arg":e.arg}
-      timestamps.append(int(e.ts)-start_ts)
-      step += 1
-      mem += e.arg["nbytes"]
+      bufs.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
+      dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
+      temp[e.key] = nbytes = e.arg["sz"]*e.arg["dtype"].itemsize
+      mem += nbytes
       if mem > peak: peak = mem
     if e.name == "free":
-      timestamps.append(int(e.ts)-start_ts)
-      step += 1
-      mem -= (removed:=temp.pop(e.key))["arg"]["nbytes"]
-      removed["x"].append(step)
-      removed["y"].append(removed["y"][-1])
-      for k,v in temp.items():
-        if k > e.key:
-          v["x"] += [step, step]
-          v["y"] += [v["y"][-1], v["y"][-1]-removed["arg"]["nbytes"]]
-  for v in temp.values():
-    v["x"].append(step)
-    v["y"].append(v["y"][-1])
-  timestamps.append(end_ts-start_ts)
-  return {"shapes":list(shps.values()), "peak":peak, "timestamps":timestamps}
+      bufs.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      mem -= temp.pop(e.key)
+  peaks.append(peak)
+  return struct.pack("<BIQ", 1, len(bufs), peak)+b"".join(bufs) if bufs else None
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
@@ -189,12 +186,17 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if end_ts is None or et > end_ts: end_ts = et
   if start_ts is None: return None
   # return layout of per device events
-  layout:dict[str, dict] = {}
+  layout:dict[str, bytes|None] = {}
+  scache:dict[str, int] = {}
+  peaks:list[int] = []
+  dtype_size:dict[str, int] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v, start_ts)
-    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts))
-  return json.dumps({"layout":layout, "dur":unwrap(end_ts)-start_ts}).encode("utf-8")
+    layout[k] = timeline_layout(v, start_ts, scache)
+    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
+  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size}).encode()
+  return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
 def get_runtime_stats(key) -> list[dict]:
   ret:list[dict] = []
@@ -256,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
       else: return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
-    elif url.path == "/get_profile" and profile_ret is not None: ret, content_type = profile_ret, "application/json"
+    elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 
     # send response
@@ -289,8 +291,8 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:str):
-  if path is None or not os.path.exists(path): return None
+def load_pickle(path:str|None) -> list:
+  if path is None or not os.path.exists(path): return []
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -313,16 +315,16 @@ if __name__ == "__main__":
   contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
 
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts[:2]) if contexts is not None else []
+  ctxs = get_metadata(*contexts[:2]) if contexts else []
 
-  profile_ret = get_profile(profile) if profile is not None else None
+  profile_ret = get_profile(profile)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
-  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}{'/profiler' if contexts is None else ''}")
+  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
