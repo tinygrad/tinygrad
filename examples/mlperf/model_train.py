@@ -1414,7 +1414,7 @@ def train_llama3():
     else:
       if SMALL:
         from examples.mlperf.dataloader import batch_load_llama3_small
-        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR.parent / "c4-8b", seed=SEED, val=bool(TRAIN_ON_VAL))
+        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
       else:
         from examples.mlperf.dataloader import batch_load_llama3
         return batch_load_llama3(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
@@ -1425,10 +1425,10 @@ def train_llama3():
     else:
       if SMALL:
         from examples.mlperf.dataloader import batch_load_llama3_small
-        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR.parent / "c4-8b", seed=SEED, val=True)
+        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
       else:
         from examples.mlperf.dataloader import batch_load_llama3
-        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, seed=SEED, val=True)
+        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
 
   iter = get_train_iter()
   i, sequences_seen = 0, 0
