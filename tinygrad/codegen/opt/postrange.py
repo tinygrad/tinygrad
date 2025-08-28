@@ -29,21 +29,28 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   # create the new ranges as speced by the tensor core
   old_range = [in0_range, in1_range, r_range]
   new_range = [r.replace(src=(r.src[0]//tc.dims[i],), arg=r.arg[0:-1]+(0, r.arg[-1])) for i,r in enumerate(old_range)]
+  new_range_args = [list(x.arg[0:-1]) for x in new_range]
   new_reduce_range = new_range[2]
-  tc_range = 9050
   red_ranges = []
+
+  locals_range = 90
 
   ne: list[UOp] = []
   for o in tc.opts:
-    lrange = UOp.range(dtypes.int, 2, tc_range, AxisType.UPCAST if o[0] == "u" else AxisType.LOCAL)
+    axis = 1-int(o[1])
+    if o[0] == "u":
+      new_range_args[axis][-1] += 1
+      lrange = UOp.range(dtypes.int, 2, *new_range_args[axis], AxisType.UPCAST)
+    else:
+      lrange = UOp.range(dtypes.int, 2, locals_range, AxisType.LOCAL)
+      locals_range += 1
     ne.append(lrange)
-    tc_range += 1
-    new_range[1-int(o[1])] = (2 * new_range[1-int(o[1])]) + lrange
+    new_range[axis] = (2 * new_range[axis]) + lrange
   for _, amt in tc.get_reduce_axes():
-    lrange = UOp.range(dtypes.int, amt, tc_range, AxisType.UNROLL)
+    new_range_args[2][-1] += 1
+    lrange = UOp.range(dtypes.int, amt, *new_range_args[2], AxisType.UNROLL)
     ne.append(lrange)
     red_ranges.append(lrange)
-    tc_range += 1
     new_range[2] = (amt * new_range[2]) + lrange
   tne = [x.replace(tag=1) for x in ne]
 
