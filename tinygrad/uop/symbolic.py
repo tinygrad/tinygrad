@@ -377,7 +377,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
   for stmt in split_uop(valid, Ops.AND):
     try: expr, is_upper, c = parse_valid(stmt)
-    except ValueError: return uop  # give up if we cannot parse the valid
+    except ValueError: continue  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
   # don't simplify any other gates, can lead to OOB, we substitute them back later
