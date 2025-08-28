@@ -7,7 +7,7 @@ from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.uop.spec import type_verify
 
-def get_optimized_ast(ctx:Renderer, ast:UOp) -> UOp:
+def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
   """
   Optimize an AST based on heuristics or BEAM search.
 
@@ -23,20 +23,20 @@ def get_optimized_ast(ctx:Renderer, ast:UOp) -> UOp:
   if ast.src[0].st is None: return None
   new_arg = ast.arg
   if new_arg is None:
-    k = Kernel(ast, opts=ctx)
+    k = Kernel(ast, opts=renderer)
     if not NOOPT:
       if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
       if BEAM >= 1:
         from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
-        kb = Kernel(ast, opts=ctx)
+        kb = Kernel(ast, opts=renderer)
         rawbufs = bufs_from_lin(kb, allocate=False)
         k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
     new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
   elif len(new_arg.applied_opts): return None
-  return Kernel(ast.replace(arg=None), opts=ctx).get_optimized_ast().replace(arg=new_arg)
+  return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
 
 pm_get_optimization = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), get_optimized_ast),
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx)),
 ])
 
 def apply_opt(ast:UOp, renderer:Renderer):
