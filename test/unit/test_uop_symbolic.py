@@ -4,11 +4,11 @@ import z3
 
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.devectorizer import sym
+from tinygrad.codegen.late.devectorizer import sym
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
-from tinygrad.uop.spec import z3_renderer
+from tinygrad.uop.spec import uops_to_z3
 
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
@@ -32,9 +32,8 @@ class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
     if test_z3:
       solver = z3.Solver()
-      z3_sink = graph_rewrite(v.sink(v.simplify()), z3_renderer, ctx=(solver, {}))
-      expr, epxr_simplified = z3_sink.src[0].arg, z3_sink.src[1].arg
-      self.assertEqual(solver.check(expr != epxr_simplified), z3.unsat, "simplified expression not equal to original")
+      expr, expr_simplified = uops_to_z3(solver, v, v.simplify())
+      self.assertEqual(solver.check(expr != expr_simplified), z3.unsat, "simplified expression not equal to original")
     rendered, nmin, nmax = render(v)
     if isinstance(s, tuple): self.assertIn(rendered, s)
     else: self.assertEqual(rendered, s)
@@ -483,7 +482,9 @@ class TestSymbolic(unittest.TestCase):
     lidx2 = Variable("lidx2", 0, 3)
     alu0 = gidx2*640+gidx1*160+(gidx0//5)*2+lidx0*320+lidx1*10
     self.helper_test_variable((alu0+lidx2*2+1)//20, 0, 8192,
-                              ("((((gidx1*8)+(gidx2*32))+(lidx0*16))+(((lidx2+(gidx0//5))+(lidx1*5))//10))",))
+                              ("((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(((gidx2*32)+(gidx1*8))+(lidx0*16)))",
+                               "(((lidx1+((lidx2+(gidx0//5))//5))//2)+((gidx2*32)+((gidx1*8)+(lidx0*16))))",
+                               "((((gidx1*8)+(gidx2*32))+(lidx0*16))+((lidx1+((lidx2+(gidx0//5))//5))//2))"))
 
   def test_sum_div_complex2(self):
     gidx0 = Variable("gidx0", 0, 7)
@@ -497,8 +498,8 @@ class TestSymbolic(unittest.TestCase):
     gidx0 = Variable("gidx0", 0, 7)
     lidx2 = Variable("lidx2", 0, 12)
     lidx3 = Variable("lidx3", 0, 1)
-    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, ("((lidx2+(gidx0*2))//6)"))
-    self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, ("((lidx2+(gidx0*2))//6)"))
+    self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, ("(((lidx2//2)+gidx0)//3)", "((gidx0+(lidx2//2))//3)"))
+    self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, ("(((lidx2//2)+gidx0)//3)", "((gidx0+(lidx2//2))//3)"))
 
   def test_sum_mul_distribute(self):
     gidx0 = Variable("gidx0", 0, 7)
@@ -638,15 +639,16 @@ class TestSymbolic(unittest.TestCase):
     cond = Variable("x", 0, 3) < 2
     a = Variable("a", 0, 3)
     b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
     aa = cond.where(a, a.ufix(0))
     bb = cond.where(b, b.ufix(1))
     self.helper_test_variable(aa, 0, 3, "(a if (x<2) else 0)")
     self.helper_test_variable(bb, 0, 3, "(b if (x<2) else 1)")
     self.helper_test_variable(aa+bb, 0, 6, "((a+b) if (x<2) else 1)")
     self.helper_test_variable(aa.maximum(bb), 0, 3, "(max(a, b) if (x<2) else 1)")
+    self.helper_test_variable((c+aa)+bb, 0, 9, "(c+((a+b) if (x<2) else 1))")
 
     # not combining because it increased total ALU
-    c = Variable("c", 0, 3)
     cc = cond.where(c, c+1)
     self.helper_test_variable(bb+cc, 0, 7, "((b if (x<2) else 1)+(c if (x<2) else (c+1)))")
 

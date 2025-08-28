@@ -10,7 +10,7 @@ from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
-from tinygrad.dtype import ImageDType, AddrSpace
+from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
@@ -60,7 +60,7 @@ class Kernel:
 
     self.vars: list[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
-    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer][::-1]
+    self.bufs: list[UOp] = [x for x in self.ast.toposort() if x.op in GroupOp.Buffer and x.st is not None][::-1]
 
     # create new shapetrackers inside this kernel, we will permute them
     self.sts: list[ShapeTracker] = [x.st_arg for x in self.bufs]
@@ -122,7 +122,7 @@ class Kernel:
   @property
   def output_shape(self) -> tuple[sint, ...]: return self.sts[0].shape
   @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
+  def shape_len(self) -> int: return len(self.full_shape)
 
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in argfix(axis_type)]
   @property
@@ -174,7 +174,7 @@ class Kernel:
   # amount : the amount to take
   # top : if you want to pull that amount from the top
   # insert_at : place to insert the new stuff
-  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
+  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None) -> int:
     if insert_at is None: insert_at = self.shape_len
     self.axis_types.insert(insert_at, new_type)
     move_axis = axis if top else axis+1
@@ -183,6 +183,7 @@ class Kernel:
     new_axes = [i for i in range(insert_at) if i != move_axis]+[move_axis]+[i for i in range(insert_at, self.shape_len+1) if i != move_axis]
     self.reshape(new_shape_fxn)
     self.permute(new_axes)
+    return insert_at
 
   # ******************** complex simplifiers ********************
 
@@ -244,11 +245,11 @@ class Kernel:
       if axis is None: return -1
       if op is OptOps.UNROLL: return self.unrollable_dims[axis]
       if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
-      check(axis < self.shape_len, "invalid axis")
+      check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
     except IndexError as e: raise KernelOptError from e
 
-  def apply_opt(self, opt:Opt, append_opt:bool=True):
+  def apply_opt(self, opt:Opt, append_opt:bool=True) -> int|None:
     if self.finalized: raise RuntimeError("can't optimize Kernel after it's finalized")
     if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
 
@@ -262,7 +263,7 @@ class Kernel:
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
       self.applied_opts.append(opt)
-      return
+      return None
 
     axis = self.real_axis(opt.op, opt.axis)
 
@@ -285,28 +286,30 @@ class Kernel:
       smem_sz = amt*acc_sz*upcast_sz*local_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
+    new_axis = None
     if opt.op is OptOps.LOCAL:    # cyan
       # NOTE: LLVM/CPU can use locals too, but they are treated the same as globals (still helpful for L1 cache)
       # it's disabled for now since it makes BEAM slow for little gain
       check(self.opts.has_local, "target does not support local")
       check(self.axis_types[axis] is AxisType.GLOBAL, "local is for globals")
-      self.shift_to(axis, amt, AxisType.LOCAL, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
+      new_axis = self.shift_to(axis, amt, AxisType.LOCAL, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL))+1)
     elif opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:   # green
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.axis_types[axis] is AxisType.REDUCE, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
       check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
-      self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_at=min(self.axes_of(AxisType.REDUCE)))
+      new_axis = self.shift_to(axis, amt, AxisType.GROUP_REDUCE, top=(opt.op is OptOps.GROUPTOP), insert_at=min(self.axes_of(AxisType.REDUCE)))
     elif opt.op is OptOps.UNROLL:                     # purple
       check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "can't upcasted already upcasted")
       check(amt <= 32, "don't unroll more than 32")
-      self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
+      new_axis = self.shift_to(axis, amt, AxisType.UNROLL, insert_at=None)
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis in self.upcastable_dims, f"{axis=} not in {self.upcastable_dims=}")
       # NOTE: assume the first get_local_axes() LOCAL are for TC
       check(not (self.tensor_core and axis in self.axes_of(AxisType.LOCAL)[:len(self.tensor_core.get_local_axes())]), "can't upcast TC locals")
       check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      self.shift_to(axis, amt, AxisType.UPCAST, insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
+      new_axis = self.shift_to(axis, amt, AxisType.UPCAST,
+                               insert_at=max(self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP, AxisType.UPCAST))+1)
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(AxisType.LOCAL not in self.axis_types and self.group_for_reduces == 0, "can't have no locals with locals")
@@ -336,6 +339,7 @@ class Kernel:
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
+    return new_axis
 
   def apply_opts(self, opts:Sequence[Opt]) -> Kernel:
     for opt in opts: self.apply_opt(opt)
@@ -460,8 +464,7 @@ class Kernel:
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
         changed = tuple(i for i in range(self.shape_len) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.UNROLL) if i in changed)
-        grouped_axes = tuple(i for i in self.axes_of(AxisType.GROUP_REDUCE) if i in changed)
+        axes = tuple(i for i in self.axes_of(AxisType.REDUCE, AxisType.GROUP_REDUCE, AxisType.UNROLL) if i in changed)
         if (tc := self.tensor_core) and self.use_tensor_cores == 1:
           # get reduce/upcast axes for the tensor cores
           tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
@@ -486,23 +489,6 @@ class Kernel:
           return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
 
         ret = ret.replace(arg = (op.arg[0], axes))
-        if self.group_for_reduces and grouped_axes:
-          local_axes = tuple([i for i,t in enumerate(self.axis_types) if t in (AxisType.LOCAL, AxisType.UPCAST) or i in grouped_axes])
-          slocal, supcast, sgroup = sorted(self.axes_of(AxisType.LOCAL)), sorted(self.axes_of(AxisType.UPCAST)), sorted(grouped_axes)
-          # NOTE: start with UPCAST at the end so it has stride 1 and can merge
-          base_shape = tuple([self.full_shape[i] for i in slocal] + [self.full_shape[i] for i in sgroup] + [self.full_shape[i] for i in supcast])
-          permute_axes = tuple([local_axes.index(i) for i in slocal+sgroup+supcast])
-          local_shape = tuple([s if i in local_axes else 1 for i,s in enumerate(self.full_shape)])
-          local_src_shape = tuple([self.full_shape[i] if i in self.axes_of(AxisType.GLOBAL) else s for i,s in enumerate(local_shape)])
-          st = ShapeTracker.from_shape(base_shape).permute(permute_axes).reshape(local_shape).expand(local_src_shape)
-          local_size = st.real_size()
-          local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local_size, addrspace=AddrSpace.LOCAL), (), f"temp{self.reduceops.index(op)}")
-          local_load = local_buffer.view(st).load(local_buffer.view(st).store(ret))
-          grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
-          if op is self.reduceops[-1]: return grouped_reduce
-          st = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else s for i,s in enumerate(local_shape)]))
-          return local_buffer.view(st).load(local_buffer.view(st).store(grouped_reduce))
-
       return ret
     self.finalized = True
     fixed_ast = fixup_ast(self.ast)
