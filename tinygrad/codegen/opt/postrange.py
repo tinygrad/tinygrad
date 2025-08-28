@@ -17,8 +17,6 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
 ])
 
-def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
-
 class RKernel(Kernel):
   def __init__(self, ast:UOp, opts:Renderer|None=None):
     self.rng = sorted([u for u in ast.toposort() if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: x.arg)
@@ -87,12 +85,19 @@ class RKernel(Kernel):
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         if tc.dtype_in == dtypes.float and tc.dtype_out == dtypes.float:
-          axes = [1,0]
+          in0, in1 = list((reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]).src)
+
+          # tensor cores have three ranges. X, Y, and REDUCE
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
+          if not len(in0_ranges) or not len(in1_ranges): return None
+          in0_range, in1_range = in0_ranges[0], in1_ranges[0]
+          axes = [in1_range, in0_range]
 
           # do optimizations and save the ranges
           ne: list[UOp] = []
           for opt in tc.opts:
-            ne.append(self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], axes[int(opt[1])], 2), append_opt=False))
+            ne.append(self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], axes[int(opt[1])].arg[0], 2), append_opt=False))
           for _, amt in tc.get_reduce_axes():
             ne.append(self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False)) # TODO: this should be the reduce, not 0
 
