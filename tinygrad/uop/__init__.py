@@ -34,7 +34,7 @@ class Ops(FastEnum):
   VIEW = auto()
 
   # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
-  VALID = auto(); INVALID = auto()
+  VALID = auto(); INVALID = auto() # noqa: E702
 
   # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto() # noqa: E702
