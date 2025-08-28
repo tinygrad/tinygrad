@@ -42,6 +42,7 @@ class RKernel(Kernel):
   def simplify_merge_adjacent(self): return
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> int|None:
+    if opt.op == OptOps.PADTO: raise RuntimeError("PAD is not supported yet. needs INVALID")
     return super().apply_opt(opt, append_opt)
 
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False, insert_at:int|None=None):
@@ -70,7 +71,9 @@ class RKernel(Kernel):
   @property
   def full_shape(self) -> tuple[sint, ...]: return tuple([ssimplify(x.src[0]) for x in self.rng])
   @property
-  def output_shape(self) -> tuple[sint, ...]: return tuple([ssimplify(x.src[0]) for x in self.ast.src[0].src[2:]])
+  def output_shape(self) -> tuple[sint, ...]:
+    if self.ast.src[0].op is not Ops.STORE: return ()
+    return tuple([ssimplify(x.src[0]) for x in self.ast.src[0].src[2:]])
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     ret = self.ast
