@@ -172,6 +172,8 @@ x86_matcher = PatternMatcher([
   # *** INDEX/LOAD/STORE ***
   # loading from register is a noop
   #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
+  # rewrite index with gate to cmove
+  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
   # move mask from INDEX to the load/store
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
    lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
@@ -521,17 +523,13 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x.src[0])}:"))),
 ])
 
-class X86Renderer(Renderer):
-  device = "X86"
-  has_local = False
-  global_max = None
-  pre_matcher = x86_pre_matcher
-  extra_matcher = x86_matcher
-  extra_spec = x86_spec
-  lowerer = x86_lowerer
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
-  callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
+class AsmRenderer(Renderer):
+  lowerer = PatternMatcher([])
+  callee_saved: tuple[Register, ...] = ()
 
+  def load(self, dest:Register, src:Memory): raise NotImplementedError("arch specific")
+  def store(self, dest:Memory, src:Register): raise NotImplementedError("arch specific")
+  def assign(self, dest:Register, src:Register): raise NotImplementedError("arch specific")
   def __getitem__(self, x:UOp) -> Register: # hacky helper
     assert x.op is not Ops.CONST, "const is an immediate"
     if x in self.virtuals: return self.virtuals[x]
@@ -610,8 +608,8 @@ class X86Renderer(Renderer):
         self.stack_size = offset + spilled.size
         mem[spilled] = Memory(spilled.size, Register("rbp", 5, 8), disp=Immediate(-self.stack_size, 4))
         # TODO: hoist store
-        if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, MUOpX86.store(mem[spilled], live[spilled]))
-        else: final_muops.append(MUOpX86.store(mem[spilled], live[spilled]))
+        if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.store(mem[spilled], live[spilled]))
+        else: final_muops.append(self.store(mem[spilled], live[spilled]))
       return live.pop(spilled)
 
     def rewrite(x:Operand, cons:tuple[Register, ...]) -> Operand:
@@ -622,7 +620,7 @@ class X86Renderer(Renderer):
         if x in live and live[x] not in cons:
           reg = alloc(cons)
           reg = Register(reg.name, reg.index, x.size)
-          final_muops.append(MUOpX86.assign(reg, live[x]))
+          final_muops.append(self.assign(reg, live[x]))
           reg_pool.insert(0, live.pop(x))
           live[x] = reg
         elif x not in live:
@@ -631,7 +629,7 @@ class X86Renderer(Renderer):
           #if mu is not None and live_range[x][-1] == i and x in mem and x is mu.rm and x not in (mu.reg, mu.vvvv, mu.imm): return mem[x]
           reg = alloc(cons)
           live[x] = Register(reg.name, reg.index, x.size)
-          if x in mem: final_muops.append(MUOpX86.load(live[x], mem[x]))
+          if x in mem: final_muops.append(self.load(live[x], mem[x]))
         elif x in live: live[x] = Register(live[x].name, live[x].index, x.size)
         return live[x]
       if isinstance(x, Memory):
@@ -641,8 +639,8 @@ class X86Renderer(Renderer):
           reg = alloc(GPR)
           live[v] = Register(reg.name, reg.index, v.size)
           # HACK: can't load inside branch, this happens in conditional load
-          if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, MUOpX86.load(live[v], mem[v]))
-          else: final_muops.append(MUOpX86.load(live[v], mem[v]))
+          if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.load(live[v], mem[v]))
+          else: final_muops.append(self.load(live[v], mem[v]))
         return Memory(x.size, live[x.base], live.get(x.index, None), x.scale, x.disp)
       return x
 
@@ -664,7 +662,7 @@ class X86Renderer(Renderer):
           if not in_degrees:
             # TODO: the store is just for the loop accumulator, everything else doesn't need it, should remove it
             chosen = rset.pop()
-            final_muops.append(MUOpX86.store(mem[chosen[0]], live[chosen[0]]))
+            final_muops.append(self.store(mem[chosen[0]], live[chosen[0]]))
             patch.append(chosen)
           rset -= in_degrees
           for v,r in in_degrees: rewrite(v, [r])
@@ -684,6 +682,23 @@ class X86Renderer(Renderer):
     self.stack_size += (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16
     return (final_muops, callee_saved)
 
+  def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]: raise NotImplementedError("arch specific")
+  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
+
+class X86Renderer(AsmRenderer):
+  device = "X86"
+  has_local = False
+  global_max = None
+  pre_matcher = x86_pre_matcher
+  extra_matcher = x86_matcher
+  extra_spec = x86_spec
+  lowerer = x86_lowerer
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
+
+  def load(self, dest:Register, src:Memory): return MUOpX86.load(dest, src)
+  def store(self, dest:Memory, src:Register): return MUOpX86.store(dest, src)
+  def assign(self, dest:Register, src:Register): return MUOpX86.assign(dest, src)
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
     prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
                [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
@@ -692,4 +707,3 @@ class X86Renderer(Renderer):
                [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
     kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
     return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
-  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
