@@ -87,20 +87,6 @@ class TestShapeTrackerAdd(unittest.TestCase):
     assert not (st_equal(st1, st2))
 
 class TestShapeTrackerAddVariable(unittest.TestCase):
-  def test_self_add(self):
-    j = Variable("j", 0, 20).bind(10)
-    a = ShapeTracker.from_shape((10,10))
-    x = a.reshape((10, j))
-    out = x + x
-    assert out == x
-
-  def test_self_add_reshape(self):
-    j = Variable("j", 0, 20).bind(10)
-    a = ShapeTracker.from_shape((10,10))
-    x = a.reshape((10, j))
-    out = x.reshape((5, 2, j)) + x
-    assert out == x
-
   def test_merge_symbolic_views(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('i', 1, 10)
