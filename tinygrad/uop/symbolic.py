@@ -190,9 +190,23 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in split_uop(x, Ops.ADD)])
-  if (gcd := math.gcd(y.arg, *factors)) == 1: return None
-  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
+  if (gcd := math.gcd(y.const_factor(), *factors)) == 1: return None
+  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, (y//gcd).simplify())
   return ret*gcd if d.op is Ops.MOD else ret
+
+def divide_by_symbolic_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  if y.op is Ops.CONST: return None  # handled by divide_by_gcd
+  div_factors = [f for f in split_uop(y, Ops.MUL) if f.op is not Ops.CONST]
+  all_factors = [list(split_uop(f, Ops.MUL)) for f in split_uop(x, Ops.ADD)]
+  removed_factors = []
+  for f in div_factors.copy():
+    if all(f in factors for factors in all_factors):
+      removed_factors.append(f)
+      for factors in all_factors: factors.remove(f)
+      div_factors.remove(f)
+  if not removed_factors: return None
+  ret = sum(math.prod(factors) for factors in all_factors).alu(d.op, y.ufix(math.prod(div_factors)))
+  return ret*math.prod(removed_factors) if d.op is Ops.MOD else ret
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
@@ -336,7 +350,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_symbolic_gcd),
   (UPat(Ops.MOD, dtypes.sints, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat((Ops.IDIV), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.sints, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
