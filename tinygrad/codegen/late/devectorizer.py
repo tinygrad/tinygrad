@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, PtrDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
 
@@ -211,6 +211,8 @@ correct_load_store = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, name="idx").cast(),), name="ls", allow_any_len=True), split_load_store),
   # image indexing, including unfoldable images
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
+  # move INVALID from idx where to a gate
+  (UPat(Ops.INDEX, src=(UPat(), invalid_gate,), name="idx"), lambda idx,cond,x,i: idx.replace(src=(idx.src[0], x, cond)))
 ])
 
 # *** uop expander ***
