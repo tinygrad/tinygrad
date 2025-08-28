@@ -80,6 +80,7 @@ def apply_tensor_cores(ctx:tuple[dict, Renderer], in0:UOp, in1:UOp, r_range:UOp,
   return ret
 
 pm_postrange_opt_early = PatternMatcher([
+  # TODO: this is optional (and can have internal options) and we need a way to express that
   ((UPat.var("in0")*UPat.var("in1")).reduce(UPat(Ops.RANGE, name="r_range"), name="reduceop", arg=Ops.ADD), apply_tensor_cores),
   (UPat(Ops.SINK, name="s"), lambda ctx,s: s.substitute(ctx[0])),
 ])
@@ -102,12 +103,15 @@ def rename_sink(s:UOp):
 
 def split_range(r:UOp):
   if len(r.arg) > 2: return None
+  # any divisor is an option
   N = 4
   rd = r.src[0].divides(N)
   if rd is None: return None
   sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0,r.arg[-1]))
-  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),),
-           arg=r.arg[0:-1]+(1,AxisType.UNROLL if r.arg[-1] is AxisType.REDUCE else AxisType.UPCAST))
+  at_map = { # (is_reduce, is_local)
+    (False,False): AxisType.UPCAST, (False,True): AxisType.LOCAL,
+    (True, False): AxisType.UNROLL, (True, True): AxisType.GROUP_REDUCE}
+  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, at_map[(r.arg[-1] is AxisType.REDUCE, False)]))
   return sr*N+er
 
 def flatten_range_in_terminators(r:UOp):
@@ -121,7 +125,7 @@ pm_postrange_opt = PatternMatcher([
   # flatten ranges
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range_in_terminators),
   (UPat(Ops.STORE, name="s"), global_stores_are_global),
-  # this is optional
+  # TODO: this is optional (and can have internal options) and we need a way to express that
   (UPat(Ops.RANGE, name="r"), split_range),
   # run this last
   (UPat(Ops.SINK, name="s"), rename_sink),
