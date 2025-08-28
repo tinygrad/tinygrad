@@ -88,14 +88,12 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.append(RewriteStep(pm_devectorize, lambda _: opts, name="devectorize"))
 
   supported_ops = tuple(opts.code_for_op.keys())
+  pre_matcher = opts.pre_matcher if opts.pre_matcher is not None else PatternMatcher([])
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
-
-  # optional pre matcher
-  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
 
   # decompositions
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
-  ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
+  ret.append(RewriteStep(pm_decomp+pre_matcher, lambda _: opts.device, name="decompositions"))
 
   # final rules for the renderer (without sym)
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
@@ -107,7 +105,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, linearizer:bool=False) -> UOp:
   return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), linearizer))
 
-def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, opts:Renderer=Renderer()) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
@@ -120,5 +118,5 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
 
   lst = list(full_rewrite_to_sink(sink, opts, linearizer=True).arg.lst)
-  if __debug__: type_verify(lst)
+  if __debug__: type_verify(lst, opts.extra_spec)
   return lst

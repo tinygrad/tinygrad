@@ -10,7 +10,7 @@ from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "X86", "LLVM", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -307,6 +307,9 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     return device == "AMD"
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
+    return False
+  if dtype in dtypes.masks:
+    # mask dtypes are specific to certain backends and they're managed by a pattern matcher
     return False
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]

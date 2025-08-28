@@ -1,0 +1,15 @@
+import functools, queue
+from tinygrad.helpers import capstone_flatdump
+from tinygrad.renderer.asm import X86Renderer
+from tinygrad.runtime.support.hcq import HCQCompiled
+from tinygrad.runtime.ops_cpu import CPUWorker, CPUAllocator, CPUProgram, Compiler, CPUSignal, CPUComputeQueue
+
+class X86Compiler(Compiler):
+  def __init__(self): super().__init__(None)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib)
+
+class X86Device(HCQCompiled):
+  def __init__(self, device:str):
+    self.tasks:queue.Queue = queue.Queue()
+    CPUWorker(self).start()
+    super().__init__(device, CPUAllocator(self), X86Renderer(), X86Compiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
