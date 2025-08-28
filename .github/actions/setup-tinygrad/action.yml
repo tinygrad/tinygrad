@@ -254,8 +254,12 @@ runs:
       if: inputs.ocelot == 'true'
       shell: bash
       run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || '' }}lib/
+        if [[ "${{ runner.os }}" == "macOS" ]]; then
+          sudo cp libgpuocelot.dylib /usr/local/lib/
+          echo "DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:/opt/homebrew/lib:${DYLD_FALLBACK_LIBRARY_PATH}" >> "$GITHUB_ENV"
+        elif [[ "${{ runner.os }}" == "Linux" ]]; then
+          sudo cp libgpuocelot.so /usr/lib/
+        fi
 
     # **** WebGPU ****
 
