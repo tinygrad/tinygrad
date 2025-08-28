@@ -1,6 +1,7 @@
 import math, itertools
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat
+from tinygrad.helpers import DEBUG
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
@@ -31,17 +32,19 @@ class RKernel(Kernel):
       # filter any not in local stores
       local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL) \
                           or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
-      for ls in local_store_rngs: store_rngs = [x for x in store_rngs if x in ls]
+      for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
       store_rng = [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE] if store_rngs else []
       rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rng]
       self.replaces.update(dict(zip(self.rng, rng)))
       self.rng = rng
 
+    self.maxarg = max([x.arg[0] for x in self.rng]) if len(self.rng) else 0
+
   # must be done earlier
   def simplify_merge_adjacent(self): return
 
-  def apply_opt(self, opt:Opt, append_opt:bool=True) -> int|None:
+  def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
     if opt.op == OptOps.PADTO: raise RuntimeError("PAD is not supported yet. needs INVALID")
     if opt.op == OptOps.SWAP: raise RuntimeError("SWAP is not supported yet")
     return super().apply_opt(opt, append_opt)
@@ -50,8 +53,8 @@ class RKernel(Kernel):
     old_sz = self.rng[axis].src[0].arg // amount
     assert old_sz > 0, f"bad old_sz on {axis} {amount} {self.rng[axis]}"
 
-    maxarg = max([x.arg[0] for x in self.rng])
-    new_rng = UOp.range(dtypes.int, amount, maxarg+1, new_type)
+    self.maxarg += 1
+    new_rng = UOp.range(dtypes.int, amount, self.maxarg, new_type)
 
     if old_sz == 1:
       self.replaces[self.rng[axis]] = new_rng
@@ -65,7 +68,7 @@ class RKernel(Kernel):
     return new_rng
 
   @property
-  def axis_types(self) -> list[AxisType]: return [x.arg[1] for x in self.rng]
+  def axis_types(self) -> list[AxisType]: return [x.arg[-1] for x in self.rng]
   @property
   def shape_len(self): return len(self.rng)
 
@@ -97,7 +100,9 @@ class RKernel(Kernel):
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges and u.vmax+1 >= tc.dims[1]], key=lambda x: x.arg[0])
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges and u.vmax+1 >= tc.dims[0]], key=lambda x: x.arg[0])
           red_ranges = sorted([u for u in reduceop.src[1:] if u.vmax+1 >= tc.dims[2]], key=lambda x: x.arg[0])
-          print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]} {[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
+          if DEBUG >= 3:
+            print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
+                               "{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
           if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): return None
 
           # pick ranges
@@ -109,8 +114,9 @@ class RKernel(Kernel):
           ne: list[UOp] = []
           for opt in tc.opts:
             ne.append(self.apply_opt(Opt({"u":OptOps.UPCAST, "l":OptOps.LOCAL}[opt[0]], axes[int(opt[1])].arg[0], 2), append_opt=False))
+          reduce_axis = [self.rng[i] for i in self.axes_of(AxisType.REDUCE)].index(axes[2])
           for _, amt in tc.get_reduce_axes():
-            ne.append(self.apply_opt(Opt(OptOps.UNROLL, 0, amt), append_opt=False)) # TODO: this should be the reduce, not 0
+            ne.append(self.apply_opt(Opt(OptOps.UNROLL, reduce_axis, amt), append_opt=False))
 
           # early realize for TC
           self.ast = self.ast.substitute(self.replaces)
