@@ -1,4 +1,4 @@
-import math
+import math, itertools
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
@@ -90,15 +90,17 @@ class RKernel(Kernel):
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
-        if tc.dtype_in == dtypes.float and tc.dtype_out == dtypes.float:
-          in0, in1 = list((reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]).src)
-
+        in0, in1 = list((reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]).src)
+        if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
-          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
-          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges and u.vmax+1 >= tc.dims[1]], key=lambda x: x.arg[0])
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges and u.vmax+1 >= tc.dims[0]], key=lambda x: x.arg[0])
           if not len(in0_ranges) or not len(in1_ranges): return None
-          in0_range, in1_range = in0_ranges[0], in1_ranges[0]
-          axes = [in1_range, in0_range]
+
+          # pick ranges
+          axis_choices = list(itertools.product(in1_ranges, in0_ranges))
+          if not (axis < len(axis_choices)): return None
+          axes = axis_choices[axis]
 
           # do optimizations and save the ranges
           ne: list[UOp] = []
