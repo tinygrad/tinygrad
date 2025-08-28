@@ -25,15 +25,17 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
 invalid_gate = UPat.var("cond").where(UPat.var("x"), UPat(Ops.INVALID, name="i"))
 
 propagate_invalid = PatternMatcher([
+  # this needs to be before symbolic so that 0*something_that_might_be_invalid does become 0
   # propagate invalid, push it past children
-  (invalid_gate.cast(name="cast"), lambda cond,x,i,cast: cond.where(cast.replace(src=(x,)), i.replace(dtype=cast.dtype)),
+  (invalid_gate.cast(name="cast"), lambda cond,x,i,cast: cond.where(cast.replace(src=(x,)), i.replace(dtype=cast.dtype))),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"),
     lambda cond,x,y,alu,i: cond.where(newx:=x.alu(alu.op,y),i.replace(dtype=newx.dtype))) for op in GroupOp.Binary),
   (invalid_gate.where(UPat.var("y"), UPat.var("z")), lambda cond,x,i,y,z: cond.where(x.where(y,z),i.replace(dtype=y.dtype))),
-
   (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
-  # (UPat.var("gate").where(invalid_gate, UPat.var("y")),
-  # (UPat.var("gate").where(UPat.var("y"), invalid_gate),
+  # order of gate&!cond matters!, and-clauses are only simplified left to right and we need to gate to be used to fold cond
+  (UPat.var("gate").where(invalid_gate, UPat.var("y")), lambda gate,cond,x,y,i: ((gate&cond.logical_not()).logical_not()).where(gate.where(x,y), i)),
+  # unswap the branches for the rule above
+  (UPat.var("gate").where(UPat.var("y"), invalid_gate).named("where"), lambda gate,cond,x,y,i: gate.logical_not().where(cond.where(x,i), y))
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
