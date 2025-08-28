@@ -11,6 +11,26 @@ class TestRangeify(unittest.TestCase):
     ba = A.expand(N, N)
     ((ba+1).sum(axis=1) + (ba+2).sum(axis=0)).realize()
 
+  def test_partial_contig(self):
+    A = Tensor.empty(64, 64, 64)
+    ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
+    ret.realize()
+
+  def test_double_gemm_real(self):
+    def go():
+      with Context(DEBUG=0):
+        Tensor.manual_seed(1337)
+        A,B,C = [Tensor.randn(N, N) for _ in range(3)]
+        Tensor.realize(A, B, C)
+      GlobalCounters.reset()
+      return (A@B@C).realize()
+    rng = go()
+    with Context(RANGEIFY=0, DEBUG=2):
+      ref = go()
+      mse = ((rng-ref)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-2)
+
   def test_double_gemm(self):
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
@@ -99,7 +119,7 @@ class TestRangeify(unittest.TestCase):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 16, 128, 64
+    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
 
     # llama 8B
     #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128

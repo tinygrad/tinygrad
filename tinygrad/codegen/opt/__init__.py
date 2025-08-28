@@ -7,7 +7,7 @@ from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.uop.spec import type_verify
 
-def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
+def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
   """
   Optimize an AST based on heuristics or BEAM search.
 
@@ -19,19 +19,24 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp:
     The Ops.SINK rooted AST transformed to apply the opts and with a KernelInfo in the arg.
   """
 
-  assert ast.arg is None, "no opt if there's an arg"
-  k = Kernel(ast, opts=renderer)
-  if not NOOPT:
-    if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
-    if BEAM >= 1:
-      from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
-      kb = Kernel(ast, opts=renderer)
-      rawbufs = bufs_from_lin(kb, allocate=False)
-      k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  return ast.replace(arg=KernelInfo(opts_to_apply=tuple(k.applied_opts)))
+  # no shape, no opt
+  if ast.src[0].st is None: return None
+  new_arg = ast.arg
+  if new_arg is None:
+    k = Kernel(ast, opts=renderer)
+    if not NOOPT:
+      if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
+      if BEAM >= 1:
+        from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
+        kb = Kernel(ast, opts=renderer)
+        rawbufs = bufs_from_lin(kb, allocate=False)
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
+  elif len(new_arg.applied_opts): return None
+  return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
 
 pm_get_optimization = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx) if ast.arg is None and ast.src[0].st is not None else None),
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx)),
 ])
 
 def apply_opt(ast:UOp, renderer:Renderer):
