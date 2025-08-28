@@ -2,6 +2,7 @@ import math
 from dataclasses import replace
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo
+from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import colored, USE_TC, DEBUG
 from tinygrad.codegen.opt.kernel import axis_colors, AxisType
 from tinygrad.renderer import Renderer
@@ -102,11 +103,12 @@ def split_range(r:UOp):
   if r.arg[-1] not in {AxisType.LOOP, AxisType.GLOBAL, AxisType.REDUCE}: return None
   if r.tag is not None: return None
   # any divisor is an option
+  is_local = False # if r.arg[-1] is AxisType.REDUCE else True
   N = 4
   rd = r.src[0].divides(N)
   if rd is None: return None
   sr = r.replace(src=(rd,), arg=r.arg[0:-1]+(0, r.arg[-1]), tag=1)
-  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, axis_typemap[(r.arg[-1] is AxisType.REDUCE, False)]))
+  er = UOp(Ops.RANGE, dtypes.int, src=(UOp.const(dtypes.int, N),), arg=r.arg[0:-1]+(1, axis_typemap[(r.arg[-1] is AxisType.REDUCE, is_local)]))
   return sr*N+er
 
 def flatten_range_in_terminators(r:UOp):
@@ -129,6 +131,8 @@ def rename_sink(s:UOp):
 pm_postrange_opt = PatternMatcher([
   # TODO: this is optional (and can have internal options) and we need a way to express that
   (UPat(Ops.RANGE, name="r"), split_range),
+  # remove axes with 1
+  (UPat(Ops.RANGE, name="r"), lambda r: r.const_like(0) if r.vmax == 0 else None),
   # flatten ranges
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range_in_terminators),
   # run this last
