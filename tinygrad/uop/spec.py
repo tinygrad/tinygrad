@@ -124,16 +124,20 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
   mask = idx.src[2]&gate if len(idx.src)==3 else gate
+  idx = idx.src[1]
+  if idx.op is Ops.WHERE and idx.src[2].op is Ops.INVALID:
+    mask &= idx.src[0]
+    idx = idx.src[1]
 
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
 
   if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
+  z3_idx, z3_mask = uops_to_z3(solver, idx, mask)
   solver.add(z3_mask)
   if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
-    print(f"idx={idx.src[1].render(simplify=False)}")
+    print(f"idx={idx.render(simplify=False)}")
     print(f"mask & gate={mask.render(simplify=False)}")
     print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
     return False
@@ -164,6 +168,7 @@ spec = PatternMatcher([
    lambda x,src: isinstance(x.arg, ShapeTracker) and src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
+  (UPat(Ops.INVALID, src=()), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
   # early LOAD has a <bufview, store?>

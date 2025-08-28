@@ -22,7 +22,21 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-symbolic_simple = PatternMatcher([
+invalid_gate = UPat.var("cond").where(UPat.var("x"), UPat(Ops.INVALID, name="i"))
+
+propagate_invalid = PatternMatcher([
+  # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda cond,x,i,cast: cond.where(cast.replace(src=(x,)), i.replace(dtype=cast.dtype)),
+  *((invalid_gate.alu(op, UPat.var("y")).named("alu"),
+    lambda cond,x,y,alu,i: cond.where(newx:=x.alu(alu.op,y),i.replace(dtype=newx.dtype))) for op in GroupOp.Binary),
+  (invalid_gate.where(UPat.var("y"), UPat.var("z")), lambda cond,x,i,y,z: cond.where(x.where(y,z),i.replace(dtype=y.dtype))),
+
+  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
+  # (UPat.var("gate").where(invalid_gate, UPat.var("y")),
+  # (UPat.var("gate").where(UPat.var("y"), invalid_gate),
+])
+
+symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -287,16 +301,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
-  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
-  # Pattern 1: c1?(c2?x:y):y -> (c1&c2)?x:y
-  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
-  # Pattern 2: c1?(c2?y:x):y -> (c1&!c2)?x:y
-  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("y"), UPat.var("x")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2.logical_not()).where(x,y)),
-  # Pattern 3: c1?y:(c2?x:y) -> (!c1&c2)?x:y
-  (UPat.var("c1").where(UPat.var("y"), UPat.var("c2").where(UPat.var("x"), UPat.var("y"))), lambda c1,c2,x,y: (c1.logical_not()&c2).where(x,y)),
-  # Pattern 4: c1?y:(c2?y:x) -> (!c1&!c2)?x:y
-  (UPat.var("c1").where(UPat.var("y"), UPat.var("c2").where(UPat.var("y"), UPat.var("x"))),
-    lambda c1,c2,x,y: (c1.logical_not()&c2.logical_not()).where(x,y)),
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")),
+    lambda cond, t, f: cond.where(f,t) if f.op is not Ops.INVALID else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
