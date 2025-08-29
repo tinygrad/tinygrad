@@ -23,6 +23,10 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   # dont cast internal dtypes
   return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
 
+def _to_torch_storage_type(dtype:DType):
+  if dtype == dtypes.bfloat16: return torch.float32
+  return _to_torch_dtype(dtype)
+
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
   na = a.numpy()
@@ -47,9 +51,8 @@ def _test_cast(a:Tensor, target_dtype:DType):
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   if getenv("PTX") and a.dtype == dtypes.int8 and target_dtype.itemsize != a.dtype.itemsize:
     raise unittest.SkipTest("shape changing bitcast of int8 broken on PTX")
-  torch_dtype = torch.float32 if a.dtype == dtypes.bfloat16 else _to_torch_dtype(a.dtype)
-  expected = torch.tensor(a.tolist(), dtype=torch_dtype).view(_to_torch_dtype(target_dtype))
-  np.testing.assert_equal(np.array(expected.tolist()), np.array(a.bitcast(target_dtype).tolist()))
+  expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype))
+  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected.tolist())
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -301,8 +304,8 @@ class TestBitCast(unittest.TestCase):
     # NOTE: this has to be assume to prevent hypothesis from skipping all samples
     assume(not (getenv("PTX") and dt1 == dtypes.int8)) # TODO: bitcasting int8 fails in PTX
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
-    expected = torch.tensor(data.tolist(), dtype=torch.float32 if dt1 == dtypes.bfloat16 else _to_torch_dtype(dt1)).view(_to_torch_dtype(dt2))
-    np.testing.assert_equal(np.array(expected.tolist()), np.array(Tensor(data, dtype=dt1).bitcast(dt2).tolist()))
+    expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
+    _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
 
   def test_shape_change_bitcast_exceptions(self):
     with self.assertRaises(RuntimeError):
