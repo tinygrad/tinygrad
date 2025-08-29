@@ -70,8 +70,8 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
-  # TODO: bfloat16 has const dtype issue, and generally cos has large input issue
-  if op[0] == Tensor.cos and (dtype == dtypes.bfloat16 or abs(a) > 30): return
+  # TODO: cos does not match for large input
+  if op[0] == Tensor.cos and abs(a) > 100: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
