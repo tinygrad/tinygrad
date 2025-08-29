@@ -1,7 +1,8 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve
+from tinygrad.dtype import dtypes, least_upper_dtype
+from tinygrad.device import is_dtype_supported
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve, GroupOp
 
 # ***** indexing *****
 
@@ -12,7 +13,7 @@ class IndexContext:
   start: int = 0
 
 def shape_to_idx(s, axis_types, start=0):
-  return [UOp.range(dtypes.int, sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
+  return [UOp.range(dtypes.index, sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
@@ -84,4 +85,28 @@ pm_lowerer = PatternMatcher([
   # axis fixups for WMMA
   (UPat((Ops.CONTRACT, Ops.UNROLL), name="x"),
    lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0], sz) for a,sz in x.arg])) if x.tag is None else None),
+])
+
+def lower_index_dtype(u: UOp, x:UOp, y:UOp, ctx, cond:UOp|None=None) -> UOp|None:
+  # check for overflow
+  if u.vmax > dtypes.int64.max or u.vmin < dtypes.int64.min: raise ValueError("indexing overflows int64")
+  casted_srcs = ((cond,) if cond is not None else ()) + (x.cast(dtypes.int64), y.cast(dtypes.int64))
+
+  if u.vmax > dtypes.int32.max or u.vmin < dtypes.int32.min:
+    if not is_dtype_supported(dtypes.int64, ctx): raise ValueError(f"index overflows int32 and int64 is not supported on {ctx}")
+    return u.replace(dtype=dtypes.int64.vec(u.dtype.count), src=casted_srcs)
+  # if any inputs are int64 and this *doesn't* overflow, cast back to int
+  if x.dtype == dtypes.int64 or y.dtype == dtypes.int64:
+    return u.replace(dtype=dtypes.int64.vec(u.dtype.count), src=casted_srcs).cast(dtypes.int32)
+  return u.replace(dtype=dtypes.int32.vec(u.dtype.count))
+
+pm_lower_index_dtype = PatternMatcher([
+  # There are no Unary ops at this point in symbolic, those are introduced in later
+  (UPat(GroupOp.Binary, dtype=dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lower_index_dtype),
+  (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lower_index_dtype),
+  # TODO: assert that these fit in int32
+  (UPat((Ops.RANGE,Ops.DEFINE_VAR,Ops.CONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
+  (UPat(Ops.VCONST, dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
+  (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(
+    dtype=(dt:=least_upper_dtype(*[x.dtype for x in u.src])).vec(u.dtype.count), src=tuple(x.cast(dt) if x.dtype is not dt else x for x in u.src)))
 ])
