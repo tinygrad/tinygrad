@@ -128,6 +128,7 @@ class dtypes:
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
+  index: Final[DType] = DType.new(-1, 8, "index", 'I')
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
@@ -162,7 +163,7 @@ class dtypes:
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
-  sints = (int8, int16, int32, int64)
+  sints = (int8, int16, int32, int64, index)
   ints = uints + sints
   all = floats + ints + (bool,)
 
