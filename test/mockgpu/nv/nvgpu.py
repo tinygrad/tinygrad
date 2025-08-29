@@ -97,7 +97,10 @@ class GPFIFO:
     cargs = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
-    gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+    try:
+      gpuocelot_lib.ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt,
+        (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+    except Exception as e: print("failed to execute:", e)
     if qmd.release0_enable:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x10).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
