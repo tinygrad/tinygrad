@@ -1,8 +1,9 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
 from tinygrad.codegen import full_rewrite_to_sink
+from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
 def apply_rewrite(expr):
@@ -284,13 +285,17 @@ class TestSubstitute(unittest.TestCase):
     # the srcs are rewritten but we keep tag
     self.assertIs(ret, (b+4).replace(tag=1))
 
+matchers = strat.sampled_from([PatternMatcher, TrackedPatternMatcher])
+
 class TestRecurse(unittest.TestCase):
-  def test_no_inf_loop(self):
+  @given(matchers)
+  def test_no_inf_loop(self, PatternMatcher):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm)
 
-  def test_no_inf_loop_bottom_up(self):
+  @given(matchers)
+  def test_no_inf_loop_bottom_up(self, PatternMatcher):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm, bottom_up=True)
@@ -298,8 +303,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
@@ -307,8 +312,8 @@ class TestRecurse(unittest.TestCase):
   def test_inf_loop_bottom_up(self):
     a = UOp.variable('a', 0, 10)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.DEFINE_REG)),
-      (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
+      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)

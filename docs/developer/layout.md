@@ -6,11 +6,11 @@ Directories are listed in order of how they are processed.
 
 ---
 
-## tinygrad/kernelize
+## tinygrad/schedule
 
 Group UOps into kernels.
 
-::: tinygrad.kernelize.kernelize.get_kernelize_map
+::: tinygrad.schedule.kernelize.get_kernelize_map
     options:
         members: false
         show_labels: false
@@ -18,11 +18,11 @@ Group UOps into kernels.
 
 ---
 
-## tinygrad/opt
+## tinygrad/codegen/opt
 
 Transforms the ast into an optimized ast. This is where BEAM search and heuristics live.
 
-::: tinygrad.opt.get_optimized_ast
+::: tinygrad.codegen.opt.get_optimized_ast
     options:
         members: false
         show_labels: false

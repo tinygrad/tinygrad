@@ -8,21 +8,19 @@ onmessage = (e) => {
   const { graph, additions, ctxs } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-  if (additions.length !== 0) g.setNode("addition", {label:"", style:"fill: rgba(26, 27, 38, 0.5);", padding:0});
+  if (additions.length !== 0) g.setNode("addition", {label:"", className:"overlay", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
-    const idx = ref ? ctxs.findIndex(k => k.ref === ref) : -1;
-    if (idx != -1) label += `\ncodegen@${ctxs[idx].function_name}`;
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ref:idx==-1 ? null : idx, ...rest});
+    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, padding:NODE_PADDING, label, ref, id:k, ...rest});
     // add edges
     const edgeCounts = {}
-    for (const s of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
-    for (const s of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? edgeCounts[s] : null });
+    for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
+    for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
   dagre.layout(g);

@@ -118,7 +118,7 @@ class SpeedyResNet:
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
 hyp = {
-  'seed' : 200,
+  'seed' : 201,
   'opt': {
     'bias_lr':            1.76 * bias_scaler/512,
     'non_bias_lr':        1.76 / 512,
