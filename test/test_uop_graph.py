@@ -477,7 +477,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_load_with_float_in_index(self):
     with Context(IGNORE_OOB=0):
-      ridx = UOp.range(dtypes.int, 20, 0)
+      ridx = UOp.range(20, 0)
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       i = (ridx.cast(dtypes.float)*0.68).trunc().cast(dtypes.int)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
@@ -490,7 +490,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_cast_to_bool(self):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), (), 0)
-      ridx = UOp.range(dtypes.int, 20, 0)
+      ridx = UOp.range(20, 0)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(ridx, ridx.cast(dtypes.bool).logical_not()),))
       to_uops_list([ld0])
 
@@ -499,7 +499,7 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       mask = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
-      ridx = UOp.range(dtypes.int, 20, 0)
+      ridx = UOp.range(20, 0)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(ridx, ridx<16&mask),)))
       to_uops_list([ld0])
 
@@ -592,8 +592,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_switched_range_order(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     cf = UOp.const(dtypes.float, 0.0)
-    r1 = UOp.range(dtypes.int, 2, 0)
-    r2 = UOp.range(dtypes.int, 2, 1)
+    r1 = UOp.range(2, 0)
+    r2 = UOp.range(2, 1)
     alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
     store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
     uops = to_uops_list([store])
