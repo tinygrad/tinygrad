@@ -1,6 +1,5 @@
 # the job of the lowerer is to do indexing
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve
 
 # ***** indexing *****
@@ -12,7 +11,7 @@ class IndexContext:
   start: int = 0
 
 def shape_to_idx(s, axis_types, start=0):
-  return [UOp.range(dtypes.int, sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
+  return [UOp.range(sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
