@@ -418,7 +418,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.get_optimized_ast(), k.opts).uops:
+    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
@@ -429,7 +429,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.get_optimized_ast(), k.opts).uops:
+    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -442,7 +442,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.get_optimized_ast(), k.opts).uops:
+    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -453,7 +453,7 @@ class TestLinearizer(unittest.TestCase):
     r = (x@y).relu()
     k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
     # the uops graph is DEFINE_REG -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(k.ast, k.opts, k.applied_opts).uops
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
     for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
@@ -544,7 +544,7 @@ class TestLinearizer(unittest.TestCase):
     # shrink so that the dims do not collapse
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
     k = helper_linearizer_opt(t+1)[0]
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(k.ast, k.opts, k.applied_opts).uops
     idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg[0])
     assert idxs[0].arg == ('gidx0', 6), idxs[0].arg
@@ -584,7 +584,7 @@ class TestLinearizer(unittest.TestCase):
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       k = helper_linearizer_opt(t)[-1]
-      uops = get_program(k.get_optimized_ast(), k.opts).uops
+      uops = get_program(k.ast, k.opts, k.applied_opts).uops
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
@@ -616,7 +616,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
     k = helper_linearizer_opt(out)[-1]
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(k.ast, k.opts, k.applied_opts).uops
     # check that the float4 cast collapses
     store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
     for val in store_vals:
@@ -641,7 +641,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.randn((4,3,6,6)).realize()
     out = x.flip((0,1)).contiguous()
     k = helper_linearizer_opt(out)[-1]
-    store_val = [u.src[1] for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
+    store_val = [u.src[1] for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
     assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.VECTORIZE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -654,7 +654,7 @@ class TestLinearizer(unittest.TestCase):
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     k = helper_linearizer_opt(out, opts=[opt])[-1]
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(k.ast, k.opts, k.applied_opts).uops
     local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
     global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER][0]
@@ -674,7 +674,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
-    uops = get_program(k.get_optimized_ast(), k.opts).uops
+    uops = get_program(k.ast, k.opts, k.applied_opts).uops
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
     # the float4 value stores directly in lds and we skip upcast
@@ -700,7 +700,7 @@ class TestLinearizer(unittest.TestCase):
         Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)
     ]
     k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
-    out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
+    out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -718,7 +718,7 @@ class TestLinearizer(unittest.TestCase):
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
-    out = [u for u in get_program(k.get_optimized_ast(), k.opts).uops if u.op is Ops.STORE][0]
+    out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
@@ -1049,7 +1049,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   outbufs = [real_bufs[x.src[0].base.arg] for x in realized_ast.src]
   device = real_bufs[0].device
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.get_optimized_ast(), k.opts), device=device))
+  def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.ast, k.opts, k.applied_opts), device=device))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
