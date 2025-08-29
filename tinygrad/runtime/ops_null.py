@@ -1,3 +1,4 @@
+import functools
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -12,9 +13,9 @@ class NullRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
 class NullProgram:
-  def __init__(self, name:str, lib:bytes): self.name = name
+  def __init__(self, device:str, name:str, lib:bytes): self.device, self.name = device, name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    with cpu_profile(self.name, "NULL"): return 1e-4
+    with cpu_profile(self.name, self.device): return 1e-4
 
 class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
@@ -27,4 +28,4 @@ class NullGraph(MultiGraphRunner):
   def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3
 
 class NullDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, NullAllocator(self), NullRenderer(), Compiler(), NullProgram, NullGraph)
+  def __init__(self, device:str): super().__init__(device, NullAllocator(self), NullRenderer(), Compiler(), functools.partial(NullProgram, device), NullGraph)
