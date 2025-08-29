@@ -150,11 +150,11 @@ if __name__ == "__main__":
     return Tensor.stack(*loss).mean() / (batchsize*loss_batchsize_scaler), Tensor.stack(*acc).mean()
 
   Tensor.manual_seed(1337)
-  idx_shape = X_train.shape[0]
+  num_train_samples = X_train.shape[0]
 
   for epoch in range(math.ceil(hyp['misc']['train_epochs'])):
     gst = time.perf_counter()
-    tidxs = Tensor.arange(idx_shape, dtype='int')[Tensor.randperm(idx_shape)][:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
+    tidxs = Tensor.randperm(num_train_samples, dtype='int')[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)
     train_loss:float = 0
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       st = time.perf_counter()
