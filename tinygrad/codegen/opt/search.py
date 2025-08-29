@@ -1,5 +1,5 @@
-from typing import cast, Callable
-import itertools, functools, random, math, time, multiprocessing, traceback, signal, atexit
+from typing import cast
+import functools, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
 from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
@@ -201,15 +201,3 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if BEAM_DEBUG: print(f"BEAM_SEARCH: final tm={time_to_str(beam[0][1], w=0)}, applied_opts={beam[0][0].applied_opts}")
   return beam[0][0]
-
-def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
-  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
-  MAX_WORKGROUP = 1024
-  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
-  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-  def try_exec(local_size):
-    try: return _prg(*[x._buf for x in test_rawbuffers], global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)  # noqa: E501
-    except Exception: return float('inf')
-  ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
-  assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
-  return ret[1]

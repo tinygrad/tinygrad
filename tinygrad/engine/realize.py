@@ -1,8 +1,8 @@
-from typing import cast, Generator
-import time, pprint, decimal
+from typing import cast, Generator, Callable
+import time, pprint, decimal, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -59,6 +59,20 @@ class Runner:
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
 
+def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
+  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+  MAX_WORKGROUP = 1024
+  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+  def try_exec(local_size):
+    try:
+      return _prg(*[x._buf for x in test_rawbuffers],global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)],
+                  local_size=local_size, wait=True)
+    except Exception: return float('inf')
+  ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
+  assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
+  return ret[1]
+
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 4: print(p.src)
@@ -76,8 +90,6 @@ class CompiledRunner(Runner):
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
     global_size, local_size = self.p.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
-      # TODO: this is copied from get_program
-      from tinygrad.codegen.opt.search import optimize_local_size
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
@@ -160,10 +172,15 @@ class ExecItem:
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
+        header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(44-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
-               f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
+        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
+        flops_str = f"{flops*1e-9:9.2f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:9.2f} TFLOPS", 'green')
+        mem_str = f"{membw*1e-9:6.1f}|{ldsbw*1e-9:<7.1f} GB/s" if membw < 1e13 else colored(f"{membw*1e-12:6.1f}|{ldsbw*1e-12:<7.1f} TB/s", 'green')
+        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
+          f" {self.prg.display_name+' '*(44-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB"+
+          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
+          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
       self.prg.first_run = False
     return et
 

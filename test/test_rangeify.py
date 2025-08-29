@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
+from tinygrad.uop.ops import UOp
 
 N = 256
 
@@ -10,6 +11,26 @@ class TestRangeify(unittest.TestCase):
     A = Tensor.empty(N, N).sum(axis=1)
     ba = A.expand(N, N)
     ((ba+1).sum(axis=1) + (ba+2).sum(axis=0)).realize()
+
+  def test_partial_contig(self):
+    A = Tensor.empty(64, 64, 64)
+    ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
+    ret.realize()
+
+  def test_double_gemm_real(self):
+    def go():
+      with Context(DEBUG=0):
+        Tensor.manual_seed(1337)
+        A,B,C = [Tensor.randn(N, N) for _ in range(3)]
+        Tensor.realize(A, B, C)
+      GlobalCounters.reset()
+      return (A@B@C).realize()
+    rng = go()
+    with Context(RANGEIFY=0, DEBUG=2):
+      ref = go()
+      mse = ((rng-ref)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-2)
 
   def test_double_gemm(self):
     A = Tensor.empty(N, N)
@@ -99,7 +120,7 @@ class TestRangeify(unittest.TestCase):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 16, 128, 64
+    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
 
     # llama 8B
     #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
@@ -121,9 +142,6 @@ class TestRangeify(unittest.TestCase):
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 
-from tinygrad import dtypes
-from tinygrad.uop.ops import UOp
-
 # contiguous + reduce can support ranges?
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
@@ -132,7 +150,7 @@ class TestOuterworld(unittest.TestCase):
     t = Tensor.rand(10, 10).realize()
 
     # passthrough ranges
-    a = UOp.range(dtypes.int, 10, -1)
+    a = UOp.range(10, -1)
     sel = t[a]
     cpy = sel.contiguous(a).realize()
 
@@ -142,7 +160,7 @@ class TestOuterworld(unittest.TestCase):
     t = Tensor.rand(10, 10).realize()
 
     # passthrough ranges
-    a = UOp.range(dtypes.int, 10, -1)
+    a = UOp.range(10, -1)
     sel = t[9-a]
     cpy = sel.contiguous(a).realize()
 
@@ -154,7 +172,7 @@ class TestOuterworld(unittest.TestCase):
     x = Tensor.ones(3, 10, 2).contiguous()
 
     # vmap across axis 0
-    a = UOp.range(dtypes.int, 3, -1)
+    a = UOp.range(3, -1)
     out = f(x[a])
     out = out.contiguous(a)
 
@@ -168,7 +186,7 @@ class TestOuterworld(unittest.TestCase):
 
     manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
 
-    a = UOp.range(dtypes.int, 3, -1)
+    a = UOp.range(3, -1)
     x = x.assign(x @ W[a])
     out = x.contiguous(a)[-1].contiguous().realize()
 

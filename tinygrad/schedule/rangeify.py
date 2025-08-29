@@ -2,11 +2,11 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, colored, RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, KernelInfo, identity_element, sint, AxisType
+from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, identity_element, sint, AxisType
 
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
@@ -109,7 +109,7 @@ class RangeifyContext:
   # create ranges
   range_idx: int = 0
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
-    ret = UOp.range(dtypes.int, s, self.range_idx, axistype)
+    ret = UOp.range(s, self.range_idx, axistype)
     self.range_idx += 1
     return ret
 
@@ -196,7 +196,8 @@ def map_contiguous(ctx:RangeifyContext, x:UOp):
   ranges = []
   for s in x.shape[len(x.src)-1:]:
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.int, 0))
-  return x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device).forced_reshape(x.shape)
+  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device)
+  return ret.shrink(((0, prod(x.shape)),)).forced_reshape(x.shape)
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
@@ -415,12 +416,8 @@ def split_store(x:UOp):
   ctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=ctx, name="kernel split", bottom_up=True)
 
-  # get name
-  rng = sorted([u for u in ret.toposort() if u.op is Ops.RANGE], key=lambda x: x.arg)
-  name = "k"+colored('_', 'BLACK').join(['']+[colored(s.src[0].render(), "WHITE" if s in ret.src[2:] else "red") for s in rng])
-
   # NOTE: the hack for COPY is here
-  ret = ret.sink(arg=KernelInfo(name=name)) if ret.src[1].op is not Ops.COPY else ret.src[1]
+  ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
   return x.as_buf().assign(kernel)
 
