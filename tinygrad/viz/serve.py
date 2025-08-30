@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes
+import subprocess, ctypes, pathlib
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -289,17 +289,17 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:str|None) -> list:
-  if path is None or not os.path.exists(path): return []
-  with open(path, "rb") as f: return pickle.load(f)
+def load_pickle(path:pathlib.Path|None) -> list:
+  if path is None or not path.exists(): return []
+  with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
-  parser.add_argument('--profile', type=str, help='Path profile', default=None)
+  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=None)
+  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=None)
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
