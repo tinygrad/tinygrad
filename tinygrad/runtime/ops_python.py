@@ -73,8 +73,8 @@ class PythonProgram:
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
-          if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
-          elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
+          if arg[0] == 'g': ul[i] = [idxs[2-int(arg[-1])]] * warp_size
+          elif arg[0] == 'l': ul[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: ul[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
           ret:list = []
