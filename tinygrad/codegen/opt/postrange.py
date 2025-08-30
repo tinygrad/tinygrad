@@ -70,7 +70,7 @@ class SimpleKernel:
     # filter any not in local stores
     local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL) \
                         or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
-    for ls in local_store_rngs: store_rngs = [x for x in store_rngs if x in ls]
+    for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
     store_rng = [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE] if store_rngs else []
     rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rngs]
@@ -111,9 +111,13 @@ class SimpleKernel:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
     return replaced_rng, new_rng
 
-  def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
+  def apply_opt(self, opt:Opt, append_opt:bool=True):
+    if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
+      check(self.opts.has_local, "locals needed for opt")
+
     try:
       if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
+        check(opt.axis is not None)
         rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][opt.axis]
         check(rng.arg[-1] in {AxisType.REDUCE}, "can only unroll/upcast reduce")
       else:
@@ -147,7 +151,10 @@ class SimpleKernel:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return False
       in0, in1 = mul.src
-      tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      try:
+        tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
+      except IndexError:
+        raise KernelOptError(f"invalid tensor core choice {tc_select}")
       for tc in tensor_cores:
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
