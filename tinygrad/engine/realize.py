@@ -34,8 +34,9 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   try:
     uops = full_rewrite(ast, renderer)
-  except RuntimeError:
+  except RuntimeError as e:
     print("***** LINEARIZE FAILURE *****")
+    print(e)
     print(f"ast = {ast}")
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
