@@ -312,14 +312,16 @@ if __name__ == '__main__':
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
-  with open(args.input, 'rb') as fd: input_bytes = fd.read()
+  if args.command == "create": input_bytes = load_pickle(pathlib.Path(args.input))
+  else:
+    with open(args.input, 'rb') as fd: input_bytes = fd.read()
 
   match args.command:
     case 'print':
       rgp = RGP.from_bytes(input_bytes)
       rgp.print()
     case 'create':
-      rgp = RGP.from_profile(load_pickle(pathlib.Path(args.input)), device=args.device)
+      rgp = RGP.from_profile(input_bytes, device=args.device)
       # rgp.to_bytes() # fixup
       # rgp.print()
     case 'repl':
