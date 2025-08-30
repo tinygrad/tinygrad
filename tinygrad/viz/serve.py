@@ -290,15 +290,15 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:str|None) -> list:
-  if path is None or not os.path.exists(path): return []
-  if (p:=pathlib.Path(path)).is_dir():
-    start_time, traces = (p/"start").stat().st_mtime_ns if (p/"start").exists() else 0, []
-    for e in p.iterdir():
+def load_pickle(path:pathlib.Path|None) -> list:
+  if path is None or not path.exists(): return []
+  if path.is_dir():
+    start_time, traces = (path/"start").stat().st_mtime_ns if (path/"start").exists() else 0, []
+    for e in path.iterdir():
       if (stat:=e.stat()).st_mtime_ns < start_time: e.unlink(missing_ok=True)
       elif stat.st_size:
         with e.open("rb") as f: traces.append(pickle.load(f))
-    (p/"start").unlink(missing_ok=True)
+    (path/"start").unlink(missing_ok=True)
     return list(sum(traces, []))
   with open(path, "rb") as f: return pickle.load(f)
 
@@ -307,8 +307,8 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernels', type=str, help='Path to kernels', default=None)
-  parser.add_argument('--profile', type=str, help='Path profile', default=None)
+  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=None)
+  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=None)
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
