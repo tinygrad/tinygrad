@@ -1,6 +1,6 @@
 import math, itertools
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, sint, ssimplify, AxisType, KernelInfo, PatternMatcher, UPat, graph_rewrite
 from tinygrad.helpers import DEBUG, BEAM, getenv
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.renderer import Renderer
@@ -46,7 +46,7 @@ class RKernel(Kernel):
     self.maxarg = max([x.arg[0] for x in self.rng]) if len(self.rng) else 0
 
   def substitute(self) -> UOp:
-    self.ast = self.ast.substitute(self.replaces)
+    self.ast = graph_rewrite(self.ast.substitute(self.replaces), pm_flatten_range)
     self.replaces = {}
     return self.ast
 
@@ -104,7 +104,7 @@ class RKernel(Kernel):
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
     reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
-    if not len(reduceops): raise KernelOptError("no reduce ops")
+    if not len(reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
@@ -113,6 +113,9 @@ class RKernel(Kernel):
       tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
       for tc in tensor_cores:
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
+          # early realize for TC
+          self.substitute()
+
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
@@ -142,9 +145,6 @@ class RKernel(Kernel):
             ne.append(self.apply_opt(Opt(OptOps.UNROLL, reduce_axis, amt), append_opt=False))
 
           if use_tensor_cores != 2:
-            # early realize for TC
-            self.substitute()
-
             # fix the srcs
             reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
             tne = [x.replace(tag=1) for x in ne]
