@@ -81,7 +81,7 @@ class SimpleKernel:
       i += 1
 
   def colored_shape(self, pad:int|None=None, dense=False) -> str:
-    return ' '.join([colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+    return ' '.join([colored(f'{x.src[0].render():4s}', axis_colors[x.arg[-1]]) for x in self.rngs])
 
   def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False):
     try:
@@ -100,11 +100,11 @@ class SimpleKernel:
     new_rng = UOp.range(amount, self.maxarg+1, new_type)
 
     if old_sz == 1:
-      self.ast.substitute({rng:new_rng}, name=f"shift {axis} {amount}")
+      self.ast = self.ast.substitute({rng:new_rng}, name=f"shift {axis} {amount}")
     else:
       replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
       sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-      self.ast.substitute({rng:sub_axis}, name=f"shift {axis} {amount}")
+      self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {axis} {amount}")
     return new_rng
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
