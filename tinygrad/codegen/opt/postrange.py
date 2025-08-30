@@ -41,9 +41,10 @@ class SimpleKernel:
 
   def copy(self): return SimpleKernel(self.get_optimized_ast(), self.opts)
 
-  def get_optimized_ast(self):
-    name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
-    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)))
+  def get_optimized_ast(self, name_override:str|None=None):
+    if name_override is not None: name = name_override
+    else: name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def convert_loop_to_global(self):
     if not self.opts.has_local: return None
@@ -92,17 +93,18 @@ class SimpleKernel:
       amount = rng.src[0].arg
       old_sz = 1
     else:
+      if rng.src[0].divides(amount) is None: raise KernelOptError("can't divide that")
       old_sz = rng.src[0].arg // amount
       assert old_sz > 0, f"bad old_sz on {axis} {amount} {rng}"
 
     new_rng = UOp.range(amount, self.maxarg+1, new_type)
 
     if old_sz == 1:
-      self.ast.substitute({rng:new_rng})
+      self.ast.substitute({rng:new_rng}, name=f"shift {axis} {amount}")
     else:
       replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
       sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-      self.ast.substitute({rng:sub_axis})
+      self.ast.substitute({rng:sub_axis}, name=f"shift {axis} {amount}")
     return new_rng
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
@@ -134,7 +136,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  return k.get_optimized_ast().replace(tag=1)
+  return k.get_optimized_ast()
 
 pm_postrange_opt = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), apply_opts),
