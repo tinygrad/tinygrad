@@ -16,10 +16,9 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
 
 # real VIZ=1 pickles these tracked values
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
-from tinygrad.viz import serve
-serve.contexts = [(tracked_keys, tracked_ctxs, uop_fields)]
+traces = [(tracked_keys, tracked_ctxs, uop_fields)]
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
-def get_viz_list(): return get_metadata(serve.contexts)
+def get_viz_list(): return get_metadata(traces)
 
 class BaseTestViz(unittest.TestCase):
   def setUp(self):

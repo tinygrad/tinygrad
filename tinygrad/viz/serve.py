@@ -26,13 +26,13 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # ** Metadata for a track_rewrites scope
 
-contexts:dict[int, tuple[TracingKey, list[TrackedGraphRewrite], dict[int, dict]]] = {}
 ref_map:dict[Any, int] = {}
-def get_metadata(bufs:list[tuple]) -> list[dict]:
+traces:dict[int, tuple] = {}
+def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
   ret = []
-  for keys,ctxs,uops in bufs:
-    for k,v in zip(keys, ctxs):
-      contexts[i:=len(contexts)] = (k, v, uops)
+  for keys,contexts,uop_fields in trace_bufs:
+    for k,v in zip(keys, contexts):
+      traces[i:=len(traces)] = (k, v, uop_fields)
       steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
                 "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
       ret.append(r:={"name":k.display_name, "steps":steps})
@@ -95,7 +95,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
 
 @functools.cache
 def _reconstruct(a:int, i:int):
-  op, dtype, src, arg, *rest = contexts[i][2][a]
+  op, dtype, src, arg, *rest = traces[i][2][a]
   arg = type(arg)(_reconstruct(arg.ast, i), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s, i) for s in src), arg, *rest)
 
@@ -145,7 +145,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     name, info = e.name, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      if isinstance(p:=contexts[ref][0].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+      if isinstance(p:=traces[ref][0].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
                f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
     elif isinstance(e.name, TracingKey):
@@ -194,6 +194,7 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
   for k,v in sorted(dev_events.items(), key=lambda k: k[1][0][0]):
+    v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
@@ -230,7 +231,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_disassembly(ctx:list[str]):
-  if not isinstance(prg:=contexts[int(ctx[0])][0].ret, ProgramSpec): return
+  if not isinstance(prg:=traces[int(ctx[0])][0].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
@@ -258,7 +259,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
-      else: return self.stream_json(get_details(contexts[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
+      else: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
@@ -304,7 +305,7 @@ def load_pickle(path:pathlib.Path|None) -> list:
         with e.open("rb") as f: ret.append(pickle.load(f))
     start.unlink(missing_ok=True)
     return list(sum(ret, []))
-  with open(path, "rb") as f: return [pickle.load(f)]
+  with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
@@ -323,7 +324,6 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  # NOTE: this context is a tuple of list[keys] and list[values]
   ctxs = get_metadata(load_pickle(args.kernels))
 
   profile_ret = get_profile(profile:=load_pickle(args.profile))
