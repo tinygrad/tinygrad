@@ -219,7 +219,8 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", tc.amx
 
   def render(self, uops:list[UOp]) -> str:
-    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
+    # the value of SPECIAL comes from local/global_size, not form its source
+    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):
