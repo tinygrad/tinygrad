@@ -110,7 +110,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def sparents(self:UOp) -> dict[UOp, None]: return {self:None, **self.parents}
 
-  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None, gate_parents_instead_of_self:bool=False) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
@@ -120,6 +120,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its parents
           for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
+        elif gate_parents_instead_of_self: ret[node] = None  # we wont continue into the paretns but we add this node
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
@@ -927,6 +928,7 @@ if TRACK_MATCH_STATS or PROFILE:
 # *** simple graph rewrite engine ***
 
 class RewriteNotReady(Exception): pass
+class DontRewriteParents(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
@@ -954,17 +956,19 @@ class RewriteContext:
       if n in self.replace: continue  # skip any nodes we have seen
       try:
         if stage == 0:
-          # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-          if self.bpm is not None:
-            # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
-            test_n: UOp|None = n
-            seen = set()
-            while test_n is not None:
-              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-              seen.add(test_n)
-              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
-          stack.append((n, 1, new_n))
-          for x in reversed(new_n.src): stack.append((x, 0, x))
+          try:
+            # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+            if self.bpm is not None:
+              # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
+              test_n: UOp|None = n
+              seen = set()
+              while test_n is not None:
+                if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+                seen.add(test_n)
+                new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+            stack.append((n, 1, new_n))
+            for x in reversed(new_n.src): stack.append((x, 0, x))
+          except DontRewriteParents:self.replace[n] = new_n
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
           except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from

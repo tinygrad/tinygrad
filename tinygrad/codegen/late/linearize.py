@@ -2,7 +2,7 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, DontRewriteParents
 from tinygrad.helpers import dedup, all_same, flatten, BLOCK_REORDER
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
@@ -71,20 +71,17 @@ class BlockContext:
   child_count: dict[UOp, int]
   block_ctxs: dict[UOp, tuple[UOp, ...]]
   child_ctxs: dict[UOp, tuple[UOp, ...]]
-  dont_linearize: dict[UOp, None]
   def last_ctx(self, u): return self.child_ctxs.get(u, self.block_ctxs[u])
   @staticmethod
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
-    ctx = BlockContext({}, {}, {}, {})
-    for u in sink.toposort():
+    ctx = BlockContext({}, {}, {})
+    for u in sink.toposort(gate=lambda u:u.op is not Ops.SPECIAL, gate_parents_instead_of_self=True):
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
-      if u.op is Ops.SPECIAL:  # the src of a special is calculated outside the kernel
-        for v in u.toposort(): ctx.dont_linearize[v] = None
-      else:
-        # get children and accumulate the last_ctx
+      # get children and accumulate the last_ctx
+      if u.op is not Ops.SPECIAL:
         for s in u.src:
           # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
           ctx.child_count[s] += 1
@@ -113,7 +110,6 @@ def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp
   return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
-  if x in ctx.dont_linearize: return None
   if x.op is Ops.BLOCKSTART:
     current_ctx, child_ctx = x.arg
     lst = list(x.src)
@@ -159,8 +155,11 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
+def raise_dont_rewrite_parents(): raise DontRewriteParents
+
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
+  (UPat(Ops.SPECIAL), raise_dont_rewrite_parents)
 ])
 
 # ***** blockend merging ****
