@@ -28,11 +28,14 @@ class SimpleKernel:
   @property
   def rngs(self): return sorted([u for u in self.ast.parents if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: x.arg)
   @property
+  def full_shape(self): return [x.vmax+1 for x in self.rngs]
+  @property
+  def axis_types(self): return [x.arg[-1] for x in self.rngs]
+  @property
   def maxarg(self): return max([x.arg[0] for x in self.rngs], default=0)
 
   @property
   def termination(self):
-     # NOTE: this one is better than the one in kernel.py, which is kind of a problem
     terminators = [u for u in self.ast.parents if u.op in {Ops.REDUCE, Ops.STORE}]
     termination = {}
     for t in terminators:
@@ -44,6 +47,7 @@ class SimpleKernel:
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
     else: name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+    self.ast = graph_rewrite(self.ast, pm_flatten_range)
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def convert_loop_to_global(self):
@@ -80,7 +84,7 @@ class SimpleKernel:
             continue
       i += 1
 
-  def colored_shape(self, pad:int|None=None, dense=False) -> str:
+  def colored_shape(self) -> str:
     return ' '.join([colored(f'{x.src[0].render():2s}', axis_colors[x.arg[-1]]) for x in self.rngs])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
@@ -89,23 +93,21 @@ class SimpleKernel:
     assert old_sz > 0, f"bad old_sz on {amount} {rng}"
 
     new_rng = UOp.range(amount, self.maxarg+1, new_type)
-
-    if old_sz == 1:
-      self.ast = self.ast.substitute({rng:new_rng}, name=f"shift {rng.arg[0]} {amount}")
-    else:
-      replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
-      sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-      self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
-    return new_rng
+    replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
+    sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
     try:
       if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
         rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][opt.axis]
+        check(rng.arg[-1] in {AxisType.REDUCE}, "can only unroll/upcast reduce")
       else:
         rng = self.rngs[opt.axis]
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP})
     except IndexError:
       raise KernelOptError(f"bad opt {opt} on axis")
+
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
       OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
@@ -115,7 +117,7 @@ class SimpleKernel:
       amt = rng.src[0].arg if opt.arg == 0 else opt.arg
       if opt.op is OptOps.UNROLL: check(amt <= 32, "don't unroll more than 32")
       if opt.op is OptOps.UPCAST: check(amt <= 16, "don't upcast more than 16")
-      self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op == OptOps.GROUPTOP)
+      self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
@@ -129,11 +131,14 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = SimpleKernel(ast, ctx)
   k.convert_loop_to_global()
+  for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
+  """
   k.simplify_merge_adjacent()
   if BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+  """
   return k.get_optimized_ast()
 
 pm_postrange_opt = PatternMatcher([
