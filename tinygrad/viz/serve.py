@@ -307,14 +307,15 @@ def load_pickle(path:pathlib.Path|None) -> list:
   if path is None or not path.exists(): return ret
   if path.is_file():
     with open(path, "rb") as f: ret.append(pickle.load(f))
+  # if it's a directory, load the most recent files and remove stales
   elif path.is_dir():
-    start_time = (path/"start").stat().st_mtime_ns if (path/"start").exists() else 0
+    st = start.stat().st_mtime_ns if (start:=path/"start").exists() else 0
     for e in path.iterdir():
-      if (stat:=e.stat()).st_mtime_ns < start_time: e.unlink(missing_ok=True)
-      elif stat.st_size:
+      if (stat:=e.stat()).st_mtime_ns < st: e.unlink(missing_ok=True)
+      elif stat.st_size != 0:
         with e.open("rb") as f: ret.append(pickle.load(f))
-    (path/"start").unlink(missing_ok=True)
-  return {"rewrites":merge_rewrites}.get(path.stem, lambda lst:list(sum(lst,[])))(ret)
+    start.unlink(missing_ok=True)
+  return merge_rewrites(ret) if path.stem == "rewrites" else list(sum(ret, []))
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True

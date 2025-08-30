@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, ctypes, struct, hashlib, pickle, code, typing, functools, pathlib
+import argparse, ctypes, struct, hashlib, code, typing, functools, pathlib
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
@@ -145,7 +145,7 @@ class RGP:
     return RGP(file_header, chunks)
   @staticmethod
   def from_profile(profile_pickled, device:str|None=None):
-    profile: list[ProfileEvent] = pickle.loads(profile_pickled)
+    profile: list[ProfileEvent] = profile_pickled
     device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD')}
     if device is None:
       if len(device_events) == 0: raise RuntimeError('No supported devices found in profile')
@@ -312,14 +312,14 @@ if __name__ == '__main__':
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
-  input_bytes = load_pickle(pathlib.Path(args.input))
+  with open(args.input, 'rb') as fd: input_bytes = fd.read()
 
   match args.command:
     case 'print':
       rgp = RGP.from_bytes(input_bytes)
       rgp.print()
     case 'create':
-      rgp = RGP.from_profile(input_bytes, device=args.device)
+      rgp = RGP.from_profile(load_pickle(pathlib.Path(args.input)), device=args.device)
       # rgp.to_bytes() # fixup
       # rgp.print()
     case 'repl':
