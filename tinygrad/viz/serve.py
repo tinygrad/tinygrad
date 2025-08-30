@@ -91,16 +91,16 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 @functools.cache
-def _reconstruct(a:int):
-  op, dtype, src, arg, *rest = contexts[2][a]
-  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
+def _reconstruct(a:int, i:int):
+  op, dtype, src, arg, *rest = contexts[2][i][a]
+  arg = type(arg)(_reconstruct(arg.ast, i), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s, i) for s in src), arg, *rest)
 
-def get_details(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+def get_details(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
+  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink, i)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc in tqdm(ctx.matches):
-    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
+    replaces[u0:=_reconstruct(u0_num, i)] = u1 = _reconstruct(u1_num, i)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
@@ -255,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
-      else: return self.stream_json(get_details(contexts[1][int(query["ctx"][0])][int(query["idx"][0])]))
+      else: return self.stream_json(get_details(contexts[1][j:=int(query["ctx"][0])][int(query["idx"][0])], contexts[3][j]))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
@@ -290,17 +290,31 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
+def merge_rewrites(traces:list) -> list:
+  cpu_uops:dict[int, dict] = {}
+  cpu_ctxs:dict[int, int] = {}
+  merged_keys:list[TracingKey] = []
+  merged_ctxs:list[list[TrackedGraphRewrite]] = []
+  for i,(keys,ctxs,uops) in enumerate(traces):
+    for j in range(s:=len(merged_keys), s+len(keys)): cpu_ctxs[j] = i
+    cpu_uops[i] = uops
+    merged_keys += keys
+    merged_ctxs += ctxs
+  return [merged_keys, merged_ctxs, cpu_uops, cpu_ctxs]
+
 def load_pickle(path:pathlib.Path|None) -> list:
-  if path is None or not path.exists(): return []
-  if path.is_dir():
-    start_time, traces = (path/"start").stat().st_mtime_ns if (path/"start").exists() else 0, []
+  ret:list = []
+  if path is None or not path.exists(): return ret
+  if path.is_file():
+    with open(path, "rb") as f: ret.append(pickle.load(f))
+  elif path.is_dir():
+    start_time = (path/"start").stat().st_mtime_ns if (path/"start").exists() else 0
     for e in path.iterdir():
       if (stat:=e.stat()).st_mtime_ns < start_time: e.unlink(missing_ok=True)
       elif stat.st_size:
-        with e.open("rb") as f: traces.append(pickle.load(f))
+        with e.open("rb") as f: ret.append(pickle.load(f))
     (path/"start").unlink(missing_ok=True)
-    return list(sum(traces, []))
-  with open(path, "rb") as f: return pickle.load(f)
+  return {"rewrites":merge_rewrites}.get(path.stem, lambda lst:list(sum(lst,[])))(ret)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
