@@ -21,7 +21,7 @@ being dispatched starting from different simds). More info in comments in ops_am
 ## Converting pickled profile with SQTT data into RGP file
 
 ```bash
-extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+extra/sqtt/rgptool.py create "/tmp/tinygrad_trace/profile.$USER" -o /tmp/gpu0.rgp
 ```
 
 Then load gpu0.rgp into Radeon GPU Profiler. It works just fine both in wine (macos, native version available for linux) and via ssh X forwarding
@@ -29,5 +29,5 @@ Then load gpu0.rgp into Radeon GPU Profiler. It works just fine both in wine (ma
 If multiple gpus are used you can select which one to export with `-d` like this:
 
 ```bash
-extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -d 'AMD:5' -o /tmp/gpu5.rgp
+extra/sqtt/rgptool.py create "/tmp/tinygrad_trace/profile.$USER" -d 'AMD:5' -o /tmp/gpu5.rgp
 ```

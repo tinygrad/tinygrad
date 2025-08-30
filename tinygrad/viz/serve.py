@@ -296,15 +296,15 @@ def reloader():
 
 def load_pickle(path:pathlib.Path|None) -> list:
   if path is None or not path.exists(): return []
-  # load the most recent files and remove stales
+  # load the most recent files and remove stale traces
   if path.is_dir():
     st, ret = start.stat().st_mtime_ns if (start:=path/"start").exists() else 0, []
     for e in path.iterdir():
-      if (stat:=e.stat()).st_mtime_ns < st: e.unlink(missing_ok=True)
+      if (stat:=e.stat()).st_mtime_ns < st: e.unlink()
       elif stat.st_size != 0:
-        with e.open("rb") as f: ret.append(pickle.load(f))
+        with e.open("rb") as f: ret.extend(pickle.load(f))
     start.unlink(missing_ok=True)
-    return list(sum(ret, []))
+    return ret
   with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
