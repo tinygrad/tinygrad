@@ -226,10 +226,15 @@ runs:
       if: inputs.ocelot == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        pkgs=(cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses)
+        pkgs=(cmake ninja llvm@15 zlib glew flex bison boost@1.85 zstd ncurses)
         for f in "${pkgs[@]}"; do
           brew ls --versions "$f" >/dev/null 2>&1 || brew install --quiet "$f"
         done
+
+        # Fix boost 1.85 for gpuocelot
+        ln -s /opt/homebrew/opt/boost@1.85 /opt/homebrew/opt/boost || true
+        ln -s /opt/homebrew/opt/boost/lib/libboost_atomic-mt.dylib /opt/homebrew/opt/boost/lib/libboost_atomic.dylib || true
+        ln -s /opt/homebrew/opt/boost/lib/libboost_thread-mt.dylib /opt/homebrew/opt/boost/lib/libboost_thread.dylib || true
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true'
       id: cache-build

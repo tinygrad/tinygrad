@@ -26,7 +26,7 @@ if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or), operator.mod]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
-                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal), (Tensor.cos, np.cos)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -35,7 +35,9 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
-if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
+if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU":
+  unary_operations.remove((Tensor.sin, np.sin))
+  unary_operations.remove((Tensor.cos, np.cos))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -68,6 +70,8 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
+  # TODO: cos does not match for large input
+  if op[0] == Tensor.cos and abs(a) > 100: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())

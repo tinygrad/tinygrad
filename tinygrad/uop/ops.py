@@ -832,7 +832,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
     def __wrapper(*args, **kwargs):
       fn = key = func.__name__
       if TRACK_MATCH_STATS >= 2:
-        tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
+        tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
         tracked_ctxs.append([])
       with cpu_profile(key, TINY) as e:
         ret = func(*args, **kwargs)
@@ -840,7 +840,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
         name_ret = name(*args, **kwargs, ret=ret)
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
-        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys, cat=fn)
+        e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if getenv("CAPTURE_PROCESS_REPLAY") and replay:
         # find the unittest frame we're capturing in
         frm = sys._getframe(1)
