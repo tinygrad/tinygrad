@@ -79,7 +79,7 @@ class CompiledRunner(Runner):
     self.p:ProgramSpec = p
     if precompiled is not None: self.lib = precompiled
     else:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,), cat="compiler"), "TINY"):
+      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
         self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg

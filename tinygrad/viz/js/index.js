@@ -191,7 +191,7 @@ async function renderProfiler() {
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
-  // color by key (name/category/device)
+  // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
@@ -210,7 +210,7 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), cat:optional(u8()), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -218,7 +218,7 @@ async function renderProfiler() {
           depth = levels.length;
           levels.push(et);
         } else levels[depth] = et;
-        if (depth === 0) colorKey = e.cat ?? e.name;
+        if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
         const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
