@@ -110,7 +110,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def sparents(self:UOp) -> dict[UOp, None]: return {self:None, **self.parents}
 
-  def toposort(self, gate:Callable|None=None, gate_parents_instead_of_self:bool=False) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
@@ -120,7 +120,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its parents
           for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
-        elif gate_parents_instead_of_self: ret[node] = None  # we wont continue into the paretns but we add this node
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 

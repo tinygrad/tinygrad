@@ -76,16 +76,16 @@ class BlockContext:
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
-    for u in sink.toposort(gate=lambda u:u.op is not Ops.SPECIAL, gate_parents_instead_of_self=True):
+    for u in sink.toposort(gate=lambda u:u.op is not Ops.SPECIAL):
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
       # get children and accumulate the last_ctx
-      if u.op is not Ops.SPECIAL:
-        for s in u.src:
-          # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
-          ctx.child_count[s] += 1
-          this_block_ctx += ctx.last_ctx(s)
+      for s in u.src:
+        if s.op is Ops.SPECIAL: continue
+        # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
+        ctx.child_count[s] += 1
+        this_block_ctx += ctx.last_ctx(s)
 
       # save the block ctx. SINK never has anything
       ctx.block_ctxs[u] = _sort_ctx(this_block_ctx) if u.op is not Ops.SINK else ()
@@ -143,7 +143,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs.get(u,()), current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
