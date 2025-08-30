@@ -192,6 +192,8 @@ class Profiling(contextlib.ContextDecorator):
               colored(_format_fcn(fcn).ljust(50), "yellow"),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
+TINY:str = f"TINY:{os.getpid()}"
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
@@ -205,8 +207,6 @@ class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decim
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent): device:str; name:str; ts:decimal.Decimal; key:Any; arg:dict=field(default_factory=dict) # noqa: E702
-
-TINY = f"TINY:{os.getpid()}"
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager

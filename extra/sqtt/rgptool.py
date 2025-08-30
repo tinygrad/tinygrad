@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
+import argparse, ctypes, struct, hashlib, pickle, code, typing, functools, pathlib
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.helpers import round_up, flatten, all_same
+from tinygrad.viz.serve import load_pickle
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -306,12 +307,12 @@ class RGP:
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='rgptool', description='A tool to create (from pickled tinygrad profile), inspect and modify Radeon GPU Profiler files')
   parser.add_argument('command')
-  parser.add_argument('input')
+  parser.add_argument('input', type=pathlib.Path)
   parser.add_argument('-d', '--device')
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
-  with open(args.input, 'rb') as fd: input_bytes = fd.read()
+  input_bytes = load_pickle(args.input)
 
   match args.command:
     case 'print':
