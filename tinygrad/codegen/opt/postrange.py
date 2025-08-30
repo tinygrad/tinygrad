@@ -3,7 +3,7 @@ from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import colored, BEAM, getenv
-from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check
 from tinygrad.renderer import Renderer
 
 def flatten_range(r:UOp):
@@ -81,43 +81,41 @@ class SimpleKernel:
       i += 1
 
   def colored_shape(self, pad:int|None=None, dense=False) -> str:
-    return ' '.join([colored(f'{x.src[0].render():4s}', axis_colors[x.arg[-1]]) for x in self.rngs])
+    return ' '.join([colored(f'{x.src[0].render():2s}', axis_colors[x.arg[-1]]) for x in self.rngs])
 
-  def shift_to(self, axis:int, amount:int, new_type:AxisType, top:bool=False):
-    try:
-      rng = self.rngs[axis]
-    except IndexError:
-      raise KernelOptError(f"bad axis {axis}")
-
-    if amount == 0:
-      amount = rng.src[0].arg
-      old_sz = 1
-    else:
-      if rng.src[0].divides(amount) is None: raise KernelOptError("can't divide that")
-      old_sz = rng.src[0].arg // amount
-      assert old_sz > 0, f"bad old_sz on {axis} {amount} {rng}"
+  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
+    if rng.src[0].divides(amount) is None: raise KernelOptError("can't divide that")
+    old_sz = rng.src[0].arg // amount
+    assert old_sz > 0, f"bad old_sz on {amount} {rng}"
 
     new_rng = UOp.range(amount, self.maxarg+1, new_type)
 
     if old_sz == 1:
-      self.ast = self.ast.substitute({rng:new_rng}, name=f"shift {axis} {amount}")
+      self.ast = self.ast.substitute({rng:new_rng}, name=f"shift {rng.arg[0]} {amount}")
     else:
       replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
       sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-      self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {axis} {amount}")
+      self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
     return new_rng
 
   def apply_opt(self, opt:Opt, append_opt:bool=True) -> UOp|None:
-    if opt.op is OptOps.LOCAL:
-      self.shift_to(opt.axis, opt.arg, AxisType.LOCAL)
-    elif opt.op is OptOps.UPCAST:
-      self.shift_to(opt.axis, opt.arg, AxisType.UPCAST)
-    elif opt.op is OptOps.UNROLL:
-      try:
-        r_axis = [x for x in self.rngs if x.arg[1] is AxisType.REDUCE][opt.axis]
-      except IndexError:
-        raise KernelOptError(f"bad reduce axis {opt.axis}")
-      self.shift_to(self.rngs.index(r_axis), opt.arg, AxisType.UNROLL)
+    try:
+      if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
+        rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][opt.axis]
+      else:
+        rng = self.rngs[opt.axis]
+    except IndexError:
+      raise KernelOptError(f"bad opt {opt} on axis")
+    opt_to_at = {
+      OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
+      OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
+      OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
+
+    if opt.op in opt_to_at:
+      amt = rng.src[0].arg if opt.arg == 0 else opt.arg
+      if opt.op is OptOps.UNROLL: check(amt <= 32, "don't unroll more than 32")
+      if opt.op is OptOps.UPCAST: check(amt <= 16, "don't upcast more than 16")
+      self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op == OptOps.GROUPTOP)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
