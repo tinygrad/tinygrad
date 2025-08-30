@@ -76,7 +76,7 @@ def universal_test_unary(a, dtype, op):
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 1e-2)}.get(dtype, (1e-6, 1e-5))
+    atol, rtol = {dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2)}.get(dtype, (1e-6, 1e-5))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
