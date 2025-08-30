@@ -7,7 +7,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, TINY
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -834,7 +834,7 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
       if TRACK_MATCH_STATS >= 2:
         tracked_keys.append(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,), cat=fn))
         tracked_ctxs.append([])
-      with cpu_profile(key, "TINY") as e:
+      with cpu_profile(key, TINY) as e:
         ret = func(*args, **kwargs)
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
@@ -862,7 +862,7 @@ def track_matches(func):
       depth = len(active_rewrites)
       tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
+    with cpu_profile(kwargs.get("name", "<unnamed>"), TINY, display=tracking):
       ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret

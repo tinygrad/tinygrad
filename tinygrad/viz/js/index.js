@@ -137,7 +137,7 @@ function formatTime(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+const colorScheme = {TINY:["#1d2e62", "#9362CC"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
@@ -219,7 +219,7 @@ async function renderProfiler() {
           levels.push(et);
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.cat ?? e.name;
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
+        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size));
         const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
