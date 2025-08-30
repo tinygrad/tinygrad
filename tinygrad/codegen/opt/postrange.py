@@ -3,7 +3,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, USE_TC
+from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG, USE_TC
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 
@@ -191,7 +191,6 @@ class SimpleKernel:
             srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
 
             # get reduce/upcast axes for the tensor cores
-            print(self.shape_str())
             tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
             base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
             tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
@@ -224,16 +223,14 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = SimpleKernel(ast, ctx)
   k.convert_loop_to_global()
-  if ast.arg is not None and ast.arg.opts_to_apply is not None:
-    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  # move beam here?
-  """
-  k.simplify_merge_adjacent()
-  if BEAM >= 1:
+  if POSTBEAM >= 1:
+    k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
-    k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  """
+    k = beam_search(k, rawbufs, POSTBEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+  else:
+    if ast.arg is not None and ast.arg.opts_to_apply is not None:
+      for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   return k.get_optimized_ast()
 
 pm_postrange_opt = PatternMatcher([
