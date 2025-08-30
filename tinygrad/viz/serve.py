@@ -26,20 +26,23 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # ** Metadata for a track_rewrites scope
 
+contexts:dict[int, tuple[TracingKey, list[TrackedGraphRewrite], dict[int, dict]]] = {}
 ref_map:dict[Any, int] = {}
-def get_metadata(keys:list[TracingKey], contexts:list[list[TrackedGraphRewrite]]) -> list[dict]:
+def get_metadata(bufs:list[tuple]) -> list[dict]:
   ret = []
-  for i,(k,v) in enumerate(zip(keys, contexts)):
-    steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
-              "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-    ret.append(r:={"name":k.display_name, "steps":steps})
-    # use the first key to get runtime profiling data about this context
-    if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
-    # program spec metadata
-    if isinstance(k.ret, ProgramSpec):
-      steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
-      r["fmt"] = k.ret.src
-    for key in k.keys: ref_map[key] = i
+  for keys,ctxs,uops in bufs:
+    for k,v in zip(keys, ctxs):
+      contexts[i:=len(contexts)] = (k, v, uops)
+      steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
+                "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
+      ret.append(r:={"name":k.display_name, "steps":steps})
+      # use the first key to get runtime profiling data about this context
+      if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
+      # program spec metadata
+      if isinstance(k.ret, ProgramSpec):
+        steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
+        r["fmt"] = k.ret.src
+      for key in k.keys: ref_map[key] = i
   return ret
 
 # ** Complete rewrite details for a graph_rewrite call
@@ -92,7 +95,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
 
 @functools.cache
 def _reconstruct(a:int, i:int):
-  op, dtype, src, arg, *rest = contexts[2][i][a]
+  op, dtype, src, arg, *rest = contexts[i][2][a]
   arg = type(arg)(_reconstruct(arg.ast, i), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s, i) for s in src), arg, *rest)
 
@@ -142,7 +145,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     name, info = e.name, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      if isinstance(p:=contexts[0][ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+      if isinstance(p:=contexts[ref][0].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
                f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
     elif isinstance(e.name, TracingKey):
@@ -227,7 +230,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_disassembly(ctx:list[str]):
-  if not isinstance(prg:=contexts[0][int(ctx[0])].ret, ProgramSpec): return
+  if not isinstance(prg:=contexts[int(ctx[0])][0].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
@@ -255,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
-      else: return self.stream_json(get_details(contexts[1][j:=int(query["ctx"][0])][int(query["idx"][0])], contexts[3][j]))
+      else: return self.stream_json(get_details(contexts[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
@@ -290,32 +293,18 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def merge_rewrites(traces:list) -> list:
-  cpu_uops:dict[int, dict] = {}
-  cpu_ctxs:dict[int, int] = {}
-  merged_keys:list[TracingKey] = []
-  merged_ctxs:list[list[TrackedGraphRewrite]] = []
-  for i,(keys,ctxs,uops) in enumerate(traces):
-    for j in range(s:=len(merged_keys), s+len(keys)): cpu_ctxs[j] = i
-    cpu_uops[i] = uops
-    merged_keys += keys
-    merged_ctxs += ctxs
-  return [merged_keys, merged_ctxs, cpu_uops, cpu_ctxs]
-
 def load_pickle(path:pathlib.Path|None) -> list:
-  ret:list = []
-  if path is None or not path.exists(): return ret
-  if path.is_file():
-    with open(path, "rb") as f: ret.append(pickle.load(f))
-  # if it's a directory, load the most recent files and remove stales
-  elif path.is_dir():
-    st = start.stat().st_mtime_ns if (start:=path/"start").exists() else 0
+  if path is None or not path.exists(): return []
+  # load the most recent files and remove stales
+  if path.is_dir():
+    st, ret = start.stat().st_mtime_ns if (start:=path/"start").exists() else 0, []
     for e in path.iterdir():
       if (stat:=e.stat()).st_mtime_ns < st: e.unlink(missing_ok=True)
       elif stat.st_size != 0:
         with e.open("rb") as f: ret.append(pickle.load(f))
     start.unlink(missing_ok=True)
-  return merge_rewrites(ret) if path.stem == "rewrites" else list(sum(ret, []))
+    return list(sum(ret, []))
+  with open(path, "rb") as f: return [pickle.load(f)]
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
@@ -334,12 +323,10 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  contexts, profile = load_pickle(args.kernels), load_pickle(args.profile)
-
   # NOTE: this context is a tuple of list[keys] and list[values]
-  ctxs = get_metadata(*contexts[:2]) if contexts else []
+  ctxs = get_metadata(load_pickle(args.kernels))
 
-  profile_ret = get_profile(profile)
+  profile_ret = get_profile(profile:=load_pickle(args.profile))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

@@ -902,7 +902,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=tracefp("rewrites"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        pickle.dump([tracked_keys, tracked_ctxs, uop_fields], f)
+        pickle.dump([(tracked_keys, tracked_ctxs, uop_fields)], f)
     if VIZ: launch_viz(VIZ, fn.parent)
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
