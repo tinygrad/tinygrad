@@ -300,7 +300,7 @@ def load_pickle(path:str|None) -> list:
       elif stat.st_size:
         with e.open("rb") as f: traces.append(pickle.load(f))
     (p/"start").unlink(missing_ok=True)
-    return traces[0] # TODO: merge these
+    return list(sum(traces, []))
   with open(path, "rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn

@@ -323,17 +323,16 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   return True
 
 if PROFILE:
+  from tinygrad.uop.ops import launch_viz, tracefile_path
   @atexit.register
   def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
+    with open(fn:=tracefile_path("profile"), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    if not getenv("SQTT", 0):
-      from tinygrad.uop.ops import launch_viz
-      launch_viz(PROFILE, fn)
+    if not getenv("SQTT", 0): launch_viz(PROFILE, fn.parent)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:
