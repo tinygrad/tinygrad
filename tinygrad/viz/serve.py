@@ -293,7 +293,7 @@ def reloader():
 def load_pickle(path:str|None) -> list:
   if path is None or not os.path.exists(path): return []
   if (p:=pathlib.Path(path)).is_dir():
-    start_time, traces = (p/"start").stat().st_mtime_ns, []
+    start_time, traces = (p/"start").stat().st_mtime_ns if (p/"start").exists() else 0, []
     for e in p.iterdir():
       if (stat:=e.stat()).st_mtime_ns < start_time: e.unlink(missing_ok=True)
       elif stat.st_size:
