@@ -26,7 +26,7 @@ if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or), operator.mod]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
-                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal), (Tensor.cos, np.cos)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
