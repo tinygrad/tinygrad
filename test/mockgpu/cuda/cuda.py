@@ -128,7 +128,10 @@ def cuModuleUnload(hmod) -> int:
 def cuLaunchKernel(f, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, sharedMemBytes: int,
                    hStream: Any, kernelParams: Any, extra: Any) -> int:
   cargs = [ctypes.cast(getattr(extra, field[0]), ctypes.c_void_p) for field in extra._fields_]
-  gpuocelot_lib.ptx_run(ctypes.cast(f.value, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+  try: gpuocelot_lib.ptx_run(ctypes.cast(f.value, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+  except Exception as e:
+    print("Error in cuLaunchKernel:", e)
+    return orig_cuda.CUDA_ERROR_LAUNCH_FAILED
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceComputeCapability(major, minor, dev: int) -> int:
