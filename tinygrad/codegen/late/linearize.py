@@ -71,20 +71,24 @@ class BlockContext:
   child_count: dict[UOp, int]
   block_ctxs: dict[UOp, tuple[UOp, ...]]
   child_ctxs: dict[UOp, tuple[UOp, ...]]
+  dont_linearize: dict[UOp, None]
   def last_ctx(self, u): return self.child_ctxs.get(u, self.block_ctxs[u])
   @staticmethod
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
-    ctx = BlockContext({}, {}, {})
+    ctx = BlockContext({}, {}, {}, {})
     for u in sink.toposort():
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
-      # get children and accumulate the last_ctx
-      for s in u.src:
-        # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
-        ctx.child_count[s] += 1
-        this_block_ctx += ctx.last_ctx(s)
+      if u.op is Ops.SPECIAL:  # the src of a special is calculated outside the kernel
+        for v in u.toposort(): ctx.dont_linearize[v] = None
+      else:
+        # get children and accumulate the last_ctx
+        for s in u.src:
+          # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
+          ctx.child_count[s] += 1
+          this_block_ctx += ctx.last_ctx(s)
 
       # save the block ctx. SINK never has anything
       ctx.block_ctxs[u] = _sort_ctx(this_block_ctx) if u.op is not Ops.SINK else ()
@@ -109,6 +113,7 @@ def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp
   return base_block
 
 def make_block_bottom_up(ctx:BlockContext, x:UOp):
+  if x in ctx.dont_linearize: return None
   if x.op is Ops.BLOCKSTART:
     current_ctx, child_ctx = x.arg
     lst = list(x.src)
