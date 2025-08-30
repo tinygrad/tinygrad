@@ -589,7 +589,7 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/disasm")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    displayGraph("profiler");
+    displayGraph("disasm");
     const root = document.createElement("div");
     root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
@@ -631,7 +631,7 @@ async function main() {
         appendTd(tr, s.value);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
-    return document.querySelector(".profiler").replaceChildren(root);
+    return document.querySelector(".disasm").replaceChildren(root);
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
