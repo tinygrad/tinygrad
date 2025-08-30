@@ -194,6 +194,11 @@ class Profiling(contextlib.ContextDecorator):
 
 TINY:str = f"TINY:{os.getpid()}"
 
+def tracefp(name:str) -> pathlib.Path:
+  os.makedirs(dest:=pathlib.Path(temp(f"tinygrad_trace/{name}", append_user=True)), exist_ok=True)
+  if not os.path.exists(dest/"start"): (dest/"start").touch()
+  return dest/f"{os.getpid()}.pkl"
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event

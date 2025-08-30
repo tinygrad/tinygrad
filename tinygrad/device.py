@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, time
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, colored, \
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, tracefp, colored, \
                              Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
@@ -323,16 +323,17 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   return True
 
 if PROFILE:
-  from tinygrad.uop.ops import launch_viz, tracefile_path
   @atexit.register
   def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
-    with open(fn:=tracefile_path("profile"), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
+    with open(fn:=tracefp("profile"), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    if not getenv("SQTT", 0): launch_viz(PROFILE, fn.parent)
+    if not getenv("SQTT", 0):
+      from tinygrad.uop.ops import launch_viz
+      launch_viz(PROFILE, fn.parent)
 
 if __name__ == "__main__":
   for device in ALL_DEVICES:

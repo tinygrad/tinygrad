@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
-from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, tracefp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, TINY
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -896,15 +896,11 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  def tracefile_path(name:str) -> pathlib.Path:
-    os.makedirs(dest:=pathlib.Path(temp(f"tinygrad_trace/{name}", append_user=True)), exist_ok=True)
-    if not os.path.exists(dest/"start"): (dest/"start").touch()
-    return dest/f"{os.getpid()}.pkl"
   import atexit
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open(fn:=tracefile_path("rewrites"), "wb") as f:
+      with open(fn:=tracefp("rewrites"), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump([tracked_keys, tracked_ctxs, uop_fields], f)
     if VIZ: launch_viz(VIZ, fn.parent)

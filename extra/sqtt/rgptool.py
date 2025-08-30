@@ -307,12 +307,12 @@ class RGP:
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='rgptool', description='A tool to create (from pickled tinygrad profile), inspect and modify Radeon GPU Profiler files')
   parser.add_argument('command')
-  parser.add_argument('input', type=pathlib.Path)
+  parser.add_argument('input')
   parser.add_argument('-d', '--device')
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
-  input_bytes = load_pickle(args.input)
+  input_bytes = load_pickle(pathlib.Path(args.input))
 
   match args.command:
     case 'print':
