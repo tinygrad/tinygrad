@@ -191,7 +191,7 @@ async function renderProfiler() {
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
-  // color by key (name/category/device)
+  // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
@@ -210,7 +210,7 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), cat:optional(u8()), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -218,8 +218,8 @@ async function renderProfiler() {
           depth = levels.length;
           levels.push(et);
         } else levels[depth] = et;
-        if (depth === 0) colorKey = e.cat ?? e.name;
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k] ?? colorScheme.DEFAULT, colorMap.size));
+        if (depth === 0) colorKey = e.name.split(" ")[0];
+        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size));
         const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
@@ -314,12 +314,12 @@ async function renderProfiler() {
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
-          ctx.beginPath();
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) ctx.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fill();
+          const p = new Path2D();
+          p.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
+          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
+          p.closePath();
+          ctx.fill(p);
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
             let tooltipText = e.arg.tooltipText;
@@ -589,7 +589,7 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/disasm")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    displayGraph("profiler");
+    displayGraph("disasm");
     const root = document.createElement("div");
     root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
@@ -631,7 +631,7 @@ async function main() {
         appendTd(tr, s.value);
       }
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
-    return document.querySelector(".profiler").replaceChildren(root);
+    return document.querySelector(".disasm").replaceChildren(root);
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step

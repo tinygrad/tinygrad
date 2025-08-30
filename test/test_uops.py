@@ -26,7 +26,7 @@ def _uops_to_prg(uops_list):
     src = "\n".join(str(mu) for mu in muops)
   else: src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops, muops=muops,
+  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops, muops=muops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -407,7 +407,7 @@ class TestAssembly(unittest.TestCase):
     self.assertNotIn(Ops.IDIV, ops)
 
   def test_fast_idiv_remove_powers_of_two(self):
-    ridx = UOp.range(dtypes.int, 2**20, 0)
+    ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], opts=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
@@ -451,7 +451,7 @@ class TestUOpMethod(unittest.TestCase):
   def test_uop_variables(self):
     a = UOp.variable("a", 1, 10)
     uop_var = Tensor(a.bind(1))
-    st_var = Tensor.empty((2, 1)).reshape((2, a.bind(1)))
+    st_var = Tensor.empty((2, 10))[:, :a.bind(1)]
     _, var_vals = (uop_var+st_var).schedule_with_vars()
     self.assertEqual(len(var_vals), 1)
     self.assertEqual(list(var_vals)[0], a)

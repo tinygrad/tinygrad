@@ -53,17 +53,15 @@ class SimpleTokenizer:
     try: return [ self._normal_tokens[p] for p in parts ]
     except KeyError: raise RuntimeError("token not found")
 
-def apply_rope(x:Tensor, start_pos:int|UOp, base:int=10000):
+def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   B, H, T, Hd = x.shape
-  # NOTE: this is usually in a RoPE cache, but tinygrad JIT should prune it outside the kernel
-  # TODO: make it do that
-  freq = base ** (-Tensor.arange(0, 1, 2/Hd, dtype='float32'))
-  angles = Tensor.arange(start_pos, start_pos+T, dtype='float32')[None, None, :, None] * freq
-  cos, sin = angles.cos(), angles.sin()
-  x = x.reshape(B, H, T, Hd // 2, 2)    # split into pairs
-  y1 = x[..., 0] * cos - x[..., 1] * sin
-  y2 = x[..., 0] * sin + x[..., 1] * cos
-  return Tensor.stack(y1, y2, dim=-1).reshape(B, H, T, Hd)
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype), angles.sin().reshape(1, 1, T, half).cast(x.dtype)
+  x_pairs = x.reshape(B, H, T, half, 2)
+  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0):

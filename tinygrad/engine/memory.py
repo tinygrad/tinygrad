@@ -23,7 +23,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
   # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
   buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
                            [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
-  total_memory = sum(round_up(buf.nbytes, min_block_size:=0x1000) for buf in first_appearance.keys())
+  total_memory = sum(round_up(buf.nbytes, min_block_size:=0x1000) for buf in first_appearance.keys()) * 2 # *2 for fragmentation (which is about 15%)
 
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
