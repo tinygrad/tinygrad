@@ -120,14 +120,14 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
           [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1], tc_arg[2])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
   for i,a in enumerate(kernel_actions):
-    if a.axis is not None and a.op is not OptOps.TC:
-      try: ax = lin.real_axis(a.op, a.axis)
-      except KernelOptError: continue
-      if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, a.axis, 0) in kernel_actions): continue
+    #if a.axis is not None and a.op is not OptOps.TC:
+    #  try: ax = lin.real_axis(a.op, a.axis)
+    #  except KernelOptError: continue
+    #  if (ax >= lin.shape_len) or (lin.full_shape[ax] == a.arg and Opt(a.op, a.axis, 0) in kernel_actions): continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
+      up, lcl, tc_up = 1, 1, 1 #prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.axis_types):
         if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
         elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s
