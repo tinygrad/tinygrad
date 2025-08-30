@@ -60,7 +60,7 @@ class SimpleKernel:
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
     else: name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
-    self.ast = graph_rewrite(self.ast, pm_flatten_range)
+    self.ast = graph_rewrite(self.ast, pm_flatten_range, "flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def convert_loop_to_global(self):
@@ -166,13 +166,11 @@ class SimpleKernel:
           axes = list(axis_choices[axis])
 
           # do optimizations and save the ranges
-          """
           try:
             for i,a in enumerate(axes):
-              if a.src[0].divides(tc.dims[i]) is None:
-                self.apply_opt(Opt(OptOps.PADTO, self.rng.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
+              check(a.src[0].divides(tc.dims[i]) is not None, "doesn't divide evenly")
+              #self.apply_opt(Opt(OptOps.PADTO, self.rng.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
           except KernelOptError: continue
-          """
 
           ne: list[UOp] = []
           for opt in tc.opts:
@@ -201,7 +199,9 @@ class SimpleKernel:
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+            # do the reduce_axes always disappear? i think they don't
+            # they need to be moved into the WMMA srcs
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, ()) #tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
