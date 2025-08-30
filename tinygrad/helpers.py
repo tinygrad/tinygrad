@@ -192,6 +192,12 @@ class Profiling(contextlib.ContextDecorator):
               colored(_format_fcn(fcn).ljust(50), "yellow"),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
+TINY:str = f"TINY:{os.getpid()}"
+
+def tracefp(name:str) -> pathlib.Path:
+  os.makedirs(dest:=pathlib.Path(temp(f"tinygrad_trace/{name}", append_user=True)), exist_ok=True)
+  if not os.path.exists(dest/"start"): (dest/"start").touch()
+  return dest/f"{os.getpid()}.pkl"
 
 @dataclass(frozen=True)
 class TracingKey:
