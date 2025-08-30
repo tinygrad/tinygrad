@@ -22,17 +22,11 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
   # no shape, no opt
   if ast.src[0].st is None: return None
   new_arg = ast.arg
-  if new_arg is None:
+  if new_arg is None and not NOOPT and not BEAM:
     k = Kernel(ast, opts=renderer)
-    if not NOOPT:
-      if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
-      if BEAM >= 1:
-        from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
-        kb = Kernel(ast, opts=renderer)
-        rawbufs = bufs_from_lin(kb, allocate=False)
-        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
     new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
-  elif len(new_arg.applied_opts): return None
+  elif new_arg is not None and len(new_arg.applied_opts): return None
   return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
 
 pm_get_optimization = PatternMatcher([
