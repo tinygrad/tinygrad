@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, least_upper_dtype
 from tinygrad.device import is_dtype_supported
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve, GroupOp
 
 # ***** indexing *****
 
