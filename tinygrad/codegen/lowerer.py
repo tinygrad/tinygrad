@@ -104,6 +104,7 @@ pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced in later
   (UPat(GroupOp.Binary, dtype=dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lower_index_dtype),
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lower_index_dtype),
+  (UPat(Ops.CAST, dtype=dtypes.index, src=(UPat.var("x", dtypes.ints),), name="u"), lambda u,x: x),
   # TODO: assert that these fit in int32
   (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
   (UPat((Ops.RANGE,), dtype=dtypes.index, src=(UPat.var("end")), name="r"), lambda r,end:
