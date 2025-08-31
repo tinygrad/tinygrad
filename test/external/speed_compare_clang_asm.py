@@ -9,8 +9,7 @@ from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 
 if __name__ == "__main__":
   ast_strs = load_worlds(filter_reduce=False, filter_novariable=True)
-  # TODO: include float16
-  ast_strs = [x for x in ast_strs if "dtypes.bfloat16" not in x and "dtypes.half" not in x]
+  ast_strs = [x for x in ast_strs if "dtypes.bfloat16" not in x]
   dev = Device["CPU"]
 
   # these kernels are all dividing by 0
