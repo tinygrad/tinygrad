@@ -180,7 +180,6 @@ x86_matcher = asm_matcher + PatternMatcher([
   # some ops can't take imm in srcs
   (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE), name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
-  # TODO: cmpne, add shouldn't have consts on the left to begin with
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
    lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -317,7 +316,7 @@ x86_vec_lowerer = PatternMatcher([
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 1, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 1, 1)), # noqa: E501
   (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 1, 1)), # noqa: E501
-  # float ternary TODO: can share with scalar pm
+  # float ternary
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvps", 0x4A, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.V_VM("vmovups", 0x10, ctx[x], ctx[x.src[0]], 0, 1),
@@ -364,7 +363,6 @@ x86_lowerer = PatternMatcher([
   # index
   (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 1)), # noqa: E501
   (UPat.var("a").index(UPat.var("idx")).named("x"), lambda ctx,a,idx,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], ctx[idx], a.dtype.itemsize), 1)), # noqa: E501
-  # TODO: use compact immediate versions, add r32 imm32 can be add r32 imm8 if within range
   # int binary with immediate
   ((UPat.var("a", dtypes.ints16) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 2), 0, 0x66)), # noqa: E501
   ((UPat.var("a", dtypes.ints32) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 4))),
@@ -490,7 +488,7 @@ x86_lowerer = PatternMatcher([
                                                               MUOpX86.V_V_VM("vfmadd213ss", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]),
   (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.V_V_V("vmovsd", 0x10, ctx[x], ctx[x.src[0]], ctx[x.src[0]], 3, 1),
                                                               MUOpX86.V_V_VM("vfmadd213sd", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]),
-  # float load/store, TODO: this could be vmaskmovps
+  # float load/store
   (UPat.var("a").load(UPat.cvar("c"), UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float16, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.V_V_V("vmovss", 0x10, ctx[x], ctx[b], ctx[b], 2, 1), # noqa: E501
                                                                                                                                          MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
                                                                                                                                          MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
