@@ -147,7 +147,6 @@ class dtypes:
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
   # mask dtypes, used in x86/arm64 backends
-  # TODO: why are patterns wrong with empty str??
   mask8: Final[DType] = DType.new(15, 1, "mask8", None)
   mask16: Final[DType] = DType.new(16, 2, "mask16", None)
   mask32: Final[DType] = DType.new(17, 4, "mask32", None)
@@ -203,7 +202,9 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "mask"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void"}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()},
+                       **{v.name:k for k,v in dtypes.__dict__.items() if isinstance(v, DType) and k.startswith("mask")},
+                       "void": "void"}
 
 @functools.cache
 def can_safe_cast(dt0:DType, dt1:DType) -> bool:
