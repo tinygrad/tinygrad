@@ -208,6 +208,16 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((Variable("x", -10, 0)%Variable("y", -10, -1))._min_max, (-9, 0))
     self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
 
+  def test_range_div_its_symbolic_bound(self):
+    a = Variable("a", 1, 10)
+    ridx0 = UOp.range(a+2, 0)
+    self.helper_test_variable(ridx0//(a+2), 0, 0, "0")
+
+  def test_range_mod_its_symbolic_bound(self):
+    a = Variable("a", 1, 10)
+    ridx = UOp.range(a+2, 0)
+    self.helper_test_variable(ridx%(a+2), 0, 11, "ridx0")
+
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 2, 7) // 2, 1, 3, "(a//2)")
     self.helper_test_variable(Variable("a", 0, 6) // 2, 0, 3, "(a//2)")

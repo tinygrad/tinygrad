@@ -2,16 +2,14 @@ from __future__ import annotations
 from typing import Any
 import ctypes, time
 from tinygrad.runtime.autogen import cuda as orig_cuda
+from test.mockgpu.helpers import _try_dlopen_gpuocelot
 from tinygrad.helpers import mv_address
 
 for attr in dir(orig_cuda):
   if not attr.startswith('__'):
     globals()[attr] = getattr(orig_cuda, attr)
 
-try:
-  gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-  gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]  # noqa: E501
-except Exception: pass
+gpuocelot_lib = _try_dlopen_gpuocelot()
 
 # Global state
 class CUDAState:
@@ -130,7 +128,10 @@ def cuModuleUnload(hmod) -> int:
 def cuLaunchKernel(f, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, sharedMemBytes: int,
                    hStream: Any, kernelParams: Any, extra: Any) -> int:
   cargs = [ctypes.cast(getattr(extra, field[0]), ctypes.c_void_p) for field in extra._fields_]
-  gpuocelot_lib.ptx_run(ctypes.cast(f.value, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+  try: gpuocelot_lib.ptx_run(ctypes.cast(f.value, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+  except Exception as e:
+    print("Error in cuLaunchKernel:", e)
+    return orig_cuda.CUDA_ERROR_LAUNCH_FAILED
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceComputeCapability(major, minor, dev: int) -> int:

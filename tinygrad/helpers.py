@@ -197,7 +197,6 @@ class Profiling(contextlib.ContextDecorator):
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
-  cat:str|None=None                      # optional category to color this by
   ret:Any=None
 
 class ProfileEvent: pass

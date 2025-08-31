@@ -403,7 +403,7 @@ class TestAssembly(unittest.TestCase):
     self.assertNotIn(Ops.IDIV, ops)
 
   def test_fast_idiv_remove_powers_of_two(self):
-    ridx = UOp.range(dtypes.int, 2**20, 0)
+    ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], opts=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv

@@ -1,5 +1,6 @@
 import ctypes, time
 from test.mockgpu.gpu import VirtGPU
+from test.mockgpu.helpers import _try_dlopen_remu
 from tinygrad.helpers import getbits, to_mv, init_c_struct_t
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 
@@ -24,19 +25,6 @@ WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
-REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
-              "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
-def _try_dlopen_remu():
-  for path in REMU_PATHS:
-    try:
-      remu = ctypes.CDLL(path)
-      remu.run_asm.restype = ctypes.c_int32
-      remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
-        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
-    except OSError: pass
-    else: return remu
-  print("Could not find libremu.so")
-  return None
 remu = _try_dlopen_remu()
 
 def create_sdma_packets():

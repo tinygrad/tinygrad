@@ -56,7 +56,7 @@ def randoms():
 def ast_to_cuda_prog(compiler, ast, opts):
   k = Kernel(ast)
   k.apply_opts(opts)
-  p = get_program(k.get_optimized_ast(), k.opts)
+  p = get_program(k.ast, k.opts, k.applied_opts)
   return CUDAProgram(device, p.function_name, compiler.compile(p.src))
 
 if __name__ == "__main__":

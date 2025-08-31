@@ -16,10 +16,9 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
 
 # real VIZ=1 pickles these tracked values
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
-from tinygrad.viz import serve
-serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
+traces = [(tracked_keys, tracked_ctxs, uop_fields)]
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
-def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
+def get_viz_list(): return get_metadata(traces)
 
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
@@ -142,6 +141,8 @@ class TestViz(BaseTestViz):
     z = UOp.const(dtypes.int, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
     # embed const in the parent node when possible
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
@@ -277,8 +278,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
-        name, ref, st, dur, cat, _ = u("<IIIfBI")
-        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur, "cat":option(cat)})
+        name, ref, st, dur, _ = u("<IIIfI")
+        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur})
     else:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):

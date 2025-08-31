@@ -65,21 +65,21 @@ class TestFoldingAndReduction(unittest.TestCase):
   def test_full_graph_rewrite_reduction_with_unused_range(self):
     const1 = UOp.const(dtypes.int32, 15)
     const2 = UOp.const(dtypes.int32, 25)
-    rng = UOp.range(dtypes.int32, 10, idx=0)
+    rng = UOp.range(10, idx=0)
     optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
     self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_range_reduction(self):
-    simple_range = UOp.range(dtypes.int32, 5, idx=0)
+    simple_range = UOp.range(5, idx=0)
     optimized_sink = apply_rewrite(simple_range.reduce(Ops.ADD, simple_range))
     expected_sum = sum(range(5))
     self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_simple_reduction_folding(self):
-    simple_range = UOp.range(dtypes.int32, 4, idx=0)
+    simple_range = UOp.range(4, idx=0)
     add_uop = simple_range + UOp.const(dtypes.int32, 1)
     optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
@@ -87,8 +87,8 @@ class TestFoldingAndReduction(unittest.TestCase):
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_nested_loop_collapse(self):
-    outer_range = UOp.range(dtypes.int32, 8, 0)
-    inner_range = UOp.range(dtypes.int32, 4, 1)
+    outer_range = UOp.range(8, 0)
+    inner_range = UOp.range(4, 1)
     expr = (outer_range * 10) + inner_range
     optimized_reduce_uop = apply_rewrite(expr.reduce(Ops.ADD, outer_range, inner_range))
     self.assertEqual(optimized_reduce_uop.op, Ops.CONST)

@@ -29,7 +29,7 @@ if __name__ == "__main__":
       Opt(op=OptOps.LOCAL, axis=0, amt=2),
     ]
   k.apply_opts(opts)
-  prg = get_program(k.get_optimized_ast(), k.opts)
+  prg = get_program(k.ast, k.opts, k.applied_opts)
   new_src = prg.src
   # can mod source here
   prg = replace(prg, src=new_src)

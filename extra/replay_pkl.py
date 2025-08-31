@@ -58,7 +58,7 @@ if __name__ == "__main__":
             GlobalCounters.kernel_count -= 1
 
         if not getenv("NOOPT"): k.apply_opts(hand_coded_optimizations(k))
-        p2 = get_program(k.get_optimized_ast(), k.opts)
+        p2 = get_program(k.ast, k.opts, k.applied_opts)
         new_ei = replace(ei, prg=CompiledRunner(p2))
         new_ei.run()
         new_jit.append(new_ei)
