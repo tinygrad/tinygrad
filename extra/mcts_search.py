@@ -4,9 +4,9 @@ import numpy as np
 np.set_printoptions(suppress=True)
 import math, functools, time, random, statistics
 from tinygrad.helpers import DEBUG, getenv, CACHELEVEL, diskcache_get, diskcache_put, colored, Profiling
-from tinygrad.opt.kernel import Kernel
+from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.device import Buffer, Device, CompileError
-from tinygrad.opt.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
+from tinygrad.codegen.opt.search import _ensure_buffer_alloc, get_kernel_actions, _time_program
 from tinygrad.engine.realize import get_program
 
 class MCTSNode:

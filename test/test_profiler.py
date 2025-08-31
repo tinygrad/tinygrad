@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics, time, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
+from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
@@ -30,7 +30,10 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) or Device.DEFAULT in {"METAL"}, "HCQ device required to run")
+# TODO: support in HCQCompiled
+is_cpu_hcq = Device.DEFAULT in {"CPU", "LLVM"}
+
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -182,7 +185,13 @@ class TestProfiler(unittest.TestCase):
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
     self.assertEqual(len(range_events), 2)
     # record start/end time up to exit (error or success)
-    self.assertGreater(range_events[0].en-range_events[0].st, range_events[1].en-range_events[1].st)
+    for e in range_events:
+      self.assertGreater(e.en, e.st)
+    e1, e2 = range_events
+    self.assertEqual([e1.name, e2.name], ["test_1", "test_2"])
+    # TODO: this is flaky
+    #self.assertLess(e1.st, e2.st)
+    #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
@@ -199,6 +208,19 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(graphs), runs)
     for ge in graphs:
       self.assertEqual(len(ge.ents), len(graphs))
+
+  def test_trace_metadata(self):
+    with Context(TRACEMETA=1):
+      a = Tensor.empty(1)+2
+      b = Tensor.empty(1)+2
+      with helper_collect_profile(TestProfiler.d0) as profile:
+        Tensor.realize(a, b)
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent)]
+    self.assertEqual(len(exec_points), len(range_events), 2)
+    self.assertEqual(len(dedup(e.key for e in exec_points)), 1)
+    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()

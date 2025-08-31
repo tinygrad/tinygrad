@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
-from typing import cast
+from typing import cast, Any
 from tinygrad.runtime.autogen.nv import nv
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
 from tinygrad.runtime.support.system import System
@@ -8,12 +8,13 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import nv_gpu
 
 @dataclasses.dataclass(frozen=True)
-class GRBufDesc: size:int; v:int; p:int; lc:int=0 # noqa: E702
+class GRBufDesc: size:int; virt:bool; phys:bool; local:bool=False # noqa: E702
 
 class NV_IP:
   def __init__(self, nvdev): self.nvdev = nvdev
   def init_sw(self): pass # Prepare sw/allocations for this IP
   def init_hw(self): pass # Initialize hw for this IP
+  def fini_hw(self): pass # Finalize hw for this IP
 
 class NVRpcQueue:
   def __init__(self, gsp:NV_GSP, va:int, completion_q_va:int|None=None):
@@ -25,13 +26,13 @@ class NVRpcQueue:
     self.gsp, self.va, self.queue_va, self.seq = gsp, va, va + self.tx.entryOff, 0
     self.queue_mv = to_mv(self.queue_va, self.tx.msgSize * self.tx.msgCount)
 
-  def _checksum(self, data):
+  def _checksum(self, data:bytes):
     if (pad_len:=(-len(data)) % 8): data += b'\x00' * pad_len
     checksum = 0
     for offset in range(0, len(data), 8): checksum ^= struct.unpack_from('Q', data, offset)[0]
     return hi32(checksum) ^ lo32(checksum)
 
-  def send_rpc(self, func, msg, wait=False):
+  def send_rpc(self, func:int, msg:bytes, wait=False):
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
       rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(msg) + 0x20)
 
@@ -48,7 +49,7 @@ class NVRpcQueue:
     self.seq += 1
     self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
 
-  def wait_resp(self, cmd) -> memoryview:
+  def wait_resp(self, cmd:int) -> memoryview:
     while True:
       System.memory_barrier()
       if self.rx.readPtr == self.tx.writePtr: continue
@@ -59,13 +60,14 @@ class NVRpcQueue:
 
       # Handling special functions
       if hdr.function == nv.NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER: self.gsp.run_cpu_seq(msg)
-      elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG: print(f"GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
+      elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG:
+        print(f"nv {self.gsp.nvdev.devfmt}: GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
       System.memory_barrier()
 
-      if DEBUG >= 2:
+      if DEBUG >= 3:
         rpc_names = {**nv.c__Ea_NV_VGPU_MSG_FUNCTION_NOP__enumvalues, **nv.c__Ea_NV_VGPU_MSG_EVENT_FIRST_EVENT__enumvalues}
         print(f"nv {self.gsp.nvdev.devfmt}: in RPC: {rpc_names.get(hdr.function, f'ev:{hdr.function:x}')}, res:{hdr.rpc_result:#x}")
 
@@ -87,7 +89,7 @@ class NV_FLCN(NV_IP):
     self.prep_booter()
 
   def prep_ucode(self):
-    expansion_rom_off, bit_addr = 0x14e00, 0x1b0
+    expansion_rom_off, bit_addr = {"GA": 0x16600, "AD": 0x14e00}[self.nvdev.chip_name[:2]], 0x1b0
     vbios_bytes = bytes(array.array('I', self.nvdev.mmio[0x00300000//4:(0x00300000+0x98e00)//4]))
 
     bit_header = nv.BIT_HEADER_V1_00.from_buffer_copy(vbios_bytes[bit_addr:bit_addr + ctypes.sizeof(nv.BIT_HEADER_V1_00)])
@@ -132,7 +134,7 @@ class NV_FLCN(NV_IP):
       dmem.init_cmd = cmd_id
       patched_image[dmem_mapper_offset : dmem_mapper_offset+len(bytes(dmem))] = bytes(dmem)
       patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
-      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[0x180:]
+      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[-0x180:]
 
       return System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
 
@@ -158,6 +160,7 @@ class NV_FLCN(NV_IP):
       imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
       dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
       pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
+    assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
 
     self.reset(self.falcon, riscv=True)
 
@@ -175,7 +178,7 @@ class NV_FLCN(NV_IP):
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
 
-  def execute_dma(self, base, cmd, dest, mem_off, sysmem, size):
+  def execute_dma(self, base:int, cmd:int, dest:int, mem_off:int, sysmem:int, size:int):
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['full'], value=0, msg="DMA does not progress")
 
     self.nvdev.NV_PFALCON_FALCON_DMATRFBASE.with_base(base).write(lo32(sysmem >> 8))
@@ -192,7 +195,7 @@ class NV_FLCN(NV_IP):
 
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['idle'], msg="DMA does not complete")
 
-  def start_cpu(self, base):
+  def start_cpu(self, base:int):
     if self.nvdev.NV_PFALCON_FALCON_CPUCTL.with_base(base).read_bitfields()['alias_en'] == 1:
       self.nvdev.wreg(base + self.nvdev.NV_PFALCON_FALCON_CPUCTL_ALIAS, 0x2)
     else: self.nvdev.NV_PFALCON_FALCON_CPUCTL.with_base(base).write(startcpu=1)
@@ -230,11 +233,11 @@ class NV_FLCN(NV_IP):
     if mailbox is not None:
       return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
 
-  def disable_ctx_req(self, base):
+  def disable_ctx_req(self, base:int):
     self.nvdev.NV_PFALCON_FBIF_CTL.with_base(base).update(allow_phys_no_ctx=1)
     self.nvdev.NV_PFALCON_FALCON_DMACTL.with_base(base).write(0x0)
 
-  def reset(self, base, riscv=False):
+  def reset(self, base:int, riscv=False):
     engine_reg = self.nvdev.NV_PGSP_FALCON_ENGINE if base == self.falcon else self.nvdev.NV_PSEC_FALCON_ENGINE
     engine_reg.write(reset=1)
     time.sleep(0.1)
@@ -313,9 +316,11 @@ class NV_GSP(NV_IP):
     self.rpc_set_gsp_system_info()
     self.rpc_set_registry_table()
 
-    self.gpfifo_class = nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_CHANNEL_GPFIFO_A
-    self.compute_class = nv_gpu.BLACKWELL_COMPUTE_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.ADA_COMPUTE_A
-    self.dma_class = nv_gpu.BLACKWELL_DMA_COPY_B if self.nvdev.chip_name.startswith("GB") else nv_gpu.AMPERE_DMA_COPY_B
+    self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.AMPERE_DMA_COPY_B
+    match self.nvdev.chip_name[:2]:
+      case "AD": self.compute_class = nv_gpu.ADA_COMPUTE_A
+      case "GB":
+        self.gpfifo_class,self.compute_class,self.dma_class=nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A,nv_gpu.BLACKWELL_COMPUTE_B,nv_gpu.BLACKWELL_DMA_COPY_B
 
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
@@ -404,10 +409,10 @@ class NV_GSP(NV_IP):
       assert self.nvdev.flcn.frts_offset == m.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {m.frtsOffset}"
     self.wpr_meta, self.wpr_meta_sysmem = self.nvdev._alloc_boot_struct(m)
 
-  def promote_ctx(self, client, subdevice, obj, ctxbufs, bufs=None, virt=None, phys=None):
+  def promote_ctx(self, client:int, subdevice:int, obj:int, ctxbufs:dict[int, GRBufDesc], bufs=None, virt=None, phys=None):
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
     for i,(buf,desc) in enumerate(ctxbufs.items()):
-      use_v, use_p = (desc.v if virt is None else virt), (desc.p if phys is None else phys)
+      use_v, use_p = (desc.virt if virt is None else virt), (desc.phys if phys is None else phys)
       x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contiguous=True)) # allocate buffers
       prom.promoteEntry[i] = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY(bufferId=buf, gpuVirtAddr=x.va_addr if use_v else 0, bInitialize=use_p,
         gpuPhysAddr=x.paddrs[0][0] if use_p else 0, size=desc.size if use_p else 0, physAttr=0x4 if use_p else 0, bNonmapped=(use_p and not use_v))
@@ -445,10 +450,11 @@ class NV_GSP(NV_IP):
     gr_size = _ctx_info(nv_gpu.NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS, add=0x40000)
     patch_size = _ctx_info(nv_gpu.NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PATCH)
     cfgs_sizes = {x: _ctx_info(x + 14, align=(2 << 20) if x == 5 else None) for x in range(3, 11)} # indices 3–10 are mapped to 17–24
-    self.grctx_bufs = {0: GRBufDesc(gr_size, p=1, v=1), 1: GRBufDesc(patch_size, p=1, v=1, lc=1), 2: GRBufDesc(patch_size, p=1, v=1),
-      **{x: GRBufDesc(cfgs_sizes[x], p=0, v=1) for x in range(3, 7)}, 9: GRBufDesc(cfgs_sizes[9], p=1, v=1),
-      10: GRBufDesc(cfgs_sizes[10], p=1, v=0), 11: GRBufDesc(cfgs_sizes[10], p=1, v=1)} # NOTE: 11 reuses cfgs_sizes[10]
-    self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if v.lc == 0})
+    self.grctx_bufs = {0: GRBufDesc(gr_size, phys=True, virt=True), 1: GRBufDesc(patch_size, phys=True, virt=True, local=True),
+      2: GRBufDesc(patch_size, phys=True, virt=True), **{x: GRBufDesc(cfgs_sizes[x], phys=False, virt=True) for x in range(3, 7)},
+      9: GRBufDesc(cfgs_sizes[9], phys=True, virt=True), 10: GRBufDesc(cfgs_sizes[10], phys=True, virt=False),
+      11: GRBufDesc(cfgs_sizes[10], phys=True, virt=True)} # NOTE: 11 reuses cfgs_sizes[10]
+    self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if not v.local})
 
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.compute_class, params=None)
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.dma_class, params=None)
@@ -465,9 +471,11 @@ class NV_GSP(NV_IP):
     self.priv_root = 0xc1e00004
     self.init_golden_image()
 
+  def fini_hw(self): self.rpc_unloading_guest_driver()
+
   ### RPCs
 
-  def rpc_rm_alloc(self, hParent, hClass, params, client=None) -> int:
+  def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None) -> int:
     if hClass == self.gpfifo_class:
       ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
@@ -493,7 +501,7 @@ class NV_GSP(NV_IP):
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj if hClass != nv_gpu.NV1_ROOT else client
 
-  def rpc_rm_control(self, hObject, cmd, params, client=None):
+  def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None):
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
@@ -505,7 +513,7 @@ class NV_GSP(NV_IP):
       cast(nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS, st).workSubmitToken |= (1 << 30)
     return st
 
-  def rpc_set_page_directory(self, device, hVASpace, pdir_paddr, client=None, pasid=0xffffffff):
+  def rpc_set_page_directory(self, device:int, hVASpace:int, pdir_paddr:int, client=None, pasid=0xffffffff):
     params = nv.struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(physAddress=pdir_paddr,
       numEntries=self.nvdev.mm.pte_cnt[0], flags=0x8, hVASpace=hVASpace, pasid=pasid, subDeviceId=1, chId=0) # flags field is all channels.
     alloc_args = nv.rpc_set_page_directory_v(hClient=client or self.priv_root, hDevice=device, pasid=pasid, params=params)
@@ -520,6 +528,11 @@ class NV_GSP(NV_IP):
       bIsPassthru=1, PCIDeviceID=self.nvdev.venid, PCISubDeviceID=self.nvdev.subvenid, PCIRevisionID=self.nvdev.rev, maxUserVa=0x7ffffffff000)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, bytes(data))
 
+  def rpc_unloading_guest_driver(self):
+    data = nv.rpc_unloading_guest_driver_v(bInPMTransition=0, bGc6Entering=0, newLevel=(__GPU_STATE_FLAGS_FAST_UNLOAD:=1 << 6))
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_UNLOADING_GUEST_DRIVER, bytes(data))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_UNLOADING_GUEST_DRIVER)
+
   def rpc_set_registry_table(self):
     table = {'RMForcePcieConfigSave': 0x1, 'RMSecBusResetEnable': 0x1}
     entries_bytes, data_bytes = bytes(), bytes()
@@ -533,7 +546,7 @@ class NV_GSP(NV_IP):
     header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(table))
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_REGISTRY, bytes(header) + entries_bytes + data_bytes)
 
-  def run_cpu_seq(self, seq_buf):
+  def run_cpu_seq(self, seq_buf:memoryview):
     hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
     cmd_iter = iter(seq_buf[ctypes.sizeof(nv.rpc_run_cpu_sequencer_v17_00):].cast('I')[:hdr.cmdIndex])
 

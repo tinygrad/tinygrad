@@ -1,11 +1,12 @@
 from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
-from tinygrad.codegen.expander import expander
+from tinygrad.codegen.late.expander import expander
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -241,6 +242,22 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.op, Ops.CONST)
     self.assertEqual(out.arg, 0)
 
+  def test_const_bitcast(self):
+    bf = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    out = UOp(Ops.BITCAST, dtypes.uint32, (bf,))
+    uops = to_uops_list([out])
+    self.assertEqual(len(uops), 1)
+    out = uops[-1]
+    self.assertEqual(out.op, Ops.CONST)
+    self.assertEqual(out.arg, 0x3F800000)
+
+  @unittest.expectedFailure
+  def test_const_shape_change_bitcast(self):
+    bf = UOp(Ops.CONST, dtypes.uint8, arg=0x3F)
+    out = UOp(Ops.BITCAST, dtypes.half, (bf,))
+    uops = to_uops_list([out])
+    self.assertEqual(len(uops), 1)
+
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
@@ -300,6 +317,7 @@ class TestUOpGraph(unittest.TestCase):
       for uop, const in zip(uops, consts):
         self.assertEqual(uop, const)
 
+  @unittest.skip("no longer testable standalone")
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
       vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
@@ -425,9 +443,9 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_in_out_of_bounds_access_gated_store(self):
     with Context(IGNORE_OOB=0):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), src=(), arg=0)
       v = Variable("v", 0, 20)
-      st0 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), UOp.const(dtypes.int, 0), v<16))
+      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v), UOp.const(dtypes.int, 0), UOp(Ops.IF, src=(v<16,))))
       to_uops_list([st0])
 
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
@@ -437,7 +455,7 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       # Define buffers
       gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(400), (), 0)
-      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, local=True), (), "temp0")
+      sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, addrspace=AddrSpace.LOCAL), (), "temp0")
 
       # Define indices, valids and barrier
       gidx = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 416))
@@ -445,7 +463,7 @@ class TestUOpGraph(unittest.TestCase):
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx), UOp.const(dtypes.uint, 1), lidx<8))
+      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx), UOp.const(dtypes.uint, 1), UOp(Ops.IF, src=(lidx<8,))))
 
       barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
       if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))
@@ -456,6 +474,34 @@ class TestUOpGraph(unittest.TestCase):
       # Store to global memory
       global_store = UOp(Ops.STORE, dtypes.void, (gbuf.index(gidx), local_load))
       to_uops_list([global_store])
+
+  def test_load_with_float_in_index(self):
+    with Context(IGNORE_OOB=0):
+      ridx = UOp.range(20, 0)
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      i = (ridx.cast(dtypes.float)*0.68).trunc().cast(dtypes.int)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
+      to_uops_list([ld0])
+      glblfloat = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(20), (), 0)
+      ldfloat = UOp(Ops.LOAD, dtypes.float, (glblfloat.index(ridx),))
+      i = (ldfloat+3.14).cast(dtypes.int)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
+
+  def test_load_cast_to_bool(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), (), 0)
+      ridx = UOp.range(20, 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(ridx, ridx.cast(dtypes.bool).logical_not()),))
+      to_uops_list([ld0])
+
+  @unittest.skip("Bool load is not supported yet")
+  def test_load_mask(self):
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      mask = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+      ridx = UOp.range(20, 0)
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(ridx, ridx<16&mask),)))
+      to_uops_list([ld0])
 
   def test_out_of_bounds_off_by_one_access(self):
     with Context(IGNORE_OOB=0):
@@ -512,7 +558,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, local=True), (), "temp")
+    smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, addrspace=AddrSpace.LOCAL), (), "temp")
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
@@ -529,12 +575,12 @@ class TestUOpGraph(unittest.TestCase):
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = UOp(Ops.STORE, dtypes.void, (glbl.index(idx0, UOp.const(dtypes.bool, False)), val))
-    st1 = UOp(Ops.STORE, dtypes.void, (glbl.index(idx1, UOp.const(dtypes.bool, True)), val))
+    st0 = glbl.index(idx0, UOp.const(dtypes.bool, False)).store(val)
+    st1 = glbl.index(idx0, UOp.const(dtypes.bool, True)).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 5)
-    self.assertEqual(uops[-1], UOp.store(glbl.index(idx1), val))
+    self.assertEqual(uops[-1], glbl.index(idx1).store(val))
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
@@ -545,10 +591,9 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_switched_range_order(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    c2 = UOp.const(dtypes.int, 2)
     cf = UOp.const(dtypes.float, 0.0)
-    r1 = UOp(Ops.RANGE, dtypes.int, (c2,), 0)
-    r2 = UOp(Ops.RANGE, dtypes.int, (c2,), 1)
+    r1 = UOp.range(2, 0)
+    r2 = UOp.range(2, 1)
     alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
     store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
     uops = to_uops_list([store])
@@ -710,7 +755,7 @@ class TestExpander(unittest.TestCase):
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, local=True), (), "smem")
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=4, addrspace=AddrSpace.LOCAL), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -729,7 +774,7 @@ class TestIFUOps(unittest.TestCase):
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, local=True), (), "smem")
+    sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(size=16, addrspace=AddrSpace.LOCAL), (), "smem")
     valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))

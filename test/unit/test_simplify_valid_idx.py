@@ -19,7 +19,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
-def Range(n, nmax): return UOp(Ops.RANGE, dtypes.int, arg=n, src=(UOp.const(dtypes.int, nmax),))
+def Range(n, nmax): return UOp.range(nmax, n)
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):

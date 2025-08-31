@@ -1,6 +1,6 @@
 import ctypes, gzip, unittest, timeit
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
 from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
@@ -210,6 +210,14 @@ class TestMemoryview(unittest.TestCase):
       t_us = timeit.timeit(lambda: to_mv(ptr, sz), number=iters) * 1e6 / iters
       print(f"Size {label:>9} | Time: {t_us:8.3f} µs")
 
+  def test_speed_from_mv_vs_mv_address(self):
+    x = memoryview(bytearray(1))
+
+    iters = 100000
+    fmv_us = timeit.timeit(lambda: from_mv(x), number=iters) * 1e6 / iters
+    mva_us = timeit.timeit(lambda: mv_address(x), number=iters) * 1e6 / iters
+    print(f"from_mv vs mv_address: {fmv_us:8.3f} µs vs {mva_us:8.3f} µs")
+
 class TestGetContraction(unittest.TestCase):
   def test_contraction_with_reduce(self):
     r = get_contraction((16, 1, 1, 1), (16, 1, 1))
@@ -399,6 +407,20 @@ class TestWordWrap(unittest.TestCase):
     st = colored("x"*wrap*2, "red")
     st2 = word_wrap(st, wrap=wrap)
     self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_explicit_newline(self):
+    wrap = 10
+    st = "\n".join(["x"*wrap, "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines()))
+
+    st = "\n".join(["x"*(wrap+1), "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+1)
+
+    st = "\n".join(["x"*(wrap+1), "x"*(wrap+1), "x"*(wrap+1)])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+3)
 
 class TestIsNumpyNdarray(unittest.TestCase):
   def test_ndarray(self):

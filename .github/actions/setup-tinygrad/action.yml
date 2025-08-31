@@ -112,6 +112,15 @@ runs:
         fi
 
     # ******************* apt *******************
+    - name: Setup apt
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      shell: bash
+      run: |
+        sudo chown -R $USER:$USER /var/cache/apt/archives
+
+        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' | sudo tee -a /etc/apt/apt.conf.d/99keep-debs
 
     - name: Add OpenCL Repo
       if: inputs.opencl == 'true' && runner.os == 'Linux'
@@ -135,14 +144,11 @@ runs:
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
-    - name: apt-get update + install
+    - name: Compute Package List + Hash
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      id: apt-pkgs
       shell: bash
       run: |
-        echo 'Acquire::GzipIndexes "true";' | sudo tee /etc/apt/apt.conf.d/gzip
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        sudo apt -qq update || true
-
         pkgs=""
         # **** OpenCL ****
         if [[ "${{ inputs.opencl }}" == "true" ]]; then
@@ -153,7 +159,7 @@ runs:
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
-          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev"
+          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libibverbs-dev libc6-dev"
         fi
         # **** CUDA ****
         if [[ "${{ inputs.cuda }}" == "true" ]]; then
@@ -169,13 +175,30 @@ runs:
           pkgs+=" libllvm20 clang-20 lld-20"
         fi
 
+        echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
+        echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache apt
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives/
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.APT_CACHE_VERSION }}
+
+    - name: Run apt Update + Install
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      shell: bash
+      run: |
+        sudo apt -qq update || true
+
         # ******** do install ********
-        if [[ -n "$pkgs" ]]; then
-          sudo apt-get -y --allow-unauthenticated --no-install-recommends install $pkgs
+        if [[ -n "${{ steps.apt-pkgs.outputs.pkgs }}" ]]; then
+          sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}
         fi
 
-    # **** AMD ****
+        sudo chown -R $USER:$USER /var/cache/apt/archives/
 
+    # **** AMD ****
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
@@ -202,16 +225,25 @@ runs:
     - name: Install gpuocelot dependencies (MacOS)
       if: inputs.ocelot == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install --quiet cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+      run: |
+        pkgs=(cmake ninja llvm@15 zlib glew flex bison boost@1.85 zstd ncurses)
+        for f in "${pkgs[@]}"; do
+          brew ls --versions "$f" >/dev/null 2>&1 || brew install --quiet "$f"
+        done
+
+        # Fix boost 1.85 for gpuocelot
+        ln -s /opt/homebrew/opt/boost@1.85 /opt/homebrew/opt/boost || true
+        ln -s /opt/homebrew/opt/boost/lib/libboost_atomic-mt.dylib /opt/homebrew/opt/boost/lib/libboost_atomic.dylib || true
+        ln -s /opt/homebrew/opt/boost/lib/libboost_thread-mt.dylib /opt/homebrew/opt/boost/lib/libboost_thread.dylib || true
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true'
       id: cache-build
       uses: actions/cache@v4
       env:
-        cache-name: cache-gpuocelot-build
+        cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-0
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.BUILD_CACHE_VERSION }}
     - name: Clone/compile gpuocelot
       if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
@@ -221,14 +253,15 @@ runs:
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF \
+          -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         ninja
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
       shell: bash
       run: |
         cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || ''}}lib/
+        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || '' }}lib/
 
     # **** WebGPU ****
 

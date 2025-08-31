@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes
 
 class MathTrait:
   # required to implement
-  def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
+  def alu(self:T, op:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b) -> T: raise NotImplementedError
 
   # great functions you get!
@@ -161,6 +161,7 @@ class MathTrait:
     raise RuntimeError("where needs at least one UOp arg")
   def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
   def reciprocal(self): return self.alu(Ops.RECIP)
+  def trunc(self): return self.alu(Ops.TRUNC)
   def sqrt(self): return self.alu(Ops.SQRT)
   def sin(self): return self.alu(Ops.SIN)
   def log2(self): return self.alu(Ops.LOG2)
