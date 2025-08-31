@@ -110,7 +110,7 @@ class GroupOp:
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
   # These can change the dtype to bool
-  Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
+  Comparison = {Ops.CMPLT, Ops.CMPGT, Ops.CMPNE, Ops.CMPEQ}
 
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
