@@ -11,7 +11,8 @@ if __name__ == "__main__":
   for i in range(10_000):
     if i % 1000 == 0:
       print(f"Progress: {i}")
-    dt = random.choice(dtypes.ints)
+    dts = [dt for dt in dtypes.ints if dt is not dtypes.index]
+    dt = random.choice(dts)
     u = UOp.variable('x', random.randint(dt.min, 0), random.randint(1, dt.max), dtype=dt)
     d = random.randint(1, max(1, u.arg[2]))
     if d in powers_of_two: continue
