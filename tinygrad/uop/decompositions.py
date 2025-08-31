@@ -358,8 +358,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
       ((UPat.cvar("c1",vec=False)<UPat.var("x", dtypes.sints)) & (UPat.var("x", dtypes.sints)<UPat.cvar("c2",vec=False)),
         lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
-  # NOTE: no mathtrait as CMPNE has mask dtype instead of bool in some backends
-  if Ops.CMPEQ in ops: pat += [(UPat(Ops.CMPNE, src=(UPat.var("x"), UPat.var("y"))).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
+  if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:

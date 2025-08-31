@@ -12,7 +12,6 @@ from tinygrad.helpers import DEBUG
 
 def to_mask(dt:DType): return {1:dtypes.mask8, 2:dtypes.mask16, 4:dtypes.mask32, 8:dtypes.mask64}[dt.scalar().itemsize].vec(dt.count)
 def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize]
-# TODO: get_late_rewrite_patterns needs to run before mask_macther as rewritting cmpne to cmpeq stops the cmpne cmpne to cmpeq pattern
 # or instead emit the correct value instead of True for masks
 # on x86/arm64 certain comparisons create masks instead of booleans
 mask_matcher = PatternMatcher([
@@ -24,9 +23,10 @@ mask_matcher = PatternMatcher([
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
-  # bool CMPNE is XOR, bool CMPLT is XOR+AND, NOTE: cmp of masks is not valid (true mask == nan)
-  (UPat.var('x', dtype=(dtypes.bool,)+dtypes.masks).ne(UPat.var('y')), lambda x,y: x^y),
-  (UPat.var('x', dtype=(dtypes.bool,)+dtypes.masks)<UPat.var('y'), lambda x,y: (x^True)&y),
+  # bool CMPNE is XOR, bool CMPLT is XOR+AND, NOTE: cmp of masks is not valid for floats (true mask == nan)
+  (UPat.var('x', (dtypes.bool,)+dtypes.masks).ne(UPat.var('y')), lambda x,y: x^y),
+  (UPat.var('x', (dtypes.bool,)+dtypes.masks).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
+  (UPat.var('x', (dtypes.bool,)+dtypes.masks)<UPat.var('y'), lambda x,y: (x^True)&y),
   # no cmplt for packed ints, y < x => x > y
   (UPat(Ops.CMPLT, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"), lambda y,x,cmp: UOp(Ops.CMPGT, cmp.dtype, (x, y)) if y.dtype.count > 1 else None),
   # no cmpne for packed ints, y != x => !(y==x)
