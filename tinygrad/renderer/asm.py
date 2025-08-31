@@ -66,23 +66,22 @@ mask_matcher = PatternMatcher([
 ])
 
 powers_of_two = {2**i:i for i in range(64)}
-def split_vectorized_alu(alu:UOp):
+def split_vectorized_alu(ctx:Renderer, alu:UOp):
   dt = max([alu.src[-1].dtype, alu.dtype], key=lambda x: x.itemsize)
-  if dt.itemsize <= 16 and dt.count in powers_of_two: return None
+  if dt.itemsize <= ctx.max_vec_sz and dt.count in powers_of_two: return None
   szs, src, offset = [4,2,1], [], 0
   while offset < dt.count:
     for sz in szs:
-      # TODO: max vec len (16) is backend specific
-      if sz*dt.scalar().itemsize > 16 or offset+sz > dt.count: continue
+      if sz*dt.scalar().itemsize > ctx.max_vec_sz or offset+sz > dt.count: continue
       src.append(UOp(alu.op, alu.dtype.scalar().vec(sz), tuple(s.gep(tuple(range(offset, offset+sz))) for s in alu.src)))
       offset += sz
       break
   return UOp(Ops.CAT, alu.dtype, tuple(src))
 
 # TODO: handle tails, define reg probably shouldn't have a vector dtype
-def split_vectorized_acc(acc:UOp, c:UOp):
-  if acc.dtype.itemsize <= 16 and acc.dtype.count in powers_of_two: return None
-  l = next(x for x in [4,2,1] if acc.dtype.count % x == 0 and acc.dtype.base.scalar().vec(x).itemsize <= 16)
+def split_vectorized_acc(ctx:Renderer, acc:UOp, c:UOp):
+  if acc.dtype.itemsize <= ctx.max_vec_sz and acc.dtype.count in powers_of_two: return None
+  l = next(x for x in [4,2,1] if acc.dtype.count % x == 0 and acc.dtype.base.scalar().vec(x).itemsize <= ctx.max_vec_sz)
   new_acc = acc.replace(dtype=acc.dtype.base.scalar().vec(l).ptr(acc.dtype.count // l, cast(PtrDType, acc.dtype).addrspace))
   return UOp(Ops.PTRCAT, acc.dtype, tuple([new_acc.index(UOp.const(dtypes.int, i)) for i in range(0, acc.dtype.count, l)]))
 
@@ -693,6 +692,7 @@ class AsmRenderer(Renderer):
 
 class X86Renderer(AsmRenderer):
   device = "X86"
+  max_vec_sz = 16
   has_local = False
   global_max = None
   pre_matcher = x86_pre_matcher

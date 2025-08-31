@@ -113,6 +113,7 @@ class Renderer:
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
+  max_vec_sz: int = 0
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
