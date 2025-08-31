@@ -69,7 +69,7 @@ symbolic_simple = PatternMatcher([
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
-  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(a.dtype, x.dtype) else None),
+  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
