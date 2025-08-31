@@ -428,5 +428,12 @@ class TestOpsBFloat16(unittest.TestCase):
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
+  # TODO: AMD_LLVM failed on this
+  @unittest.skipUnless(Device.DEFAULT == "PYTHON", "only test on PYTHON now")
+  def test_no_approximation(self):
+    data = [326.0, 339.0, 10603200512.0]
+    expected = torch.tensor(data, dtype=torch.bfloat16).sqrt().float().numpy()
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).sqrt().numpy(), expected)
+
 if __name__ == '__main__':
   unittest.main()
