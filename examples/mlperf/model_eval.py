@@ -243,7 +243,7 @@ def eval_mrcnn():
 
 def eval_llama3():
   from extra.models.llama import Transformer
-  from examples.llama3 import MODEL_PARAMS, load, fix_bf16, convert_from_huggingface
+  from examples.llama3 import MODEL_PARAMS, load, convert_from_huggingface
   from tinygrad.helpers import tqdm
 
   BASEDIR = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
