@@ -13,7 +13,7 @@ class IndexContext:
   start: int = 0
 
 def shape_to_idx(s, axis_types, start=0):
-  return [UOp.range(sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
+  return [UOp.range(sint_to_uop(s).cast(dtypes.index), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
@@ -105,7 +105,9 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(GroupOp.Binary, dtype=dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lower_index_dtype),
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lower_index_dtype),
   # TODO: assert that these fit in int32
-  (UPat((Ops.RANGE,Ops.DEFINE_VAR,Ops.CONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
+  (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
+  (UPat((Ops.RANGE,), dtype=dtypes.index, src=(UPat.var("end")), name="r"), lambda r,end:
+    r.replace(dtype=dtypes.int32.vec(r.dtype.count), src=(end.cast(dtypes.int32),))),
   (UPat(Ops.VCONST, dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32.vec(u.dtype.count))),
   (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(
     dtype=(dt:=least_upper_dtype(*[x.dtype for x in u.src])).vec(u.dtype.count), src=tuple(x.cast(dt) if x.dtype is not dt else x for x in u.src)))
