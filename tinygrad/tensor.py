@@ -96,8 +96,13 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
+# --- case 1        self   : (10,20,30,40,50), x: (10,2,3,4,40,50)
+# ---               values : (10,2,3,4, 1, 1,40,50)
+# ---               mask   : (10,2,3,4,20,30,40,50)
+# ---  (last arg)   axes = (1,2,3)
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
+  # (2,3,4) -> (1,1,1)
   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
@@ -1132,21 +1137,23 @@ class Tensor(MathTrait):
 
   # ***** movement high level ops *****
 
-  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+  def _parse_indices(self, indices) -> list[dict]:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, list(indices)
+    indices = list(indices)
 
     # fill ellipsis or rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     # NOTE: None adds a dim later
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
-    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
+    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices) # --- What if t[0, None] for 5d tensor? -> [0, None, :, :, :, :]
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
+    # --- Until here, I read
 
     indices_parsed, dim = [], 0
     for index in indices:
+      # --- None is assumed to be last? Maybe not
       size = 1 if index is None else self.shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
@@ -1180,11 +1187,21 @@ class Tensor(MathTrait):
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
       if index is not None: dim += 1
+    return indices_parsed
+
+  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    x = self
+    # --- [{index:..., size:..., boundary:..., stride:...}]
+    indices_parsed = self._parse_indices(indices)
 
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
+      # --- shrinks = (i['boundary'] for i in mops)
+      # --- strides = (i['stride'] for i in mops)
       shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
+      # --- shrink shrinks the dims that are indexed by int/slice/tensor
+      # --- flip makes the dims in reverse order if stride is negative, so that we can use positive stride only
       x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
       strides = tuple(map(abs, strides))
       # apply stride
@@ -1196,15 +1213,36 @@ class Tensor(MathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
+    # --- if index is integer, it extracts a single element and removes that dim, so we can filter out those dims
+    # --- but why we only filter out sint only?
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
 
     # tensor indexing
+    # --- Q. What's the usage of tensor indexing?
+    # --- A. samples = Tensor.randint(1000, size=(100,)); batch = X_train[samples];
+    # --- sint is symbolic int. What happens if index is sint?
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
       pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
+      print(f"{x.shape=}, {dims=}, {big_shape=}, {pre_reduce_shape=}")
+      # --- By reading numpy indexing document, I understood the rule above
+      # --- https://numpy.org/devdocs//user/basics.indexing.html#combining-advanced-and-basic-indexing
 
       # create index masks
+      # --- e.g. x.shape: (10, 20, 30, 40, 50), idx1: (2,1,4), idx2: (3,1) -> big_shape: (2,3,4)
+      # ---      case 1, x[:, idx1, idx2]  -> (10,2,3,4,40,50)
+      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
+      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
+      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
+      # ---              mask               = (10,2,3,4,20,30,40,50)
+      # ---      case 2, x[:, idx1, :, idx2]  -> (2,3,4,10,30,50)
+      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
+      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
+      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
+      # ---              mask               = (10,2,3,4,20,30,40,50)
+      # ---              sumed              = (10,2,3,4,30,50)
+      # ---              permute(1,2,3,0,4) = (2,3,4,10,30,50)
       for dim, tensor in zip(dims, tensors):
         try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
@@ -1216,9 +1254,19 @@ class Tensor(MathTrait):
       # inject 1's for the extra dims added in create masks
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
       # sum reduce the extra dims introduced in create masks
+      # --- Why sum is OK? Because mask is one-hot, so only one value is kept, others are zeroed out
+      # --- case 1       maked_x (10,2,3,4,*20,*30,40,50)
+      # ---              sum_axis = (1+3, 2+3) = (4, 5)
+      # ---              sumed    = (10,2,3,4,40,50)
+      # --- case 2       maked_x (10,2,3,4,*20,30,*40,50)
+      # ---              sum_axis = (1+3, 3+3) = (4, 6)
+      # ---              sumed    = (10,2,3,4,30,50)
       x = (mask.where(x.reshape(reshape_arg), 0)).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
 
       # special permute case
+      # --- case 2       dims = [1,3], range(1, 1+3) = (1,2,3)
+      # ---              permute(*(range(1,4)), *range(0,1), *range(4,5))
+      # ---              permute(1,2,3,0,4) -> (2,3,4,10,30,50)
       if dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1)):
         x = x.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), x.ndim))
 
@@ -1226,8 +1274,14 @@ class Tensor(MathTrait):
       if v is not None:
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
         # add back reduced dims from sum
+        # --- This does not consider the special permute case above?
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
+        # --- case 1        self: (10,20,30,40,50), x: (10,2,3,4,40,50)
+        # ---                 vb: (10,2,3,4,40,50)
+        # ---      vb.unsqueezed: (10,2,3,4, 1, 1,40,50)
+        # ---               mask: (10,2,3,4,20,30,40,50)
+        # ---  (last arg)   axes = (1,2,3)
         x = _masked_setitem(self, vb, mask, tuple(range(dims[0], dims[0] + len(big_shape))))
 
     return x

@@ -2,6 +2,7 @@ import os
 import io
 import re
 import pytest
+import unittest
 from contextlib import redirect_stdout, redirect_stderr
 
 # Ensure DEBUG is set before tinygrad imports (some logging is configured at import time)
@@ -58,19 +59,20 @@ def count_kernels(fn) -> int:
   print(f"--- total kernel-ish lines: {len(kernelish)} ---\n")
   return len(kernelish)
 
-@pytest.mark.xfail(reason="Pre-fix: setitem realizes / launches multiple kernels")
-def test_setitem_arange_single_kernel():
-  def workload():
-    # Make a realized contiguous buffer (avoid broadcasted zero w/ stride=0)
-    x = Tensor.empty(100).realize()
-    x *= 0   # zero without changing contiguity
-
-    for i in range(10):
-      x[i*10:(i+1)*10] = Tensor.arange(10)
-
-    _ = x.numpy()  # force execution
-
-  kcount = count_kernels(workload)
-  print(f"Kernel count (pre-fix): {kcount}")
-  # Goal after the bounty: this becomes exactly 1
-  assert kcount == 1
+class TestSetitem(unittest.TestCase):
+  def test_setitem_arange_single_kernel(self):
+    def workload():
+      # Make a realized contiguous buffer (avoid broadcasted zero w/ stride=0)
+      x = Tensor.empty(100).realize()
+      x *= 0   # zero without changing contiguity
+  
+      for i in range(10):
+        x[i*10:(i+1)*10] = Tensor.arange(10)
+  
+      _ = x.numpy()  # force execution
+      self.assertListEqual(x.tolist(), list(range(10))*10)
+  
+    kcount = count_kernels(workload)
+    print(f"Kernel count (pre-fix): {kcount}")
+    # Goal after the bounty: this becomes exactly 1
+    assert kcount == 1
