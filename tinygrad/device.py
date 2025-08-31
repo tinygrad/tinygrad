@@ -307,9 +307,6 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
     return False
-  if dtype in dtypes.masks:
-    # mask dtypes are specific to x86/a64 backends and are handled in a pattern matcher
-    return False
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
