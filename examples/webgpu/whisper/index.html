@@ -12,7 +12,6 @@
             ["mel", "./mel.js"],
             ["encoder", "./encoder.js"],
             ["decoder", "./decoder.js"],
-            ["vad", "./vad.js"]
         ];
         window.modules = modules;
 
@@ -253,103 +252,6 @@
 
             const { samples } = await audioFetcher();
 
-            async function vad_go_brrr(samples_array) {
-                var hn = new Float32Array(128);
-                var cn = new Float32Array(128);
-
-                const prefix = 64;
-                const VAD_BS = 32;
-                const stride = VAD_BS*512;
-                // var vad_probs = [];
-                let vad_probs = new Float32Array(Math.ceil(samples_array.length / stride) * VAD_BS)
-                var batch_n = 0;
-                for(var i = -prefix; i < samples_array.length; i+=stride)
-                {
-                    let vad_chunk = null;
-                    if (i < 0) {
-                        vad_chunk = new Float32Array(stride+prefix);
-                        vad_chunk.set(samples_array.slice(0, stride), prefix);
-                    } else if (i+prefix+stride <= samples_array.length) {
-                        vad_chunk = samples_array.slice(i, i+prefix+stride);
-                    } else {
-                        vad_chunk = new Float32Array(stride+prefix);
-                        vad_chunk.set(samples_array.slice(i));
-                    }
-                    const vad_output = await nets.vad(vad_chunk, hn, cn);
-                    hn = vad_output[1];
-                    cn = vad_output[2];
-                    vad_probs.set(vad_output[0], batch_n * VAD_BS);
-                    console.log(vad_output[0]);
-                    ++batch_n;
-                }
-                return vad_probs;
-            }
-
-            function segment_speech(vad_probabilities, {threshold=0.5, neg_threshold=0.15, min_silence=1000, min_speech=250, speech_pad=50, prob_duration=32.0} = {}) {
-                const SPEECH = 1;
-                const SILENCE = 2;
-
-                let segments = [];
-                let state = SILENCE;
-                let start = 0;
-                let buffered = 0;
-                let ts = 0;
-                for (var i = 0; i < vad_probabilities.length; ++i) {
-                    ts = i*prob_duration;
-                    let prob = vad_probabilities[i];
-
-                    switch (state) {
-                        case SPEECH:
-                            if (prob < threshold-neg_threshold) {
-                                buffered += prob_duration;
-                            } else {
-                                buffered = 0;
-                            }
-
-                            if (buffered >= min_silence) {
-                                let finish = Math.min(ts + prob_duration - buffered + speech_pad, vad_probabilities.length * prob_duration )
-                                segments.push(finish);
-                                buffered = 0;
-                                state = SILENCE;
-                            } else if (true) {
-
-                            }
-                            break;
-
-                        case SILENCE:
-                            if (prob > threshold) {
-                                buffered += prob_duration;
-                            } else {
-                                buffered = 0;
-                            }
-
-                            if (buffered >= min_speech) {
-                                start = Math.max(ts + prob_duration - buffered - speech_pad, 0);
-                                segments.push(start);
-                                buffered = 0;
-                                state = SPEECH;
-                            }
-                            break;
-
-                        default:
-                            console.error("invalid state");
-                            break;
-                    }
-                }
-                if (state === SPEECH && ts - start > min_speech) {
-                    segments.push(ts);
-                }
-                segments = segments.map((x,i) => x/1000.0);
-                if (segments[0] < 0 && segments.length) segments[0] = 0;
-                if (segments.length && segments[segments.length-1] > vad_probabilities.length * 0.032) segments[segments.length-1] = vad_probabilities.length * 0.032;
-                return segments;
-            }
-
-            // const vad_probabilities = await vad_go_brrr(samples);
-
-            // let speech_segments = segment_speech(vad_probabilities);
-            // console.log(speech_segments);
-
             let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
             for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
                 let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
@@ -421,25 +323,6 @@
                 return probs.map(p => p / sum);
             }
 
-            function has_speech(vad_probabilities, log_spec_seek, threshold=0.2) {
-                let seek_seconds = log_spec_seek / MEL_SPEC_CHUNK_LENGTH * 30.0;
-                let seek_milliseconds = seek_seconds * 1000.0;
-                let vad_chunk_length_seconds = 512 / 16000.0;
-                let vad_chunk_length_milliseconds = vad_chunk_length_seconds * 1000.0;
-                return vad_probabilities[Math.trunc(seek_milliseconds / vad_chunk_length_milliseconds)] > threshold;
-            }
-
-            function next_speech(speech_segments, log_spec_seek) {
-                let seek_seconds = log_spec_seek / MEL_SPEC_CHUNK_LENGTH * 30.0;
-                if (speech_segments.length && seek_seconds < speech_segments[0]) return speech_segments[0] / 30.0 * MEL_SPEC_CHUNK_LENGTH;
-                for (let i = 1; i < speech_segments.length; i+=2) {
-                    let [end, start] = [speech_segments[i], speech_segments[i+1]];
-                    if (seek_seconds >= end && seek_seconds < start) {
-                        return start / 30.0 * MEL_SPEC_CHUNK_LENGTH;
-                    }
-                }
-                return seek_seconds / 30.0 * MEL_SPEC_CHUNK_LENGTH;
-            }
 
             const DECODER_OUTPUTS_TOKENS = false;
             const DECODER_OUTPUTS_LOGITS = true;
@@ -449,11 +332,6 @@
             let temperature = 0;
             // for (let seek = 50 * MEL_SPEC_CHUNK_LENGTH; seek < 51*MEL_SPEC_CHUNK_LENGTH;) {
             for (let seek = 0; seek < log_specs_full.length;) {
-                // let next_speech_seek = next_speech(speech_segments, seek);
-                // if (next_speech_seek > seek + 80) {
-                //     // seek = next_speech_seek;
-                //     // continue;
-                // }
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
