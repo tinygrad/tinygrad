@@ -105,46 +105,10 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
    lambda y,x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.bitcast(x.dtype.scalar().vec(x.dtype.count*2)).gep(i*2) for i in range(2))) if y.dtype.count > 1 else None),
 ]) + mask_matcher
 
-def x86_load_consts(x:UOp) -> UOp|None:
-  if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
-  nsrc = []
-  for i,s in enumerate(x.src):
-    if s.op is Ops.CONST:
-      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
-      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
-      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
-      elif x.dtype in dtypes.masks: s = s.load()
-      elif x.op is Ops.STORE and i == 1: s = s.const_like(truncate[s.dtype](s.arg)).load()
-      elif x.op is Ops.VECTORIZE or abs(s.arg) > dtypes.max(dtypes.int32): s = s.const_like(truncate[s.dtype](s.arg)).load()
-    nsrc.append(s)
-  return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
-
-x86_matcher = PatternMatcher([
-  # *** IMMEDIATES ***
-  # some consts can't be immediates
-  (UPat(GroupOp.All, name="x"), x86_load_consts),
-  # some ops can't take imm in srcs
-  (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE), name="x"),
-   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
-  # TODO: cmpne, add shouldn't have consts on the left to begin with
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
-   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
-  # *** CASTS ***
+asm_matcher = PatternMatcher([
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
-  # can't cast from float16 to ints/float64 directly and vice versa
-  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  # can't cast from float to int8/16 directly and vice versa
-  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  # int/float casts only for signed int
-  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
-  # casting uint64 to float requires special handling if msb is 1
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
-   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
-                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # *** NOOPS ***
+  # *** NOOP ***
   # cast to pointer is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
   # cast from pointer is a noop
@@ -166,9 +130,6 @@ x86_matcher = PatternMatcher([
   # moving elements of a single register to another without shuffling is a noop
   (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
-  # a gep in a 32bit vectorize is a noop and its arg is part of the imm of the instruction
-  (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, name="x"),
-   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
   # *** INDEX/LOAD/STORE ***
   # loading from register is a noop
   #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
@@ -192,6 +153,46 @@ x86_matcher = PatternMatcher([
    lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
   (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
    lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
+])
+
+def x86_load_consts(x:UOp) -> UOp|None:
+  if x.op is Ops.LOAD and x.src[0].op is Ops.CONST: return None
+  nsrc = []
+  for i,s in enumerate(x.src):
+    if s.op is Ops.CONST:
+      if s.dtype is dtypes.float16: s = s.load(dtype=dtypes.int16).bitcast(dtypes.float16)
+      elif s.dtype is dtypes.float32: s = s.load(dtype=dtypes.int32).bitcast(dtypes.float32)
+      elif s.dtype is dtypes.float64: s = s.load(dtype=dtypes.int64).bitcast(dtypes.float64)
+      elif x.dtype in dtypes.masks: s = s.load()
+      elif x.op is Ops.STORE and i == 1: s = s.const_like(truncate[s.dtype](s.arg)).load()
+      elif x.op is Ops.VECTORIZE or abs(s.arg) > dtypes.max(dtypes.int32): s = s.const_like(truncate[s.dtype](s.arg)).load()
+    nsrc.append(s)
+  return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
+
+x86_matcher = asm_matcher + PatternMatcher([
+  # some consts can't be immediates
+  (UPat(GroupOp.All, name="x"), x86_load_consts),
+  # some ops can't take imm in srcs
+  (UPat((Ops.IDIV, Ops.MOD, Ops.WHERE), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
+  # TODO: cmpne, add shouldn't have consts on the left to begin with
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
+   lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
+  # can't cast from float16 to ints/float64 directly and vice versa
+  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  # can't cast from float to int8/16 directly and vice versa
+  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  # int/float casts only for signed int
+  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
+  # casting uint64 to float requires special handling if msb is 1
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
+   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
+                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # a gep in a 32bit vectorize is a noop and its arg is part of the imm of the instruction
+  (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
   # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
   (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
   # mulacc only available for floats
@@ -200,7 +201,6 @@ x86_matcher = PatternMatcher([
   (UPat.var("a", dtypes.ints8) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
-  # *** FLOAT16 ***
   # float16 alus are done in float32
   (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count), tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
