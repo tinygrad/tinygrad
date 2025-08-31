@@ -19,11 +19,11 @@ mask_matcher = PatternMatcher([
   # float16 alus are done in float32
   (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count), tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
-  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
+  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
-  # bool CMPNE is XOR, bool CMPLT is XOR+AND, NOTE: cmp of masks is not valid for floats (true mask == nan)
+  # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND, NOTE: cmp of masks is not valid for floats (true mask == nan)
   (UPat.var('x', (dtypes.bool,)+dtypes.masks).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', (dtypes.bool,)+dtypes.masks).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', (dtypes.bool,)+dtypes.masks)<UPat.var('y'), lambda x,y: (x^True)&y),
@@ -35,9 +35,9 @@ mask_matcher = PatternMatcher([
   (UPat(GroupOp.Binary, dtypes.bool, (UPat.var("a", dtypes.floats+dtypes.masks), UPat()), name="x"), lambda a,x: x.replace(dtype=to_mask(a.dtype))),
   (UPat(GroupOp.Binary, dtypes.bool, (UPat.var("a", dtypes.ints), UPat()), name="x"), lambda a,x: x.replace(dtype=to_mask(a.dtype)) if a.dtype.count > 1 else None),
   # convert bools to masks in bitwise source
-  (UPat((Ops.CMPNE, Ops.CMPEQ, Ops.CMPLT, Ops.CMPGT, Ops.AND, Ops.OR, Ops.XOR), src=(UPat.var("a", dtypes.bool), UPat.var("b", dtypes.masks)), name="x"),
+  (UPat(GroupOp.Comparison | {Ops.AND, Ops.OR, Ops.XOR}, src=(UPat.var("a", dtypes.bool), UPat.var("b", dtypes.masks)), name="x"),
    lambda a,b,x: x.replace(dtype=(dt:=to_mask(b.dtype)), src=(a.cast(to_int(dt)).mul(-1).bitcast(dt), b))),
-  (UPat((Ops.CMPNE, Ops.CMPEQ, Ops.CMPLT, Ops.CMPGT, Ops.AND, Ops.OR, Ops.XOR), src=(UPat.var("a", dtypes.masks), UPat.var("b", dtypes.bool)), name="x"),
+  (UPat(GroupOp.Comparison | {Ops.AND, Ops.OR, Ops.XOR}, src=(UPat.var("a", dtypes.masks), UPat.var("b", dtypes.bool)), name="x"),
    lambda a,b,x: x.replace(dtype=(dt:=to_mask(a.dtype)), src=(a, b.cast(to_int(dt)).mul(-1).bitcast(dt)))),
   # convert bool to mask in float/packed where
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
@@ -204,7 +204,7 @@ x86_matcher = asm_matcher + PatternMatcher([
   # float16 alus are done in float32
   (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count), tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
-  (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
+  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
 ]) + mask_matcher
 
