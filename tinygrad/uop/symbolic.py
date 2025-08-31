@@ -71,7 +71,7 @@ symbolic_simple = PatternMatcher([
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
   # if the intermediate cast doesnt narrow we can do it in one cast, we have to be carefull with bfloat16
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) and
-    not (a.dtype==dtypes.float and b.dtype==dtypes.bfloat16) else None),
+    not (a.dtype==dtypes.float and (b.dtype==dtypes.bfloat16 or x.dtype==dtypes.bfloat16)) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
