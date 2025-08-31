@@ -102,9 +102,14 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
 # ---  (last arg)   axes = (1,2,3)
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
-  # (2,3,4) -> (1,1,1)
+  # --- (2,3,4) -> (1,1,1)
+  # --- x:acc, y:cur, acc[0],cur[0] is mask, acc[1],cur[1] is value
+  # --- So, if values have tensor indexed shape, the values are also reduced to the last one. What if mask and values have different shape?
+  # --- But values are always broadcasted to the sahpe of mask, so it's okay.
   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+  # --- mask: (10,1,1,1,20,30,40,50), values: (10,1,1,1, 1, 1,40,50)
   # remove extra dims from reduce
+  # --- What happens if squeeze on non-one dim?
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
   # select from values for each True element in mask else select from target
   return mask.where(values, target)
@@ -1272,6 +1277,7 @@ class Tensor(MathTrait):
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
+        # --- What if v and x are broadcasted to even bigger shape?
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
         # add back reduced dims from sum
         # --- This does not consider the special permute case above?
@@ -1336,12 +1342,20 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
+    # --- Why do we need realize() before _getitem?
     res = self.realize()._getitem(indices, v)
+    #res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
+      #print(f"setitem is a full copy, assigning to self")
+      # --- I think this realize() is not needed
+      # self.assign(res)
       self.assign(res).realize()
     else: # no copy, basic setitem
+      #print(f"setitem is a partial copy, assigning to result of getitem")
+      #print(f"{self.shape=}, {res.shape=}, {v.shape=}")
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+      #print(f"{v.shape=}, {v.uop=}")
       res.assign(v).realize()
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
