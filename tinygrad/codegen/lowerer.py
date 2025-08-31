@@ -13,7 +13,7 @@ class IndexContext:
   start: int = 0
 
 def shape_to_idx(s, axis_types, start=0):
-  return [UOp.range(sint_to_uop(s).cast(dtypes.index), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
+  return [UOp.range(sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()

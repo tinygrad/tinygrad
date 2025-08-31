@@ -34,8 +34,8 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
   if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   # try to split up dims: (a,) -> (b, c)
   if limited == dims: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
-  for s in limited: assert sint_to_uop(s).vmax <= dtypes.int32.max+1, f"gpu dim upper bound does not fit in int32: {s}"
-  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int32, (), (f"{prefix}{i}", sint_to_uop(s).cast(dtypes.int32).ssimplify())) for i,s in enumerate(limited)]
+  for s in limited: assert sint_to_uop(s, dtypes.int32).vmax <= dtypes.int32.max+1, f"gpu dim upper bound does not fit in int32: {s}"
+  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int32, (), (f"{prefix}{i}", sint_to_uop(s, dtypes.int32).ssimplify())) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")

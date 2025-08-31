@@ -1004,7 +1004,7 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
 
-def sint_to_uop(x:sint, dtype:DType=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
+def sint_to_uop(x:sint, dtype:DType=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
