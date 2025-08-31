@@ -181,8 +181,7 @@ class TestSafeCast(TestUOps):
   def test_cast_folds(self):
     a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int32).simplify(), a)
-    # TODO: double preserves certain int dtypes
-    # self.assertEqual(a.cast(dtypes.double).cast(dtypes.int32).simplify(), a)
+    self.assertEqual(a.cast(dtypes.double).cast(dtypes.int32).simplify(), a)
     a = UOp.variable("a", 1, 10, dtype=dtypes.uint8)
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.uint8).simplify(), a)
     self.assertEqual(a.cast(dtypes.uint32).cast(dtypes.uint8).simplify(), a)
@@ -192,7 +191,7 @@ class TestSafeCast(TestUOps):
     self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))
     a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
     # TODO: double preserves certain int dtypes
-    # self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))
+    self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int16).simplify(), a.cast(dtypes.int16))
     a = UOp.variable("a", 1, 10, dtype=dtypes.uint8)
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int32).simplify(), a.cast(dtypes.int32))
