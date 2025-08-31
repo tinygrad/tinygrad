@@ -201,6 +201,7 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   match dt1:
     case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16)
     case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16)
+    case dtypes.index: return dt0 in dtypes.ints
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
