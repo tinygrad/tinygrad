@@ -60,7 +60,7 @@ class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_variable_inside_special(self):
     uop = UOp(Ops.SPECIAL, dtypes.int, arg=('gidx0', UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10))))
     self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 10)
+    self.assertEqual(uop.vmax, 9)
 
   def test_vmin_vmax_multiplication_0_inf(self):
     # vmin and vmax for multiplication with a variable
