@@ -35,7 +35,7 @@ k = Kernel(ast)
 k.apply_opts(opts)
 bufs = bufs_from_lin(k)
 
-prg = CompiledRunner(get_program(k.get_optimized_ast(), k.opts))
+prg = CompiledRunner(get_program(k.ast, k.opts, k.applied_opts))
 
 for i in range(10):
   speed = prg(bufs, var_vals={}, wait=True)

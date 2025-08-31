@@ -9,7 +9,6 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.codegen.opt.search import Opt, OptOps
-from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.engine.realize import get_program
 
 class TestLinearizerDumb(unittest.TestCase):
@@ -36,9 +35,7 @@ class TestLinearizerDumb(unittest.TestCase):
           UOp(Ops.CONST, dtypes.half, arg=0.0, src=(
              x16,)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, arg=(-1, 2, 1)), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0)]
-    k = Kernel(ast, opts=Device["METAL"].renderer)
-    k.apply_opts(opts)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device["METAL"].renderer, opts)
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     gate_count = len([x for x in prg.src.splitlines() if "if" in x])
@@ -75,9 +72,7 @@ class TestLinearizerDumb(unittest.TestCase):
             UOp(Ops.CONST, dtypes.int, arg=1000, src=(
                x14,)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
 
@@ -93,9 +88,7 @@ class TestLinearizerDumb(unittest.TestCase):
             UOp(Ops.VIEW, dtypes.float.ptr(25), arg=ShapeTracker(views=(View(shape=(26, 49), strides=(0, -1), offset=48, mask=((0, 26), (24, 49)), contiguous=False), View(shape=(25, 25), strides=(1, 50), offset=0, mask=None, contiguous=False))), src=(
               UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(25), arg=1, src=()),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.PADTO, axis=0, arg=32), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=0)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
     if_uops = [u for u in prg.uops if u.op is Ops.IF]
     self.assertIn(len(if_uops), {1,2,3})
@@ -135,8 +128,7 @@ class TestLinearizerDumb(unittest.TestCase):
                 UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                   UOp(Ops.VIEW, dtypes.half.ptr(131072000), arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(1, 4096, 0), offset=0, mask=None, contiguous=False),)), src=(
                     UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(131072000), arg=2, src=()),)),)),)),)),)),)),)),))
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer)
     print(prg.src)
 
   @unittest.expectedFailure
@@ -163,11 +155,9 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.float.ptr(18), arg=ShapeTracker(views=(View(shape=(3, 6), strides=(6, 1), offset=0, mask=None, contiguous=True),)), src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(18), arg=2, src=()),)),)),)),)),)),))
     opts = [Opt(op=OptOps.UNROLL, axis=0, arg=0)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
-    load_idxs = [x.src[1] for x in k.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
+    load_idxs = [x.src[1] for x in prg.uops if x.op is Ops.LOAD and x.src[0].arg == 2]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
 
   @unittest.expectedFailure
@@ -187,11 +177,9 @@ class TestLinearizerDumb(unittest.TestCase):
               UOp(Ops.VIEW, dtypes.float.ptr(1040), arg=ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 4, 1, 4, 3, 3), strides=(260, 13, 1, 0, 0, 0, 65, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1040), arg=2, src=()),)),)),)),)),)),))
     opts = [Opt(op=OptOps.UPCAST, axis=3, arg=0), Opt(op=OptOps.UPCAST, axis=2, arg=0)]
-    k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    k.apply_opts(opts)
-    prg = get_program(k.get_optimized_ast(), k.opts)
+    prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
-    store_idxs = [x.src[1] for x in k.uops if x.op is Ops.STORE]
+    store_idxs = [x.src[1] for x in prg.uops if x.op is Ops.STORE]
     for i in range(len(store_idxs) - 1):
       first_bounds = store_idxs[i].vmin+store_idxs[i].vmax
       next_bounds = store_idxs[i+1].vmin+store_idxs[i+1].vmax
