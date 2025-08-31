@@ -109,7 +109,7 @@ class RangeifyContext:
   # create ranges
   range_idx: int = 0
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
-    ret = UOp.range(dtypes.index, s, self.range_idx, axistype)
+    ret = UOp.range(s, self.range_idx, axistype)
     self.range_idx += 1
     return ret
 

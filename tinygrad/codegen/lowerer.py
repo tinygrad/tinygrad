@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, least_upper_dtype
 from tinygrad.device import is_dtype_supported
-from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve, GroupOp
+from tinygrad.uop.ops import KernelInfo, UOp, Ops, PatternMatcher, UPat, sint_to_uop, AxisType, graph_rewrite, resolve
 
 # ***** indexing *****
 
@@ -13,11 +13,11 @@ class IndexContext:
   start: int = 0
 
 def shape_to_idx(s, axis_types, start=0):
-  return [UOp.range(dtypes.index, sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
+  return [UOp.range(sint_to_uop(s), start+i, at) for i, (s, at) in enumerate(zip(s, axis_types))]
 
 def get_index(ast:UOp) -> IndexContext:
   axis_types = ast.arg.axis_types if isinstance(ast.arg, KernelInfo) else ()
-  if len(ast.full_shape) != len(axis_types):
+  if len(ast.full_shape) != len(axis_types) and ast.st is not None:
     axis_types = tuple([AxisType.REDUCE if resolve(s != fs) else AxisType.LOOP for s,fs in zip(ast.shape, ast.full_shape)])
   return IndexContext(axis_types, [], 0)
 

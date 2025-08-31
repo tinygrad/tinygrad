@@ -1,5 +1,5 @@
 from typing import cast, Generator, Callable
-import time, pprint, decimal, random, itertools, math
+import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod
@@ -34,8 +34,9 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   try:
     uops = full_rewrite(ast, renderer)
-  except RuntimeError:
+  except RuntimeError as e:
     print("***** LINEARIZE FAILURE *****")
+    print(e)
     print(f"ast = {ast}")
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
@@ -79,7 +80,7 @@ class CompiledRunner(Runner):
     self.p:ProgramSpec = p
     if precompiled is not None: self.lib = precompiled
     else:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,), cat="compiler"), "TINY"):
+      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
         self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
@@ -161,8 +162,7 @@ class ExecItem:
   def run(self, _var_vals:dict[Variable, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
-    if PROFILE: cpu_events.append(ProfilePointEvent(self.prg.device, "exec", decimal.Decimal(time.perf_counter_ns())/1000, self.prg.display_name,
-                                                    {"metadata":self.metadata, "var_vals":var_vals}))
+    if PROFILE: cpu_events.append(ProfilePointEvent(self.prg.device, "exec", self.prg.display_name, {"metadata":self.metadata, "var_vals":var_vals}))
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
