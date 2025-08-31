@@ -98,8 +98,8 @@ def _reshape_mask(_mask:tuple[tuple[sint, sint], ...]|None, old_shape:tuple[sint
 def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # find the position of offset on each dimension based on shape
   # similar to unravel_index in numpy/torch
-  acc, idxs = 1, []
-  for d in reversed(shape):
+  acc, idxs = sint_to_uop(1), []
+  for d in map(sint_to_uop, reversed(shape)):
     idxs.append((offset//acc)%d)
     acc *= d
   return idxs[::-1]
@@ -117,7 +117,7 @@ class View:
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*sint_to_uop(st)
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
         if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
