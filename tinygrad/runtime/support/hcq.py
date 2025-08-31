@@ -383,7 +383,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
-    self.error_state:Exception|None = None # True if error is unrecoverable and sync will always fail
+    self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
 
     if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
 
