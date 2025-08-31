@@ -96,6 +96,8 @@ class dtypes:
   @staticmethod
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
+  def is_mask(x: DType) -> bool: return x.scalar() in dtypes.masks
+  @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
     if x.__class__ is int: return dtypes.default_int
@@ -144,6 +146,11 @@ class dtypes:
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
+  # used in x86/a64 backends
+  mask8: Final[DType] = DType.new(15, 1, "mask8", None)
+  mask16: Final[DType] = DType.new(16, 2, "mask16", None)
+  mask32: Final[DType] = DType.new(17, 4, "mask32", None)
+  mask64: Final[DType] = DType.new(18, 8, "mask64", None)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -159,6 +166,7 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
+  masks = (mask8, mask16, mask32, mask64)
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
