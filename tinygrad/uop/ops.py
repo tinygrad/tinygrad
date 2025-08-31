@@ -301,7 +301,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(end:sint, *arg):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtypes.index, src=(sint_to_uop(end),), arg=arg)
+    end = sint_to_uop(end, dtype=dtypes.index)
+    if end.dtype is not dtypes.index:
+      end = end.cast(dtypes.index)
+    return UOp(Ops.RANGE, dtype=dtypes.index, src=(end,), arg=arg)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
