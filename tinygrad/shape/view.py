@@ -100,7 +100,7 @@ def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # similar to unravel_index in numpy/torch
   acc, idxs = sint_to_uop(1), []
   for d in map(sint_to_uop, reversed(shape)):
-    idxs.append((offset//acc)%d)
+    idxs.append(((offset//acc)%d).ssimplify())
     acc *= d
   return idxs[::-1]
 
