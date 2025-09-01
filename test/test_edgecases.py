@@ -230,10 +230,7 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.expectedFailure
   def test_tensor_index_overflow(self):
-    # Advanced indexing on tensors expanded past int32 should not error, but
-    # tinygrad fails with a UOp verification error.
     val = Tensor([1])
     big = val.expand(2**31 + 3)
     idx = Tensor([0, 2**31 + 2])
