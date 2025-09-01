@@ -390,9 +390,6 @@
                     return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
                 }
 
-                let segment_cumlogprob = 0;
-                let max_range = offset + MAX_TOKENS_TO_DECODE;
-
                 async function decodeOne(i, max_range, segment_cumlogprob, context, temperature) {
                     let avg_logprob;
                     if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
@@ -453,23 +450,30 @@
                     return [true, context, avg_logprob, segment_cumlogprob];
                 }
 
-                let i = offset;
-                let avg_logprob;
-                for(;;) {
-                    let keep;
-                    [keep, context, avg_logprob, segment_cumlogprob] = await decodeOne(i, max_range, segment_cumlogprob, context, temperature);
+                let max_range = offset + MAX_TOKENS_TO_DECODE;
 
-                    if (DECODER_OUTPUTS_TOKENS) {
-                        pendingText = context.slice(offset).map(j => mapping[j]).join('');
-                    } else {
-                        pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                let indices, max_ranges, cumlogprobs, avg_logprobs, contexts;
+                [indices, max_ranges, cumlogprobs, avg_logprobs, contexts] = [[offset], [max_range], [0], [0], [context]];
+
+                for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
+                    for (let idx = 0; idx < indices.length; ++idx) {
+                        if (contexts[idx].at(-1) === TOK_EOS) continue;
+
+                        let keep;
+                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx]] = await decodeOne(indices[idx], max_ranges[idx], cumlogprobs[idx], contexts[idx], temperature);
+
+                        if (DECODER_OUTPUTS_TOKENS) {
+                            pendingText = contexts[idx].slice(offset).map(j => mapping[j]).join('');
+                        } else {
+                            pendingText = format_text(contexts[idx].slice(offset).map(j => mapping[j]).join(''), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                        }
+
+                        if (!keep) break;
+                        ++indices[idx];
                     }
-
-                    if (!keep) break;
-                    ++i;
                 }
 
-                return [avg_logprob, segment_cumlogprob, context, offset];
+                return [avg_logprobs[0], cumlogprobs[0], contexts[0], offset];
             }
 
             let previous_context = [];
