@@ -683,10 +683,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
   def test_where_cast(self):
-    s = Variable("s", 0, 3, dtype=dtypes.int)
+    s = Variable("s", 0, 3)
     cond = s < 2
-    a = Variable("a", 0, 3, dtype=dtypes.int)
-    b = Variable("b", 0, 3, dtype=dtypes.int)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
     expr = cond.where(a, b).cast(dtypes.half)
 
     # TODO: copied from render, render does not support cast
