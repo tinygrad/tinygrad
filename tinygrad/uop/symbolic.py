@@ -328,9 +328,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  ((UPat() + (UPat(dtype=dtypes.index)//UPat.cvar("d", vec=False)).cast(dtypes.ints)).named("divs"),
+  ((UPat() + (UPat()//UPat.cvar("d", vec=False)).or_casted()).named("divs"),
     lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat() + ((UPat(dtype=dtypes.index)//UPat.cvar("d", vec=False))*UPat.cvar("c")).cast(dtypes.ints)).named("divs"), lambda divs,d,c:
+  ((UPat() + ((UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).or_casted()).named("divs"), lambda divs,d,c:
     fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
