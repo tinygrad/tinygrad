@@ -453,19 +453,33 @@
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
 
                 let indices, max_ranges, cumlogprobs, avg_logprobs, contexts;
-                [indices, max_ranges, cumlogprobs, avg_logprobs, contexts] = [[offset], [max_range], [0], [0], [context]];
+                [indices, cumlogprobs, avg_logprobs, contexts] = [[], [], [], []];
+
+                const BEST_OF = 5;
+                const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
+                for(let i = 0; i < SEQUENCE_COUNT; ++i) {
+                    indices.push(offset);
+                    cumlogprobs.push(0);
+                    avg_logprobs.push(0);
+                    contexts.push(context.slice());
+                }
+                // [indices, cumlogprobs, avg_logprobs, contexts] = [[offset], [0], [0], [context]];
 
                 for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
+                    let updated = false;
                     for (let idx = 0; idx < indices.length; ++idx) {
                         if (contexts[idx].at(-1) === TOK_EOS) continue;
 
                         let keep;
-                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx]] = await decodeOne(indices[idx], max_ranges[idx], cumlogprobs[idx], contexts[idx], temperature);
+                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature);
 
-                        if (DECODER_OUTPUTS_TOKENS) {
-                            pendingText = contexts[idx].slice(offset).map(j => mapping[j]).join('');
-                        } else {
-                            pendingText = format_text(contexts[idx].slice(offset).map(j => mapping[j]).join(''), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                        if (!updated) {
+                            if (DECODER_OUTPUTS_TOKENS) {
+                                pendingText = contexts[idx].slice(offset).map(j => mapping[j]).join('');
+                            } else {
+                                pendingText = format_text(contexts[idx].slice(offset).map(j => mapping[j]).join(''), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                            }
+                            updated = true;
                         }
 
                         if (!keep) break;
@@ -473,7 +487,9 @@
                     }
                 }
 
-                return [avg_logprobs[0], cumlogprobs[0], contexts[0], offset];
+                let idx = cumlogprobs.indexOf(Math.min.apply(null, cumlogprobs));
+
+                return [avg_logprobs[idx], cumlogprobs[idx], contexts[idx], offset];
             }
 
             let previous_context = [];
@@ -495,7 +511,7 @@
                 let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(previous_context, temperature, audio_features, seek);
 
                 if (avg_logprob < -1 || segment_cumlogprob > -2 || (context.length-offset) < 14) {
-                    temperature += 0.2/5;
+                    temperature += 0.2;
                     console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length-offset}`);
                     continue;
                 } else {
