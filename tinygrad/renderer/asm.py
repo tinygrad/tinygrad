@@ -43,8 +43,8 @@ mask_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison | {Ops.AND, Ops.OR, Ops.XOR}, src=(UPat.var("a", dtypes.masks), UPat.var("b", dtypes.bool)), name="x"),
    lambda a,b,x: x.replace(dtype=(dt:=to_mask(a.dtype)), src=(a, b.cast(to_int(dt)).mul(-1).bitcast(dt)))),
   # convert bool to mask in float/packed where
-  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
-   lambda m,a,b: m.cast(to_int(a.dtype)).mul(-1).bitcast(to_mask(a.dtype)).where(a, b)),
+  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
+   lambda m,a,b: m.cast(to_int(a.dtype)).mul(-1).bitcast(to_mask(a.dtype)).where(a, b) if dtypes.is_float(a.dtype) or a.dtype.count > 1 else None),
   # convert mask to bool in scalar int where
   (UPat.var("m", (dtypes.mask32, dtypes.mask64)).where(UPat.var("a", dtypes.ints), UPat.var("b")),
    lambda m,a,b: m.bitcast(to_int(m.dtype)).cast(dtypes.bool).where(a, b) if a.dtype.count == 1 else None),
@@ -54,9 +54,6 @@ mask_matcher = PatternMatcher([
   (UPat.var("y", dtypes.masks).cast(dtypes.ints, name="x"), lambda y,x: y.bitcast(x.dtype).mul(-1)),
   (UPat.var("y", dtypes.masks).cast(dtypes.floats, name="x"), lambda y,x: y.where(x.const_like(1), x.const_like(0))),
   # convert bool vectorize to mask if src is mask
-  (UPat(Ops.VECTORIZE, dtypes.bool, (UPat(Ops.GEP, name="a"),), allow_any_len=True, name="x"),
-   lambda a,x: x.replace(dtype=(dt:=to_mask(a.src[0].dtype).scalar().vec(len(x.src))), src=tuple(s.replace(dtype=dt.scalar()) for s in x.src)) if \
-    dtypes.is_mask(a.src[0].dtype) else None),
   (UPat(Ops.VECTORIZE, dtypes.bool, (UPat.var("y", dtypes.masks),), allow_any_len=True, name="x"),
    lambda y,x: x.replace(dtype=y.dtype.vec(len(x.src)))),
   # mask is converted to bool in store
@@ -98,8 +95,8 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
   (UPat(dtype=dtypes.ints64).cast(dtypes.floats, name="alu"), no_vectorized_alu),
   (UPat(dtype=dtypes.floats).cast(dtypes.ints64, name="alu"), no_vectorized_alu),
   # TODO: use shuffle for these casts instead of devectorizing
-  (UPat(dtype=dtypes.ints32+(dtypes.mask32,)).cast(dtypes.ints16+(dtypes.mask16,), name="alu"), lambda alu: no_vectorized_alu(alu)),
-  (UPat(dtype=dtypes.ints16+(dtypes.mask16,)).cast(dtypes.ints8+(dtypes.mask8,), name="alu"), lambda alu: no_vectorized_alu(alu)),
+  (UPat(dtype=dtypes.ints32+(dtypes.mask32,)).cast(dtypes.ints16+(dtypes.mask16,), name="alu"), no_vectorized_alu),
+  (UPat(dtype=dtypes.ints16+(dtypes.mask16,)).cast(dtypes.ints8+(dtypes.mask8,), name="alu"), no_vectorized_alu),
   (UPat(Ops.MUL, dtypes.ints64, name="alu"), no_vectorized_alu),
   (UPat(Ops.IDIV, name="alu"), no_vectorized_alu),
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
@@ -298,9 +295,8 @@ x86_vec_lowerer = PatternMatcher([
   # float unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtps", 0x51, ctx[x], ctx[y], 0, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtpd", 0x51, ctx[x], ctx[y], 1, 1)),
-  (UPat.var("y", dtypes.float32).reciprocal().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vrcpss", 0x53, ctx[x], ctx[y], 0, 1)),
-  (UPat(Ops.TRUNC, dtypes.float32, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundps", 0x08, ctx[x], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
-  (UPat(Ops.TRUNC, dtypes.float64, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundpd", 0x09, ctx[x], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
+  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundps", 0x08, ctx[x], ctx[y], Immediate(3, 1), 1, 3)),
+  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundpd", 0x09, ctx[x], ctx[y], Immediate(3, 1), 1, 3)),
   # float binary
   ((UPat.var("a", dtypes.float32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vaddps", 0x58, ctx[x], ctx[a], ctx[b], 0, 1)),
   ((UPat.var("a", dtypes.float64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vaddpd", 0x58, ctx[x], ctx[a], ctx[b], 1, 1)),
@@ -456,9 +452,8 @@ x86_lowerer = PatternMatcher([
   # float unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtss", 0x51, ctx[x], ctx[y], ctx[y], 2, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtsd", 0x51, ctx[x], ctx[y], ctx[y], 3, 1)),
-  (UPat.var("y", dtypes.float32).reciprocal().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vrcpss", 0x53, ctx[x], ctx[y], ctx[y], 2, 1)),
-  (UPat(Ops.TRUNC, dtypes.float32, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundss", 0x0A, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
-  (UPat(Ops.TRUNC, dtypes.float64, (UPat.var("y"),), name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundsd", 0x0B, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
+  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundss", 0x0A, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)),
+  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundsd", 0x0B, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)),
   # mask binary NOTE: only bitwise and packed
   ((UPat.var("a", dtypes.mask32) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vandps", 0x54, ctx[x], ctx[a], ctx[b], 0, 1)),
   ((UPat.var("a", dtypes.mask64) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vandpd", 0x54, ctx[x], ctx[a], ctx[b], 1, 1)),

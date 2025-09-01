@@ -234,7 +234,7 @@ x86_spec = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX), UPat(), UPat.cvar()), allow_any_len=True), lambda: True),
   (UPat(Ops.WHERE, src=(UPat.var("m", dtypes.masks), UPat.var("a"), UPat.var("b")), name="x"),
    lambda m,a,b,x: a.dtype == b.dtype == x.dtype and m.dtype.itemsize == x.dtype.itemsize),
-  (UPat((Ops.CMPLT, Ops.CMPGT, Ops.CMPNE, Ops.CMPEQ), dtypes.masks, (UPat.var("a"), UPat.var("b")), name="x"),
+  (UPat(GroupOp.Comparison, dtypes.masks, (UPat.var("a"), UPat.var("b")), name="x"),
    lambda a,b,x: a.dtype == b.dtype and x.dtype.itemsize == a.dtype.itemsize),
 ])
 

@@ -95,7 +95,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
 
   # optional pre matcher
-  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, lambda _: opts, name="pre_matcher"))
+  if opts.pre_matcher is not None: ret.append(RewriteStep(symbolic_simple+opts.pre_matcher, lambda _: opts, name="pre_matcher"))
 
   # final rules for the renderer (without sym)
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
