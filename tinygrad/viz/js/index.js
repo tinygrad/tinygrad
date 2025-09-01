@@ -312,8 +312,10 @@ async function renderProfiler() {
         if (e.width == null) {
           const x = e.x.map(xscale);
           const y0 = [], y1 = [];
-          for (let i=0; i<x.length; i++) y0.push(offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) y1.push(offsetY+e.y1[i]);
+          for (let i=0; i<x.length; i++) {
+            y0.push(offsetY+e.y0[i]);
+            y1.push(offsetY+e.y1[i]);
+          }
           draw.push({ x, y0, y1, fillColor:e.fillColor });
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
@@ -329,7 +331,7 @@ async function renderProfiler() {
         const x = xscale(start);
         const width = xscale(end)-x;
         draw.push({ x, y:offsetY+e.y, width, height:e.height, fillColor:e.fillColor });
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, fillColor:e.fillColor });
+        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         let [labelX, labelWidth] = [x+2, 0];
