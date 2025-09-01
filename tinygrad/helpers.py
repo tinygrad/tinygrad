@@ -218,6 +218,9 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
     res.en = perf_counter_us()
     if PROFILE and display: cpu_events.append(res)
 
+def profile_marker(name:str, color="gray") -> None:
+  cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
+
 # *** universal database cache ***
 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
