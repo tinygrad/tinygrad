@@ -393,10 +393,9 @@
                 let segment_cumlogprob = 0;
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
 
-                let i = offset;
-                // for(let i = offset; i < max_range; ++i) {
-                for(;;) {
-                    if (i >= max_range) break;
+                async function decodeOne(i, max_range, segment_cumlogprob, context) {
+                    let avg_logprob;
+                    if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
 
                     let token_count = context.length - offset;
                     let last_token_index = i;
@@ -406,6 +405,7 @@
                     let nextLogprobs;
                     let nextTokens;
                     let max;
+
                     if (DECODER_OUTPUTS_TOKENS) {
                         nextTokens = decoder_output;
                     } else {
@@ -436,17 +436,26 @@
                     if (DECODER_OUTPUTS_TOKENS) {
                         pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     } else {
-                        var avg_logprob = segment_cumlogprob / (i-offset+1);
+                        avg_logprob = segment_cumlogprob / (i-offset+1);
                         segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
                         pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                     }
 
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
-                        break;
+                        return [false, context, avg_logprob, segment_cumlogprob];
                     } else if (i + 1 >= max_range) {
                         context[context.length-1] = TOK_EOS;
                     }
 
+                    return [true, context, avg_logprob, segment_cumlogprob];
+                }
+
+                let i = offset;
+                let avg_logprob;
+                for(;;) {
+                    let keep;
+                    [keep, context, avg_logprob, segment_cumlogprob] = await decodeOne(i, max_range, segment_cumlogprob, context);
+                    if (!keep) break;
                     ++i;
                 }
 
