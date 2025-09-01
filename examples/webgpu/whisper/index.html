@@ -230,7 +230,8 @@
             }
         }
 
-        async function transcribeAudio(audioFetcher) {
+        let currentCancel = null;
+        async function transcribeAudio(audioFetcher, cancelToken) {
             await window.moduleReady;
             if (!nets.encoder) {
                 const device = await getDevice();
@@ -340,7 +341,7 @@
 
             const MAX_TOKENS_TO_DECODE = 224;
 
-            async function inferLoop(previous_context, temperature, audio_features, seek) {
+            async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
                 let context = [];
                 if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
                     let prefix = [TOK_STARTOFPREV];
@@ -469,6 +470,7 @@
                     let updated = false;
                     for (let idx = 0; idx < indices.length; ++idx) {
                         if (contexts[idx].at(-1) === TOK_EOS) continue;
+                        if (cancelToken.cancelled) return;
 
                         let keep;
                         [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature);
@@ -508,29 +510,35 @@
                 // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
 
 
-                let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(previous_context, temperature, audio_features, seek);
-
-                if (avg_logprob < -1 || segment_cumlogprob > -2 || (context.length-offset) < 14) {
-                    temperature += 0.2;
-                    console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length-offset}`);
-                    continue;
+                let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(previous_context, temperature, audio_features, seek, cancelToken);
+                if (cancelToken.cancelled) {
+                    console.log("Transcription cancelled");
+                    inferenceDone = true;
+                    currentTranscription.style.display = 'none';
+                    return;
                 } else {
-                    temperature = 0;
-                }
-                previous_context = context.slice();
+                    if (avg_logprob < -1 || segment_cumlogprob > -2 || (context.length-offset) < 14) {
+                        temperature += 0.2;
+                        console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length-offset}`);
+                        continue;
+                    } else {
+                        temperature = 0;
+                    }
+                    previous_context = context.slice();
 
-                const newChunk = document.createElement('div');
-                newChunk.className = 'transcription-chunk';
-                if (!DECODER_OUTPUTS_TOKENS) {
-                    newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
-                } else {
-                    newChunk.innerText = pendingText;
-                }
-                transcriptionLog.appendChild(newChunk);
-                pendingText = '';
-                currentTranscription.innerText = '';
+                    const newChunk = document.createElement('div');
+                    newChunk.className = 'transcription-chunk';
+                    if (!DECODER_OUTPUTS_TOKENS) {
+                        newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
+                    } else {
+                        newChunk.innerText = pendingText;
+                    }
+                    transcriptionLog.appendChild(newChunk);
+                    pendingText = '';
+                    currentTranscription.innerText = '';
 
-                seek += MEL_SPEC_CHUNK_LENGTH;
+                    seek += MEL_SPEC_CHUNK_LENGTH;
+                }
             }
             inferenceDone = true;
             currentTranscription.style.display = 'none';
@@ -583,6 +591,7 @@
 
             // Prevent default behavior (Prevent file from being opened)
             e.preventDefault();
+            if (currentCancel) currentCancel.cancelled = true;
 
             if (e.dataTransfer.items) {
                 // Use DataTransferItemList interface to access the file(s)
@@ -591,7 +600,8 @@
                     if (item.kind === "file") {
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
-                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file));
+                        currentCancel = { cancelled: false };
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel);
                     }
                 });
             } else {
@@ -602,7 +612,8 @@
             }
         });
 
-        transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`));
+        currentCancel = { cancelled: false };
+        transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel);
     </script>
 </body>
 </html>
