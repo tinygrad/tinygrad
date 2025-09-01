@@ -432,6 +432,7 @@
                     }
 
                     context.push(nextTokens[nextTokenIndex]);
+
                     if (DECODER_OUTPUTS_TOKENS) {
                         pendingText = context.slice(offset).map(j => mapping[j]).join('');
                     } else {
@@ -439,6 +440,7 @@
                         segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
                         pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                     }
+
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
                         break;
                     } else if (i + 1 >= max_range) {
