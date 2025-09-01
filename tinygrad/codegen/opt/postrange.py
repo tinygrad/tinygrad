@@ -1,10 +1,11 @@
 import math, itertools
-from typing import cast
+from collections import defaultdict
+from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG
+from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG, to_function_name
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 
@@ -58,9 +59,14 @@ class Scheduler:
 
   def copy(self): return Scheduler(self.get_optimized_ast(), self.opts)
 
+  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
-    else: name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+    else:
+      name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+      Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
+      num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
+      name += colored(num, 'BLACK')
     self.ast = graph_rewrite(self.ast, pm_flatten_range, "flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
@@ -244,7 +250,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
   else:
     if ast.arg is not None and ast.arg.opts_to_apply is not None:
       for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  return k.get_optimized_ast()
+  return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 pm_postrange_opt = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), apply_opts),
