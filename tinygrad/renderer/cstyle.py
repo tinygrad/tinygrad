@@ -2,7 +2,7 @@ from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, AxisType
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
@@ -216,7 +216,8 @@ class ClangRenderer(CStyleLanguage):
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
   # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
-    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu), (UPat(Ops.RANGE, name="r"), multicore_range)]) + CStyleLanguage.extra_matcher
+    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu),
+    (UPat(Ops.RANGE, name="r", arg=(0, AxisType.LOOP)), multicore_range)]) + CStyleLanguage.extra_matcher
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"

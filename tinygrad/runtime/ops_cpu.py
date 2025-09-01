@@ -38,7 +38,6 @@ class CPUWorker(threading.Thread):
       for cmd in cmd_iter:
         shared, args_cnt = next(cmd_iter), next(cmd_iter)
         args = [next(cmd_iter) for _ in range(args_cnt)]
-        print(self.core_id, cmd, shared, args_cnt, args)
         if shared:
           for sub in self.dev.subtasks: sub.put([cmd, False, args_cnt] + args)
         cmd(self.core_id, *args)
