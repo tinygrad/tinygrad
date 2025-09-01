@@ -555,7 +555,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.UNROLL, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: Ops.SPECIAL is Ops.DEFINE_VAR
-    if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
+    if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax-1
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
