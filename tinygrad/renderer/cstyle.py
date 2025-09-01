@@ -187,7 +187,7 @@ class CStyleLanguage(Renderer):
 
 def multicore_range(r:UOp):
   if any(x.op is Ops.SPECIAL for x in r.toposort()): return None
-  core = UOp(Ops.SPECIAL, dtypes.int, arg=("g0", os.cpu_count()))
+  core = UOp(Ops.SPECIAL, dtypes.int, arg=("t0", os.cpu_count()))
   q = r.src[0] // os.cpu_count()
   pq = r.src[0] % os.cpu_count()
   do_cnt = (core < pq).where(q + 1, q)
@@ -203,7 +203,7 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  code_for_workitem = {"g": lambda _: "core_id"}
+  code_for_workitem = {"t": lambda _: "core_id"}
   extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
 

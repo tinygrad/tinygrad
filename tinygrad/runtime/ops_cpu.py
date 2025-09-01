@@ -36,13 +36,13 @@ class CPUWorker(threading.Thread):
     while True:
       cmd_iter = iter(self.tasks.get())
       for cmd in cmd_iter:
-        shared, args_cnt = next(cmd_iter), next(cmd_iter)
+        threads, args_cnt = next(cmd_iter), next(cmd_iter)
         args = [next(cmd_iter) for _ in range(args_cnt)]
-        if shared:
-          for sub in self.dev.subtasks: sub.put([cmd, False, args_cnt] + args)
+        if threads > 1:
+          for th in range(threads - 1): self.dev.subtasks[th].put([cmd, 1, args_cnt] + args)
         cmd(self.core_id, *args)
-        if shared:
-          for sub in self.dev.subtasks: sub.join()
+        if threads > 1:
+          for th in range(threads - 1): self.dev.subtasks[th].join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
@@ -51,13 +51,13 @@ class CPUComputeQueue(HWQueue):
   def _signal(self, core_id, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, core_id, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
   def _timestamp(self, core_id, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
-  def cmd(self, cmd, *args, shared=False):
-    self.q(cmd, shared, len(args), *args)
+  def cmd(self, cmd, *args, threads=1):
+    self.q(cmd, threads, len(args), *args)
     return self
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, shared=True)
+    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=local_size[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
