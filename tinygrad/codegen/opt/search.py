@@ -83,7 +83,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tup
 
 # workers should not open devices and should ignore ctrl c and should not launch VIZ
 def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0, VIZ=0).__enter__()
+  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, PRINT_MATCH_STATS=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]

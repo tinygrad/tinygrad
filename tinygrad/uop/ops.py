@@ -805,6 +805,7 @@ def track_uop(u:UOp):
 
 VIZ = ContextVar("VIZ", 0)
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
+PRINT_MATCH_STATS = ContextVar("PRINT_MATCH_STATS", 1)
 match_stats:dict[UPat, list[int|float]] = dict()
 
 @dataclass(frozen=True)
@@ -901,10 +902,11 @@ if TRACK_MATCH_STATS or PROFILE:
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=tracefp("rewrites"), "wb") as f:
-        print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
+        if PRINT_MATCH_STATS:
+          print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump([(tracked_keys, tracked_ctxs, uop_fields)], f)
     if VIZ: launch_viz(VIZ, fn.parent)
-    if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
+    if PRINT_MATCH_STATS:
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
