@@ -423,12 +423,15 @@
                     if (temperature > 0) {
                         // let sortedSampledIndex = sample(normalize(nextLogprobs));
                         let dist = normalize(softmax(decoder_output));
-                        let s = [];
-                        for (let i = 0; i < 2; ++i) {
-                            s.push(nextTokens.indexOf(sample(dist)));
+                        if (false) {
+                            let s = [];
+                            for (let i = 0; i < 2; ++i) {
+                                s.push(nextTokens.indexOf(sample(dist)));
+                            }
+                            nextTokenIndex = Math.min(...s);
+                        } else {
+                            nextTokenIndex = nextTokens.indexOf(sample(dist));
                         }
-                        nextTokenIndex = Math.min(...s);
-                        // nextTokenIndex = nextTokens.indexOf(sample(dist));
                     }
 
                     context.push(nextTokens[nextTokenIndex]);
