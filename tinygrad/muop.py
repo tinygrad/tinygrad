@@ -149,22 +149,24 @@ class MUOpX86(MUOp):
     return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
             Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7), Ops.CMPEQ: ("cmp", 0x81, 7)}[op]
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
-    in_cons = tuple(r for r in GPR if r.name not in ("rax", "rdx"))
-    move = MUOpX86("mov", 0x8B, x, (a,), (Register("rax", 0, 8),), (GPR,), x, a, w=1)
-    push = MUOpX86._RM("push", 0xFF, 6, Register("rdx", 2, 8))
+    rax = Register("rax", 0, 8)
+    rdx = Register("rdx", 2, 8)
+    in_cons = tuple(r for r in GPR if r not in (rax, rdx))
+    move = MUOpX86("mov", 0x8B, x, (a,), (rax,), (GPR,), x, a, w=1)
+    push = MUOpX86._RM("push", 0xFF, 6, rdx)
     if x.size == 1:
-      extend = MUOpX86("cbw", 0x98) if is_signed else MUOpX86.R_RM("movzx", 0x0FB6, x, x)
+      extend = MUOpX86("cbw", 0x98, prefix=0x66) if is_signed else MUOpX86.R_RM("movzx", 0x0FB6, x, x)
       div = MUOpX86._RM("idiv", 0xF6, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF6, 6, b, in_cons=in_cons)
     elif x.size == 2:
-      extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+      extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, prefix=0x66, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, prefix=0x66, in_cons=in_cons)
     elif x.size == 4:
-      extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
+      extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
     elif x.size == 8:
-      extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, Register("rdx", 2, 8), Register("rdx", 2, 8), 1)
-      div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
-    pop = MUOpX86._RM("pop", 0x8F, 0, Register("rdx", 2, 8))
+      extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, 1, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
+    pop = MUOpX86._RM("pop", 0x8F, 0, rdx)
     return [move, push, extend, div, pop]
   def load(dest:Register, src:Memory) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
@@ -200,9 +202,6 @@ class MUOpX86(MUOp):
     inst = bytearray()
     # *** EXCEPTIONS *** certain instructions have specific encodings
     if self.opstr == "": return b'' # fake MUOp
-    if self.opcode == 0xC3: return self.opcode.to_bytes() # ret
-    if self.opcode == 0x99: # cwd/cdq/cqo
-      return ((0b0100 << 4) | (self.w << 3) | 0b000).to_bytes() + self.opcode.to_bytes()
     if self.opcode == 0xB8: # 64bit imm load
       return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(self.out.index > 7) & 0b1)).to_bytes() + \
         int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0)
@@ -228,39 +227,39 @@ class MUOpX86(MUOp):
         inst.append(((~r & 0b1) << 7) | ((~x & 0b1) << 6) | ((~b & 0b1) << 5) | self.map_select)
         inst.append((self.we << 7) | (vvvv << 3) | (self.l << 2) | self.pp)
     else:
-      # *** PREFIX byte (optional) ***
+      # *** PREFIX byte ***
       if self.prefix: inst.append(self.prefix)
-      # *** REX byte (optional) ***
+      # *** REX byte ***
       # if 64bit or extended register (index 8 - 15) is used or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
       if self.w or r or x or b or any(isinstance(v, Register) and v.size == 1 and v.name in ("rsp", "rbp", "rsi", "rdi") for v in (self.reg, self.rm)):
         inst.append((0b0100 << 4) | (self.w << 3) | (r << 2) | (x << 1) | b)
     # *** OPCODE byte ***
     inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8))
     # *** MODR/M byte ***
-    # reg field can be register or opcode extension
-    # r/m field can be register, base register in memory or signal a sib byte is required
-    reg, rm = self.reg, 0b000
-    if isinstance(self.reg, Register): reg = self.reg.index & 0b111
-    if isinstance(self.rm, Register): rm = self.rm.index & 0b111
-    elif isinstance(self.rm, Memory): rm = self.rm.base.index & 0b111 if self.rm.index is None else 0b100
-    # specifies operand types
-    mod = 0b11
-    # TODO: support 8 bit displacement
-    #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp.value == 0 else 0b01 if -128 <= self.rm.disp.value < 128 else 0b10
-    if isinstance(self.rm, Memory):
-      if self.rm.disp.value == 0: mod = 0b10 if self.rm.base.name == "r13" else 0b00
-      else: mod = 0b10
-    inst.append((mod << 6) | (reg << 3) | rm)
-    # *** SIB byte (optional) ***
+    if self.rm is not None:
+      # reg field can be register or opcode extension
+      # r/m field can be register, base register in memory or signal a sib byte is required
+      reg, rm = self.reg, 0b000
+      if isinstance(self.reg, Register): reg = self.reg.index & 0b111
+      if isinstance(self.rm, Register): rm = self.rm.index & 0b111
+      elif isinstance(self.rm, Memory): rm = self.rm.base.index & 0b111 if self.rm.index is None else 0b100
+      # specifies operand types
+      mod = 0b11
+      # TODO: support 8 bit displacement
+      #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp.value == 0 else 0b01 if -128 <= self.rm.disp.value < 128 else 0b10
+      if isinstance(self.rm, Memory):
+        if self.rm.disp.value == 0: mod = 0b10 if self.rm.base.name == "r13" else 0b00
+        else: mod = 0b10
+      inst.append((mod << 6) | (reg << 3) | rm)
+    # *** SIB byte ***
     if isinstance(self.rm, Memory) and (self.rm.index is not None or self.rm.base.name in ("rsp", "r12")):
       index = self.rm.index.index & 0b111 if self.rm.index is not None else 0b100
       scale = {1: 0b00, 2: 0b01, 4: 0b10, 8: 0b11}[self.rm.scale]
       inst.append((scale << 6) | (index << 3) | (self.rm.base.index & 0b111))
-    # *** DISPLACEMENT bytes (optional) ***
+    # *** DISPLACEMENT bytes ***
     if isinstance(self.rm, Memory) and (self.rm.disp.value or self.rm.base.name == "r13"):
       inst.extend(self.rm.disp.value.to_bytes(self.rm.disp.size, 'little', signed=True))
-    # *** IMMEDIATE bytes (optional) *** the fourth register is in the upper 4 bits of an 8 bit immediate
+    # *** IMMEDIATE bytes *** the fourth register is in the upper 4 bits of an 8 bit immediate
     if isinstance(self.imm, Register): inst.append((self.imm.index & 0b1111) << 4 | 0b0000)
-    # TODO: fix signage
     elif self.imm is not None: inst.extend(self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0))
     return bytes(inst)

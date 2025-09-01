@@ -522,7 +522,7 @@ x86_lowerer = PatternMatcher([
                                                                                                                    MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), # noqa: E501
                                                                                                                    MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
   # if / endif
-  (UPat(Ops.IF, name="x"), lambda ctx,x: MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),))),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: [MUOpX86._RM_I("test", 0xF6, 0, ctx[x.src[0]], Immediate(1, 1)), MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),))]),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x.src[0])}:"))),
 ])
 
