@@ -290,6 +290,7 @@ async function renderProfiler() {
   updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
+  const minWidth = 1; // dpr?
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform) {
@@ -305,6 +306,7 @@ async function renderProfiler() {
     // rescale / merge shapes
     const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
+      const proxies = new Set();
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
         if (start>domain[1] || end<domain[0]) continue;
@@ -328,10 +330,19 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        const x = xscale(start);
+        const x = xscale(start), y = offsetY+e.y;
         const width = xscale(end)-x;
-        draw.push({ x, y:offsetY+e.y, width, height:e.height, fillColor:e.fillColor });
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        if (width < minWidth) {
+          const px = Math.round(x);
+          if (proxies.has(px)) continue;
+          draw.push({ x:px, y, height:e.height, width:minWidth, fillColor:e.fillColor });
+          rectLst.push({ y0:y, y1:y+e.height, x0:px, x1:px+minWidth, width:minWidth, arg:{tooltipText:"small rect"} });
+        }
+        else {
+          draw.push({ x, y, width, height:e.height, fillColor:e.fillColor });
+          rectLst.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
+        }
+
         // add label
         if (e.label == null) continue;
         let [labelX, labelWidth] = [x+2, 0];
