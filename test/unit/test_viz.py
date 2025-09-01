@@ -266,7 +266,7 @@ def option(i:int) -> int|None: return None if i == 0 else i-1
 def load_profile(lst:list[ProfileEvent]) -> dict:
   ret = get_profile(lst)
   u = TinyUnpacker(ret)
-  dur, global_peak, index_len, layout_len = u("<IQII")
+  total_dur, global_peak, index_len, layout_len = u("<IQII")
   strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
   u.offset += index_len
   layout:dict[str, dict] = {}
@@ -286,7 +286,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
         else: v["events"].append({"event":"free", "ts":ts, "key":key})
-  return {"dur":dur, "peak":global_peak, "layout":layout}
+  return {"dur":total_dur, "peak":global_peak, "layout":layout}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
@@ -318,6 +318,8 @@ class TestVizProfiler(unittest.TestCase):
 
     event2 = j['layout']['NV:2']['events'][0]
     self.assertEqual(event2['st'], 20) # second event, diff clock
+
+    self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
