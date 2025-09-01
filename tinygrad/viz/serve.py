@@ -186,15 +186,19 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
   if start_ts is None: return None
-  # first sort all per-device buffers by timestamp
-  for k,v in dev_events.items(): v.sort(key=lambda e:e[0])
+  # first sort all per-device events by timestamp
+  dev_starts:dict[str, list[tuple[str, int]]] = {}
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
+    dev_starts.setdefault(k.split(":")[0], []).append((k, v[0][0]))
+  sorted_devs = [s for k,v in dev_starts.items() for s,_ in sorted(v, key=lambda e:e[1])]
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in sorted(dev_events.items(), key=lambda k: k[1][0][0]):
-    v.sort(key=lambda e:e[0])
+  for k in sorted_devs:
+    v = dev_events[k]
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
