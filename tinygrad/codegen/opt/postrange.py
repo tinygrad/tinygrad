@@ -141,7 +141,7 @@ class Scheduler:
     if opt.op in opt_to_at:
       amt = rng.src[0].arg if opt.arg == 0 else opt.arg
       if opt.op is OptOps.UNROLL: check(amt <= 32, "don't unroll more than 32")
-      if opt.op is OptOps.UPCAST: check(amt <= 16, "don't upcast more than 16")
+      if opt.op is OptOps.UPCAST: check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
       check(opt.axis is not None, "tensor core opts must have an axis")
