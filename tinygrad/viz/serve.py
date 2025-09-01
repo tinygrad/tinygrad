@@ -154,24 +154,24 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     events.append(struct.pack("<IIIfI", enum_str(name, scache), option(ref), st-start_ts, dur, enum_str(info or "", scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
-def mem_layout(events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
   peak, mem = 0, 0
   temp:dict[int, int] = {}
-  bufs:list[bytes] = []
-  for st,_,_,e in events:
+  events:list[bytes] = []
+  for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      bufs.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
+      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
       temp[e.key] = nbytes = e.arg["sz"]*e.arg["dtype"].itemsize
       mem += nbytes
       if mem > peak: peak = mem
     if e.name == "free":
-      bufs.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      events.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
       mem -= temp.pop(e.key)
   peaks.append(peak)
-  return struct.pack("<BIQ", 1, len(bufs), peak)+b"".join(bufs) if bufs else None
+  return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
