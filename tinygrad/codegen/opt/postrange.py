@@ -1,9 +1,10 @@
 import math, itertools
+from typing import cast
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG, USE_TC
+from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 
@@ -21,7 +22,7 @@ pm_flatten_range = PatternMatcher([
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 
-class SimpleKernel:
+class Scheduler:
   def __init__(self, ast:UOp, opts:Renderer):
     self.ast, self.opts = ast, opts
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
@@ -55,7 +56,7 @@ class SimpleKernel:
         if u.op is Ops.RANGE: termination[u] = t
     return termination
 
-  def copy(self): return SimpleKernel(self.get_optimized_ast(), self.opts)
+  def copy(self): return Scheduler(self.get_optimized_ast(), self.opts)
 
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
@@ -137,7 +138,12 @@ class SimpleKernel:
       if opt.op is OptOps.UPCAST: check(amt <= 16, "don't upcast more than 16")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
-      self._apply_tc_opt(USE_TC, *opt.arg)
+      check(opt.axis is not None, "tensor core opts must have an axis")
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
+      check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
+      check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
+      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
@@ -228,7 +234,7 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
 
 def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
-  k = SimpleKernel(ast, ctx)
+  k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
   if POSTBEAM >= 1:
     k.simplify_merge_adjacent()
