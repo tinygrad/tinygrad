@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY, POSTOPT
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
@@ -11,13 +11,15 @@ from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
-from tinygrad.uop.optional import get_late_rewrite_patterns
-from tinygrad.codegen.expander import migrate_indexing, expander
-from tinygrad.codegen.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
+from tinygrad.uop.decompositions import get_late_rewrite_patterns
+from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
+from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
-from tinygrad.codegen.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.opt import pm_optimize
+from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
+from tinygrad.codegen.opt import pm_get_optimization, pm_do_optimize
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
+from tinygrad.codegen.opt.postrange import pm_postrange_opt
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
 
 @dataclass
 class RewriteStep:
@@ -44,10 +46,10 @@ rewrites_for_linearizer = [
 
 def get_rewrites_for_renderer(opts:Renderer, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
+  return _get_rewrites_for_renderer(opts, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, RANGEIFY.value, POSTOPT.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL, _RANGEIFY, _POSTOPT) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
@@ -55,22 +57,28 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.extend(rewrites_for_views)
 
   # this is kernel.py
-  ret.append(RewriteStep(pm_optimize, ctx=lambda _: opts, name="optimize ast"))
+  if not _RANGEIFY: ret.append(RewriteStep(pm_get_optimization, ctx=lambda _: opts, name="get optimization"))
+  if not _POSTOPT and not _RANGEIFY: ret.append(RewriteStep(pm_do_optimize, ctx=lambda _: opts, name="optimize ast"))
 
   if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
   ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
+
+  if _POSTOPT or _RANGEIFY: ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="initial symbolic"))
 
   # expand
-  ret.append(RewriteStep(sym+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
+
+  # add locals
+  ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
 
-  # add gpu dims (late)
+  # add gpu dims (late). this works after devectorize, but it's faster here
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # devectorize (TODO: does this need opts?)
@@ -85,8 +93,12 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
 
+  # decompositions
+  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
+  ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
+
   # final rules for the renderer (without sym)
-  pm_final_rewrite = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)+pm_render+extra_matcher
+  pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # return the list (with optional linearizer)

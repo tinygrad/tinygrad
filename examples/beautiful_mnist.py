@@ -21,7 +21,7 @@ if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
 
   model = Model()
-  opt = nn.optim.Adam(nn.state.get_parameters(model))
+  opt = (nn.optim.Adam if not getenv("MUON") else nn.optim.Muon)(nn.state.get_parameters(model))
 
   @TinyJit
   @Tensor.train()
@@ -29,8 +29,7 @@ if __name__ == "__main__":
     opt.zero_grad()
     samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
     loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
-    opt.step()
-    return loss
+    return loss.realize(*opt.schedule_step())
 
   @TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100

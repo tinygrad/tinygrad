@@ -108,17 +108,16 @@ class dtypes:
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
-    # TODO: should truncate here
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
   def min(dtype:DType):
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
   @functools.cache
   def max(dtype:DType):
-    if dtypes.is_int(dtype): return 2**(dtype.itemsize*8)-1+dtypes.min(dtype)
+    if dtypes.is_int(dtype): return 2**(dtype.scalar().itemsize*8)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -199,8 +198,9 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16)
+    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16,
+      dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
+    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
@@ -215,15 +215,14 @@ def sum_acc_dtype(dt:DType):
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
 
 def truncate_fp16(x):
-  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
+  try: return struct.unpack('e', struct.pack('e', float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
-def truncate_bf16(x):
-  max_bf16 = struct.unpack('f', struct.pack('I', 0x7f7f0000))[0]
-  if abs(x) > max_bf16: return math.copysign(math.inf, x)
-  f32_int = struct.unpack('I', struct.pack('f', x))[0]
-  bf = struct.unpack('f', struct.pack('I', f32_int & 0xFFFF0000))[0]
-  return bf
+def float_to_bf16(x):
+  if not math.isfinite(x): return x
+  u = struct.unpack('I', struct.pack('f', x))[0]
+  u = (u + 0x7FFF + ((u >> 16) & 1)) & 0xFFFF0000
+  return struct.unpack('f', struct.pack('I', u))[0]
 
 # fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
 def float_to_fp8(x: float, dtype: DType) -> int:
@@ -288,7 +287,7 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   return float(float32_val)
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  dtypes.float16: truncate_fp16, dtypes.bfloat16: truncate_bf16,
+  dtypes.float16: truncate_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
@@ -300,6 +299,7 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
+  if dtype == dtypes.bfloat16: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
@@ -308,6 +308,8 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 @functools.cache
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
+  if dtype == dtypes.uint64: return torch.uint64
+  if dtype == dtypes.bfloat16: return torch.bfloat16
   # NOTE: torch doesn't expose this mapping with a stable API
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
   except TypeError: return None
