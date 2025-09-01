@@ -12,7 +12,6 @@ from tinygrad.helpers import DEBUG
 
 def to_mask(dt:DType): return {1:dtypes.mask8, 2:dtypes.mask16, 4:dtypes.mask32, 8:dtypes.mask64}[dt.scalar().itemsize].vec(dt.count)
 def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize]
-# or instead emit the correct value instead of True for masks
 # on x86/arm64 certain comparisons create masks instead of booleans
 mask_matcher = PatternMatcher([
   # TODO: shouldn't be here
@@ -122,12 +121,9 @@ asm_matcher = PatternMatcher([
   # cast between signed and unsigned is a noop
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
    lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
-  # bitcast between mask and float is a noop
-  (UPat(dtype=dtypes.masks).bitcast(dtypes.floats).named("x"), lambda x: x.replace(op=Ops.NOOP)),
-  # bitcast between signed and unsigned is a noop
-  (UPat.var("y", dtypes.ints).bitcast(dtypes.ints).named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
-  # bitcast between vectors is a noop
-  (UPat.var("y").bitcast().named("x"), lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.count > 1 and y.dtype.count > 1 else None),
+  # bitcasts between scalar float/mask and scalar int are real, rest are noops
+  (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
+   (y.dtype in dtypes.ints and x.dtype in dtypes.floats+dtypes.masks) else x.replace(op=Ops.NOOP)),
   # moving elements of a single register to another without shuffling is a noop
   (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
