@@ -196,6 +196,12 @@ class TestSafeCast(TestUOps):
     a = UOp.variable("a", 1, 10, dtype=dtypes.uint8)
     self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int32).simplify(), a.cast(dtypes.int32))
 
+  def test_safe_cast_using_bounds(self):
+    a = UOp.variable("a", 1, 10, dtype=dtypes.uint64)
+    self.assertEqual(a.cast(dtypes.int16).cast(dtypes.int).simplify(), a.cast(dtypes.int))
+    a = UOp.variable("a", -10, 10, dtype=dtypes.int32)
+    self.assertEqual(a.cast(dtypes.int8).cast(dtypes.int64).simplify(), a.cast(dtypes.int64))
+
 class TestExecALU(TestUOps):
   def test_sqrt(self):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
