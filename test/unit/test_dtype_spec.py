@@ -100,6 +100,11 @@ class TestHelpers(unittest.TestCase):
         np.testing.assert_equal(dt.min, False)
         np.testing.assert_equal(dt.max, True)
 
+  def test_dtype_range_vec(self):
+    for dt in core_dtypes:
+      self.assertEqual(dt.min, dt.vec(4).min)
+      self.assertEqual(dt.max, dt.vec(4).max)
+
   def test_truncate_fp16(self):
     self.assertEqual(truncate_fp16(1), 1)
     self.assertEqual(truncate_fp16(65504), 65504)

@@ -1290,12 +1290,14 @@ def train_llama3():
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
 
   config = {}
+  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
+  SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
@@ -1317,7 +1319,8 @@ def train_llama3():
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}
+  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  params = params | {"vocab_size": 32000} if not SMALL else params
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
@@ -1403,21 +1406,29 @@ def train_llama3():
   # ** data iters **
   def fake_data(bs, samples):
     for _ in range(samples // bs):
-      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
+      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
       return fake_data(GBS, SAMPLES)
     else:
-      from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
 
   def get_eval_iter():
     if getenv("FAKEDATA", 0):
       return fake_data(EVAL_BS, 5760)
     else:
-      from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(EVAL_BS, 5760, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=True)
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
 
   iter = get_train_iter()
   i, sequences_seen = 0, 0
@@ -1426,7 +1437,7 @@ def train_llama3():
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens, grad_acc)
     loss = loss.float().item()
-    # above as tqdm.write f-string
+
     tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:

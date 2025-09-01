@@ -673,6 +673,7 @@ impl<'a> Thread<'a> {
                                         39 => f32::log2(s0),
                                         42 => 1.0 / s0,
                                         43 => 1.0 / s0,
+                                        46 => 1.0 / f32::sqrt(s0),
                                         51 => f32::sqrt(s0),
                                         _ => todo_instr!(instruction)?,
                                     }
@@ -1246,7 +1247,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 531 | 537 | 540 | 551 | 567 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 551 | 567 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1258,6 +1259,7 @@ impl<'a> Thread<'a> {
                                         272 => f32::max(s0, s1),
                                         299 => f32::mul_add(s0, s1, f32::from_bits(self.vec_reg[vdst])),
                                         426 => s0.recip(),
+                                        430 => 1.0 / f32::sqrt(s0),
                                         531 => f32::mul_add(s0, s1, s2),
                                         537 => f32::min(f32::min(s0, s1), s2),
                                         540 => f32::max(f32::max(s0, s1), s2),
@@ -2623,6 +2625,14 @@ mod test_vop1 {
         r(&vec![0x7E045F00, END_PRG], &mut thread);
         assert_eq!(thread.vec_reg[2], 0);
         assert_eq!(thread.vec_reg[3], 1071644672);
+    }
+
+    #[test]
+    fn test_v_rsq_f32() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[0] = f32::to_bits(4.0);
+        r(&vec![0x7E005D00, END_PRG], &mut thread);
+        assert_eq!(f32::from_bits(thread.vec_reg[0]), 0.5);
     }
 
     #[test]
