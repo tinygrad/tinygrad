@@ -392,7 +392,12 @@
 
                 let segment_cumlogprob = 0;
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
-                for(let i = offset; i < max_range; ++i) {
+
+                let i = offset;
+                // for(let i = offset; i < max_range; ++i) {
+                for(;;) {
+                    if (i >= max_range) break;
+
                     let token_count = context.length - offset;
                     let last_token_index = i;
                     let one_before_last_token_index = i - 1;
@@ -439,6 +444,8 @@
                     } else if (i + 1 >= max_range) {
                         context[context.length-1] = TOK_EOS;
                     }
+
+                    ++i;
                 }
 
                 return [avg_logprob, segment_cumlogprob, context, offset];
