@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, time
+import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, \
                              Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
@@ -138,15 +138,14 @@ class Buffer:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
       if PROFILE:
         self._prof_num = num = len(Buffer.profile_events)
-        ts = decimal.Decimal(time.perf_counter_ns())/1000
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":str(self.dtype),"sz":self.size,"nbytes":self.nbytes}))
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", num, {"dtype":self.dtype, "sz":self.size}))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", decimal.Decimal(time.perf_counter_ns())/1000, self._prof_num))
+      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self._prof_num))
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
@@ -304,7 +303,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device == "METAL": return not CI
     if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
     if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
-    return device == "AMD"
+    return device in {"AMD", "PYTHON"}
   if dtype in dtypes.fp8s:
     # not supported yet - in progress
     return False

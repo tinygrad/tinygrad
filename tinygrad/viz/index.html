@@ -75,9 +75,14 @@
   g.tag circle {
     fill: #FFD700;
     stroke: #B8860B;
+  }
+  g.port circle {
+    fill: #b3dcc2;
+  }
+  g.tag circle, #edge-labels circle {
     stroke-width: 0.8;
   }
-  g.tag text {
+  g.tag text, #edge-labels text {
     text-anchor: middle;
     font-size: 6px;
     fill: #08090e;
@@ -85,10 +90,29 @@
   .label :is(text, p) {
     font-weight: 350;
   }
+  rect.node {
+    stroke-width: 1.4;
+    stroke: #4a4b57;
+  }
+  rect.overlay {
+    fill: rgba(26, 27, 38, 0.5);
+  }
   .edgePath {
     stroke: #4a4b57;
     fill: none;
     stroke-width: 1.4px;
+  }
+  .highlight rect, .edgePath.highlight, g.port circle {
+    stroke: #89C9A2;
+  }
+  #edge-labels g.port.highlight {
+    display: block
+  }
+  #edge-labels g.port {
+    display: none
+  }
+  #arrowhead {
+    fill: #4a4b57;
   }
   .main-container {
     display: flex;
@@ -126,7 +150,7 @@
     inset: 0;
     z-index: 1;
   }
-  .profiler {
+  .profiler, .disasm {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -322,6 +346,7 @@
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view profiler"></div>
+    <div class="view disasm"></div>
     <div class="view graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
@@ -331,7 +356,7 @@
         </g>
         <defs>
           <marker id="arrowhead" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M0,-5L10,0L0,5" fill="#4a4b57"></path>
+            <path d="M0,-5L10,0L0,5" fill="context-stroke"></path>
           </marker>
         </defs>
       </svg>

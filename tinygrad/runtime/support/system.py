@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
@@ -84,7 +84,11 @@ class PCIDevice:
     for i in resize_bars or []:
       if FileIOInterface.exists(rpath:=f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize"):
         try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
-        except OSError as e: raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
+        except OSError as e:
+          if e.errno in {errno.EPERM, errno.EACCES}:
+            raise RuntimeError(f"Cannot resize BAR {i}: {e}. Permission error: run `extra/amdpci/setup_python_cap.sh`"
+                                " to allow python accessing device or run with sudo") from e
+          raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio()) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")

@@ -45,10 +45,10 @@ def render_wmma_amx(ctx, wmma: UOp) -> str:
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
       f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
 
-def render_wmma_amd(ctx, wmma: UOp, arch: str) -> str:
-  dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.bfloat16: "bf16", dtypes.ushort: "bf16"}
+def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
+  dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
-  if arch.split(":")[0] in {"gfx942", "gfx950"}:
+  if cdna:
     return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype.scalar()]}" + \
            f".16x16x16{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
@@ -101,13 +101,13 @@ base_rewrite = PatternMatcher([
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
-   f"  br label %loop_body_{x.arg}\nloop_body_{x.arg}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg} ], [ {ctx[x]}phi, %loop_latch_{x.arg} ]"),
+   f"  br label %loop_entry_{x.arg[0]}\nloop_entry_{x.arg[0]}:\n"
+   f"  br label %loop_body_{x.arg[0]}\nloop_body_{x.arg[0]}:\n"
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg[0]} ], [ {ctx[x]}phi, %loop_latch_{x.arg[0]} ]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_latch_{x.src[0].arg}\nloop_latch_{x.src[0].arg}:\n"
+   f"  br label %loop_latch_{x.src[0].arg[0]}\nloop_latch_{x.src[0].arg[0]}:\n"
    f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg}, label %loop_exit_{x.src[0].arg}\nloop_exit_{x.src[0].arg}:"),
+   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg[0]}, label %loop_exit_{x.src[0].arg[0]}\nloop_exit_{x.src[0].arg[0]}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
@@ -123,11 +123,10 @@ class LLVMRenderer(Renderer):
   has_local = False
   global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  code_for_op = {Ops.FDIV: lambda: None}
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = PatternMatcher([
-    # rewrite RECIP with FDIV
-    (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
     # rewrite cast to bool to CMPNE 0
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
@@ -197,14 +196,20 @@ class LLVMRenderer(Renderer):
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+# https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
+# llvm.log2/llvm.exp2 don't support double
+llvm_intrinsics = {Ops.SQRT: "sqrt"}
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
   abi = "amdgpu_kernel"
+  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+    (UPat(tuple(llvm_intrinsics), name="x"),
+    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
@@ -222,7 +227,14 @@ class AMDLLVMRenderer(LLVMRenderer):
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
-    self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, arch=arch: render_wmma_amd(ctx, wmma, arch))])
+    self.is_cdna = arch.split(":")[0] in {"gfx942", "gfx950"}
+    self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
+    if self.is_cdna:
+      self.extra_matcher += PatternMatcher([
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
+          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint16.vec(4)), x.src[1].bitcast(dtypes.uint16.vec(4)),
+            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(4) else None)
+      ])
     if self.arch.split(":")[0] == "gfx1100":
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),

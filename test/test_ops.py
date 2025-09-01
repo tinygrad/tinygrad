@@ -928,6 +928,12 @@ class TestOps(unittest.TestCase):
       for j in [-1., 0., 1.]:
         helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
 
+  def test_logaddexp(self):
+    helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-1.], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-100.0, -200, -300], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[1.0, 2000, 30000], [-1.0, 2, 3]])
+
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
     helper_test_op([()], torch.nn.functional.softsign, Tensor.softsign)
@@ -965,8 +971,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=1/3), lambda t: Tensor.softplus(t, beta=1/3), grad_atol=1e-6)
-    helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3, threshold=0.5),
-                              lambda t: Tensor.softplus(t, beta=3, threshold=0.5), grad_atol=1e-6)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=-400, high=-300)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
@@ -2461,6 +2465,20 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.max_unpool2d(*Tensor.max_pool2d(x, kernel_size=(2,2), return_indices=True),
                                     kernel_size=(2,2), output_size=(99,99,7,6)), forward_only=True)
 
+  def test_max_unpool2d_inf(self):
+    data = [[[[math.inf, -math.inf, math.nan], [1.0, 2.0, 3.0]]]]
+    ksz = (2,2)
+    helper_test_op((),
+      lambda: torch.nn.functional.max_unpool2d(
+        *torch.nn.functional.max_pool2d(torch.tensor(data), kernel_size=ksz, return_indices=True),
+        kernel_size=ksz
+      ),
+      lambda: Tensor.max_unpool2d(
+        *Tensor.max_pool2d(Tensor(data), kernel_size=ksz, return_indices=True),
+        kernel_size=ksz
+      ),
+      forward_only=True)
+
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
@@ -2694,6 +2712,10 @@ class TestOps(unittest.TestCase):
     i, j, k, o, p = [Tensor(tor.detach().cpu().numpy().astype(np.int32), requires_grad=False) for tor in [a,b,c,d,e]]
     return a,b,c,d,e,i,j,k,o,p
 
+  def test_fancy_indexing_inf(self):
+    data = [math.inf, -math.inf, math.nan]
+    helper_test_op((), lambda: torch.tensor(data)[torch.tensor([0, 1, 2])], lambda: Tensor(data)[Tensor([0, 1, 2])])
+
   def test_slice_fancy_indexing_no_dim_collapse(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
     # no dim collapse from int or dim injection from None
@@ -2804,11 +2826,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[1., 2., 3.]])
-
-  @unittest.expectedFailure
-  @unittest.skipIf(torch._C._get_privateuse1_backend_name() == "tiny", 'results in a success instead of a failure')
-  def test_gather_failure(self):
-    # gather with inf values do not work, other values results in nan
+    # gather with inf values
     helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[-float("inf"), 2., 3.]])

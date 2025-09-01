@@ -1,8 +1,9 @@
 # this converts a lowerer program into a vectorized program
 
 import functools, itertools, operator
-from tinygrad.helpers import AMX, dedup, flatten, all_same, prod
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace
+from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -46,11 +47,13 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-UNROLL input
-      if root.op is Ops.IF:
+      if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif root.op in {Ops.REDUCE, Ops.STORE} and src.op is Ops.RANGE:
-        # for any range args of REDUCE, pass them through
+      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1) or (root.op is Ops.WMMA and i >= 3):
+        # for any range args of STORE/REDUCE, pass them through
+        new_srcs.append(src)
+      elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -72,7 +75,7 @@ def do_contract(con:UOp):
   # CONTRACT without UNROLL repeats the element VECTORIZED
   if ex.op is not Ops.UNROLL: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from UNROLL
-  assert con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
+  assert con.dtype == dtypes.void or con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   idxs = []
   for rpk in _choices_from_args(new_ex_args:=tuple(x for x in ex.arg if x not in con.arg)):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
@@ -83,7 +86,7 @@ expander = PatternMatcher([
   (UPat(Ops.UNROLL, name="outer", src=(UPat(Ops.UNROLL, name="inner"),)),
    lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX,
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
          Ops.VECTORIZE, Ops.IF, Ops.REDUCE), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # BARRIERs aren't actually expanded
@@ -110,4 +113,50 @@ def create_gate(root:UOp) -> UOp|None:
 migrate_indexing = PatternMatcher([
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
+])
+
+# ****
+
+def fix_reduce_unroll(x:UOp):
+  reduce_range, reduce_expand = partition(x.src[1:], lambda y: y.op is Ops.RANGE)
+  if len(reduce_expand) == 0: return None
+  reduce_expand = [x for x in reduce_expand if x.op is not Ops.CONST]
+  assert all(x.op is Ops.UNROLL for x in reduce_expand), f"not all UNROLLS in {reduce_expand}"
+  ret = x.src[0]
+  if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
+    ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis), tag=1)
+  # REDUCE supports both "horizontal" reduction and range reduction. the horizontal elements are taken in the nearest group
+  return x.replace(src=(ret,)+tuple(reduce_range))
+
+def fix_store_unroll(x:UOp):
+  store_expand, store_range = partition(x.src[2:], lambda y: y.op is Ops.UNROLL)
+  if len(store_expand) == 0: return None
+  return UOp(Ops.CONTRACT, dtypes.void, (x.replace(src=x.src[:2]+tuple(store_range)),), tuple(flatten(x.arg for x in store_expand)), tag=1)
+
+def fix_group_for_reduce(x:UOp):
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
+  if len(reduce_gfr) == 0: return None
+
+  # NOTE: if there's other locals here, we need them in the buffer too
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+
+  # do only the non grouped reduces early
+  ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
+  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=(AddrSpace.LOCAL, reduce_gfr[0].arg[0])).index(*upstream_locals, *reduce_loop)
+
+  # gate with an if on the store + do the final reduce
+  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
+  return buf.reduce(*reduce_loop, arg=x.arg)
+
+pm_pre_expander = PatternMatcher([
+  # rewrite UPCAST/UNROLL range to something to be expanded
+  (UPat(Ops.RANGE, name="r"),
+   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+    if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
+  # fix REDUCEs with UNROLLs
+  (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
+  (UPat(Ops.STORE, name="x"), fix_store_unroll),
+  # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
