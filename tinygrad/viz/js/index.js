@@ -298,15 +298,15 @@ async function renderProfiler() {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain(data.axes.x).range([0, canvas.clientWidth]);
-    xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
-    const xDomain = xscale.domain();
+    const xrange = [0, canvas.clientWidth];
+    const xscale = d3.scaleLinear().domain(data.axes.x).range(xrange);
+    xscale.domain(domain=[xscale.invert(zoomLevel.invertX(0)), xscale.invert(zoomLevel.invertX(xrange[1]))]);
     let yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (start>xDomain[1] || end<xDomain[0]) continue;
+        if (start>domain[1] || end<domain[0]) continue;
         ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
@@ -351,7 +351,7 @@ async function renderProfiler() {
       }
     }
     // draw axes
-    drawLine(ctx, xscale.range(), [0, 0]);
+    drawLine(ctx, xrange, [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
