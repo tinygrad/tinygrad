@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue
+import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue, os
 from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -28,31 +28,37 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUWorker(threading.Thread):
-  def __init__(self, dev):
+  def __init__(self, dev, tasks, core_id):
     super().__init__()
-    self.dev, self.tasks, self.daemon = dev, dev.tasks, True
+    self.dev, self.tasks, self.daemon, self.core_id = dev, tasks, True, core_id
 
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
       for cmd in cmd_iter:
-        args_cnt = next(cmd_iter)
-        cmd(*[next(cmd_iter) for _ in range(args_cnt)])
+        shared, args_cnt = next(cmd_iter), next(cmd_iter)
+        args = [next(cmd_iter) for _ in range(args_cnt)]
+        print(self.core_id, cmd, shared, args_cnt, args)
+        if shared:
+          for sub in self.dev.subtasks: sub.put([cmd, False, args_cnt] + args)
+        cmd(self.core_id, *args)
+        if shared:
+          for sub in self.dev.subtasks: sub.join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]))
-  def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
-  def cmd(self, cmd, *args):
-    self.q(cmd, len(args), *args)
+  def _exec(self, core_id, prg, bufs, *args):
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), core_id)
+  def _signal(self, core_id, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
+  def _wait(self, core_id, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _timestamp(self, core_id, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
+  def cmd(self, cmd, *args, shared=False):
+    self.q(cmd, shared, len(args), *args)
     return self
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals)
+    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, shared=True)
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
@@ -121,5 +127,8 @@ class CPUAllocator(HCQAllocatorBase):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self).start()
+    self.subtasks = []
+    for core_id in range(os.cpu_count()):
+      if core_id != 0: self.subtasks.append(queue.Queue())
+      CPUWorker(self, self.tasks if core_id == 0 else self.subtasks[core_id-1], core_id).start()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
