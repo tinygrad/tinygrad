@@ -1313,9 +1313,9 @@ def train_llama3():
 
   opt_gradient_clip_norm = 1.0
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
+  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = 8e-7
+  opt_end_learning_rate = getenv("END_LR", 8e-7)
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer

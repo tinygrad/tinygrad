@@ -114,12 +114,12 @@ class dtypes:
   @staticmethod
   @functools.cache
   def min(dtype:DType):
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
   @functools.cache
   def max(dtype:DType):
-    if dtypes.is_int(dtype): return 2**(dtype.itemsize*8)-1+dtypes.min(dtype)
+    if dtypes.is_int(dtype): return 2**(dtype.scalar().itemsize*8)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
