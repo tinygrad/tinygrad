@@ -16,10 +16,9 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
 
 # real VIZ=1 pickles these tracked values
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
-from tinygrad.viz import serve
-serve.contexts = (tracked_keys, tracked_ctxs, uop_fields)
+traces = [(tracked_keys, tracked_ctxs, uop_fields)]
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
-def get_viz_list(): return get_metadata(tracked_keys, tracked_ctxs)
+def get_viz_list(): return get_metadata(traces)
 
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
@@ -142,6 +141,8 @@ class TestViz(BaseTestViz):
     z = UOp.const(dtypes.int, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
+    lst = get_viz_list()
+    self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
     # embed const in the parent node when possible
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
@@ -265,7 +266,7 @@ def option(i:int) -> int|None: return None if i == 0 else i-1
 def load_profile(lst:list[ProfileEvent]) -> dict:
   ret = get_profile(lst)
   u = TinyUnpacker(ret)
-  dur, global_peak, index_len, layout_len = u("<IQII")
+  total_dur, global_peak, index_len, layout_len = u("<IQII")
   strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
   u.offset += index_len
   layout:dict[str, dict] = {}
@@ -273,19 +274,19 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     klen = u("<B")[0]
     k = ret[u.offset:u.offset+klen].decode()
     u.offset += klen
-    layout[k] = v = {"shapes":[]}
+    layout[k] = v = {"events":[]}
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
         name, ref, st, dur, _ = u("<IIIfI")
-        v["shapes"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur})
+        v["events"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur})
     else:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
-        if alloc: v["shapes"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["shapes"].append({"event":"free", "ts":ts, "key":key})
-  return {"dur":dur, "peak":global_peak, "layout":layout}
+        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key})
+  return {"dur":total_dur, "peak":global_peak, "layout":layout}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
@@ -294,7 +295,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = load_profile(prof)
 
-    dev_events = j['layout']['NV']['shapes']
+    dev_events = j['layout']['NV']['events']
     self.assertEqual(len(dev_events), 1)
     event = dev_events[0]
     self.assertEqual(event['name'], 'E_2')
@@ -310,13 +311,15 @@ class TestVizProfiler(unittest.TestCase):
 
     j = load_profile(prof)
 
-    event = j['layout']['NV']['shapes'][0]
+    event = j['layout']['NV']['events'][0]
     self.assertEqual(event['name'], 'COPYxx')
     self.assertEqual(event['st'], 0)   # first event
     self.assertEqual(event['dur'], 10)
 
-    event2 = j['layout']['NV:2']['shapes'][0]
+    event2 = j['layout']['NV:2']['events'][0]
     self.assertEqual(event2['st'], 20) # second event, diff clock
+
+    self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
   def test_perfetto_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -333,18 +336,18 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(tracks[1], 'NV')
     self.assertEqual(tracks[2], 'NV:1')
 
-    nv_events = j['layout']['NV']['shapes']
+    nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
     self.assertEqual(nv_events[0]['st'], 0)
     self.assertEqual(nv_events[0]['dur'], 2)
     #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    nv1_events = j['layout']['NV:1']['shapes']
+    nv1_events = j['layout']['NV:1']['events']
     self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
     self.assertEqual(nv1_events[0]['st'], 954)
     #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
 
-    graph_events = j['layout']['NV Graph']['shapes']
+    graph_events = j['layout']['NV Graph']['events']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
 
@@ -376,7 +379,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["shapes"]), 2)
+    self.assertEqual(len(ret["events"]), 2)
 
   def test_del_once(self):
     a = _alloc(1)
@@ -385,7 +388,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
-    self.assertEqual(len(ret["shapes"]), 3)
+    self.assertEqual(len(ret["events"]), 3)
 
   def test_alloc_free(self):
     a = _alloc(1)
@@ -395,7 +398,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["shapes"]), 4)
+    self.assertEqual(len(ret["events"]), 4)
 
 if __name__ == "__main__":
   unittest.main()
