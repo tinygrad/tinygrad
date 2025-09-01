@@ -302,21 +302,19 @@ async function renderProfiler() {
     const xscale = d3.scaleLinear().domain(data.axes.x).range(xrange);
     xscale.domain(domain=[xscale.invert(zoomLevel.invertX(0)), xscale.invert(zoomLevel.invertX(xrange[1]))]);
     let yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
-    // draw shapes
+    // rescale / merge shapes
+    const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
         if (start>domain[1] || end<domain[0]) continue;
-        ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
+          const y0 = [], y1 = [];
+          for (let i=0; i<x.length; i++) y0.push(offsetY+e.y0[i]);
+          for (let i=x.length-1; i>=0; i--) y1.push(offsetY+e.y1[i]);
+          draw.push({ x, y0, y1, fillColor:e.fillColor });
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
             let tooltipText = e.arg.tooltipText;
@@ -330,24 +328,39 @@ async function renderProfiler() {
         // contiguous rect
         const x = xscale(start);
         const width = xscale(end)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        draw.push({ x, y:offsetY+e.y, width, height:e.height, fillColor:e.fillColor });
+        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, fillColor:e.fillColor });
         // add label
         if (e.label == null) continue;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
         let [labelX, labelWidth] = [x+2, 0];
         const labelY = offsetY+e.y+e.height/2;
         for (const [i,l] of e.label.entries()) {
           if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-            if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
+            if (labelWidth !== 0) draw.push({ text:"...", x:labelX, y:labelY });
             break;
           }
-          ctx.fillStyle = l.color;
-          ctx.fillText(l.st, labelX, labelY);
+          draw.push({ text:l.st, x:labelX, y:labelY, fillColor:l.color });
           labelWidth += l.width;
           labelX += l.width;
         }
+      }
+    }
+    // draw shapes
+    for (const d of draw) {
+      ctx.fillStyle = d.fillColor;
+      if (d.text != null) {
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(d.text, d.x, d.y);
+      } else if (d.width != null) {
+        ctx.fillRect(d.x, d.y, d.width, d.height)
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(d.x[0], d.y0[0]);
+        for (let i=1; i<d.x.length; i++) ctx.lineTo(d.x[i], d.y0[i]);
+        for (let i=d.x.length-1; i>=0; i--) ctx.lineTo(d.x[i], d.y1[i]);
+        ctx.closePath();
+        ctx.fill();
       }
     }
     // draw axes
