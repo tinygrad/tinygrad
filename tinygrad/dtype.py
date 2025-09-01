@@ -112,12 +112,12 @@ class dtypes:
   @staticmethod
   @functools.cache
   def min(dtype:DType):
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().itemsize*8-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
   @functools.cache
   def max(dtype:DType):
-    if dtypes.is_int(dtype): return 2**(dtype.itemsize*8)-1+dtypes.min(dtype)
+    if dtypes.is_int(dtype): return 2**(dtype.scalar().itemsize*8)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -198,8 +198,9 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16)
+    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16,
+      dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
+    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
@@ -298,6 +299,7 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
+  if dtype == dtypes.bfloat16: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
@@ -306,6 +308,8 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 @functools.cache
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
+  if dtype == dtypes.uint64: return torch.uint64
+  if dtype == dtypes.bfloat16: return torch.bfloat16
   # NOTE: torch doesn't expose this mapping with a stable API
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
   except TypeError: return None

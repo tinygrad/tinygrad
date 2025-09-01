@@ -22,7 +22,7 @@ def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, ast, uops=uops,
+  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -176,6 +176,31 @@ class TestBoolUOps(TestUOps):
   def test_cmpne_bool(self): self._test_bop_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
   def test_cmplt_bool(self): self._test_bop_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
+
+class TestSafeCast(TestUOps):
+  def test_cast_folds(self):
+    a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
+    self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int32).simplify(), a)
+    self.assertEqual(a.cast(dtypes.double).cast(dtypes.int32).simplify(), a)
+    a = UOp.variable("a", 1, 10, dtype=dtypes.uint8)
+    self.assertEqual(a.cast(dtypes.int64).cast(dtypes.uint8).simplify(), a)
+    self.assertEqual(a.cast(dtypes.uint32).cast(dtypes.uint8).simplify(), a)
+
+  def test_remove_intermediate_cast(self):
+    a = UOp.variable("a", 0., 100., dtype=dtypes.half)
+    self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))
+    a = UOp.variable("a", 1, 10, dtype=dtypes.int32)
+    # TODO: double preserves certain int dtypes
+    self.assertEqual(a.cast(dtypes.double).cast(dtypes.float).simplify(), a.cast(dtypes.float))
+    self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int16).simplify(), a.cast(dtypes.int16))
+    a = UOp.variable("a", 1, 10, dtype=dtypes.uint8)
+    self.assertEqual(a.cast(dtypes.int64).cast(dtypes.int32).simplify(), a.cast(dtypes.int32))
+
+  def test_safe_cast_using_bounds(self):
+    a = UOp.variable("a", 1, 10, dtype=dtypes.uint64)
+    self.assertEqual(a.cast(dtypes.int16).cast(dtypes.int).simplify(), a.cast(dtypes.int))
+    a = UOp.variable("a", -10, 10, dtype=dtypes.int32)
+    self.assertEqual(a.cast(dtypes.int8).cast(dtypes.int64).simplify(), a.cast(dtypes.int64))
 
 class TestExecALU(TestUOps):
   def test_sqrt(self):
@@ -403,7 +428,7 @@ class TestAssembly(unittest.TestCase):
     self.assertNotIn(Ops.IDIV, ops)
 
   def test_fast_idiv_remove_powers_of_two(self):
-    ridx = UOp.range(dtypes.int, 2**20, 0)
+    ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], opts=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
