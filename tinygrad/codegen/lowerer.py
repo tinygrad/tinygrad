@@ -127,7 +127,7 @@ def lower_index_dtype(ctx:str, buf:UOp, x:UOp, gate:UOp|None=None):
 
   def get_min_max(u:UOp) -> tuple[int,int]:
     v0, v1 = bounds[u]
-    return (expr.vmin if v0 is None else v0, expr.vmax if v1 is None else v1)
+    return (u.vmin if v0 is None else v0, u.vmax if v1 is None else v1)
   if gate is not None:
     for stmt in split_uop(gate, Ops.AND):
       try: expr, is_upper, c = parse_valid(stmt)
