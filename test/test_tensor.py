@@ -924,7 +924,7 @@ class TestIdxUpcast(unittest.TestCase):
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
-    with self.assertRaises(KeyError):
+    with self.assertRaises(OverflowError):
       self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
