@@ -8,6 +8,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG, to_function_name
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
+from tinygrad.schedule.rangeify import remove_tags
 
 def flatten_range(r:UOp):
   off = 2 if r.op is Ops.STORE else 1
@@ -152,10 +153,13 @@ class Scheduler:
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
     elif opt.op is OptOps.SWAP:
-      raise RuntimeError("broken, this can form a loop")
-      altrng = self.rngs[opt.arg]
-      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
-                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))})
+      try:
+        altrng = self.rngs[opt.arg]
+      except IndexError:
+        raise KernelOptError
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
+                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
+      self.ast = graph_rewrite(self.ast, remove_tags)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
