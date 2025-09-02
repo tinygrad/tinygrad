@@ -195,7 +195,7 @@ class MUOpX86(MUOp):
     elif x.size == 4:
       extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
-    elif x.size == 8:
+    else:
       extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, 1, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
     pop = MUOpX86._RM("pop", 0x8F, 0, rdx)
