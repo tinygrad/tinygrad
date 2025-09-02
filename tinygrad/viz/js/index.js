@@ -299,17 +299,15 @@ async function renderProfiler() {
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
-    xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
-    const zoomDomain = transform != null ? xscale.domain() : null;
-    let yscale = null;
-    if (data.axes.y != null) {
-      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
-    }
+    const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    xscale.domain(visibleX);
+    const yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
-        const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
+        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
+        else { start = e.x; end = e.x+e.width; }
+        if (start>visibleX[1] || end<visibleX[0]) continue;
         ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
