@@ -123,6 +123,17 @@ class View:
         if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
     return iexpr, vexpr
 
+  def to_valid_uop(self, idxs:Sequence[UOp]|None=None):
+    if idxs is None: idxs = [UOp.range(dtypes.int, s, i) for i,s in enumerate(self.shape)]
+    iexpr = sint_to_uop(self.offset)
+    where = UOp.const(dtypes.bool, True)
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      if m is not None:
+        if resolve(m[0] != 0): where &= (idx >= m[0])
+        if resolve(m[1] != sh): where &= (idx < m[1])
+    return where.where(iexpr, UOp(Ops.INVALID, dtype=iexpr.dtype))
+
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
     ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])

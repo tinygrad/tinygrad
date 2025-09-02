@@ -7,7 +7,7 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
-from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
+from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid, simplify_valid_matcher
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
@@ -36,6 +36,20 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=No
     if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
     # symbolic again, upcast if needed
     return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
+
+@functools.cache
+def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
+  idx = views[-1].to_valid_uop(_idxs)
+  for view in reversed(views[0:-1]):
+    view = view.minify()
+    idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
+  # with Context(TRACK_MATCH_STATS=0):
+    # symbolic
+  idx = graph_rewrite(idx, symbolic_flat+simplify_valid_matcher, name="indexing sym @ 1")
+  if idx.op is Ops.WHERE:
+    assert all(x.op is not Ops.INVALID for x in idx.src[1].sparents)
+  # symbolic again, upcast if needed
+  return graph_rewrite(idx, symbolic_flat+simplify_valid_matcher+pm_upcast, name="indexing sym @ 2")
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:
@@ -85,6 +99,9 @@ class ShapeTracker:
 
   def to_indexed_uops(self, _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+
+  def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
+    return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:
