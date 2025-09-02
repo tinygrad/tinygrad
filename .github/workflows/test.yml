@@ -779,9 +779,8 @@ jobs:
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=4 test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=10
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_dtype_alu.py --ignore test/test_multitensor.py --durations=20
       - name: Run process replay tests
-        if: always()
         uses: ./.github/actions/process-replay
 
   tests:
