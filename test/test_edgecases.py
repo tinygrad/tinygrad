@@ -25,7 +25,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, dtypes, nn, Device
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.device import is_dtype_supported
 
 class TestNaNEdgeCases(unittest.TestCase):
