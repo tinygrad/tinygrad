@@ -1,0 +1,18 @@
+Make libnir visible:
+sed -i '/gnu_symbol_visibility/d' src/compiler/nir/meson.build
+Make libcompiler visible:
+sed -i '/gnu_symbol_visibility/d' src/compiler/meson.build
+
+Fix rpath:
+patchelf --add-rpath $MESA_PREFIX/lib/x86_64-linux-gnu $MESA_PREFIX/lib/x86_64-linux-gnu/libvulkan_nouveau.so
+
+LD_LIBRARY_PATH=$MESA_PREFIX/lib/x86_64-linux-gnu OCL_ICD_VENDORS="$MESA_PREFIX/etc/OpenCL/vendors/" \
+  RUSTICL_ENABLE=swrast RUSTICL_DEBUG=nir MESA_SHADER_CACHE_DISABLE=true DISABLE_COMPILER_CACHE=1 GPU=1 \
+  python3 -c "from tinygrad import Tensor; print((Tensor.eye(1,1) * 2).numpy())"
+
+Generate NIR options for NAK:
+cc nak_nir_options.c -o nak_nir_options \
+  -DHAVE_ENDIAN_H -DHAVE_PTHREAD -DHAVE_STRUCT_TIMESPEC \
+  -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen
+./nak_nir_options | gzip | base64 -w 0
+

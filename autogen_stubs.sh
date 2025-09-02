@@ -442,6 +442,59 @@ generate_libusb() {
   python3 -c "import tinygrad.runtime.autogen.libusb"
 }
 
+generate_nak() {
+  MESA_COMMIT_HASH=9e0991eff5aea2e064fc16d5c7fa0ee6cd52d894
+  MESA_SRC=/tmp/mesa-$MESA_COMMIT_HASH
+  if [ ! -d "$MESA_SRC" ]; then
+    git clone https://gitlab.freedesktop.org/mesa/mesa.git $MESA_SRC
+    pushd .
+    cd $MESA_SRC
+    git reset --hard $MESA_COMMIT_HASH
+    # clang 14 doesn't support packed enums
+    sed -i "s/enum \w\+ \(\w\+\);$/uint8_t \1;/" $MESA_SRC/src/nouveau/headers/nv_device_info.h
+    sed -i "s/enum \w\+ \(\w\+\);$/uint8_t \1;/" $MESA_SRC/src/nouveau/compiler/nak.h
+    sed -i "s/nir_instr_type \(\w\+\);/uint8_t \1;/" $MESA_SRC/src/compiler/nir/nir.h
+    mkdir -p gen/util/format
+    python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h
+    python3 src/compiler/nir/nir_opcodes_h.py > gen/nir_opcodes.h
+    python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+    python3 src/compiler/nir/nir_intrinsics_indices_h.py --outdir gen
+    python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
+    python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+    popd
+  fi
+
+  clang2py -k cdefstu \
+    $MESA_SRC/src/nouveau/headers/nv_device_info.h \
+    $MESA_SRC/src/nouveau/compiler/nak.h \
+    --clang-args="-DHAVE_ENDIAN_H -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir" \
+    -o $BASE/nak.py
+
+   clang2py -v -k cdefstu \
+    $MESA_SRC/src/compiler/list.h \
+    $MESA_SRC/src/compiler/nir/nir.h \
+    $MESA_SRC/src/compiler/nir/nir_builder.h \
+    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
+    $MESA_SRC/gen/nir_intrinsics.h \
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
+    -o $BASE/nir.py
+
+  fixup $BASE/nak.py
+  fixup $BASE/nir.py
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libvulkan_nouveau.so')\g" $BASE/nir.py
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libvulkan_nouveau.so')\g" $BASE/nak.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/nak.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/nir.py
+  sed -i "s\'/usr/\os.getenv('MESA_PATH', '/usr/')+'/\g" $BASE/nak.py
+  sed -i "s\'/usr/\os.getenv('MESA_PATH', '/usr/')+'/\g" $BASE/nir.py
+  sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/nir.py
+  # bitfield bug in clang2py
+  sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/nir.py
+  sed -i "s/\([0-9]\+\)()/\1/" $BASE/nir.py
+  sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/nir.py
+  python3 -c "import tinygrad.runtime.autogen.nak, tinygrad.runtime.autogen.nir"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -465,6 +518,7 @@ elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
+elif [ "$1" == "nak" ]; then generate_nak
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu; generate_nak
 else echo "usage: $0 <type>"
 fi

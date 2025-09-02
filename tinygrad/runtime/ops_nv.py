@@ -11,11 +11,15 @@ from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, pr
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
+from tinygrad.runtime.support.nak import NAKCompiler, parse_nak_shader
 from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
+
+NIR = getenv("NIR")
+if NIR: from tinygrad.renderer.nir import NIRRenderer
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -191,38 +195,45 @@ class NVArgsState(CLikeArgsState):
 class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
-
-    # For MOCKGPU, the lib is PTX code, so some values are emulated.
-    cbuf0_size = 0 if not MOCKGPU else 0x160
-
-    if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
-    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
-
-    # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-
-    self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
-    for sh in sections:
-      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
-      if sh.name == f".text.{self.name}": self.prog_addr, self.prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
-      elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
-      elif sh.name.startswith(".nv.info"):
-        for typ, param, data in self._parse_elf_info(sh):
-          if sh.name == f".nv.info.{name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
-          elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
-          elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
+
+    if NIR:
+      image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
+      self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
+      cbuf0_size = 0x160 # ?
+      self.prog_addr, self.prog_sz = self.lib_gpu.va_addr, image.nbytes
+    else:
+      if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
+      else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
+
+      # For MOCKGPU, the lib is PTX code, so some values are emulated.
+      cbuf0_size = 0 if not MOCKGPU else 0x160
+
+      # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
+      self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
+
+      self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0x240
+      for sh in sections:
+        if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
+        if sh.name == f".text.{self.name}": self.prog_addr, self.prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
+        elif m:=re.match(r'\.nv\.constant(\d+)', sh.name):
+          self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
+        elif sh.name.startswith(".nv.info"):
+          for typ, param, data in self._parse_elf_info(sh):
+            if sh.name == f".nv.info.{name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
+            elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
+            elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
+
+      # Apply relocs
+      for apply_image_offset, rel_sym_offset, typ, _ in relocs:
+        # These types are CUDA-specific, applying them here
+        if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
+        elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)
+        elif typ == 0x39: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) >> 32)
+        else: raise RuntimeError(f"unknown NV reloc {typ}")
 
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
-
-    # Apply relocs
-    for apply_image_offset, rel_sym_offset, typ, _ in relocs:
-      # These types are CUDA-specific, applying them here
-      if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
-      elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)
-      elif typ == 0x39: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) >> 32)
-      else: raise RuntimeError(f"unknown NV reloc {typ}")
 
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
@@ -525,9 +536,9 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
-    super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
+    cc = NAKCompiler(self) if NIR else (PTXCompiler if PTX else (CUDACompiler if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)))(self.arch)
+    rr = PTXRenderer(self.arch, device="NV") if PTX else (NIRRenderer(self.arch) if NIR else NVRenderer(self.arch))
+    super().__init__(device, NVAllocator(self), rr, cc, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
 
