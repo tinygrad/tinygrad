@@ -688,6 +688,10 @@ jobs:
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     - name: Test DISK copy time
       run: AMD=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
+    - name: Test CPU copy time
+      run: |
+        AMD=1 GRAPH_ONE_KERNEL=1 PYTHONPATH=. NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyDefaulttoCPUJit
+        AMD=1 GRAPH_ONE_KERNEL=1 PYTHONPATH=. NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyCPUtoDefaultJit
     - name: Run full CIFAR training w 1 GPU
       run: time BENCHMARK_LOG=cifar AMD=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee am_train_cifar_one_gpu.txt
     # TODO: enable
@@ -745,6 +749,10 @@ jobs:
       run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test DISK copy time
       run: NV=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
+    - name: Test CPU copy time
+      run: |
+        NV=1 GRAPH_ONE_KERNEL=1 PYTHONPATH=. NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyDefaulttoCPUJit
+        NV=1 GRAPH_ONE_KERNEL=1 PYTHONPATH=. NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyCPUtoDefaultJit
     - name: Test LLAMA-3
       run: BENCHMARK_LOG=llama3_beam NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --size 8B --benchmark --temperature 0 | tee nv_llama3_beam.txt
     - name: Run full CIFAR training w 1 GPU
