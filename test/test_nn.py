@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, Device, TinyJit
+from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import GlobalCounters, CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
@@ -465,7 +465,7 @@ class TestNN(unittest.TestCase):
     # used to fail bounds check
     with Context(FUSE_ARANGE=1):
       embedding = Embedding(100, 1024)
-      input_ids = Tensor.empty(16, 16)
+      input_ids = Tensor.empty(16, 16, dtype=dtypes.int)
       embedding(input_ids).realize()
 
   def test_load_state_dict(self):

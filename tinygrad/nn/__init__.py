@@ -320,7 +320,7 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
-    if not dtypes.is_int(idx.dtype): idx = idx.cast(dtypes.default_int)
+    if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
     big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
     return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
