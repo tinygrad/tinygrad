@@ -379,9 +379,9 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
 
   # (X < c).ne(True) -> X >= c
   if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
-    (s0:=valid.src[0]).op is Ops.CMPLT: return s0.src[0], False, s0.src[1].vmin
+    (s0:=valid.src[0]).op is Ops.CMPLT: return s0.src[0], False, math.floor(s0.src[1].vmin)
   # X < c -> X <= c-1
-  if valid.op is Ops.CMPLT and valid.src[1].op and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, (valid.src[1]-1).vmax
+  if valid.op is Ops.CMPLT and valid.src[1].op and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, math.ceil((valid.src[1]-1).vmax)
   raise ValueError(f"not able to parse {valid=}")
 
 def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
