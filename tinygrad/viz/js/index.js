@@ -165,6 +165,12 @@ const drawLine = (ctx, x, y) => {
   ctx.stroke();
 }
 
+const dominantColor = map => {
+  let best = null, max = -Infinity
+  for (const [color, width] of map) if (width > max) { max = width; best = color }
+  return best ?? "rgb(0,0,0)"
+}
+
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -220,7 +226,7 @@ async function renderProfiler() {
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size));
-        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
+        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth*0.8).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
         else if (ref != null) {
@@ -306,7 +312,7 @@ async function renderProfiler() {
     // rescale / merge shapes
     const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
-      const proxies = new Set();
+      const proxies = new Map();
       for (const e of shapes) {
         const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
         if (start>domain[1] || end<domain[0]) continue;
@@ -333,16 +339,14 @@ async function renderProfiler() {
         const x = xscale(start), y = offsetY+e.y;
         const width = xscale(end)-x;
         if (width < minWidth) {
-          const px = Math.round(x);
-          if (proxies.has(px)) continue;
-          draw.push({ x:px, y, height:e.height, width:minWidth, fillColor:e.fillColor });
-          rectLst.push({ y0:y, y1:y+e.height, x0:px, x1:px+minWidth, width:minWidth, arg:{tooltipText:"small rect"} });
-        }
-        else {
+          const px = Math.round(x), pkey = `${px},${y}`;
+          let prects = proxies.get(pkey);
+          if (prects == null) proxies.set(pkey, prects={ colors: new Map(), height:e.height });
+          prects.colors.set(e.fillColor, (prects.colors.get(e.fillColor) || 0)+width);
+        } else {
           draw.push({ x, y, width, height:e.height, fillColor:e.fillColor });
           rectLst.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         }
-
         // add label
         if (e.label == null) continue;
         let [labelX, labelWidth] = [x+2, 0];
@@ -356,6 +360,10 @@ async function renderProfiler() {
           labelWidth += l.width;
           labelX += l.width;
         }
+      }
+      for (const [k, v] of proxies) {
+        const [x, y] = k.split(",")
+        draw.push({ x, y, fillColor:dominantColor(v.colors), height:v.height, y, width:minWidth });
       }
     }
     // draw shapes
