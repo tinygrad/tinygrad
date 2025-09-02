@@ -1066,7 +1066,7 @@ def pyrender(ast:UOp) -> list[str]:
     if u.op in {Ops.SINK, Ops.VIEW}:
       for s in u.src: to_render.add(s)
     to_render.add(u)
-  ret = []
+  ret: list[str] = []
   rep: dict[UOp, UOp] = {}
   for u in ast.toposort():
     if u not in to_render: continue
