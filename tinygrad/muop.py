@@ -58,30 +58,28 @@ class MUOp:
 
 def assemble(src:list[MUOp]) -> bytes:
   # TODO: don't hardcore jump size (6)
-  bin, size = bytearray(), 0
+  binary = bytearray()
   targets: dict[Label, int] = {}
   fixups: list[tuple[Label, int]] = []
   for mu in src:
     if isinstance(mu.out, Label):
-      targets[mu.out] = size
+      targets[mu.out] = len(binary)
       continue
     if mu.ins and isinstance(mu.ins[0], Label):
       if mu.ins[0] in targets:
-        mu = mu.replace(mu.out, (Immediate(targets[mu.ins[0]] - (size+6), 4),))
+        mu = mu.replace(mu.out, (Immediate(targets[mu.ins[0]] - (len(binary) + 6), 4),))
       else:
-        fixups.append((mu.ins[0], size + 2))
+        fixups.append((mu.ins[0], len(binary) + 2))
         mu = mu.replace(mu.out, (Immediate(0, 4),))
-    enc = mu.encode()
-    size += len(enc)
-    bin.extend(enc)
+    binary.extend(mu.encode())
   # patch offsets for forward jumps
   for label,loc in fixups:
     offset = targets[label] - (loc + 4)
-    bin[loc:loc+4] = offset.to_bytes(4, "little", signed=True)
-  return bytes(bin)
+    binary[loc:loc+4] = offset.to_bytes(4, "little", signed=True)
+  return bytes(binary)
 
 # *** X86 ***
-GPR = tuple(Register(name, i, 8) for i,name in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,16)]))
+GPR = tuple(Register(nm, i, 8) for i,nm in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,16)]))
 VEC = tuple(Register("xmm"+str(i), i, 16) for i in range(16))
 #https://wiki.osdev.org/X86-64_Instruction_Encoding
 @dataclass(frozen=True)
@@ -103,14 +101,14 @@ class MUOpX86(MUOp):
   imm: Immediate|Register|None = None
   # REX methods
   def RM(opstr, opcode, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, prefix=prefix, w=w)
-  def _RM(opstr, opcode, reg, rm, w=0, prefix=0, in_cons=GPR): return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, prefix=prefix, w=w)
+  def _RM(opstr, opcode, reg, rm, w=0, prefix=0, in_cons=GPR): return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, prefix=prefix, w=w) # noqa: E501
   def R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
   def _R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, prefix=prefix, w=w)
   def RM_R(opstr, opcode, rm, reg, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
   def R_I(opstr, opcode, reg, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (imm,), GPR, ((),), reg, prefix=prefix, w=w, imm=imm)
   def RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (imm,), GPR, ((),), reg, rm, prefix=prefix, w=w, imm=imm)
-  def _RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
-  def R_RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
+  def _RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm) # noqa: E501
+  def R_RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm) # noqa: E501
   # VEX methods
   def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, ((),), reg, rm, pp, sel, w, l)
   def M_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), (), (VEC,), reg, rm, pp, sel, w, l)
@@ -119,15 +117,15 @@ class MUOpX86(MUOp):
   def V_RM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, (GPR,), reg, rm, pp, sel, w, l)
   def RM_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (VEC,), reg, rm, pp, sel, w, l)
   def R_VM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (VEC,), reg, rm, pp, sel, w, l)
-  def V_V_V(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
-  def V_V_VM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
-  def V_V_RM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, GPR), reg, rm, pp, sel, w, l, vvvv)
-  def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
-  def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
-  def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), GPR, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
-  def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)
-  def V_V_RM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
-  def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+  def V_V_V(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv) # noqa: E501
+  def V_V_VM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv) # noqa: E501
+  def V_V_RM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, GPR), reg, rm, pp, sel, w, l, vvvv) # noqa: E501
+  def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm) # noqa: E501
+  def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm) # noqa: E501
+  def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg, imm), GPR, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm) # noqa: E501
+  def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm) # noqa: E501
+  def V_V_RM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm) # noqa: E501
+  def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm) # noqa: E501
   def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
     def _sub(x):
       for old,new in zip((self.out,)+self.ins, (out,)+ins):
@@ -159,7 +157,8 @@ class MUOpX86(MUOp):
       div = MUOpX86._RM("idiv", 0xF6, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF6, 6, b, in_cons=in_cons)
     elif x.size == 2:
       extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
-      div = MUOpX86._RM("idiv", 0xF7, 7, b, prefix=0x66, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, prefix=0x66, in_cons=in_cons)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, prefix=0x66, in_cons=in_cons) if is_signed else \
+            MUOpX86._RM("div", 0xF7, 6, b, prefix=0x66, in_cons=in_cons)
     elif x.size == 4:
       extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
@@ -231,7 +230,8 @@ class MUOpX86(MUOp):
       if self.prefix: inst.append(self.prefix)
       # *** REX byte ***
       # if 64bit or extended register (index 8 - 15) is used or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
-      if self.w or r or x or b or any(isinstance(v, Register) and v.size == 1 and v.name in ("rsp", "rbp", "rsi", "rdi") for v in (self.reg, self.rm)):
+      if self.w or r or x or b or any(isinstance(v, Register) and v.size == 1 and v.name in ("rsp", "rbp", "rsi", "rdi") \
+                                      for v in (self.reg, self.rm)):
         inst.append((0b0100 << 4) | (self.w << 3) | (r << 2) | (x << 1) | b)
     # *** OPCODE byte ***
     inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8))

@@ -21,7 +21,6 @@ if __name__ == "__main__":
   ast_strs = ast_strs[:3001] + ast_strs[3002:]
   ast_strs = ast_strs[:3719] + ast_strs[3720:]
 
-
   single = getenv("NUM", -1)
   if single != -1: ast_strs = ast_strs[single:single+1]
 
