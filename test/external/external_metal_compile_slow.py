@@ -29,6 +29,6 @@ if __name__ == "__main__":
   prg = get_program(ast)
   print(prg.src)
   for i in range(10):
-    print(f"err {i}")
+    print(f"try {i}")
     try: CompiledRunner(prg)(*bufs)
     except RuntimeError: pass
