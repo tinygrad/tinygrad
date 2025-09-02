@@ -95,7 +95,7 @@ class dtypes:
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
-  @functools.cache
+  @staticmethod
   def is_mask(x: DType) -> bool: return x.scalar() in dtypes.masks
   @staticmethod
   def from_py(x) -> DType:
