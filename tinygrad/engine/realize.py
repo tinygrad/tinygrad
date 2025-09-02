@@ -26,7 +26,23 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: pyrender(ast)
+  if DEBUG >= 5:
+    from tinygrad.dtype import dtypes
+    from tinygrad.shape.shapetracker import ShapeTracker, View
+    ast_backup = ast
+    pys = '\n'.join(pyrender(ast))
+    print(pys)
+    dd = globals().copy()
+    dd['dtypes'] = dtypes
+    dd['ShapeTracker'] = ShapeTracker
+    dd['View'] = View
+    exec(pys, dd)
+    if str(ast_backup) != str(dd['ast']):
+      import difflib
+      print(ast_backup)
+      print(dd['ast'])
+      print(list(difflib.unified_diff(str(ast_backup), str(dd['ast']))))
+    assert str(ast_backup) == str(dd['ast'])
 
   # linearize
   if renderer is None: renderer = Device.default.renderer
