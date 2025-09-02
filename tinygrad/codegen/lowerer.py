@@ -90,12 +90,12 @@ pm_lowerer = PatternMatcher([
 ])
 
 def lower_alu_index_dtype(u: UOp, x:UOp, y:UOp, ctx, cond:UOp|None=None) -> UOp|None:
-  if u.overflows(dtypes.int64): raise ValueError("indexing overflows int64")
+  if u.overflows(dtypes.int64): raise OverflowError("indexing overflows int64")
   # cond is a UOp only if u is a WHERE
   casted_srcs = ((cond,) if cond is not None else ()) + (x.cast(dtypes.int64), y.cast(dtypes.int64))
   # TODO: use the default int dtype and try to promote untill you run out of dtypes
   if u.overflows(dtypes.int32):
-    if not is_dtype_supported(dtypes.int64, ctx): raise ValueError(f"index overflows int32 and int64 is not supported on {ctx}")
+    if not is_dtype_supported(dtypes.int64, ctx): raise OverflowError(f"index overflows int32 and int64 is not supported on {ctx}")
     return u.replace(dtype=dtypes.int64.vec(u.dtype.count), src=casted_srcs)
   # if any inputs are int64 and this *doesn't* overflow, cast back to int
   if x.dtype == dtypes.int64 or y.dtype == dtypes.int64:
