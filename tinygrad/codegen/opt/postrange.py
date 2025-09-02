@@ -10,9 +10,6 @@ from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
-axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
-                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
 axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.LOCAL: 1, AxisType.UPCAST: 2,
                AxisType.GROUP_REDUCE: 1, AxisType.REDUCE: 3, AxisType.UNROLL: 4}
