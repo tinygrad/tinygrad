@@ -160,7 +160,7 @@ def beam_search(lin, rawbufs:list[Buffer], amt:int, allow_test_size=True, disabl
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG:
-    print(f"BEAM_SEARCH:")
+    print("BEAM_SEARCH:")
     print('\n'.join(pyrender(lin.ast.replace(arg=None))))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 

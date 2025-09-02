@@ -1,8 +1,9 @@
+# ruff: noqa: E501
 from tinygrad import dtypes
 from tinygrad.helpers import Timing, getenv
 from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad.engine.realize import get_program, CompiledRunner
-from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, AxisType
 
 if __name__ == "__main__":
   if getenv("TC", 0) == 0:

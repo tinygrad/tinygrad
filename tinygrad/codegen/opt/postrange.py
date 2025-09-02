@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, POSTBEAM, getenv, DEBUG, to_function_name
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -266,11 +266,11 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
-  if POSTBEAM >= 1:
+  if BEAM >= 1:
     k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
-    k = beam_search(k, rawbufs, POSTBEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   else:
     if ast.arg is not None and ast.arg.opts_to_apply is not None:
       for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
