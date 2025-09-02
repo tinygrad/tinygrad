@@ -437,8 +437,9 @@ class TestOpsBFloat16(unittest.TestCase):
   def test_log_nan(self):
     a = 32769
     data = [from_storage_scalar(a, dtypes.bfloat16)]
-    expected = torch.tensor(data, dtype=torch.bfloat16).log().float().numpy() # nan
-    np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).log().numpy(), expected)
+    expected = torch.tensor(data, dtype=torch.bfloat16).log().float().numpy()
+    np.testing.assert_equal(expected.item(), math.nan)
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.bfloat16).log().numpy(), expected)
 
 if __name__ == '__main__':
   unittest.main()
