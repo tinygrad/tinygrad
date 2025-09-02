@@ -159,7 +159,9 @@ def beam_search(lin, rawbufs:list[Buffer], amt:int, allow_test_size=True, disabl
     def close_pool(): beam_pool.close()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
-  if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
+  if BEAM_DEBUG:
+    print(f"BEAM_SEARCH:")
+    print('\n'.join(pyrender(lin.ast.replace(arg=None))))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:
@@ -184,7 +186,6 @@ def beam_search(lin, rawbufs:list[Buffer], amt:int, allow_test_size=True, disabl
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
         except Exception as e:
           if BEAM_DEBUG: print(f"BEAM failed for opts: {acted_lins[i].applied_opts}\n{e}")
-          print('\n'.join(pyrender(lin.ast)))
           if isinstance(e, RuntimeError): continue
           raise
         timed_lins.append((acted_lins[i], min(tms)))
