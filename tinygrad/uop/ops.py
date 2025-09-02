@@ -1062,6 +1062,7 @@ def pyrender(ast:UOp) -> list[str]:
   cmap = ast.get_children_map()
   to_render = set()
   for u in ast.toposort():
+    if u.op is Ops.STORE: to_render.add(u.src[1])
     if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.VIEW, Ops.LOAD} or u.op in {Ops.CONST}: continue
     if u.op in {Ops.SINK, Ops.VIEW}:
       for s in u.src: to_render.add(s)
