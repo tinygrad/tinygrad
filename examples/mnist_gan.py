@@ -8,6 +8,7 @@ from tinygrad.helpers import trange
 from tinygrad.nn import optim
 from extra.datasets import fetch_mnist
 
+
 class LinearGen:
   def __init__(self):
     self.l1 = Tensor.scaled_uniform(128, 256)
@@ -21,6 +22,7 @@ class LinearGen:
     x = x.dot(self.l3).leaky_relu(0.2)
     x = x.dot(self.l4).tanh()
     return x
+
 
 class LinearDisc:
   def __init__(self):
@@ -37,15 +39,18 @@ class LinearDisc:
     x = x.dot(self.l4).log_softmax()
     return x
 
+
 def make_batch(images):
   sample = np.random.randint(0, len(images), size=(batch_size))
-  image_b = images[sample].reshape(-1, 28*28).astype(np.float32) / 127.5 - 1.0
+  image_b = images[sample].reshape(-1, 28 * 28).astype(np.float32) / 127.5 - 1.0
   return Tensor(image_b)
+
 
 def make_labels(bs, col, val=-2.0):
   y = np.zeros((bs, 2), np.float32)
   y[range(bs), [col] * bs] = val  # Can we do label smoothing? i.e -2.0 changed to -1.98789.
   return Tensor(y)
+
 
 def train_discriminator(optimizer, data_real, data_fake):
   real_labels = make_labels(batch_size, 1)
@@ -60,6 +65,7 @@ def train_discriminator(optimizer, data_real, data_fake):
   optimizer.step()
   return (loss_real + loss_fake).numpy()
 
+
 def train_generator(optimizer, data_fake):
   real_labels = make_labels(batch_size, 1)
   optimizer.zero_grad()
@@ -68,6 +74,7 @@ def train_generator(optimizer, data_fake):
   loss.backward()
   optimizer.step()
   return loss.numpy()
+
 
 if __name__ == "__main__":
   # data for training and validation
@@ -84,8 +91,8 @@ if __name__ == "__main__":
   output_dir = Path(".").resolve() / "outputs"
   output_dir.mkdir(exist_ok=True)
   # optimizers
-  optim_g = optim.Adam(get_parameters(generator),lr=0.0002, b1=0.5)  # 0.0002 for equilibrium!
-  optim_d = optim.Adam(get_parameters(discriminator),lr=0.0002, b1=0.5)
+  optim_g = optim.Adam(get_parameters(generator), lr=0.0002, b1=0.5)  # 0.0002 for equilibrium!
+  optim_d = optim.Adam(get_parameters(discriminator), lr=0.0002, b1=0.5)
   # training loop
   Tensor.training = True
   for epoch in (t := trange(epochs)):
@@ -102,6 +109,6 @@ if __name__ == "__main__":
     if (epoch + 1) % sample_interval == 0:
       fake_images = generator.forward(ds_noise).detach().numpy()
       fake_images = (fake_images.reshape(-1, 1, 28, 28) + 1) / 2  # 0 - 1 range.
-      save_image(make_grid(torch.tensor(fake_images)), output_dir / f"image_{epoch+1}.jpg")
-    t.set_description(f"Generator loss: {loss_g/n_steps}, Discriminator loss: {loss_d/n_steps}")
+      save_image(make_grid(torch.tensor(fake_images)), output_dir / f"image_{epoch + 1}.jpg")
+    t.set_description(f"Generator loss: {loss_g / n_steps}, Discriminator loss: {loss_d / n_steps}")
   print("Training Completed!")

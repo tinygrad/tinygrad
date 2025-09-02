@@ -6,7 +6,8 @@ from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.device import is_dtype_supported
 
-def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
+
+def single_kernel_softmax(x_in: Tensor, axis=-1, dtype: DTypeLike | None = None) -> Tensor:
   # only support axis =-1
   x = x_in.reshape(-1, x_in.shape[-1])
   nr_dim, r_dim = x.shape
@@ -14,76 +15,84 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
   inp = x.reshape(nr_dim, 1, 1, r_dim).expand(nr_dim, r_dim, 1, r_dim)
   imx = x.reshape(nr_dim, 1, r_dim, 1).expand(nr_dim, r_dim, r_dim, r_dim).max(axis=-2, keepdim=True)
   m = inp - imx.detach()
-  if dtype is not None: m = m.cast(dtype)
+  if dtype is not None:
+    m = m.cast(dtype)
   e = m.exp()
   ss = e.sum(axis=-1, keepdim=True)
 
   inp = x.reshape(nr_dim, r_dim, 1, 1)
   imx = x.reshape(nr_dim, 1, r_dim, 1).expand(nr_dim, r_dim, r_dim, 1).max(axis=-2, keepdim=True)
   m = inp - imx.detach()
-  if dtype is not None: m = m.cast(dtype)
+  if dtype is not None:
+    m = m.cast(dtype)
   e = m.exp()
 
   out = e.div(ss).reshape(x_in.shape)
   return out
 
-def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
+
+def run_one_schedule_item(out):
+  lower_schedule_item(get_single_element(out.schedule())).run()
+
 
 class TestFuse(unittest.TestCase):
   def _test_fuse(self, fxn, *args, atol=1e-7, allow_multiple=False, **kwargs):
     GlobalCounters.reset()
     out_single = fxn(*args, **kwargs).fuse()
-    if not allow_multiple: run_one_schedule_item(out_single)
+    if not allow_multiple:
+      run_one_schedule_item(out_single)
     np_single = out_single.numpy()
     GlobalCounters.reset()
     np_multi = fxn(*args, **kwargs).numpy()
     np.testing.assert_allclose(np_single, np_multi, atol=atol)
 
   def test_fuse_norm(self):
-    a = Tensor.rand(50,50).realize()
+    a = Tensor.rand(50, 50).realize()
     self._test_fuse(lambda a: a / a.mean(axis=1), a)
 
   def test_fuse_argmax(self):
-    a = Tensor.rand(50,50).realize()
+    a = Tensor.rand(50, 50).realize()
     self._test_fuse(lambda a: a.argmax(axis=-1), a)
 
   def test_fuse_softmax(self):
-    a = Tensor.rand(50,50).realize()
+    a = Tensor.rand(50, 50).realize()
     self._test_fuse(lambda a: a.softmax(axis=-1), a)
 
   def test_fuse_gemm_softmax(self):
-    a = Tensor.rand(50,50).realize()
-    b = Tensor.rand(50,50).realize()
-    self._test_fuse(lambda a,b: ((a@b).relu()+a).contiguous().softmax(axis=-1), a,b, allow_multiple=True)
+    a = Tensor.rand(50, 50).realize()
+    b = Tensor.rand(50, 50).realize()
+    self._test_fuse(lambda a, b: ((a @ b).relu() + a).contiguous().softmax(axis=-1), a, b, allow_multiple=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
   def test_fuse_softmax_dtype(self):
-    a = Tensor.rand(50,50).realize()
-    self._test_fuse(lambda a: a.softmax(axis=-1, dtype='half'), a, atol=3e-4)
+    a = Tensor.rand(50, 50).realize()
+    self._test_fuse(lambda a: a.softmax(axis=-1, dtype="half"), a, atol=3e-4)
 
   def test_fuse_arange_eye(self):
-    self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+    self._test_fuse(lambda: Tensor.arange(10).reshape(10, 1).expand(10, 10) == Tensor.arange(10).reshape(1, 10).expand(10, 10))
 
   def test_double_gemm(self):
     N = 32
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
-      a = (Tensor.rand(N,N)-0.5).realize()
-      b = (Tensor.rand(N,N)-0.5).realize()
-      c = (Tensor.rand(N,N)-0.5).realize()
-    self._test_fuse(lambda a,b,c: a@b@c, a, b, c, atol=1e-5)
+      a = (Tensor.rand(N, N) - 0.5).realize()
+      b = (Tensor.rand(N, N) - 0.5).realize()
+      c = (Tensor.rand(N, N) - 0.5).realize()
+    self._test_fuse(lambda a, b, c: a @ b @ c, a, b, c, atol=1e-5)
 
   def test_embedding(self):
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
       vocab_sz = 123
       embed_sz = 16
-      weight = (Tensor.rand(vocab_sz, embed_sz)-0.5).realize()
+      weight = (Tensor.rand(vocab_sz, embed_sz) - 0.5).realize()
       a = Tensor([1, 1, 2, 3]).realize()
-    def embedding(idx:Tensor):
+
+    def embedding(idx: Tensor):
       arange = Tensor.arange(vocab_sz).unsqueeze(-1)
       big_shp = idx.shape + (vocab_sz, embed_sz)
       arange, vals = arange.expand(big_shp), weight.expand(big_shp)
-      idx = idx.reshape(idx.shape+(1, 1)).expand(big_shp)
+      idx = idx.reshape(idx.shape + (1, 1)).expand(big_shp)
       return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
+
     self._test_fuse(embedding, a, atol=1e-5)
 
   def test_attention_kernel_count(self):
@@ -96,7 +105,7 @@ class TestFuse(unittest.TestCase):
     v = (x @ wv).contiguous()
     attn = q.scaled_dot_product_attention(k, v).fuse()
     s = attn.schedule()
-    self.assertEqual(len(s), 4) # 3 matmul and 1 attention
+    self.assertEqual(len(s), 4)  # 3 matmul and 1 attention
 
   def test_flash_attention(self):
     BS = 4
@@ -115,20 +124,28 @@ class TestFuse(unittest.TestCase):
     a = Tensor.ones(16, 10).contiguous().realize()
     b = Tensor.ones(16, 20).contiguous().realize()
     c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
-    self.assertListEqual(c.tolist(), [30]*16)
+    self.assertListEqual(c.tolist(), [30] * 16)
 
   @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
   def test_fuse_and_tc_opt(self):
     A = Tensor.randn(8, 8).realize()
     B = Tensor.randn(8, 8).realize()
-    C = Tensor.ones(1, 8, 8).pad(((1,1), None, None),).sum(0)
+    C = (
+      Tensor.ones(1, 8, 8)
+      .pad(
+        ((1, 1), None, None),
+      )
+      .sum(0)
+    )
     out = (C + (A @ B)).fuse()
     out.realize()
+
 
 class TestSoftmaxFusion(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    with Context(TRACK_MATCH_STATS=0): cls.test = Tensor.rand(32, 10).contiguous().realize()
+    with Context(TRACK_MATCH_STATS=0):
+      cls.test = Tensor.rand(32, 10).contiguous().realize()
 
   def setUp(self):
     GlobalCounters.reset()
@@ -198,5 +215,6 @@ class TestSoftmaxFusion(unittest.TestCase):
 
       np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

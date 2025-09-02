@@ -16,10 +16,7 @@ import tensorflow.compat.v1 as tf
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_bool(
-    "preserve_unused_tokens", False,
-    "If True, Wordpiece tokenization will not be applied to words in the vocab."
-)
+flags.DEFINE_bool("preserve_unused_tokens", False, "If True, Wordpiece tokenization will not be applied to words in the vocab.")
 
 _UNUSED_TOKEN_RE = re.compile("^\\[unused\\d+\\]$")
 
@@ -50,15 +47,9 @@ def validate_case_matches_checkpoint(do_lower_case, init_checkpoint):
 
   model_name = m.group(1)
 
-  lower_models = [
-      "uncased_L-24_H-1024_A-16", "uncased_L-12_H-768_A-12",
-      "multilingual_L-12_H-768_A-12", "chinese_L-12_H-768_A-12"
-  ]
+  lower_models = ["uncased_L-24_H-1024_A-16", "uncased_L-12_H-768_A-12", "multilingual_L-12_H-768_A-12", "chinese_L-12_H-768_A-12"]
 
-  cased_models = [
-      "cased_L-12_H-768_A-12", "cased_L-24_H-1024_A-16",
-      "multi_cased_L-12_H-768_A-12"
-  ]
+  cased_models = ["cased_L-12_H-768_A-12", "cased_L-24_H-1024_A-16", "multi_cased_L-12_H-768_A-12"]
 
   is_bad_config = False
   if model_name in lower_models and not do_lower_case:
@@ -75,12 +66,12 @@ def validate_case_matches_checkpoint(do_lower_case, init_checkpoint):
 
   if is_bad_config:
     raise ValueError(
-        "You passed in `--do_lower_case=%s` with `--init_checkpoint=%s`. "
-        "However, `%s` seems to be a %s model, so you "
-        "should pass in `--do_lower_case=%s` so that the fine-tuning matches "
-        "how the model was pre-training. If this error is wrong, please "
-        "just comment out this check." % (actual_flag, init_checkpoint,
-                                          model_name, case_name, opposite_flag))
+      "You passed in `--do_lower_case=%s` with `--init_checkpoint=%s`. "
+      "However, `%s` seems to be a %s model, so you "
+      "should pass in `--do_lower_case=%s` so that the fine-tuning matches "
+      "how the model was pre-training. If this error is wrong, please "
+      "just comment out this check." % (actual_flag, init_checkpoint, model_name, case_name, opposite_flag)
+    )
 
 
 def convert_to_unicode(text):
@@ -95,7 +86,7 @@ def convert_to_unicode(text):
   elif six.PY2:
     if isinstance(text, str):
       return text.decode("utf-8", "ignore")
-    elif isinstance(text, unicode): # noqa: F821
+    elif isinstance(text, unicode):  # noqa: F821
       return text
     else:
       raise ValueError("Unsupported string type: %s" % (type(text)))
@@ -118,7 +109,7 @@ def printable_text(text):
   elif six.PY2:
     if isinstance(text, str):
       return text
-    elif isinstance(text, unicode): # noqa: F821
+    elif isinstance(text, unicode):  # noqa: F821
       return text.encode("utf-8")
     else:
       raise ValueError("Unsupported string type: %s" % (type(text)))
@@ -171,8 +162,7 @@ class FullTokenizer(object):
   def __init__(self, vocab_file, do_lower_case=True):
     self.vocab = load_vocab(vocab_file)
     self.inv_vocab = {v: k for k, v in self.vocab.items()}
-    self.basic_tokenizer = BasicTokenizer(
-        do_lower_case=do_lower_case, vocab=self.vocab)
+    self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case, vocab=self.vocab)
     self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab)
 
   def tokenize(self, text):
@@ -287,14 +277,16 @@ class BasicTokenizer(object):
     # as is Japanese Hiragana and Katakana. Those alphabets are used to write
     # space-separated words, so they are not treated specially and handled
     # like all of the other languages.
-    if ((cp >= 0x4E00 and cp <= 0x9FFF) or  #
-        (cp >= 0x3400 and cp <= 0x4DBF) or  #
-        (cp >= 0x20000 and cp <= 0x2A6DF) or  #
-        (cp >= 0x2A700 and cp <= 0x2B73F) or  #
-        (cp >= 0x2B740 and cp <= 0x2B81F) or  #
-        (cp >= 0x2B820 and cp <= 0x2CEAF) or
-        (cp >= 0xF900 and cp <= 0xFAFF) or  #
-        (cp >= 0x2F800 and cp <= 0x2FA1F)):  #
+    if (
+      (cp >= 0x4E00 and cp <= 0x9FFF)  #
+      or (cp >= 0x3400 and cp <= 0x4DBF)  #
+      or (cp >= 0x20000 and cp <= 0x2A6DF)  #
+      or (cp >= 0x2A700 and cp <= 0x2B73F)  #
+      or (cp >= 0x2B740 and cp <= 0x2B81F)  #
+      or (cp >= 0x2B820 and cp <= 0x2CEAF)
+      or (cp >= 0xF900 and cp <= 0xFAFF)  #
+      or (cp >= 0x2F800 and cp <= 0x2FA1F)
+    ):  #
       return True
 
     return False
@@ -304,7 +296,7 @@ class BasicTokenizer(object):
     output = []
     for char in text:
       cp = ord(char)
-      if cp == 0 or cp == 0xfffd or _is_control(char):
+      if cp == 0 or cp == 0xFFFD or _is_control(char):
         continue
       if _is_whitespace(char):
         output.append(" ")
@@ -406,8 +398,7 @@ def _is_punctuation(char):
   # Characters such as "^", "$", and "`" are not in the Unicode
   # Punctuation class but we treat them as punctuation anyways, for
   # consistency.
-  if ((cp >= 33 and cp <= 47) or (cp >= 58 and cp <= 64) or
-      (cp >= 91 and cp <= 96) or (cp >= 123 and cp <= 126)):
+  if (cp >= 33 and cp <= 47) or (cp >= 58 and cp <= 64) or (cp >= 91 and cp <= 96) or (cp >= 123 and cp <= 126):
     return True
   cat = unicodedata.category(char)
   if cat.startswith("P"):

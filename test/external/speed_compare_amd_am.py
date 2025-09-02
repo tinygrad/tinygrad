@@ -14,6 +14,7 @@ import os, random, statistics
 am_signal_pages, am_signal_pool, am_devices = [], [], []
 amd_signal_pages, amd_signal_pool, amd_devices = [], [], []
 
+
 def rebind_vfio(pcibus="0000:44:00.0"):
   print("rebind ", pcibus)
   os.system("sudo rmmod amdgpu")
@@ -21,13 +22,17 @@ def rebind_vfio(pcibus="0000:44:00.0"):
 
   base = f"/sys/bus/pci/devices/{pcibus}"
   if os.path.exists(f"{base}/driver"):
-    with open(f"{base}/driver/unbind", "w") as f: f.write(pcibus)
-  with open(f"{base}/driver_override", "w") as f: f.write("vfio-pci")
-  with open("/sys/bus/pci/drivers_probe", "w") as f: f.write(pcibus)
+    with open(f"{base}/driver/unbind", "w") as f:
+      f.write(pcibus)
+  with open(f"{base}/driver_override", "w") as f:
+    f.write("vfio-pci")
+  with open("/sys/bus/pci/drivers_probe", "w") as f:
+    f.write(pcibus)
 
   os.system("sudo modprobe amdgpu")
   os.system("rocm-smi --setprofile compute")
   os.system("rocm-smi --setperflevel high")
+
 
 @contextmanager
 def run_amd():
@@ -38,6 +43,7 @@ def run_amd():
   amd_signal_pages, amd_signal_pool, amd_devices = AMDDevice.signal_pages, AMDDevice.signal_pool, AMDDevice.devices
   AMDDevice.signal_pages, AMDDevice.signal_pool, AMDDevice.devices = [], [], []
 
+
 @contextmanager
 def run_am():
   global am_signal_pages, am_signal_pool, am_devices
@@ -46,6 +52,7 @@ def run_am():
   yield
   am_signal_pages, am_signal_pool, am_devices = AMDDevice.signal_pages, AMDDevice.signal_pool, AMDDevice.devices
   AMDDevice.signal_pages, AMDDevice.signal_pool, AMDDevice.devices = [], [], []
+
 
 if __name__ == "__main__":
   CHECK_CPU = getenv("CHECK_CPU", 0)
@@ -67,13 +74,15 @@ if __name__ == "__main__":
   with run_amd():
     amddev = Device["AMD"]
 
-  if CHECK_CPU: cpudev = Device["CPU"]
+  if CHECK_CPU:
+    cpudev = Device["CPU"]
 
   single = getenv("NUM", -1)
-  if single != -1: ast_strs = ast_strs[single:single+1]
+  if single != -1:
+    ast_strs = ast_strs[single : single + 1]
 
   average_tm_amd, average_tm_am = 0, 0
-  for num,ast in enumerate(ast_strs):
+  for num, ast in enumerate(ast_strs):
     with run_amd():
       amdlin = ast_str_to_lin(ast, opts=amddev.renderer)
       amdlin.apply_opts(hand_coded_optimizations(amdlin))
@@ -82,7 +91,8 @@ if __name__ == "__main__":
       amd_prg = CompiledRunner(get_program(amdlin.get_optimized_ast(), amdlin.opts))
       amdbufs = bufs_from_lin(amdlin)
       test_amdbufs = get_fuzz_rawbufs(amdlin) if not has_bf16 else amdbufs
-      if not has_bf16: contents = [buf.as_buffer() for buf in test_amdbufs]
+      if not has_bf16:
+        contents = [buf.as_buffer() for buf in test_amdbufs]
 
     with run_am():
       rdr = amdev.renderer
@@ -93,7 +103,8 @@ if __name__ == "__main__":
       ambufs = bufs_from_lin(amlin)
       test_ambufs = get_fuzz_rawbufs(amlin) if not has_bf16 else ambufs
       if not has_bf16:
-        for i,rawbuf in enumerate(test_ambufs): rawbuf.copyin(contents[i])
+        for i, rawbuf in enumerate(test_ambufs):
+          rawbuf.copyin(contents[i])
 
     if CHECK_CPU:
       cpu_rdr = cpudev.renderer
@@ -104,14 +115,16 @@ if __name__ == "__main__":
       cpubufs = bufs_from_lin(cpulin)
       test_cpubufs = get_fuzz_rawbufs(cpulin) if not has_bf16 else ambufs
       if not has_bf16:
-        for i,rawbuf in enumerate(test_cpubufs): rawbuf.copyin(contents[i])
+        for i, rawbuf in enumerate(test_cpubufs):
+          rawbuf.copyin(contents[i])
 
     # warmup
     tm_amd, tm_am, failed = [], [], False
     with run_amd():
       try:
         amd_prg(test_amdbufs, {}, wait=True)
-        for i in range(CNT): tm_amd.append(amd_prg(amdbufs, {}, wait=True))
+        for i in range(CNT):
+          tm_amd.append(amd_prg(amdbufs, {}, wait=True))
       except RuntimeError:
         print("AMD FAILED")
         tm_amd = [1e9]
@@ -120,7 +133,8 @@ if __name__ == "__main__":
     with run_am():
       try:
         am_prg(test_ambufs, {}, wait=True)
-        for i in range(CNT): tm_am.append(am_prg(ambufs, {}, wait=True))
+        for i in range(CNT):
+          tm_am.append(am_prg(ambufs, {}, wait=True))
       except RuntimeError:
         print("AM FAILED")
         tm_am = [1e9]
@@ -128,7 +142,8 @@ if __name__ == "__main__":
 
     if CHECK_CPU:
       cpu_prg(test_cpubufs, {}, wait=True)
-      for i in range(1): cpu_prg(cpubufs, {}, wait=True)
+      for i in range(1):
+        cpu_prg(cpubufs, {}, wait=True)
 
     if not failed and not has_bf16:
       with run_amd():
@@ -152,6 +167,7 @@ if __name__ == "__main__":
     bamd = statistics.median(tm_amd)
     average_tm_amd += bamd
     average_tm_am += bam
-    ratio = bam/bamd
-    print(f"{average_tm_am/average_tm_amd:5.2f}x -- {num:4d} {colorize_float(ratio)} {bam*1e6:7.2f} vs {bamd*1e6:7.2f} us", amlin.name)
-    if DEBUG > 3 and ratio > 1.04: print(f"AM slower {ratio}", amlin.ast, amlin.applied_opts)
+    ratio = bam / bamd
+    print(f"{average_tm_am / average_tm_amd:5.2f}x -- {num:4d} {colorize_float(ratio)} {bam * 1e6:7.2f} vs {bamd * 1e6:7.2f} us", amlin.name)
+    if DEBUG > 3 and ratio > 1.04:
+      print(f"AM slower {ratio}", amlin.ast, amlin.applied_opts)

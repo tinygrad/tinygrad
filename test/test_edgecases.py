@@ -27,13 +27,14 @@ import numpy as np
 import torch
 from tinygrad import Tensor, dtypes, nn
 
+
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
 
   @unittest.expectedFailure
   def test_max_nan(self):
     # Reductions with NaN should propagate NaN like PyTorch.
-    arr = [1.0, float('nan'), 3.0]
+    arr = [1.0, float("nan"), 3.0]
     torch_out = torch.tensor(arr).max().item()
     out = Tensor(arr).max().numpy()
     if np.isnan(torch_out):
@@ -45,7 +46,7 @@ class TestNaNEdgeCases(unittest.TestCase):
   @unittest.expectedFailure
   def test_argmax_nan(self):
     # PyTorch returns the index of the NaN, tinygrad returns the index of the maximum value.
-    arr = [1.0, float('nan'), 3.0]
+    arr = [1.0, float("nan"), 3.0]
     torch_idx = torch.tensor(arr).argmax().item()
     idx = Tensor(arr).argmax().item()
     self.assertEqual(idx, torch_idx)
@@ -53,11 +54,12 @@ class TestNaNEdgeCases(unittest.TestCase):
   @unittest.expectedFailure
   def test_sort_with_nan(self):
     # Sorting a tensor containing NaN should keep NaN at the end like PyTorch.
-    arr = [1.0, float('nan'), 3.0]
+    arr = [1.0, float("nan"), 3.0]
     torch_vals, torch_idxs = torch.tensor(arr).sort()
     vals, idxs = Tensor(arr).sort()
     np.testing.assert_equal(vals.numpy(), torch_vals.numpy())
     np.testing.assert_equal(idxs.numpy(), torch_idxs.numpy().astype(np.int32))
+
 
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
@@ -93,6 +95,7 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     out = Tensor([], dtype=dtypes.float32).masked_select(Tensor([], dtype=dtypes.bool))
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
+
 class TestDropoutProbabilityEdgeCases(unittest.TestCase):
   # we don't need more of these
 
@@ -108,6 +111,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
       with Tensor.train():
         Tensor.ones(10).dropout(-0.1)
 
+
 class TestInputValidation(unittest.TestCase):
   # we don't need more of these, input validation bugs are not very interesting, many are WONTFIX
 
@@ -122,23 +126,24 @@ class TestInputValidation(unittest.TestCase):
   @unittest.expectedFailure
   def test_negative_weight_decay(self):
     with self.assertRaises(ValueError):
-      torch.optim.AdamW([torch.tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
+      torch.optim.AdamW([torch.tensor([1.0], requires_grad=True)], lr=0.1, weight_decay=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.AdamW([Tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
+      nn.optim.AdamW([Tensor([1.0], requires_grad=True)], lr=0.1, weight_decay=-0.1)
 
   @unittest.expectedFailure
   def test_negative_lr(self):
     with self.assertRaises(ValueError):
-      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=-0.1)
+      torch.optim.SGD([torch.tensor([1.0], requires_grad=True)], lr=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=-0.1)
+      nn.optim.SGD([Tensor([1.0], requires_grad=True)], lr=-0.1)
 
   @unittest.expectedFailure
   def test_negative_momentum(self):
     with self.assertRaises(ValueError):
-      torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
+      torch.optim.SGD([torch.tensor([1.0], requires_grad=True)], lr=0.1, momentum=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
+      nn.optim.SGD([Tensor([1.0], requires_grad=True)], lr=0.1, momentum=-0.1)
+
 
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these
@@ -167,6 +172,7 @@ class TestZeroFolding(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       (x % x).numpy()
 
+
 class TestArangeUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we don't need more of these involving arange
@@ -194,6 +200,7 @@ class TestArangeUOpValidationIssue(unittest.TestCase):
     out = Tensor.arange(n).reshape(n, 1).permute(1, 0)
     self.assertEqual(out.shape, (1, n))
     out.realize()
+
 
 class TestAssignIssues(unittest.TestCase):
   # these are good failures. i'm not sure we need more, but we need to fix these.
@@ -226,6 +233,7 @@ class TestAssignIssues(unittest.TestCase):
     t.assign(Tensor.arange(5))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
+
 class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
@@ -245,6 +253,7 @@ class TestUOpValidationIssue(unittest.TestCase):
   def test_float_floordiv_tensor(self):
     (Tensor.arange(4, dtype=dtypes.float32) // Tensor.ones(4, dtype=dtypes.float32)).realize()
 
+
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
 
@@ -252,8 +261,8 @@ class TestEdgeCases(unittest.TestCase):
   def test_circular_pad_negative(self):
     # negative pads with circular mode should wrap like PyTorch
     arr = np.arange(9).reshape(1, 1, 3, 3).astype(np.float32)
-    torch_out = torch.nn.functional.pad(torch.tensor(arr), (1, -1, 1, -1), mode='circular')
-    out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
+    torch_out = torch.nn.functional.pad(torch.tensor(arr), (1, -1, 1, -1), mode="circular")
+    out = Tensor(arr).pad((1, -1, 1, -1), mode="circular")
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
   def test_arange_float_step(self):

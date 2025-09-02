@@ -5,6 +5,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad import dtypes
 import numpy as np
 
+
 class TestF16Decompression(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16")
   def test_u32_to_f16(self):

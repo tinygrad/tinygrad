@@ -11,6 +11,7 @@ from tinygrad.helpers import fetch
 # tinygrad convolution tensor input layout is (1,c,y,x) - and therefore the form for all images used in the project
 # tinygrad convolution tensor weight layout is (outC,inC,H,W) - this matches NCNN (and therefore KINNE), but not waifu2x json
 
+
 def image_load(path) -> numpy.ndarray:
   """
   Loads an image in the shape expected by other functions in this module.
@@ -20,14 +21,15 @@ def image_load(path) -> numpy.ndarray:
   na = numpy.array(Image.open(path))
   if na.shape[2] == 4:
     # RGBA -> RGB (covers opaque images with alpha channels)
-    na = na[:,:,0:3]
+    na = na[:, :, 0:3]
   # fix shape
-  na = numpy.moveaxis(na, [2,0,1], [0,1,2])
+  na = numpy.moveaxis(na, [2, 0, 1], [0, 1, 2])
   # shape is now (3,h,w), add 1
-  na = na.reshape(1,3,na.shape[1],na.shape[2])
+  na = na.reshape(1, 3, na.shape[1], na.shape[2])
   # change type
   na = na.astype("float32") / 255.0
   return na
+
 
 def image_save(path, na: numpy.ndarray):
   """
@@ -37,20 +39,23 @@ def image_save(path, na: numpy.ndarray):
   # change type
   na = numpy.fmax(numpy.fmin(na * 255.0, 255), 0).astype("uint8")
   # shape is now (1,3,h,w), remove 1
-  na = na.reshape(3,na.shape[2],na.shape[3])
+  na = na.reshape(3, na.shape[2], na.shape[3])
   # fix shape
-  na = numpy.moveaxis(na, [0,1,2], [2,0,1])
+  na = numpy.moveaxis(na, [0, 1, 2], [2, 0, 1])
   # shape is now (h,w,3)
   # file
   Image.fromarray(na).save(path)
 
+
 # The Model
+
 
 class Conv3x3Biased:
   """
   A 3x3 convolution layer with some utility functions.
   """
-  def __init__(self, inC, outC, last = False):
+
+  def __init__(self, inC, outC, last=False):
     # The properties must be named as "W" and "b".
     # This is in an attempt to try and be roughly compatible with https://github.com/FHPythonUtils/Waifu2x
     #  though this cannot necessarily account for transposition and other such things.
@@ -82,6 +87,7 @@ class Conv3x3Biased:
     # I have long since forgotten how I worked this out.
     self.W.assign(Tensor(layer["weight"]).reshape(shape=self.W.shape).transpose(2, 3))
     self.b.assign(Tensor(layer["bias"]).reshape(shape=self.b.shape))
+
 
 class Vgg7:
   """
@@ -115,13 +121,22 @@ class Vgg7:
     return x
 
   def get_parameters(self) -> list:
-    return self.conv1.get_parameters() + self.conv2.get_parameters() + self.conv3.get_parameters() + self.conv4.get_parameters() + self.conv5.get_parameters() + self.conv6.get_parameters() + self.conv7.get_parameters()
+    return (
+      self.conv1.get_parameters()
+      + self.conv2.get_parameters()
+      + self.conv3.get_parameters()
+      + self.conv4.get_parameters()
+      + self.conv5.get_parameters()
+      + self.conv6.get_parameters()
+      + self.conv7.get_parameters()
+    )
 
-  def load_from_pretrained(self, intent = "art", subtype = "scale2.0x"):
+  def load_from_pretrained(self, intent="art", subtype="scale2.0x"):
     """
     Downloads a nagadomi/waifu2x JSON weight file and loads it.
     """
     import json
+
     data = json.loads(fetch("https://github.com/nagadomi/waifu2x/raw/master/models/vgg_7/" + intent + "/" + subtype + "_model.json").read_bytes())
     self.load_waifu2x_json(data)
 
@@ -157,7 +172,7 @@ class Vgg7:
 
     # Padding next. Note that this padding is done on the whole image.
     # Padding the tiles would lose critical context, cause seams, etc.
-    image = numpy.pad(image, [[0, 0], [0, 0], [context, context], [context, context]], mode = "edge")
+    image = numpy.pad(image, [[0, 0], [0, 0], [context, context], [context, context]], mode="edge")
 
     # Now for tiling.
     # The output tile size is the usable output from an input tile (tile_size).
@@ -178,7 +193,7 @@ class Vgg7:
         # Extract tile.
         # Note that numpy will auto-crop this at the bottom-right.
         # This will never be a problem, as tiles are specifically chosen within the padded section.
-        tile = image[:, :, in_y:in_y + tile_size, in_x:in_x + tile_size]
+        tile = image[:, :, in_y : in_y + tile_size, in_x : in_x + tile_size]
         # Extracted tile dimensions -> output dimensions
         # This is important because of said cropping, otherwise it'd be interior tile size.
         out_h = tile.shape[2] - context2
@@ -187,7 +202,6 @@ class Vgg7:
         tile_t = Tensor(tile)
         tile_fwd_t = self.forward(tile_t)
         # Replace tile.
-        image_out[:, :, out_y:out_y + out_h, out_x:out_x + out_w] = tile_fwd_t.numpy()
+        image_out[:, :, out_y : out_y + out_h, out_x : out_x + out_w] = tile_fwd_t.numpy()
 
     return image_out
-

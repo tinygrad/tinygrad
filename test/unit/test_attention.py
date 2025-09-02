@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
 from tinygrad.apps.llm import apply_rope
 
+
 # TODO: test_scheduler, but just in uint
 class TestAttention(unittest.TestCase):
   def test_half_qkv_buffers(self):
@@ -23,10 +24,13 @@ class TestAttention(unittest.TestCase):
     self.assertEqual(result.shape, x.shape)
     self.assertEqual(result.dtype, x.dtype)
     self.assertGreater((result - apply_rope(x, 5)).abs().max().item(), 1e-6)
-    with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
+    with self.assertRaises(AssertionError):
+      apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
 
   def test_apply_rope_jit_prune(self):
-    def rope_fn(x_in, pos): return apply_rope(x_in, pos)
+    def rope_fn(x_in, pos):
+      return apply_rope(x_in, pos)
+
     rope_noprune = TinyJit(rope_fn)
     rope_prune = TinyJit(rope_fn, prune=True)
 
@@ -41,5 +45,6 @@ class TestAttention(unittest.TestCase):
     self.assertGreaterEqual(noprune_size, 3)
     self.assertEqual(prune_size, 1)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

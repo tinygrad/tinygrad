@@ -7,8 +7,10 @@ from gymnasium.envs.registration import register
 # take the action of the lit up light
 # in <hard_mode>, you act differently based on the step number and need to track this
 
+
 class PressTheLightUpButton(gym.Env):
   metadata = {"render_modes": []}
+
   def __init__(self, render_mode=None, size=2, game_length=10, hard_mode=False):
     self.size, self.game_length = size, game_length
     self.observation_space = gym.spaces.Box(0, 1, shape=(self.size,), dtype=np.float32)
@@ -18,7 +20,7 @@ class PressTheLightUpButton(gym.Env):
     self.hard_mode = hard_mode
 
   def _get_obs(self):
-    obs = [0]*self.size
+    obs = [0] * self.size
     if self.step_num < len(self.state):
       obs[self.state[self.step_num]] = 1
     return np.array(obs, dtype=np.float32)
@@ -37,6 +39,7 @@ class PressTheLightUpButton(gym.Env):
     if not reward:
       self.done = True
     return self._get_obs(), reward, self.done, self.step_num >= self.game_length, {}
+
 
 register(
   id="PressTheLightUpButton-v0",

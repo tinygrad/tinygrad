@@ -1,6 +1,7 @@
 import unittest
 from extra.models import resnet
 
+
 class TestResnet(unittest.TestCase):
   def test_model_load(self):
     model = resnet.ResNet18()
@@ -17,5 +18,5 @@ class TestResnet(unittest.TestCase):
     model.load_from_pretrained()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   unittest.main()

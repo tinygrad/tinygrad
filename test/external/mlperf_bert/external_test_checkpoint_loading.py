@@ -24,12 +24,10 @@ if __name__ == "__main__":
   max_eval_steps = (10000 + EVAL_BS - 1) // EVAL_BS
 
   for i in range(10):
-    assert os.path.exists(os.path.join(BASEDIR, "eval", f"{i}.pkl")), \
-      f"File {i}.pkl does not exist in {os.path.join(BASEDIR, 'eval')}"
+    assert os.path.exists(os.path.join(BASEDIR, "eval", f"{i}.pkl")), f"File {i}.pkl does not exist in {os.path.join(BASEDIR, 'eval')}"
 
   required_files = ["checkpoint", "model.ckpt-28252.data-00000-of-00001", "model.ckpt-28252.index", "model.ckpt-28252.meta"]
-  assert all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files), \
-    f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}"
+  assert all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files), f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}"
 
   Tensor.training = False
 
@@ -43,13 +41,20 @@ if __name__ == "__main__":
 
   for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps):
     eval_data = get_data_bert(GPUS, eval_it)
-    eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], \
-                                               eval_data["masked_lm_positions"], eval_data["masked_lm_ids"], \
-                                               eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+    eval_result: dict[str, Tensor] = eval_step_bert(
+      model,
+      eval_data["input_ids"],
+      eval_data["segment_ids"],
+      eval_data["input_mask"],
+      eval_data["masked_lm_positions"],
+      eval_data["masked_lm_ids"],
+      eval_data["masked_lm_weights"],
+      eval_data["next_sentence_labels"],
+    )
 
     mlm_accuracy = eval_result["masked_lm_accuracy"].numpy().item()
     eval_accuracy.append(mlm_accuracy)
 
   total_lm_accuracy = sum(eval_accuracy) / len(eval_accuracy)
   assert total_lm_accuracy >= 0.34, "Checkpoint loaded incorrectly. Accuracy should be very close to 0.34085 as per MLPerf BERT README."
-  print(f"Checkpoint loaded correctly. Accuracy of {total_lm_accuracy*100:.3f}% achieved. (Reference: 34.085%)")
+  print(f"Checkpoint loaded correctly. Accuracy of {total_lm_accuracy * 100:.3f}% achieved. (Reference: 34.085%)")

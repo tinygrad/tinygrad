@@ -3,17 +3,19 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.ops import Ops, UOp  # noqa: F401 # pylint: disable=unused-import
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item, get_program
 from tinygrad.codegen.opt.search import bufs_from_lin
-from tinygrad.shape.shapetracker import ShapeTracker, View # noqa: F401 # pylint: disable=unused-import
+from tinygrad.shape.shapetracker import ShapeTracker, View  # noqa: F401 # pylint: disable=unused-import
 
 N = 512
 
-def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=False):
+
+def create_gemm_model(model_path: str, batch_size=N, in_size=N, out_size=N, bias=False):
   import onnx
   from onnx import helper, numpy_helper, TensorProto
+
   # Define input and output
   input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [batch_size, in_size])
   output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [batch_size, out_size])
@@ -32,59 +34,80 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
     graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init])
 
   # Create and save the model
-  #model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  # model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
   # TODO remove this once ORT supports 1.18.0
   model_def = helper.make_model(graph_def, producer_name="single_gemm_example", ir_version=10, opset_imports=[helper.make_opsetid("", 22)])
   onnx.save_model(model_def, model_path)
   return model_path
 
-def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
+
+def sexec(out: Tensor, opts: list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
   prg = get_program(si.ast, opts=opts)
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-  for _ in range(run_count): ei.run(wait=True)
+  for _ in range(run_count):
+    ei.run(wait=True)
+
 
 def get_quantized_model(sz):
   from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
+
   class FakeDataReader(CalibrationDataReader):
-    def __init__(self): self.cnt = 0
+    def __init__(self):
+      self.cnt = 0
+
     def get_next(self) -> dict:
       self.cnt += 1
-      if self.cnt == 100: return None
+      if self.cnt == 100:
+        return None
       return {"input": np.random.uniform(size=(sz, sz)).astype(np.float32)}
+
   out_file = "/tmp/test_out.onnx"
-  quantize_static(create_gemm_model("/tmp/test_in.onnx", sz, sz, sz), out_file,
-                  FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
-                  activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
-                  extra_options={"ActivationSymmetric": False})
+  quantize_static(
+    create_gemm_model("/tmp/test_in.onnx", sz, sz, sz),
+    out_file,
+    FakeDataReader(),
+    quant_format=QuantFormat.QDQ,
+    per_channel=False,
+    reduce_range=False,
+    activation_type=QuantType.QUInt8,
+    weight_type=QuantType.QInt8,
+    extra_options={"ActivationSymmetric": False},
+  )
   return out_file
+
 
 @unittest.skip("this is broken")
 @unittest.skipIf(Device.DEFAULT != "CPU", "only tests for CPU")
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
     try:
-      import onnx # noqa: F401 # pylint: disable=unused-import
+      import onnx  # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
     from tinygrad.frontend.onnx import OnnxRunner
+
     out_file = get_quantized_model(sz)
     run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
-      sched = run_onnx({"input":inp})["output"].schedule()
+      sched = run_onnx({"input": inp})["output"].schedule()
       ei = lower_schedule_item(sched[-2])
       daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
+
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):
-  def test_quant_128(self): self.test_quant(128)
+  def test_quant_128(self):
+    self.test_quant(128)
+
   def test_quant(self, sz=512):
     from examples.benchmark_onnx import load_onnx_model
+
     # divide is ~1500-2000 without reduce_range, 750-900 with it
     out_file = get_quantized_model(sz)
     run_onnx_jit, _ = load_onnx_model(out_file)
@@ -100,8 +123,8 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemm(self):
     N = 512
-    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
+    X = Tensor(np.random.uniform(0, 255, size=(N, N)).astype(np.uint8))
+    W = Tensor(np.random.uniform(0, 255, size=(N, N)).astype(np.uint8))
     out = X.matmul(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
@@ -109,11 +132,11 @@ class TestQuantizeOnnx(unittest.TestCase):
   # TODO: this has to work
   def test_prequant_gemm_intacc_early(self, xi=np.int8, wi=np.int8):
     N = 512
-    X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
+    X = Tensor(np.random.uniform(0, 255, size=(N, N)).astype(xi))
+    W = Tensor(np.random.uniform(0, 255, size=(N, N)).astype(wi))
     with Context(DONT_REALIZE_EXPAND=1):
       # this divide is interesting and forces the accumulator to actually be an int
-      out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
+      out = (X.cast("int").matmul(W.cast("int")) // 1000).cast("int8")
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
       sexec(out, opts)
 
@@ -200,41 +223,54 @@ class TestQuantizeOnnx(unittest.TestCase):
   def test_prequant_gemm_intacc_32(self):
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=0)]
     self.test_prequant_gemm_intacc(np.uint8, np.int8, N=32, opts=opts)
-  def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128)
-  def test_prequant_gemm_intacc_256(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
+
+  def test_prequant_gemm_intacc_128(self):
+    self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128)
+
+  def test_prequant_gemm_intacc_256(self):
+    self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
+
   def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512, clip=True, opts=None):
-    X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
-    W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
+    X = Tensor(m1 := (np.random.uniform(0, 255, size=(N, N)).astype(xi))).realize()
+    W = Tensor(m2 := (np.random.uniform(0, 255, size=(N, N)).astype(wi))).realize()
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     tg_dtype = dtypes.int8 if xi == np.int8 else dtypes.uint8
     with Context(DONT_REALIZE_EXPAND=1):
-      out = (X.int().matmul(W.int())//1000)
-      if clip: out = out.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+      out = X.int().matmul(W.int()) // 1000
+      if clip:
+        out = out.clip(dtypes.min(tg_dtype), dtypes.max(tg_dtype))
       out = out.cast(tg_dtype)
       opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
       sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
-    mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
-    if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+    mout = (m1.astype(np.int32) @ m2.astype(np.int32)) // 1000
+    if clip:
+      mout = mout.clip(dtypes.min(tg_dtype), dtypes.max(tg_dtype))
     mout = mout.astype(xi)
     print(tout)
     print(mout)
     np.testing.assert_equal(tout, mout)
 
-  def test_prequant_gemm_intacc_wi(self): self.test_prequant_gemm_intacc(wi=np.int8)
-  def test_prequant_gemm_intacc_xiwi(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8)
-  def test_prequant_gemm_intacc_xiwi_noclip(self): self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8, clip=False)
+  def test_prequant_gemm_intacc_wi(self):
+    self.test_prequant_gemm_intacc(wi=np.int8)
+
+  def test_prequant_gemm_intacc_xiwi(self):
+    self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8)
+
+  def test_prequant_gemm_intacc_xiwi_noclip(self):
+    self.test_prequant_gemm_intacc(xi=np.int8, wi=np.int8, clip=False)
 
   def test_prequant_gemv(self):
     N = 2048
     # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
-    X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8)).realize()
-    W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8)).realize()
-    #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
-    #out = X @ W
+    X = Tensor(np.random.uniform(0, 255, size=(1, N)).astype(np.uint8)).realize()
+    W = Tensor(np.random.uniform(0, 255, size=(N, N)).astype(np.uint8)).realize()
+    # out = X.cast(dtypes.int) @ W.cast(dtypes.int)
+    # out = X @ W
     out = X.matmul(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
+
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestDSPCache(unittest.TestCase):
@@ -353,12 +389,13 @@ __attribute__((noinline)) void r_196_32_4_24_8(unsigned char* restrict __attribu
   }
 }
 """
-    prg = replace(prg, src=new_src+prg.src.split("/* DSP boilerplate */ ")[1])
+    prg = replace(prg, src=new_src + prg.src.split("/* DSP boilerplate */ ")[1])
     rt = CompiledRunner(prg)
-    #Device.default.compiler.disassemble(rt.lib)
+    # Device.default.compiler.disassemble(rt.lib)
     ei = ExecItem(rt, bufs_from_lin(Kernel(ast)))
     tm = ei.run(wait=True)
-    print(f"final time {tm*1e6:.2f} us")
+    print(f"final time {tm * 1e6:.2f} us")
+
 
 if __name__ == "__main__":
   unittest.main()

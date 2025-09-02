@@ -4,6 +4,7 @@ from tinygrad import Tensor
 from tinygrad.device import Device, Compiler
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context
 
+
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
     self.assertEqual(Device.canonicalize(None), Device.DEFAULT)
@@ -28,20 +29,25 @@ class TestDevice(unittest.TestCase):
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
 
+
 class MockCompiler(Compiler):
-  def __init__(self, key): super().__init__(key)
-  def compile(self, src) -> bytes: return src.encode()
+  def __init__(self, key):
+    super().__init__(key)
+
+  def compile(self, src) -> bytes:
+    return src.encode()
+
 
 class TestCompiler(unittest.TestCase):
   def test_compile_cached(self):
-    diskcache_put("key", "123", None) # clear cache
+    diskcache_put("key", "123", None)  # clear cache
     getenv.cache_clear()
     with Context(DISABLE_COMPILER_CACHE=0):
       self.assertEqual(MockCompiler("key").compile_cached("123"), str.encode("123"))
       self.assertEqual(diskcache_get("key", "123"), str.encode("123"))
 
   def test_compile_cached_disabled(self):
-    diskcache_put("disabled_key", "123", None) # clear cache
+    diskcache_put("disabled_key", "123", None)  # clear cache
     getenv.cache_clear()
     with Context(DISABLE_COMPILER_CACHE=1):
       self.assertEqual(MockCompiler("disabled_key").compile_cached("123"), str.encode("123"))
@@ -50,16 +56,23 @@ class TestCompiler(unittest.TestCase):
   def test_device_compile(self):
     getenv.cache_clear()
     with Context(DISABLE_COMPILER_CACHE=1):
-      a = Tensor([0.,1.], device=Device.DEFAULT).realize()
+      a = Tensor([0.0, 1.0], device=Device.DEFAULT).realize()
       (a + 1).realize()
+
 
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
-    p = subprocess.run([sys.executable, "-m", "tinygrad.device"],stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-      env={**os.environ, "DEBUG": "1"}, timeout=10,)
+    p = subprocess.run(
+      [sys.executable, "-m", "tinygrad.device"],
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      env={**os.environ, "DEBUG": "1"},
+      timeout=10,
+    )
     out = (p.stdout + p.stderr).decode()
     self.assertEqual(p.returncode, 0, msg=out)
-    self.assertIn("CPU", out) # for sanity check
+    self.assertIn("CPU", out)  # for sanity check
+
 
 if __name__ == "__main__":
   unittest.main()

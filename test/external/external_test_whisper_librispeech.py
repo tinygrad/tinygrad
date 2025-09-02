@@ -9,6 +9,7 @@ import numpy as np
 from whisper.normalizers import EnglishTextNormalizer
 from examples.whisper import init_whisper, transcribe_waveform
 
+
 class TestWhisperLibriSpeech(unittest.TestCase):
   # reference WERs determined by running https://github.com/openai/whisper/blob/main/notebooks/LibriSpeech.ipynb
   # the values should be consistent with the paper D.1.1 https://cdn.openai.com/papers/whisper.pdf#page=22
@@ -25,9 +26,10 @@ class TestWhisperLibriSpeech(unittest.TestCase):
   def test_en_small(self):
     run_evaluation("small.en", 0.03369011117172363, 0.030531615969223228)
 
+
 def run_evaluation(model_name, tinygrad_expected_wer, reference_wer):
   dataset = LibriSpeech()
-  batch_size=16
+  batch_size = 16
   loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
 
   model, enc = init_whisper(model_name, batch_size=batch_size)
@@ -46,8 +48,9 @@ def run_evaluation(model_name, tinygrad_expected_wer, reference_wer):
   wer = jiwer.wer(normalized_hypotheses, normalized_references)
 
   np.testing.assert_almost_equal(wer, tinygrad_expected_wer)
-  print(f'tinygrad WER {wer} vs reference WER {reference_wer}')
+  print(f"tinygrad WER {wer} vs reference WER {reference_wer}")
   del model, enc
+
 
 class LibriSpeech(torch.utils.data.Dataset):
   def __init__(self):
@@ -69,6 +72,7 @@ class LibriSpeech(torch.utils.data.Dataset):
     assert sample_rate == 16000
     return pad_or_trim_tensor(audio[0]), text
 
+
 def pad_or_trim_tensor(tensor, target_len=480000):
   curr_len = len(tensor)
   if curr_len == target_len:
@@ -79,5 +83,5 @@ def pad_or_trim_tensor(tensor, target_len=480000):
     return tensor[:target_len]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   unittest.main()

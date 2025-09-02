@@ -63,21 +63,19 @@ class Normalize:
     image = Ft.normalize(image, mean=self.mean, std=self.std)
     return image
 
-transforms = lambda size_scale: T.Compose(
-  [
-    Resize(int(800*size_scale), int(1333*size_scale)),
-    T.ToTensor(),
-    Normalize(
-      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-    ),
-  ]
-)
+
+transforms = lambda size_scale: T.Compose([
+  Resize(int(800 * size_scale), int(1333 * size_scale)),
+  T.ToTensor(),
+  Normalize(mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_bgr255=True),
+])
+
 
 def expand_boxes(boxes, scale):
-  w_half = (boxes[:, 2] - boxes[:, 0]) * .5
-  h_half = (boxes[:, 3] - boxes[:, 1]) * .5
-  x_c = (boxes[:, 2] + boxes[:, 0]) * .5
-  y_c = (boxes[:, 3] + boxes[:, 1]) * .5
+  w_half = (boxes[:, 2] - boxes[:, 0]) * 0.5
+  h_half = (boxes[:, 3] - boxes[:, 1]) * 0.5
+  x_c = (boxes[:, 2] + boxes[:, 0]) * 0.5
+  y_c = (boxes[:, 3] + boxes[:, 1]) * 0.5
 
   w_half *= scale
   h_half *= scale
@@ -118,7 +116,7 @@ def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
   mask = mask.expand((1, 1, -1, -1))
 
   mask = mask.to(torch.float32)
-  mask = F.interpolate(mask, size=(h, w), mode='bilinear', align_corners=False)
+  mask = F.interpolate(mask, size=(h, w), mode="bilinear", align_corners=False)
   mask = mask[0][0]
 
   if thresh >= 0:
@@ -132,9 +130,7 @@ def paste_mask_in_image(mask, box, im_h, im_w, thresh=0.5, padding=1):
   y_0 = max(box[1], 0)
   y_1 = min(box[3] + 1, im_h)
 
-  im_mask[y_0:y_1, x_0:x_1] = mask[
-                              (y_0 - box[1]): (y_1 - box[1]), (x_0 - box[0]): (x_1 - box[0])
-                              ]
+  im_mask[y_0:y_1, x_0:x_1] = mask[(y_0 - box[1]) : (y_1 - box[1]), (x_0 - box[0]) : (x_1 - box[0])]
   return im_mask
 
 
@@ -146,10 +142,7 @@ class Masker:
   def forward_single_image(self, masks, boxes):
     boxes = boxes.convert("xyxy")
     im_w, im_h = boxes.size
-    res = [
-      paste_mask_in_image(mask[0], box, im_h, im_w, self.threshold, self.padding)
-      for mask, box in zip(masks, boxes.bbox)
-    ]
+    res = [paste_mask_in_image(mask[0], box, im_h, im_w, self.threshold, self.padding) for mask, box in zip(masks, boxes.bbox)]
     if len(res) > 0:
       res = torch.stack(*res, dim=0)[:, None]
     else:
@@ -169,10 +162,12 @@ class Masker:
 
 masker = Masker(threshold=0.5, padding=1)
 
+
 def select_top_predictions(predictions, confidence_threshold=0.9):
   scores = predictions.get_field("scores").numpy()
   keep = [idx for idx, score in enumerate(scores) if score > confidence_threshold]
   return predictions[keep]
+
 
 def compute_prediction(original_image, model, confidence_threshold, size_scale=1.0):
   image = transforms(size_scale)(original_image).numpy()
@@ -189,6 +184,7 @@ def compute_prediction(original_image, model, confidence_threshold, size_scale=1
     prediction.add_field("mask", masks)
   return prediction
 
+
 def compute_prediction_batched(batch, model, size_scale=1.0):
   imgs = []
   for img in batch:
@@ -198,20 +194,24 @@ def compute_prediction_batched(batch, model, size_scale=1.0):
   del image
   return predictions
 
-palette = np.array([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])
+
+palette = np.array([2**25 - 1, 2**15 - 1, 2**21 - 1])
+
 
 def findContours(*args, **kwargs):
-  if cv2.__version__.startswith('4'):
+  if cv2.__version__.startswith("4"):
     contours, hierarchy = cv2.findContours(*args, **kwargs)
-  elif cv2.__version__.startswith('3'):
+  elif cv2.__version__.startswith("3"):
     _, contours, hierarchy = cv2.findContours(*args, **kwargs)
   return contours, hierarchy
+
 
 def compute_colors_for_labels(labels):
   l = labels[:, None]
   colors = l * palette
   colors = (colors % 255).astype("uint8")
   return colors
+
 
 def overlay_mask(image, predictions):
   image = np.asarray(image)
@@ -222,25 +222,98 @@ def overlay_mask(image, predictions):
 
   for mask, color in zip(masks, colors):
     thresh = mask[0, :, :, None]
-    contours, hierarchy = findContours(
-        thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-    )
+    contours, hierarchy = findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     image = cv2.drawContours(image, contours, -1, color, 3)
 
   composite = image
 
   return composite
 
+
 CATEGORIES = [
-    "__background", "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
-    "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
-    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
-    "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
-    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster",
-    "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+  "__background",
+  "person",
+  "bicycle",
+  "car",
+  "motorcycle",
+  "airplane",
+  "bus",
+  "train",
+  "truck",
+  "boat",
+  "traffic light",
+  "fire hydrant",
+  "stop sign",
+  "parking meter",
+  "bench",
+  "bird",
+  "cat",
+  "dog",
+  "horse",
+  "sheep",
+  "cow",
+  "elephant",
+  "bear",
+  "zebra",
+  "giraffe",
+  "backpack",
+  "umbrella",
+  "handbag",
+  "tie",
+  "suitcase",
+  "frisbee",
+  "skis",
+  "snowboard",
+  "sports ball",
+  "kite",
+  "baseball bat",
+  "baseball glove",
+  "skateboard",
+  "surfboard",
+  "tennis racket",
+  "bottle",
+  "wine glass",
+  "cup",
+  "fork",
+  "knife",
+  "spoon",
+  "bowl",
+  "banana",
+  "apple",
+  "sandwich",
+  "orange",
+  "broccoli",
+  "carrot",
+  "hot dog",
+  "pizza",
+  "donut",
+  "cake",
+  "chair",
+  "couch",
+  "potted plant",
+  "bed",
+  "dining table",
+  "toilet",
+  "tv",
+  "laptop",
+  "mouse",
+  "remote",
+  "keyboard",
+  "cell phone",
+  "microwave",
+  "oven",
+  "toaster",
+  "sink",
+  "refrigerator",
+  "book",
+  "clock",
+  "vase",
+  "scissors",
+  "teddy bear",
+  "hair drier",
+  "toothbrush",
 ]
+
 
 def overlay_boxes(image, predictions):
   labels = predictions.get_field("labels").numpy()
@@ -252,11 +325,10 @@ def overlay_boxes(image, predictions):
     box = torch.tensor(box.numpy())
     box = box.to(torch.int64)
     top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
-    image = cv2.rectangle(
-        image, tuple(top_left), tuple(bottom_right), tuple(color), 1
-    )
+    image = cv2.rectangle(image, tuple(top_left), tuple(bottom_right), tuple(color), 1)
 
   return image
+
 
 def overlay_class_names(image, predictions):
   scores = predictions.get_field("scores").numpy().tolist()
@@ -269,19 +341,17 @@ def overlay_class_names(image, predictions):
     x, y = box[:2]
     s = template.format(label, score)
     x, y = int(x), int(y)
-    cv2.putText(
-        image, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 255), 1
-    )
+    cv2.putText(image, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
   return image
 
 
-if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description='Run MaskRCNN', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--image', type=str, help="Path of the image to run")
-  parser.add_argument('--threshold', type=float, default=0.7, help="Detector threshold")
-  parser.add_argument('--size_scale', type=float, default=1.0, help="Image resize multiplier")
-  parser.add_argument('--out', type=str, default="/tmp/rendered.png", help="Output filename")
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description="Run MaskRCNN", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--image", type=str, help="Path of the image to run")
+  parser.add_argument("--threshold", type=float, default=0.7, help="Detector threshold")
+  parser.add_argument("--size_scale", type=float, default=1.0, help="Image resize multiplier")
+  parser.add_argument("--out", type=str, default="/tmp/rendered.png", help="Output filename")
   args = parser.parse_args()
 
   resnet = ResNet(50, num_classes=None, stride_in_1x1=True)

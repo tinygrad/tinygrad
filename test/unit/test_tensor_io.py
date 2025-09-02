@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.nn.state import TensorIO
 
+
 class TestTensorIO(unittest.TestCase):
   def test_create(self):
     with self.assertRaises(ValueError):
@@ -34,5 +35,6 @@ class TestTensorIO(unittest.TestCase):
     fobj.seek(2)
     self.assertEqual(fobj.read(), data[2:])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

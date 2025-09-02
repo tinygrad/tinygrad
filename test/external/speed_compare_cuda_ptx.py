@@ -17,10 +17,11 @@ if __name__ == "__main__":
   # NUM=112 python3 test/external/speed_compare_cuda_ptx.py
 
   single = getenv("NUM", -1)
-  if single != -1: ast_strs = ast_strs[single:single+1]
+  if single != -1:
+    ast_strs = ast_strs[single : single + 1]
 
   average_tm_cuda, average_tm_ptx = 0, 0
-  for num,ast in enumerate(ast_strs):
+  for num, ast in enumerate(ast_strs):
     # cuda compile
     dev.compiler = CUDACompiler(dev.arch)
     lin = ast_str_to_lin(ast, opts=dev.renderer)
@@ -49,12 +50,15 @@ if __name__ == "__main__":
       tm_ptx.append(ptx_prg(bufs, {}, wait=True))
     average_tm_cuda += min(tm_cuda)
     average_tm_ptx += min(tm_ptx)
-    ratio = min(tm_ptx)/min(tm_cuda)
-    print(f"{average_tm_ptx/average_tm_cuda:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_ptx)*1e6:7.2f} us", lin.name)
+    ratio = min(tm_ptx) / min(tm_cuda)
+    print(f"{average_tm_ptx / average_tm_cuda:5.2f}x -- {num:4d} {colorize_float(ratio)}  {min(tm_ptx) * 1e6:7.2f} us", lin.name)
     if ratio > 1.5:
-      def fix(x): return x.replace('\t', ' ').strip()
-      ll1, ll2 = cuda_prg.lib.decode().split('\n'), ptx_prg.lib.decode().split('\n')
+
+      def fix(x):
+        return x.replace("\t", " ").strip()
+
+      ll1, ll2 = cuda_prg.lib.decode().split("\n"), ptx_prg.lib.decode().split("\n")
       if single != -1:
-        for ln, (l1, l2) in enumerate(itertools.zip_longest(ll1, ll2, fillvalue='')):
+        for ln, (l1, l2) in enumerate(itertools.zip_longest(ll1, ll2, fillvalue="")):
           print(f"{ln:5d} | {fix(l1):80s} | {fix(l2):80s}")
-      print(len(ll1), len(ll2), "RATIO", ratio, "us", min(tm_ptx)*1e6)
+      print(len(ll1), len(ll2), "RATIO", ratio, "us", min(tm_ptx) * 1e6)

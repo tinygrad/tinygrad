@@ -4,6 +4,7 @@ from tinygrad.helpers import CI
 from tinygrad.tensor import Tensor, Device
 import numpy as np
 
+
 class TestRawShmBuffer(unittest.TestCase):
   def test_e2e(self):
     t = Tensor.randn(2, 2, 2).realize()
@@ -33,6 +34,7 @@ class TestRawShmBuffer(unittest.TestCase):
 
     assert np.allclose(t.numpy(), t2.numpy())
     s.unlink()
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -14,17 +14,18 @@ from tinygrad import TinyJit, Tensor
 # explicit inputs and outputs are realized on their way in and out of the JIT
 # there's a whole bunch of edge cases and weirdness here that needs to be tested and clarified.
 
+
 class TestJitCases(unittest.TestCase):
   def test_explicit(self):
     # this function has an explicit input and an explicit output
     @TinyJit
-    def f(x:Tensor):
-      ret:Tensor = x*2
+    def f(x: Tensor):
+      ret: Tensor = x * 2
       return ret
 
     for i in range(5):
       out = f(Tensor([i]))
-      self.assertEqual(out.item(), i*2)
+      self.assertEqual(out.item(), i * 2)
 
   def test_implicit_input(self):
     # x is the implicit input (like a weight)
@@ -33,7 +34,7 @@ class TestJitCases(unittest.TestCase):
     # this function has an implicit input and an explicit output
     @TinyJit
     def f():
-      ret:Tensor = x*2
+      ret: Tensor = x * 2
       return ret
 
     for i in range(5):
@@ -41,7 +42,7 @@ class TestJitCases(unittest.TestCase):
       # if we were explicitly tracking the implicit input Tensors, we might not need this realize
       x.assign(Tensor([i])).realize()
       out = f()
-      self.assertEqual(out.item(), i*2)
+      self.assertEqual(out.item(), i * 2)
 
   def test_implicit_output(self):
     # out is the implicit output (it's assigned to)
@@ -49,14 +50,14 @@ class TestJitCases(unittest.TestCase):
 
     # this function has an explicit input and an implicit output
     @TinyJit
-    def f(x:Tensor):
+    def f(x: Tensor):
       # NOTE: this must be realized here
       # if we were explicitly tracking the implicit output Tensors, we might not need this realize
-      out.assign(x*2).realize()
+      out.assign(x * 2).realize()
 
     for i in range(5):
       f(Tensor([i]))
-      self.assertEqual(out.item(), i*2)
+      self.assertEqual(out.item(), i * 2)
 
   def test_implicit_io(self):
     # x is the implicit input (like a weight)
@@ -67,12 +68,13 @@ class TestJitCases(unittest.TestCase):
     # this function has an implicit input and an implicit output
     @TinyJit
     def f():
-      out.assign(x*2).realize() # NOTE: this must be realized here
+      out.assign(x * 2).realize()  # NOTE: this must be realized here
 
     for i in range(5):
       x.assign(Tensor([i])).realize()
       f()
-      self.assertEqual(out.item(), i*2)
+      self.assertEqual(out.item(), i * 2)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

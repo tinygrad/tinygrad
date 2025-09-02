@@ -1,6 +1,7 @@
 import unittest
 from tinygrad.runtime.support.memory import TLSFAllocator
 
+
 class TestTLSFAllocator(unittest.TestCase):
   def setUp(self):
     self.allocator = TLSFAllocator(1024, block_size=16)
@@ -74,5 +75,6 @@ class TestTLSFAllocator(unittest.TestCase):
     self.allocator.free(addr1)
     self.assertTrue(addr1 in [addr - self.allocator.start_addr for addr in self.allocator.blocks])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

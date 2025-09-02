@@ -227,4 +227,3 @@ if __name__ == "__main__":
   dev = MetalDevice("METAL")
   lib = MetalCompiler().compile(src)
   prg = MetalProgram(dev, "r_64_32_8_16_4_6_6_4", lib)
-

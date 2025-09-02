@@ -3,6 +3,7 @@ from typing import Dict, Optional
 from tinygrad.helpers import getenv
 from tinygrad.runtime.support.memory import TLSFAllocator
 
+
 class AllocatorFuzzer:
   def __init__(self, total_size):
     self.total_size = total_size
@@ -10,13 +11,14 @@ class AllocatorFuzzer:
     self.mv = memoryview(bytearray(total_size))
     self.alloctor = TLSFAllocator(total_size, block_size=16)
 
-    self.allocations: Dict[int, tuple[int, int]] = {} # ptr -> (size, pattern)
+    self.allocations: Dict[int, tuple[int, int]] = {}  # ptr -> (size, pattern)
 
     self.min_alloc_size = 16
     self.max_alloc_size = int(total_size * 0.3)
     self.alloc_probability = 0.7
 
-  def generate_pattern(self, ptr: int, size: int) -> int: return (ptr * 31 + size * 17) & 0xFF
+  def generate_pattern(self, ptr: int, size: int) -> int:
+    return (ptr * 31 + size * 17) & 0xFF
 
   def fill_memory(self, ptr: int, size: int, pattern: int):
     for i in range(min(size, 32)):
@@ -30,14 +32,15 @@ class AllocatorFuzzer:
     return True
 
   def random_alloc(self) -> Optional[int]:
-    if self.total_size - self.alloc_payload < self.min_alloc_size: return None
+    if self.total_size - self.alloc_payload < self.min_alloc_size:
+      return None
 
     size = random.randint(self.min_alloc_size, min(self.max_alloc_size, self.total_size - self.alloc_payload))
 
     try:
       ptr = self.alloctor.alloc(size)
     except MemoryError:
-      print(f"Failed to allocate {size} bytes. Payload size is {self.alloc_payload}, so fragmenation is {(size / self.total_size)*100.0:.2f}%")
+      print(f"Failed to allocate {size} bytes. Payload size is {self.alloc_payload}, so fragmenation is {(size / self.total_size) * 100.0:.2f}%")
       return None
 
     pattern = self.generate_pattern(ptr, size)
@@ -48,7 +51,8 @@ class AllocatorFuzzer:
     return ptr
 
   def random_free(self) -> bool:
-    if not self.allocations: return False
+    if not self.allocations:
+      return False
 
     ptr = random.choice(list(self.allocations.keys()))
     size, pattern = self.allocations[ptr]
@@ -65,13 +69,17 @@ class AllocatorFuzzer:
 
   def run(self):
     for i in range(getenv("ITERS", 100000)):
-      if (random.random() < self.alloc_probability or not self.allocations): self.random_alloc()
-      else: self.random_free()
+      if random.random() < self.alloc_probability or not self.allocations:
+        self.random_alloc()
+      else:
+        self.random_free()
 
     print("\nCleaning up remaining allocations...")
-    while self.allocations: self.random_free()
+    while self.allocations:
+      self.random_free()
 
     print("Fuzzing completed successfully!")
+
 
 if __name__ == "__main__":
   SEED = getenv("SEED", 42)

@@ -11,23 +11,25 @@ import requests
 import argparse
 import numpy as np
 
+
 def convert_f32_to_f16(input_file, output_file):
-  with open(input_file, 'rb') as f:
+  with open(input_file, "rb") as f:
     metadata_length_bytes = f.read(8)
-    metadata_length = int.from_bytes(metadata_length_bytes, byteorder='little', signed=False)
+    metadata_length = int.from_bytes(metadata_length_bytes, byteorder="little", signed=False)
     metadata_json_bytes = f.read(metadata_length)
     float32_values = np.fromfile(f, dtype=np.float32)
 
   first_text_model_offset = 3772703308
-  num_elements = int((first_text_model_offset)/4)
+  num_elements = int((first_text_model_offset) / 4)
   front_float16_values = float32_values[:num_elements].astype(np.float16)
   rest_float32_values = float32_values[num_elements:]
 
-  with open(output_file, 'wb') as f:
+  with open(output_file, "wb") as f:
     f.write(metadata_length_bytes)
     f.write(metadata_json_bytes)
     front_float16_values.tofile(f)
     rest_float32_values.tofile(f)
+
 
 def split_safetensor(fn):
   _, data_start, metadata = safe_load_metadata(fn)
@@ -36,56 +38,67 @@ def split_safetensor(fn):
 
   for k in metadata:
     # safetensor is in fp16, except for text moel
-    if (metadata[k]["data_offsets"][0] < text_model_offset):
-      metadata[k]["data_offsets"][0] = int(metadata[k]["data_offsets"][0]/2)
-      metadata[k]["data_offsets"][1] = int(metadata[k]["data_offsets"][1]/2)
+    if metadata[k]["data_offsets"][0] < text_model_offset:
+      metadata[k]["data_offsets"][0] = int(metadata[k]["data_offsets"][0] / 2)
+      metadata[k]["data_offsets"][1] = int(metadata[k]["data_offsets"][1] / 2)
 
   last_offset = 0
   part_end_offsets = []
 
   for k in metadata:
-    offset = metadata[k]['data_offsets'][0]
+    offset = metadata[k]["data_offsets"][0]
 
     if offset == text_model_offset:
       break
 
     part_offset = offset - last_offset
 
-    if (part_offset >= chunk_size):
-      part_end_offsets.append(data_start+offset)
+    if part_offset >= chunk_size:
+      part_end_offsets.append(data_start + offset)
       last_offset = offset
 
-  text_model_start = int(text_model_offset/2)
-  net_bytes = bytes(open(fn, 'rb').read())
-  part_end_offsets.append(text_model_start+data_start)
+  text_model_start = int(text_model_offset / 2)
+  net_bytes = bytes(open(fn, "rb").read())
+  part_end_offsets.append(text_model_start + data_start)
   cur_pos = 0
 
   for i, end_pos in enumerate(part_end_offsets):
-    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.safetensors'), "wb+") as f:
+    with open(os.path.join(os.path.dirname(__file__), f"./net_part{i}.safetensors"), "wb+") as f:
       f.write(net_bytes[cur_pos:end_pos])
       cur_pos = end_pos
 
-  with open(os.path.join(os.path.dirname(__file__), f'./net_textmodel.safetensors'), "wb+") as f:
-    f.write(net_bytes[text_model_start+data_start:])
+  with open(os.path.join(os.path.dirname(__file__), f"./net_textmodel.safetensors"), "wb+") as f:
+    f.write(net_bytes[text_model_start + data_start :])
 
   return part_end_offsets
 
+
 def fetch_dep(file, url):
   with open(file, "w", encoding="utf-8") as f:
-    f.write(requests.get(url).text.replace("https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs", "./bpe_simple_vocab_16e6.mjs"))
+    f.write(
+      requests.get(url).text.replace("https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs", "./bpe_simple_vocab_16e6.mjs")
+    )
+
 
 if __name__ == "__main__":
   fetch_dep(os.path.join(os.path.dirname(__file__), "clip_tokenizer.js"), "https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/clip_tokenizer.js")
-  fetch_dep(os.path.join(os.path.dirname(__file__), "bpe_simple_vocab_16e6.mjs"), "https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs")
-  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--remoteweights', action='store_true', help="Use safetensors from Huggingface, or from local")
+  fetch_dep(
+    os.path.join(os.path.dirname(__file__), "bpe_simple_vocab_16e6.mjs"),
+    "https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs",
+  )
+  parser = argparse.ArgumentParser(description="Run Stable Diffusion", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--remoteweights", action="store_true", help="Use safetensors from Huggingface, or from local")
   args = parser.parse_args()
   Device.DEFAULT = "WEBGPU"
 
   model = StableDiffusion()
 
   # load in weights
-  load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
+  load_state_dict(
+    model,
+    torch_load(fetch("https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt", "sd-v1-4.ckpt"))["state_dict"],
+    strict=False,
+  )
 
   class Step(NamedTuple):
     name: str = ""
@@ -93,21 +106,36 @@ if __name__ == "__main__":
     forward: Any = None
 
   sub_steps = [
-    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
-    Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
-    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode),
-    Step(name = "f16tof32", input = [Tensor.randn(2097120, dtype=dtypes.uint32)], forward = u32_to_f16)
+    Step(name="textModel", input=[Tensor.randn(1, 77)], forward=model.cond_stage_model.transformer.text_model),
+    Step(
+      name="diffusor",
+      input=[
+        Tensor.randn(1, 77, 768),
+        Tensor.randn(1, 77, 768),
+        Tensor.randn(1, 4, 64, 64),
+        Tensor.rand(1),
+        Tensor.randn(1),
+        Tensor.randn(1),
+        Tensor.randn(1),
+      ],
+      forward=model,
+    ),
+    Step(name="decoder", input=[Tensor.randn(1, 4, 64, 64)], forward=model.decode),
+    Step(name="f16tof32", input=[Tensor.randn(2097120, dtype=dtypes.uint32)], forward=u32_to_f16),
   ]
 
   prg = ""
 
   def fixup_code(code, key):
-    code = code.replace(key, 'main')\
-      .replace("var<uniform> INFINITY : f32;\n", "fn inf(a: f32) -> f32 { return a/0.0; }\n")\
-      .replace("@group(0) @binding(0)", "")\
+    code = (
+      code.replace(key, "main")
+      .replace("var<uniform> INFINITY : f32;\n", "fn inf(a: f32) -> f32 { return a/0.0; }\n")
+      .replace("@group(0) @binding(0)", "")
       .replace("INFINITY", "inf(1.0)")
+    )
 
-    for i in range(1,9): code = code.replace(f"binding({i})", f"binding({i-1})")
+    for i in range(1, 9):
+      code = code.replace(f"binding({i})", f"binding({i - 1})")
     return code
 
   def compile_step(model, step: Step):
@@ -115,16 +143,37 @@ if __name__ == "__main__":
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
     weights = {id(x.uop.base.realized): name for name, x in state.items()}
-    kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
-    kernel_names = ', '.join([name for (name, _, _, _) in statements])
-    input_names = [name for _,name in special_names.items() if "input" in name]
-    output_names = [name for _,name in special_names.items() if "output" in name]
+    kernel_code = "\n\n".join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
+    kernel_names = ", ".join([name for (name, _, _, _) in statements])
+    input_names = [name for _, name in special_names.items() if "input" in name]
+    output_names = [name for _, name in special_names.items() if "output" in name]
     input_buf_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
     output_buf_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
-    kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
-    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
-    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
+    kernel_calls = "\n        ".join([
+      f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});"
+      for i, (_name, args, global_size, _local_size) in enumerate(statements)
+    ])
+    exported_bufs = "\n    ".join([
+      f"const {name} = "
+      + (
+        f"createEmptyBuf(device, {size});"
+        if _key not in weights
+        else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))"
+      )
+      + ";"
+      for name, (size, dtype, _key) in bufs.items()
+    ])
+    gpu_write_bufs = "\n    ".join([
+      f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});"
+      for i, (_, value) in enumerate(special_names.items())
+      if "output" not in value
+    ])
+    input_writer = "\n    ".join([
+      f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set("
+      + f"data{i});"
+      + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"
+      for i, _ in enumerate(input_names)
+    ])
     return f"""\n    var {step.name} = function() {{
 
     {kernel_code}
@@ -141,7 +190,7 @@ if __name__ == "__main__":
         const kernels = [{kernel_names}];
         const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+        return async ({",".join([f"data{i}" for i, (k, v) in enumerate(special_names.items()) if v != "output0"])}) => {{
             const commandEncoder = device.createCommandEncoder();
 
             {input_writer}
@@ -163,7 +212,7 @@ if __name__ == "__main__":
   """
 
   for step in sub_steps:
-    print(f'Executing step={step.name}')
+    print(f"Executing step={step.name}")
     prg += compile_step(model, step)
 
     if step.name == "diffusor":
@@ -172,7 +221,9 @@ if __name__ == "__main__":
       else:
         state = get_state_dict(model)
         safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
-        convert_f32_to_f16(os.path.join(os.path.dirname(__file__), "./net.safetensors"), os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
+        convert_f32_to_f16(
+          os.path.join(os.path.dirname(__file__), "./net.safetensors"), os.path.join(os.path.dirname(__file__), "./net_conv.safetensors")
+        )
         split_safetensor(os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
         os.remove(os.path.join(os.path.dirname(__file__), "net.safetensors"))
         os.remove(os.path.join(os.path.dirname(__file__), "net_conv.safetensors"))

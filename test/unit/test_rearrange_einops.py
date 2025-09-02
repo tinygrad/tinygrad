@@ -114,11 +114,11 @@ class test_rearrange_ops(unittest.TestCase):
     x.rearrange("a b c d ... ->  a b c ... d")
     bad_patterns = [
       "a b c d (...) ->  a b c ... d",  # collapsed ellipsis on input
-      "a b (c d ... ->  a b c ... d",   # unbalanced brackets
-      "a b* c d ... ->  a b c ... d",   # not alphanumeric
-      "a b c d ->  a b c d -> a b c d", # two "->"
-      "a ... c ... ->  ... a ... c",    # two "..."
-      "a b c d e -> f b c d e",         # name mismatch
+      "a b (c d ... ->  a b c ... d",  # unbalanced brackets
+      "a b* c d ... ->  a b c ... d",  # not alphanumeric
+      "a b c d ->  a b c d -> a b c d",  # two "->"
+      "a ... c ... ->  ... a ... c",  # two "..."
+      "a b c d e -> f b c d e",  # name mismatch
     ]
     for pattern in bad_patterns:
       with self.assertRaises(AssertionError):
@@ -237,8 +237,10 @@ class test_rearrange_ops(unittest.TestCase):
 
       assert np.array_equal(result, expected_result)
 
+
 def check_expression_helper(expression: str):
   Tensor.ones((1, 2, 3, 4, 5, 6, 7))
+
 
 class test_rearrange_parsing(unittest.TestCase):
   def test_elementary_axis_name(self):

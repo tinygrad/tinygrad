@@ -2,8 +2,14 @@ import unittest
 import pickle
 from tinygrad.helpers import diskcache_get, diskcache_put, diskcache, diskcache_clear
 
-def remote_get(table,q,k): q.put(diskcache_get(table, k))
-def remote_put(table,k,v): diskcache_put(table, k, v)
+
+def remote_get(table, q, k):
+  q.put(diskcache_get(table, k))
+
+
+def remote_put(table, k, v):
+  diskcache_put(table, k, v)
+
 
 class DiskCache(unittest.TestCase):
   def test_putget(self):
@@ -22,9 +28,10 @@ class DiskCache(unittest.TestCase):
   def test_getotherprocess(self):
     table = "test_getotherprocess"
     from multiprocessing import Process, Queue
+
     diskcache_put(table, "k", "getme")
     q = Queue()
-    p = Process(target=remote_get, args=(table,q,"k"))
+    p = Process(target=remote_get, args=(table, q, "k"))
     p.start()
     p.join()
     self.assertEqual(q.get(), "getme")
@@ -32,7 +39,8 @@ class DiskCache(unittest.TestCase):
   def test_putotherprocess(self):
     table = "test_putotherprocess"
     from multiprocessing import Process
-    p = Process(target=remote_put, args=(table,"k", "remote"))
+
+    p = Process(target=remote_put, args=(table, "k", "remote"))
     p.start()
     p.join()
     self.assertEqual(diskcache_get(table, "k"), "remote")
@@ -52,11 +60,13 @@ class DiskCache(unittest.TestCase):
 
   def test_decorator(self):
     calls = 0
+
     @diskcache
     def hello(x):
       nonlocal calls
       calls += 1
-      return "world"+x
+      return "world" + x
+
     self.assertEqual(hello("bob"), "worldbob")
     self.assertEqual(hello("billy"), "worldbilly")
     kcalls = calls
@@ -103,6 +113,7 @@ class DiskCache(unittest.TestCase):
     diskcache_clear()
     diskcache_clear()
     diskcache_clear()
+
 
 if __name__ == "__main__":
   unittest.main()

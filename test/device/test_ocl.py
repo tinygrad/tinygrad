@@ -5,6 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import CI
 from tinygrad.runtime.ops_gpu import CLDevice, CLAllocator, CLCompiler, CLProgram
 
+
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Runs only on OpenCL (GPU)")
 class TestCLError(unittest.TestCase):
   @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")

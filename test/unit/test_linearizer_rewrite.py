@@ -4,10 +4,11 @@ from tinygrad.engine.realize import get_program
 from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad.uop.ops import KernelInfo
 
+
 class TestLinearizerRewrite(unittest.TestCase):
   def test_reduction(self):
-    t = Tensor.ones((64,64), device="NULL").contiguous().realize()
-    out = (t*2).sum(axis=1)
+    t = Tensor.ones((64, 64), device="NULL").contiguous().realize()
+    out = (t * 2).sum(axis=1)
     with Context(SPLIT_REDUCEOP=0, DEVECTORIZE=0):
       si = out.schedule()[-1]
       opts_to_apply = []
@@ -42,5 +43,6 @@ class TestLinearizerRewrite(unittest.TestCase):
     prg = get_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
     self.assertEqual(prg.name, "custom")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

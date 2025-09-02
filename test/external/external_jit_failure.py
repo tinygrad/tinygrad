@@ -7,9 +7,11 @@ ds = tuple([Device.canonicalize(f"{Device.DEFAULT}:{i}") for i in range(GPUS)])
 t = Tensor.rand(N, N, N).shard(ds, 0)
 n = t.numpy()
 
+
 @TinyJit
-def allreduce(t:Tensor) -> Tensor:
-  return t.sum(0) #.realize()
+def allreduce(t: Tensor) -> Tensor:
+  return t.sum(0)  # .realize()
+
 
 for i in range(10):
   print(i)

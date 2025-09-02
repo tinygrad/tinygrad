@@ -5,9 +5,11 @@ from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, Tracke
 from tinygrad.codegen import full_rewrite_to_sink
 from hypothesis import given, strategies as strat
 
+
 # Helper function to apply the graph rewrite
 def apply_rewrite(expr):
   return full_rewrite_to_sink(expr.sink()).src[0]
+
 
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
@@ -20,6 +22,7 @@ def evaluate_uop(uop, variables):
     return exec_alu(uop.op, uop.dtype, src_values)
   else:
     raise NotImplementedError(f"Unsupported UOp {uop.op}")
+
 
 class TestArithmeticSimplifications(unittest.TestCase):
   def test_full_graph_rewrite_division_by_zero(self):
@@ -97,50 +100,56 @@ class TestFoldingAndReduction(unittest.TestCase):
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_folding_with_define_var(self):
-    x_var_uop = UOp.variable('x', 0, 100)
+    x_var_uop = UOp.variable("x", 0, 100)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, Ops.CONST)
     self.assertEqual(optimized_mod_uop.arg, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
-    n_var_uop = UOp.variable('n', 1, 1000)
+    n_var_uop = UOp.variable("n", 1, 1000)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
-    k_var_uop = UOp.variable('k', 0, 50)
+    k_var_uop = UOp.variable("k", 0, 50)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
-    lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
-      UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
-      UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
+    lhs = UOp(
+      Ops.ADD,
+      dtypes.int.vec(4),
+      src=(
+        UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=("lidx0", 32), src=()),) * 4),
+        UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=()),
+      ),
+    )
     rhs = UOp.const(dtypes.int.vec(4), 2)
-    unopt = lhs<rhs
+    unopt = lhs < rhs
     opt = apply_rewrite(unopt)
     print(unopt)
     print(opt)
-    if opt.op is Ops.VECTORIZE: self.assertFalse(all_same(opt.src))
+    if opt.op is Ops.VECTORIZE:
+      self.assertFalse(all_same(opt.src))
 
   def test_full_graph_rewrite_modulo_large_divisor(self):
-    x_var_uop = UOp.variable('x', 1, 5)
+    x_var_uop = UOp.variable("x", 1, 5)
     self.assertIs(apply_rewrite(x_var_uop % 10), x_var_uop)
 
   def test_full_graph_rewrite_division_with_remainder(self):
-    x_var_uop = UOp.variable('x', 7, 9)
+    x_var_uop = UOp.variable("x", 7, 9)
     optimized_sink = apply_rewrite(x_var_uop // 2)
     for x_value in range(7, 10):
-      self.assertEqual(x_value // 2, evaluate_uop(optimized_sink, {'x': x_value}))
+      self.assertEqual(x_value // 2, evaluate_uop(optimized_sink, {"x": x_value}))
 
   def test_full_graph_rewrite_complex_mod_div_expression(self):
-    x_var_uop = UOp.variable('x', 1, 10)
+    x_var_uop = UOp.variable("x", 1, 10)
     optimized_sink = apply_rewrite(((x_var_uop * 5) % 3) // 2)
     for x_value in range(1, 11):
       original_result = ((x_value * 5) % 3) // 2
-      optimized_result = evaluate_uop(optimized_sink, {'x': x_value})
+      optimized_result = evaluate_uop(optimized_sink, {"x": x_value})
       self.assertEqual(original_result, optimized_result)
 
 
@@ -149,22 +158,24 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
     optimized_sink = full_rewrite_to_sink(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
     self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
-    self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
-                    f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.arg}")
+    self.assertTrue(
+      math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0, f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.arg}"
+    )
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
-    x_var_uop = UOp.variable('x', -5, -1)
+    x_var_uop = UOp.variable("x", -5, -1)
     optimized_sink = full_rewrite_to_sink((x_var_uop % 3).sink())
     for x_value in range(-5, 0):
-      self.assertEqual(x_value % 3, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
+      self.assertEqual(x_value % 3, evaluate_uop(optimized_sink.src[0], {"x": x_value}))
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_division_negative_divisor(self):
-    x_var_uop = UOp.variable('x', 1, 5)
+    x_var_uop = UOp.variable("x", 1, 5)
     optimized_sink = full_rewrite_to_sink((x_var_uop // -2).sink())
     for x_value in range(1, 6):
-      self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
+      self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {"x": x_value}))
+
 
 class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_single_element_extraction(self):
@@ -207,101 +218,110 @@ import inspect
 from tinygrad.uop.ops import graph_rewrite, _substitute, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple
 
+
 class TestBottomUpRewrite(unittest.TestCase):
   def test_const_folding(self):
     a = UOp.const(dtypes.int, 5)
-    ret = (a*3) + (a*7)
+    ret = (a * 3) + (a * 7)
     gt = graph_rewrite(ret, symbolic_simple)
     ret = graph_rewrite(ret, symbolic_simple, bottom_up=True)
     self.assertIs(gt, ret)
 
+
 # normally .substitute would be fine, but it's not tracked
 @track_rewrites()
-def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
-def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
+def named_substitute(name: str, uop: UOp, rel: dict[UOp, UOp]):
+  return graph_rewrite(uop, _substitute, rel, bottom_up=True)
+
+
+def substitute(uop: UOp, rel: dict[UOp, UOp]):
+  return named_substitute(inspect.stack()[1].function, uop, rel)
+
 
 class TestSubstitute(unittest.TestCase):
   # these work because the substituted things don't have parents
   def test_simple(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
     ret = a + 4
-    ret = substitute(ret, {a:b})
-    self.assertIs(ret, b+4)
+    ret = substitute(ret, {a: b})
+    self.assertIs(ret, b + 4)
 
   def test_double(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    c = UOp.variable('c', 0, 10)
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
+    c = UOp.variable("c", 0, 10)
     ret = (a + 4) + b
-    ret = substitute(ret, {a:c, b:c})
+    ret = substitute(ret, {a: c, b: c})
     self.assertIs(ret, (c + 4) + c)
 
   def test_diamond(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
     ret = (a + 4) + (a + 5)
-    ret = substitute(ret, {a:b})
+    ret = substitute(ret, {a: b})
     self.assertIs(ret, (b + 4) + (b + 5))
 
   # this works because there's nothing above the substituted node
   def test_sin(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
     ret = a.sin().sin()
-    ret = substitute(ret, {a.sin():b})
+    ret = substitute(ret, {a.sin(): b})
     self.assertIs(ret, b.sin())
 
   # broken due to infinite recursion
   # NOTE: VIZ hangs and doesn't recover if you click this one
   @unittest.skip("recursion error no longer raised")
   def test_assert_inf_recurse(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     n1 = a.sin()
     ret = n1
     with self.assertRaises(RecursionError):
-      ret = substitute(ret, {n1:n1.sqrt()})
+      ret = substitute(ret, {n1: n1.sqrt()})
 
   def test_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     n1 = a.sin()
     ret = n1.sin()
-    ret = substitute(ret, {a.sin():a.sqrt()})
+    ret = substitute(ret, {a.sin(): a.sqrt()})
     self.assertIs(ret, a.sqrt().sin())
 
   def test_double_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     n1 = a.sin()
     ret = n1.sin()
     # NOTE: this would work if it had gone in the opposite order
-    ret = substitute(ret, {a.sin():a.sqrt(), n1.sin():n1.sqrt()})
+    ret = substitute(ret, {a.sin(): a.sqrt(), n1.sin(): n1.sqrt()})
     self.assertIs(ret, a.sqrt().sqrt())
 
   def test_tagged_replace(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
-    ret = (a+4).replace(tag=1)
-    ret = substitute(ret, {a:b})
+    a = UOp.variable("a", 0, 10)
+    b = UOp.variable("b", 0, 10)
+    ret = (a + 4).replace(tag=1)
+    ret = substitute(ret, {a: b})
     # the srcs are rewritten but we keep tag
-    self.assertIs(ret, (b+4).replace(tag=1))
+    self.assertIs(ret, (b + 4).replace(tag=1))
+
 
 matchers = strat.sampled_from([PatternMatcher, TrackedPatternMatcher])
+
 
 class TestRecurse(unittest.TestCase):
   @given(matchers)
   def test_no_inf_loop(self, PatternMatcher):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm)
 
   @given(matchers)
   def test_no_inf_loop_bottom_up(self, PatternMatcher):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     pm = PatternMatcher([(UPat(Ops.DEFINE_VAR, name="x"), lambda x: x)])
     graph_rewrite(a, pm, bottom_up=True)
 
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     pm = PatternMatcher([
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
       (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
@@ -310,7 +330,7 @@ class TestRecurse(unittest.TestCase):
       graph_rewrite(a, pm)
 
   def test_inf_loop_bottom_up(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable("a", 0, 10)
     pm = PatternMatcher([
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
       (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
@@ -318,17 +338,22 @@ class TestRecurse(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
 
-def bidir_append(ctx, x, b): ctx.append((x.arg if x.op is Ops.CONST else "+", b))
+
+def bidir_append(ctx, x, b):
+  ctx.append((x.arg if x.op is Ops.CONST else "+", b))
+
+
 class TestBidirectional(unittest.TestCase):
   def test_simple(self):
     a = UOp.const(dtypes.int, 1)
     b = UOp.const(dtypes.int, 2)
     c = a + b
-    pm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, False)) ])
-    bpm = PatternMatcher([ (UPat(GroupOp.All, name="x"), lambda ctx,x: bidir_append(ctx, x, True)) ])
+    pm = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda ctx, x: bidir_append(ctx, x, False))])
+    bpm = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda ctx, x: bidir_append(ctx, x, True))])
     ctx_list = []
     graph_rewrite(c, pm, ctx=ctx_list, bpm=bpm)
-    self.assertListEqual(ctx_list, [('+', True), (1, True), (1, False), (2, True), (2, False), ('+', False)])
+    self.assertListEqual(ctx_list, [("+", True), (1, True), (1, False), (2, True), (2, False), ("+", False)])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

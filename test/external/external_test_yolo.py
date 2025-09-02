@@ -6,8 +6,9 @@ import cv2
 from examples.yolov3 import Darknet, infer, show_labels
 from tinygrad.helpers import fetch
 
-chicken_img = cv2.imread(str(Path(__file__).parent.parent / 'models/efficientnet/Chicken.jpg'))
-car_img = cv2.imread(str(Path(__file__).parent.parent / 'models/efficientnet/car.jpg'))
+chicken_img = cv2.imread(str(Path(__file__).parent.parent / "models/efficientnet/Chicken.jpg"))
+car_img = cv2.imread(str(Path(__file__).parent.parent / "models/efficientnet/car.jpg"))
+
 
 class TestYOLO(unittest.TestCase):
   @classmethod
@@ -28,5 +29,6 @@ class TestYOLO(unittest.TestCase):
     labels = show_labels(infer(self.model, car_img))
     self.assertEqual(labels, ["car"])
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

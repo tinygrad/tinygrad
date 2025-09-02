@@ -5,6 +5,7 @@ from tinygrad.tensor import Tensor
 from extra.models.rnnt import LSTM
 import torch
 
+
 class TestRNNT(unittest.TestCase):
   def test_lstm(self):
     BS, SQ, IS, HS, L = 2, 20, 40, 128, 2
@@ -43,5 +44,6 @@ class TestRNNT(unittest.TestCase):
       torch_z, torch_hc = torch_layer(torch_x, torch_hc)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

@@ -14,12 +14,15 @@ BUF_SIZE = 4096 if CI else 4096 * 128
 RUN_CNT = 4 if CI else 32
 
 cached_prgs = {}
+
+
 def helper_exec_op(device, outbuf, inbufs):
   if (device, len(inbufs)) not in cached_prgs:
     with Context(DEBUG=0):
       fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for i in range(len(inbufs))]
       s = fst[0]
-      for i in range(1, len(inbufs)): s = s.bitwise_xor(fst[i])
+      for i in range(1, len(inbufs)):
+        s = s.bitwise_xor(fst[i])
 
       si = s.schedule()[-1]
       prg = get_runner(device, si.ast)
@@ -27,9 +30,11 @@ def helper_exec_op(device, outbuf, inbufs):
 
   return ExecItem(cached_prgs[(device, len(inbufs))], [outbuf] + inbufs)
 
+
 def helper_copy_op(device, dest, src):
   prg = BufferXfer(dest.nbytes, device, src.device)
   return ExecItem(prg, [dest, src])
+
 
 def helper_alloc_rawbuffer(device, fill=False):
   rawbuf = Buffer(device, BUF_SIZE, dtypes.int).ensure_allocated()
@@ -39,9 +44,11 @@ def helper_alloc_rawbuffer(device, fill=False):
       rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_buffer())
   return rawbuf
 
+
 def helper_create_offset_rawbuffer(base, offset=0):
-  x = Buffer(base.device, base.size-offset, base.dtype, base=base, offset=offset)
+  x = Buffer(base.device, base.size - offset, base.dtype, base=base, offset=offset)
   return x.ensure_allocated()
+
 
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
@@ -49,8 +56,10 @@ def helper_run_jit(jis, bufs, out_buffers):
     ctypes.memset(from_mv(mv), 0, len(mv))
     rawbuf.copyin(mv)
 
-  for ei in jis: ei.run({}, jit=True)
+  for ei in jis:
+    ei.run({}, jit=True)
   return [rawbuf.as_buffer() for rawbuf in bufs]
+
 
 def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   reg_ji = []
@@ -64,15 +73,17 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   bufs = dedup(bufs)
 
   ground_thruth_bufs = helper_run_jit(reg_ji, bufs, out_buffers)
-  ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
+  ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i, x in enumerate(ground_thruth_bufs)]
 
   # Build graphs
   gr_ji = [ExecItem(graph_impl(graph, [], {}), []) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
-    test_bufs_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(test_bufs)]
-    for i in range(len(ground_thruth_bufs)): np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
+    test_bufs_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i, x in enumerate(test_bufs)]
+    for i in range(len(ground_thruth_bufs)):
+      np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
+
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
@@ -80,9 +91,7 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[0], [b0[3], b0[4]])]
-    ]
+    graphs = [[helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[0], [b0[3], b0[4]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
@@ -90,9 +99,7 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[3], b0[4]])]
-    ]
+    graphs = [[helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[3], b0[4]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
@@ -100,16 +107,16 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[0], b0[4]])]
-    ]
+    graphs = [[helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[0], b0[4]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
   def skip_if_not_multigraph(self):
-    graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
-    if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
-    if not hasattr(d.allocator, '_transfer'): self.skipTest("device is not supported (no transfers)")
+    graph = g.func if isinstance(g := (d := Device[Device.DEFAULT]).graph, functools.partial) else g
+    if not issubclass(graph, MultiGraphRunner):
+      self.skipTest("graph is not supported (not MultiGraphRunner)")
+    if not hasattr(d.allocator, "_transfer"):
+      self.skipTest("device is not supported (no transfers)")
 
   def test_order_copy_writed(self):
     self.skip_if_not_multigraph()
@@ -117,9 +124,7 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_copy_op(d0, b0[3], b0[0])]
-    ]
+    graphs = [[helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_copy_op(d0, b0[3], b0[0])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
@@ -129,9 +134,7 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
 
-    graphs = [
-      [helper_copy_op(d0, b0[1], b0[0]), helper_exec_op(d0, b0[3], [b0[1], b0[2]])]
-    ]
+    graphs = [[helper_copy_op(d0, b0[1], b0[0]), helper_exec_op(d0, b0[3], [b0[1], b0[2]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
@@ -139,17 +142,13 @@ class TestGraph(unittest.TestCase):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
 
-    graphs = [
-      [helper_exec_op(d0, b0[3], [b0[1], b0[2]])],
-      [helper_exec_op(d0, b0[4], [b0[1], b0[3]])],
-      [helper_exec_op(d0, b0[5], [b0[4], b0[2]])]
-    ]
+    graphs = [[helper_exec_op(d0, b0[3], [b0[1], b0[2]])], [helper_exec_op(d0, b0[4], [b0[1], b0[3]])], [helper_exec_op(d0, b0[5], [b0[4], b0[2]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
     graphs = [
       [helper_exec_op(d0, b0[3], [b0[1], b0[2]]), helper_exec_op(d0, b0[4], [b0[1], b0[2]]), helper_exec_op(d0, b0[5], [b0[1], b0[2]])],
-      [helper_exec_op(d0, b0[2], [b0[6], b0[7]])]
+      [helper_exec_op(d0, b0[2], [b0[6], b0[7]])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
@@ -161,9 +160,7 @@ class TestGraph(unittest.TestCase):
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
     b1 = [helper_alloc_rawbuffer(d1, fill=True) for _ in range(1)]
 
-    graphs = [
-      [helper_copy_op(d0, b1[0], b0[0]), helper_exec_op(d0, b0[2], [b0[0], b0[1]])]
-    ]
+    graphs = [[helper_copy_op(d0, b1[0], b0[0]), helper_exec_op(d0, b0[2], [b0[0], b0[1]])]]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
@@ -177,20 +174,38 @@ class TestGraph(unittest.TestCase):
     b3 = [helper_alloc_rawbuffer(d3, fill=True) for _ in range(6)]
 
     graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_exec_op(d0, b0[6], [b0[1], b0[2]]), helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
+      [
+        helper_exec_op(d0, b0[2], [b0[0], b0[1]]),
+        helper_exec_op(d0, b0[3], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
+        helper_exec_op(d0, b0[5], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[6], [b0[1], b0[2]]),
+        helper_exec_op(d0, b0[7], [b0[0], b0[2]]),
+      ],
       [helper_copy_op(d1, b0[2], b1[0])],
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_exec_op(d0, b0[6], [b0[1], b0[2]]), helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
+      [
+        helper_exec_op(d0, b0[2], [b0[0], b0[1]]),
+        helper_exec_op(d0, b0[3], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
+        helper_exec_op(d0, b0[5], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[6], [b0[1], b0[2]]),
+        helper_exec_op(d0, b0[7], [b0[0], b0[2]]),
+      ],
       [helper_copy_op(d3, b0[2], b3[0])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
 
     graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_copy_op(d0, b2[0], b0[2]), helper_copy_op(d0, b2[1], b0[5]),
-       helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
+      [
+        helper_exec_op(d0, b0[2], [b0[0], b0[1]]),
+        helper_exec_op(d0, b0[3], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
+        helper_exec_op(d0, b0[5], [b0[0], b0[2]]),
+        helper_copy_op(d0, b2[0], b0[2]),
+        helper_copy_op(d0, b2[1], b0[5]),
+        helper_exec_op(d0, b0[7], [b0[0], b0[2]]),
+      ],
       [helper_copy_op(d1, b0[2], b1[0])],
       [helper_exec_op(d0, b0[2], [b0[0], b0[1]])],
       [helper_copy_op(d3, b0[2], b3[0])],
@@ -199,9 +214,15 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
     graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_copy_op(d0, b2[0], b0[2]), helper_copy_op(d0, b2[1], b0[5]),
-       helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
+      [
+        helper_exec_op(d0, b0[2], [b0[0], b0[1]]),
+        helper_exec_op(d0, b0[3], [b0[0], b0[2]]),
+        helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
+        helper_exec_op(d0, b0[5], [b0[0], b0[2]]),
+        helper_copy_op(d0, b2[0], b0[2]),
+        helper_copy_op(d0, b2[1], b0[5]),
+        helper_exec_op(d0, b0[7], [b0[0], b0[2]]),
+      ],
       [helper_copy_op(d1, b0[5], b1[0])],
       [helper_copy_op(d3, b0[5], b3[0])],
     ]
@@ -227,8 +248,7 @@ class TestGraph(unittest.TestCase):
     graphs = [
       [helper_copy_op(d1, b0[0], b1[0])],
       [helper_copy_op(d2, b0[1], b2[0]), helper_copy_op(d3, b0[2], b3[0])],
-      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
+      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]), helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
@@ -237,8 +257,7 @@ class TestGraph(unittest.TestCase):
       [helper_copy_op(d1, b0[0], b1[0])],
       [helper_exec_op(d0, b0[2], [b0[0], b0[1]])],
       [helper_copy_op(d2, b0[1], b2[0]), helper_copy_op(d3, b0[2], b3[0])],
-      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
+      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]), helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
@@ -247,7 +266,8 @@ class TestGraph(unittest.TestCase):
     self.skip_if_not_multigraph()
 
     d0 = Device.DEFAULT
-    if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
+    if not hasattr(Device[d0].allocator, "_offset"):
+      self.skipTest("device does not support _offset")
 
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(1)]
     b0 += [helper_create_offset_rawbuffer(b0[0]), helper_create_offset_rawbuffer(b0[0])]
@@ -258,5 +278,6 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

@@ -2,6 +2,7 @@ import unittest
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, resolve
 
+
 class TestUOpResolve(unittest.TestCase):
   def test_simple_int(self):
     u = UOp.const(dtypes.int, 4)
@@ -60,7 +61,7 @@ class TestUOpResolve(unittest.TestCase):
     self.assertTrue(u)
 
   def test_var_cmp_t2(self):
-    u = UOp.variable("i", 1, 10)//2 < 20
+    u = UOp.variable("i", 1, 10) // 2 < 20
     self.assertTrue(u)
 
   def test_var_cmp_f(self):
@@ -98,7 +99,7 @@ class TestUOpResolve(unittest.TestCase):
   @unittest.expectedFailure
   def test_x_lt_xp1(self):
     x = UOp.variable("i", 1, 10)
-    self.assertTrue(x < (x+1))
+    self.assertTrue(x < (x + 1))
 
   def test_and_true(self):
     with self.assertRaises(ValueError):
@@ -119,7 +120,8 @@ class TestUOpResolve(unittest.TestCase):
   def test_plus_ordering_lt(self):
     i = UOp.variable("i", 1, 10)
     j = UOp.variable("j", 1, 10)
-    self.assertFalse((i+j) < (j+i))
+    self.assertFalse((i + j) < (j + i))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

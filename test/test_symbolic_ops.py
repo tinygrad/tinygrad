@@ -7,9 +7,12 @@ from tinygrad.device import is_dtype_supported
 from examples.gpt2 import Attention
 import numpy as np
 
+
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
-    def f(a): return (a+1).realize()
+    def f(a):
+      return (a + 1).realize()
+
     a = Tensor.rand(3, 10)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
@@ -18,7 +21,9 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_add(self):
-    def f(a, b): return (a+b).realize()
+    def f(a, b):
+      return (a + b).realize()
+
     a = Tensor.rand(3, 10)
     b = Tensor.rand(3, 10)
     for i in range(1, 5):
@@ -28,7 +33,9 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_matmul(self):
-    def f(a, b): return (a@b).realize()
+    def f(a, b):
+      return (a @ b).realize()
+
     a = Tensor.rand(3, 10)
     b = Tensor.rand(10, 5)
     for i in range(1, 5):
@@ -38,7 +45,9 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_attention(self, dropout_p=0.0, imin=1, imax=5, use_symbolic=True):
-    def f(q, k, v): return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), dropout_p=dropout_p).realize()
+    def f(q, k, v):
+      return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), dropout_p=dropout_p).realize()
+
     q = Tensor.rand(2, 1, 4, 8)
     k = Tensor.rand(2, 10, 4, 8)
     v = Tensor.rand(2, 10, 4, 8)
@@ -59,9 +68,9 @@ class TestSymbolicOps(unittest.TestCase):
   @unittest.expectedFailure
   def test_attention_simple_view(self):
     i = Variable("i", 2, 10)
-    v1 = View.create((2,4,1,i,i), ((i*4),i,0,0,1))
-    v2 = View.create((2,4,1,i,i,i), (((i*i)*4),(i*i),0,0,i,1))
-    self.assertIsNotNone(v1+v2)
+    v1 = View.create((2, 4, 1, i, i), ((i * 4), i, 0, 0, 1))
+    v2 = View.create((2, 4, 1, i, i, i), (((i * i) * 4), (i * i), 0, 0, i, 1))
+    self.assertIsNotNone(v1 + v2)
 
   def test_attention_training(self):
     with Tensor.train():
@@ -80,51 +89,61 @@ class TestSymbolicOps(unittest.TestCase):
     Attention(128, 8)(Tensor.ones(1, 2, 128), Variable("start_pos", 0, 128).bind(0), None)
 
   def test_cat_dim0(self):
-    def f(a, b): return a.cat(b, dim=0).realize()
+    def f(a, b):
+      return a.cat(b, dim=0).realize()
+
     a = Tensor.rand(10, 3)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       b = Tensor.rand(2, 3)
-      symbolic = f(a[:vi, :], b).reshape(i+2, 3).numpy()
+      symbolic = f(a[:vi, :], b).reshape(i + 2, 3).numpy()
       expected = f(a[:i, :], b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim1(self):
-    def f(a, b): return a.cat(b, dim=1).realize()
+    def f(a, b):
+      return a.cat(b, dim=1).realize()
+
     a = Tensor.rand(3, 10)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       b = Tensor.rand(3, 2)
-      symbolic = f(a[:, :vi], b).reshape(3, i+2).numpy()
+      symbolic = f(a[:, :vi], b).reshape(3, i + 2).numpy()
       expected = f(a[:, :i], b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim0_two_vars(self):
-    def f(a, b): return a.cat(b, dim=0).realize()
+    def f(a, b):
+      return a.cat(b, dim=0).realize()
+
     a = Tensor.rand(10, 3)
     b = Tensor.rand(10, 3)
     for i in range(1, 5):
       for j in range(1, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
-        symbolic = f(a[:vi, :], b[:vj, :]).reshape(i+j, 3).numpy()
+        symbolic = f(a[:vi, :], b[:vj, :]).reshape(i + j, 3).numpy()
         expected = f(a[:i, :], b[:j, :]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim1_two_vars(self):
-    def f(a, b): return a.cat(b, dim=1).realize()
+    def f(a, b):
+      return a.cat(b, dim=1).realize()
+
     a = Tensor.rand(3, 10)
     b = Tensor.rand(3, 10)
     for i in range(1, 5):
       for j in range(1, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
-        symbolic = f(a[:, :vi], b[:, :vj]).reshape(3, i+j).numpy()
+        symbolic = f(a[:, :vi], b[:, :vj]).reshape(3, i + j).numpy()
         expected = f(a[:, :i], b[:, :j]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_two_vars_plus1_ij(self):
-    def f(a, b): return (a@b+1).realize()
+    def f(a, b):
+      return (a @ b + 1).realize()
+
     a = Tensor.rand(10, 3)
     b = Tensor.rand(3, 10)
     for i in range(1, 5):
@@ -137,7 +156,9 @@ class TestSymbolicOps(unittest.TestCase):
 
   def test_two_vars_plus1_ji(self):
     # reverse the order of variables
-    def f(a, b): return (a@b+1).realize()
+    def f(a, b):
+      return (a @ b + 1).realize()
+
     a = Tensor.rand(10, 3)
     b = Tensor.rand(3, 10)
     for i in range(1, 5):
@@ -152,9 +173,9 @@ class TestSymbolicOps(unittest.TestCase):
     a = Tensor.rand(30)
     for i in range(3, 5):
       vi = Variable("i", 3, 10).bind(i)
-      symbolic = a[:vi*3].reshape((3, 3)).numpy()
+      symbolic = a[: vi * 3].reshape((3, 3)).numpy()
       # To match symbolic reshape (potential implicit shrink), we need a shrink
-      expected = a[:i*3].shrink(((0, 9),)).reshape((3, 3)).numpy()
+      expected = a[: i * 3].shrink(((0, 9),)).reshape((3, 3)).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_invalid_symbolic_reshape(self):
@@ -162,24 +183,25 @@ class TestSymbolicOps(unittest.TestCase):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       # Cannot reshape into symbolic from non-symbolic
-      with self.assertRaises(AssertionError): a.reshape((3, vi))
+      with self.assertRaises(AssertionError):
+        a.reshape((3, vi))
 
   def test_shrink(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       a = Tensor.rand(7, 11)
-      symbolic = a.shrink(((3,5),(vi,vi+2)))
+      symbolic = a.shrink(((3, 5), (vi, vi + 2)))
       symbolic = symbolic.numpy()
-      expected = a.shrink(((3,5),(i,i+2))).numpy()
+      expected = a.shrink(((3, 5), (i, i + 2))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_slice(self):
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       a = Tensor.rand(7, 11)
-      symbolic = a[3:5, vi:vi+2]
+      symbolic = a[3:5, vi : vi + 2]
       symbolic = symbolic.numpy()
-      expected = a[3:5, i:i+2].numpy()
+      expected = a[3:5, i : i + 2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_slice_no_start(self):
@@ -273,9 +295,9 @@ class TestSymbolicOps(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_conv2d_ceildiv_edge_case(self):
-    v = Variable('v', 11, 50_000)
+    v = Variable("v", 11, 50_000)
     val = 39601
-    x = Tensor.randn(1, 22, 50_000)[:, :, :v.bind(val)]
+    x = Tensor.randn(1, 22, 50_000)[:, :, : v.bind(val)]
     weight = Tensor.randn(256, 22, 12)
 
     result = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
@@ -284,5 +306,6 @@ class TestSymbolicOps(unittest.TestCase):
     self.assertEqual(shape, (1, 256, 6600))  # TODO: fails if ceildiv is incorrect
     # TODO: test output is correct
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

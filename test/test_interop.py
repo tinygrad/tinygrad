@@ -10,17 +10,22 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 MOCKGPU = getenv("MOCKGPU")
 
+
 @unittest.skipIf(Device.DEFAULT not in ["METAL", "CUDA"] or MOCKGPU, f"no support on {Device.DEFAULT}")
 class TestInterop(unittest.TestCase):
   def setUp(self):
-    if Device.DEFAULT == "CUDA": self.torch_device = "cuda"
-    elif Device.DEFAULT == "METAL": self.torch_device = "mps"
+    if Device.DEFAULT == "CUDA":
+      self.torch_device = "cuda"
+    elif Device.DEFAULT == "METAL":
+      self.torch_device = "mps"
 
   def test_torch_interop(self):
     inp = torch.rand(2, 2, 3, device=torch.device(self.torch_device))
 
-    if self.torch_device == "mps": torch.mps.synchronize()
-    else: torch.cuda.synchronize()
+    if self.torch_device == "mps":
+      torch.mps.synchronize()
+    else:
+      torch.cuda.synchronize()
 
     tg_data = Tensor.from_blob(inp.data_ptr(), inp.shape, dtype=_from_torch_dtype(inp.dtype))
 
@@ -48,5 +53,6 @@ class TestInterop(unittest.TestCase):
 
     np.testing.assert_allclose(tg_data.numpy(), torch_out_np, atol=1e-5, rtol=1e-5)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

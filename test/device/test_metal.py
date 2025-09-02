@@ -1,8 +1,11 @@
 import unittest
 from tinygrad.device import CompileError, Device, Compiler
-if Device.DEFAULT=="METAL":
+
+if Device.DEFAULT == "METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
-@unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
+
+
+@unittest.skipIf(Device.DEFAULT != "METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
     device = MetalDevice("metal")
@@ -47,7 +50,7 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 }
 """)
     with self.assertRaises(RuntimeError):
-      compiled = compiled[:40] # corrupt the compiled program
+      compiled = compiled[:40]  # corrupt the compiled program
       MetalProgram(device, "r_5", compiled)
 
   def test_program_w_empty_compiler(self):

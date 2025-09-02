@@ -10,6 +10,7 @@ from examples.vgg7_helpers.waifu2x import image_load, image_save, Vgg7
 # amount of context erased by model
 CONTEXT = 7
 
+
 def get_sample_count(samples_dir):
   try:
     samples_dir_count_file = open(samples_dir + "/sample_count.txt", "r")
@@ -19,9 +20,11 @@ def get_sample_count(samples_dir):
   except:
     return 0
 
+
 def set_sample_count(samples_dir, sc):
   with open(samples_dir + "/sample_count.txt", "w") as file:
     file.write(str(sc) + "\n")
+
 
 if len(sys.argv) < 2:
   print("python3 -m examples.vgg7 import MODELJSON MODEL")
@@ -59,9 +62,11 @@ if len(sys.argv) < 2:
 cmd = sys.argv[1]
 vgg7 = Vgg7()
 
+
 def nansbane(p):
   if numpy.isnan(numpy.min(p.numpy())):
     raise Exception("A NaN in the model has been detected. This model will not be interacted with to prevent further damage.")
+
 
 def load_and_save(path, save):
   if save:
@@ -74,6 +79,7 @@ def load_and_save(path, save):
     load_state_dict(vgg7, st)
     for v in vgg7.get_parameters():
       nansbane(v)
+
 
 if cmd == "import":
   src = sys.argv[2]
@@ -156,7 +162,7 @@ elif cmd == "train":
 
     sample_idx = 0
     try:
-      sample_idx = numpy.random.choice(samples_count, p = sample_probs / sample_probs.sum())
+      sample_idx = numpy.random.choice(samples_count, p=sample_probs / sample_probs.sum())
     except:
       print("exception occurred (PROBABLY value-probabilities-dont-sum-to-1)")
       sample_idx = random.randint(0, samples_count - 1)
@@ -164,8 +170,8 @@ elif cmd == "train":
     x_img = image_load(samples_base + "/" + str(sample_idx) + "a.png")
     y_img = image_load(samples_base + "/" + str(sample_idx) + "b.png")
 
-    sample_x = Tensor(x_img, requires_grad = False)
-    sample_y = Tensor(y_img, requires_grad = False)
+    sample_x = Tensor(x_img, requires_grad=False)
+    sample_y = Tensor(y_img, requires_grad=False)
 
     # magic code roughly from readme example
     # An explanation, in case anyone else has to go down this path:
@@ -202,7 +208,7 @@ elif cmd == "train":
     rnum = rnum + 1
     # Probability management
     # there must always be a probability, no matter how slim, even if loss goes to 0
-    sample_probs[sample_idx] = max(loss_indicator, 1.e-10)
+    sample_probs[sample_idx] = max(loss_indicator, 1.0e-10)
 
   # if we were told to save every round, we already saved
   if rounds_per_save != 1:

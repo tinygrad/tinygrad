@@ -11,20 +11,23 @@ from extra.models.efficientnet import EfficientNet
 from extra.models.vit import ViT
 from extra.models.resnet import ResNet50
 
+
 def _load_labels():
-  labels_filename = pathlib.Path(__file__).parent / 'efficientnet/imagenet1000_clsidx_to_labels.txt'
+  labels_filename = pathlib.Path(__file__).parent / "efficientnet/imagenet1000_clsidx_to_labels.txt"
   return ast.literal_eval(labels_filename.read_text())
 
+
 _LABELS = _load_labels()
+
 
 def preprocess(img, new=False):
   # preprocess image
   aspect_ratio = img.size[0] / img.size[1]
-  img = img.resize((int(224*max(aspect_ratio,1.0)), int(224*max(1.0/aspect_ratio,1.0))))
+  img = img.resize((int(224 * max(aspect_ratio, 1.0)), int(224 * max(1.0 / aspect_ratio, 1.0))))
 
   img = np.array(img)
-  y0, x0 =(np.asarray(img.shape)[:2] - 224) // 2
-  img = img[y0: y0 + 224, x0: x0 + 224]
+  y0, x0 = (np.asarray(img.shape)[:2] - 224) // 2
+  img = img[y0 : y0 + 224, x0 : x0 + 224]
 
   # low level preprocess
   if new:
@@ -46,13 +49,16 @@ def _infer(model: EfficientNet, img, bs=1):
   Tensor.training = False
   img = preprocess(img)
   # run the net
-  if bs > 1: img = img.repeat(bs, axis=0)
+  if bs > 1:
+    img = img.repeat(bs, axis=0)
   out = model.forward(Tensor(img))
   Tensor.training = old_training
   return _LABELS[np.argmax(out.numpy()[0])]
 
-chicken_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/Chicken.jpg')
-car_img = Image.open(pathlib.Path(__file__).parent / 'efficientnet/car.jpg')
+
+chicken_img = Image.open(pathlib.Path(__file__).parent / "efficientnet/Chicken.jpg")
+car_img = Image.open(pathlib.Path(__file__).parent / "efficientnet/car.jpg")
+
 
 class TestEfficientNet(unittest.TestCase):
   @classmethod
@@ -76,6 +82,7 @@ class TestEfficientNet(unittest.TestCase):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "sports car, sport car")
 
+
 class TestViT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -93,6 +100,7 @@ class TestViT(unittest.TestCase):
   def test_car(self):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "racer, race car, racing car")
+
 
 class TestResNet(unittest.TestCase):
   @classmethod
@@ -112,5 +120,6 @@ class TestResNet(unittest.TestCase):
     label = _infer(self.model, car_img)
     self.assertEqual(label, "sports car, sport car")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

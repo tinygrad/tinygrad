@@ -6,4 +6,4 @@ if __name__ == "__main__":
 
   # kfd is 0.55ms!
   with Profiling("allocation 127.7mb"):
-    am.allocator.alloc(int(127.7*1024*1024))
+    am.allocator.alloc(int(127.7 * 1024 * 1024))

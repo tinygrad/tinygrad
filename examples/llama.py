@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pip3 install sentencepiece tiktoken blobfile
-#import typeguard.importhook
-#typeguard.importhook.install_import_hook('tinygrad')
+# import typeguard.importhook
+# typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
 from typing import List, Optional
@@ -17,32 +17,28 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
+
 class TikToken:
   num_reserved_special_tokens: int = 256
-  pat_str: str =  r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"  # noqa: E501
+  pat_str: str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"  # noqa: E501
 
   def __init__(self, model_file):
     mergeable_ranks = load_tiktoken_bpe(model_file)
     self.num_base_tokens = len(mergeable_ranks)
 
     special_tokens = [
-        "<|begin_of_text|>",
-        "<|end_of_text|>",
-        "<|reserved_special_token_0|>",
-        "<|reserved_special_token_1|>",
-        "<|reserved_special_token_2|>",
-        "<|reserved_special_token_3|>",
-        "<|start_header_id|>",
-        "<|end_header_id|>",
-        "<|reserved_special_token_4|>",
-        "<|eot_id|>",  # end of turn
-      ] + [
-        f"<|reserved_special_token_{i}|>"
-        for i in range(5, self.num_reserved_special_tokens - 5)
-      ]
-    self.special_tokens = {
-        token: self.num_base_tokens + i for i, token in enumerate(special_tokens)
-    }
+      "<|begin_of_text|>",
+      "<|end_of_text|>",
+      "<|reserved_special_token_0|>",
+      "<|reserved_special_token_1|>",
+      "<|reserved_special_token_2|>",
+      "<|reserved_special_token_3|>",
+      "<|start_header_id|>",
+      "<|end_header_id|>",
+      "<|reserved_special_token_4|>",
+      "<|eot_id|>",  # end of turn
+    ] + [f"<|reserved_special_token_{i}|>" for i in range(5, self.num_reserved_special_tokens - 5)]
+    self.special_tokens = {token: self.num_base_tokens + i for i, token in enumerate(special_tokens)}
 
     self.model = tiktoken.Encoding(
       name=model_file,
@@ -51,12 +47,21 @@ class TikToken:
       special_tokens=self.special_tokens,
     )
 
-  def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
-  def encode(self, s): return self.model.encode(s)
+  def decode(self, toks):
+    return self.model.decode([t for t in toks if t < self.num_base_tokens])
 
-  def bos_id(self): return self.special_tokens["<|begin_of_text|>"]
-  def eos_id(self): return self.special_tokens["<|end_of_text|>"]
-  def vocab_size(self): return self.model.n_vocab
+  def encode(self, s):
+    return self.model.encode(s)
+
+  def bos_id(self):
+    return self.special_tokens["<|begin_of_text|>"]
+
+  def eos_id(self):
+    return self.special_tokens["<|end_of_text|>"]
+
+  def vocab_size(self):
+    return self.model.n_vocab
+
 
 # calculating params:
 # traditionally, the MLP in the transformer architecture has hidden_dim = dim*4 [arxiv/1706.03762, 3.3]
@@ -99,19 +104,55 @@ MODEL_PARAMS = {
   },
   "3": {
     "8B": {
-      "args": {"dim": 4096, "n_heads": 32, "n_kv_heads": 8, "n_layers": 32, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 14336},
+      "args": {
+        "dim": 4096,
+        "n_heads": 32,
+        "n_kv_heads": 8,
+        "n_layers": 32,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000,
+        "vocab_size": 128256,
+        "hidden_dim": 14336,
+      },
       "files": 1,
     },
     "8B-Chat": {
-      "args": {"dim": 4096, "n_heads": 32, "n_kv_heads": 8, "n_layers": 32, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 14336},
+      "args": {
+        "dim": 4096,
+        "n_heads": 32,
+        "n_kv_heads": 8,
+        "n_layers": 32,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000,
+        "vocab_size": 128256,
+        "hidden_dim": 14336,
+      },
       "files": 1,
     },
     "70B": {
-      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
+      "args": {
+        "dim": 8192,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "n_layers": 80,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000,
+        "vocab_size": 128256,
+        "hidden_dim": 28672,
+      },
       "files": 8,
     },
     "70B-Chat": {
-      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "rope_theta": 500000, "vocab_size": 128256,  "hidden_dim": 28672},
+      "args": {
+        "dim": 8192,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "n_layers": 80,
+        "norm_eps": 1e-05,
+        "rope_theta": 500000,
+        "vocab_size": 128256,
+        "hidden_dim": 28672,
+      },
       "files": 8,
     },
     "tokenizer": TikToken,
@@ -142,15 +183,42 @@ MODEL_PARAMS = {
       "files": 2,
     },
     "34B": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
+      "args": {
+        "dim": 8192,
+        "n_layers": 48,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 1000000,
+        "vocab_size": 32000,
+        "hidden_dim": 22016,
+      },
       "files": 4,
     },
     "34B-Python": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
+      "args": {
+        "dim": 8192,
+        "n_layers": 48,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 1000000,
+        "vocab_size": 32000,
+        "hidden_dim": 22016,
+      },
       "files": 4,
     },
     "34B-Instruct": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
+      "args": {
+        "dim": 8192,
+        "n_layers": 48,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-05,
+        "rope_theta": 1000000,
+        "vocab_size": 32000,
+        "hidden_dim": 22016,
+      },
       "files": 4,
     },
     "tokenizer": SentencePieceProcessor,
@@ -165,8 +233,9 @@ MODEL_PARAMS = {
       "files": 1,
     },
     "tokenizer": SentencePieceProcessor,
-  }
+  },
 }
+
 
 # **** helper functions ****
 def concat_weights(models, device=None):
@@ -177,11 +246,14 @@ def concat_weights(models, device=None):
     axis = 1 if name.startswith("tok_embeddings.") or name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
     lazy_tensors = [data.to(device=device) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
+
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
-def load(fn:str):
-  if fn.endswith('.index.json'):
-    with open(fn) as fp: weight_map = json.load(fp)['weight_map']
+
+def load(fn: str):
+  if fn.endswith(".index.json"):
+    with open(fn) as fp:
+      weight_map = json.load(fp)["weight_map"]
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith(".safetensors"):
@@ -189,18 +261,21 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=None, device=None):
     params = MODEL_PARAMS[model_gen][model_size]
-    tokenizer = MODEL_PARAMS[model_gen]['tokenizer'](model_file=str(tokenizer_path))
+    tokenizer = MODEL_PARAMS[model_gen]["tokenizer"](model_file=str(tokenizer_path))
     assert tokenizer.vocab_size() == params["args"]["vocab_size"], f"{tokenizer.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     if quantize == "int8":
       from llama3 import Int8Linear
+
       linear = Int8Linear
     elif quantize == "nf4":
       from llama3 import NF4Linear
+
       linear = NF4Linear(64)
     else:
       linear = nn.Linear
@@ -209,11 +284,16 @@ class LLaMa:
 
     with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
       if model_path.is_dir():
-        weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]], device[0] if isinstance(device, tuple) else device)
+        weights = concat_weights(
+          [load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]],
+          device[0] if isinstance(device, tuple) else device,
+        )
       else:
         weights = load(str(model_path))
       if "model.embed_tokens.weight" in weights:
-        weights = convert_from_huggingface(weights, params["args"]["n_layers"], params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+        weights = convert_from_huggingface(
+          weights, params["args"]["n_layers"], params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"])
+        )
 
       weights = fix_bf16(weights)
 
@@ -223,23 +303,33 @@ class LLaMa:
         # quantize
         if quantize is not None:
           weights = linear.quantize(weights, device)
-          for _,v in weights.items(): v.realize()
+          for _, v in weights.items():
+            v.realize()
 
         # shard
         if isinstance(device, tuple):
-          for k,v in nn.state.get_state_dict(model).items():
-            if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-            elif '.attention.' in k:
-              if getenv("SHARD_KVCACHE") and ('.wq.' in k or '.wk.' in k or '.wv.' in k): v.shard_(device, axis=0)
-              else: v.shard_(device, axis=-1)
-            elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-            elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-            elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-            elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-            elif 'output.weight' in k: v.shard_(device, axis=-1)
-            #elif k.endswith('.weight'): v.shard_(device, axis=-1)
-            #elif 'norm.' in k: v.shard_(device, axis=-1)
-            else: v.shard_(device, axis=None)
+          for k, v in nn.state.get_state_dict(model).items():
+            if "scale" in k:
+              v.shard_(device, axis=None)  # from quantized
+            elif ".attention." in k:
+              if getenv("SHARD_KVCACHE") and (".wq." in k or ".wk." in k or ".wv." in k):
+                v.shard_(device, axis=0)
+              else:
+                v.shard_(device, axis=-1)
+            elif ".feed_forward.w1." in k:
+              v.shard_(device, axis=0)
+            elif ".feed_forward.w3." in k:
+              v.shard_(device, axis=0)
+            elif ".feed_forward." in k:
+              v.shard_(device, axis=-1)
+            elif "tok_embeddings.weight" in k:
+              v.shard_(device, axis=0)
+            elif "output.weight" in k:
+              v.shard_(device, axis=-1)
+            # elif k.endswith('.weight'): v.shard_(device, axis=-1)
+            # elif 'norm.' in k: v.shard_(device, axis=-1)
+            else:
+              v.shard_(device, axis=None)
 
         # replace weights in model
         load_state_dict(model, weights, strict=False, consume=True)
@@ -250,9 +340,10 @@ class LLaMa:
     self.model = model
     self.tokenizer = tokenizer
 
-  def greedy_until(self, prompt:str, until, max_length, temperature):
+  def greedy_until(self, prompt: str, until, max_length, temperature):
     # only used in old eval script
     import numpy as np
+
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
@@ -262,11 +353,14 @@ class LLaMa:
       start_pos = len(toks)
       toks.append(tok)
 
-      if tok == self.tokenizer.eos_id(): break
+      if tok == self.tokenizer.eos_id():
+        break
       output = self.tokenizer.decode(toks)
       for s in until:
-        if output.endswith(s): return output[0:-len(s)]
+        if output.endswith(s):
+          return output[0 : -len(s)]
     return output
+
 
 # **** main code ****
 r"""
@@ -340,14 +434,23 @@ if __name__ == "__main__":
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
   parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
-  parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
+  parser.add_argument(
+    "--size",
+    type=str,
+    default=None,
+    help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""",
+  )
   parser.add_argument("--quantize", type=str, default=None, help="Quantize the weights to int8 or nf4 in memory")
-  parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument(
+    "--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file"
+  )
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
-  if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
-  if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
+  if args.gen not in MODEL_PARAMS:
+    raise ValueError("Invalid model generation")
+  if args.size is None:
+    args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
   chatbot = args.prompt == None
 
   # *** prompt engineers work here ****
@@ -371,7 +474,7 @@ After you are done speaking, output [EOS]. You are not the User.
     user_delim = "\nUser: "
     resp_delim = "Stacy: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+    pre_prompt += "".join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
   elif args.personality.lower() == "george":
     print("WARNING: AI George Hotz is terrible and is completely disowned by the real George Hotz. Stacy is much smarter.")
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named George and User
@@ -389,13 +492,13 @@ After you are done speaking, output [EOS]. You are not the User.
       "What's the complexity of matrix multiplication?": "O(n^3), though it can be faster with things like Strassen's algorithm",
       "What's a buffer overflow?": "I assume you mean a stack buffer overflow. That's when the stack is too small for the data being copied to it, and the data corrupts things beyond the buffer",
       "How many weights do you have?": "I am based off LLaMA trained by Facebook. I'm the 7B weight version",
-      "What is swap memory?": "It is when the memory is about to overflow and unused memory is freed and stored on disk"
+      "What is swap memory?": "It is when the memory is about to overflow and unused memory is freed and stored on disk",
     }
 
     user_delim = "\nUser: "
     resp_delim = "George: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+    pre_prompt += "".join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
   elif args.personality.lower() == "gary":
     pre_prompt = f"""Consider that the following is conversation between an AI assistant named Gary and User
 You are Gary!
@@ -408,13 +511,13 @@ After you are done speaking, output [EOS]. You are not the User.
 """
     examples = {
       "What is your name?": "I am Gary. I used to sell cars.",
-      "What is 2+3?": "I don't know, but I can get you a great deal on a certified preowned slightly used Toyota Corolla"
+      "What is 2+3?": "I don't know, but I can get you a great deal on a certified preowned slightly used Toyota Corolla",
     }
 
     user_delim = "\nUser: "
     resp_delim = "Gary: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+    pre_prompt += "".join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
   elif args.personality.lower() == "lexie":
     pre_prompt = f"""Consider that the following is conversation between an attractive young girl named Lexie and a handsome man named Chad
 You are Lexie!
@@ -429,13 +532,13 @@ After you are done speaking, output [EOS]. You are not Chad.
     examples = {
       "hi lexie": "hi chad, glad we finally met up!",
       "you look better than your pictures": "thanks! are you subscribed to my onlyfans?",
-      "i am. so how'd you end up in LA?": "i moved out here about a year ago. i want to be an actress"
+      "i am. so how'd you end up in LA?": "i moved out here about a year ago. i want to be an actress",
     }
 
     user_delim = "\nChad: "
     resp_delim = "Lexie: "
     end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+    pre_prompt += "".join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k, v in examples.items())
 
   # *** prompt engineers stop here ****
 
@@ -454,7 +557,7 @@ After you are done speaking, output [EOS]. You are not Chad.
     start_pos = len(toks)
     with Timing():
       llama.model(Tensor([toks], device=device), 0, args.temperature).realize()  # NOTE: outputs are not used
-  print(outputted, end='', flush=True)
+  print(outputted, end="", flush=True)
 
   # chatbot loop
   while 1:
@@ -464,7 +567,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       outputted += user_prompt
 
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
-    assert toks == new_toks[:len(toks)] or args.gen == "3"
+    assert toks == new_toks[: len(toks)] or args.gen == "3"
     toks = new_toks
     assert outputted == llama.tokenizer.decode(toks)
 
@@ -472,15 +575,32 @@ After you are done speaking, output [EOS]. You are not Chad.
     for i in range(args.count):
       GlobalCounters.reset()
 
-      if args.timing or args.profile: print("")
+      if args.timing or args.profile:
+        print("")
       st = GlobalCounters.time_sum_s
-      next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
+      next_tok = Tensor([toks[start_pos:]], device=device) if tok_tensor is None or (len(toks) - start_pos) > 1 else tok_tensor.reshape(1, 1)
       with Profiling(enabled=args.profile):
-        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+        with Timing(
+          "total ",
+          enabled=args.timing,
+          on_exit=lambda x: f", {1e9 / x:.2f} tok/s, {GlobalCounters.global_mem / x:.2f} GB/s, param {param_bytes / x:.2f} GB/s",
+        ):
           with WallTimeEvent(BenchEvent.STEP):
-            with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                        f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                        (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+            with Timing(
+              "enqueue in ",
+              on_exit=(
+                lambda et: (f", {(GlobalCounters.time_sum_s - st) * 1e3:.2f} ms on GPU" if DEBUG >= 2 else "")
+                + f", {GlobalCounters.global_ops * 1e-9:.2f} GOPS, {GlobalCounters.global_mem * 1e-9:.2f} GB"
+                + (
+                  f", {GlobalCounters.global_mem * 1e-9 / (GlobalCounters.time_sum_s - st):.2f} GB/s, param {param_bytes * 1e-9 / (GlobalCounters.time_sum_s - st):.2f} GB/s"
+                  if DEBUG >= 2
+                  else ""
+                )
+              )
+              if DEBUG
+              else None,
+              enabled=args.timing,
+            ):
               tok_tensor = llama.model(next_tok, start_pos, args.temperature)
             tok = tok_tensor.item()
 
@@ -492,13 +612,15 @@ After you are done speaking, output [EOS]. You are not Chad.
 
       # TODO: this is a hack to deal with spaces. i think the decode is fast though, so who cares?
       cur = llama.tokenizer.decode(toks)
-      sys.stdout.write(cur[len(outputted):])
+      sys.stdout.write(cur[len(outputted) :])
       sys.stdout.flush()
       outputted = cur
 
       # stop after you have your answer
-      if chatbot and end_delim in outputted[-10:]: break
-    if not chatbot: break
+      if chatbot and end_delim in outputted[-10:]:
+        break
+    if not chatbot:
+      break
 
   # validate output!
   if args.temperature == 0 and args.count == 10 and args.prompt == "Hello.":

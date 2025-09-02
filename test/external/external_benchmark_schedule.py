@@ -7,7 +7,8 @@ from tinygrad.uop.spec import type_verify
 
 if __name__ == "__main__":
   mdl = ResNet50()
-  for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
+  for p in nn.state.get_parameters(mdl):
+    p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
 
   PROFILE = getenv("PYPROFILE", 0)
@@ -25,8 +26,9 @@ if __name__ == "__main__":
           sched = out.schedule()
 
       if not SCHEDULE_ONLY:
-        asts = list({x.ast.key:x.ast for x in sched if x.ast.op is Ops.SINK}.values())
-        if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
+        asts = list({x.ast.key: x.ast for x in sched if x.ast.op is Ops.SINK}.values())
+        if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1:
+          asts = asts[restrict_kernel : restrict_kernel + 1]
 
         rewrites = get_rewrites_for_renderer(Device.default.renderer, linearizer=False)
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
@@ -41,5 +43,6 @@ if __name__ == "__main__":
             for u in rewritten_uops:
               uops_line.append(apply_rewrites(u, rewrites_for_linearizer))
           with Timing("***** model verify in    "):
-            for u in uops_line: type_verify(u.arg.lst)
+            for u in uops_line:
+              type_verify(u.arg.lst)
           print(sum(len(u.arg.lst) for u in uops_line))

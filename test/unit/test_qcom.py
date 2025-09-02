@@ -3,14 +3,15 @@ import unittest
 from tinygrad.device import Device, BufferSpec
 from tinygrad.dtype import dtypes
 
+
 @unittest.skipUnless(Device.DEFAULT == "QCOM", "QCOM device required to run")
 class TestQcom(unittest.TestCase):
   def test_image_pitch(self):
     dev = Device["QCOM"]
 
     def __validate(imgdt, expected_pitch):
-      img = dev.allocator.alloc(imgdt.shape[0] * imgdt.shape[1] * 16, options:=BufferSpec(image=imgdt))
-      pitch = (img.descriptor[2] & 0x1fffff80) >> 7
+      img = dev.allocator.alloc(imgdt.shape[0] * imgdt.shape[1] * 16, options := BufferSpec(image=imgdt))
+      pitch = (img.descriptor[2] & 0x1FFFFF80) >> 7
       assert pitch == expected_pitch, f"Failed pitch for image: {imgdt}. Got 0x{pitch:X}, expected 0x{expected_pitch:X}"
       dev.allocator.free(img, imgdt.shape[0] * imgdt.shape[1] * 16, options)
 
@@ -68,6 +69,7 @@ class TestQcom(unittest.TestCase):
     __validate(dtypes.imagef((1, 64)), 0x400)
     __validate(dtypes.imagef((1, 1239)), 0x4D80)
     __validate(dtypes.imagef((1, 1)), 0x40)
+
 
 if __name__ == "__main__":
   unittest.main()

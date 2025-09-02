@@ -4,35 +4,46 @@ from tinygrad.device import Buffer
 from tinygrad.engine.memory import _internal_memory_planner
 
 global_map = {}
+
+
 def b(i, base=None, offset=0, pin=False, size=16):
   global global_map
-  if i in global_map: return global_map[i]
+  if i in global_map:
+    return global_map[i]
   global_map[i] = Buffer(Device.DEFAULT, size, dtypes.int8, base=global_map[base] if base is not None else None, offset=offset)
-  if pin: global_map[i].ref(1)
+  if pin:
+    global_map[i].ref(1)
   return global_map[i]
 
-def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]]):
+
+def check_assign(buffers: list[list[Buffer] | tuple[Buffer, ...]]):
   assigned = _internal_memory_planner(buffers, noopt_buffers=None)
 
   taken_parts = set()
   first_appearance, last_appearance = {}, {}
-  for i,u in enumerate(buffers):
+  for i, u in enumerate(buffers):
     for buf in u:
-      if buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0: continue
-      if buf.base not in first_appearance: first_appearance[buf.base] = i
+      if buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0:
+        continue
+      if buf.base not in first_appearance:
+        first_appearance[buf.base] = i
       last_appearance[buf.base] = i
 
-  for i,u in enumerate(buffers):
+  for i, u in enumerate(buffers):
     for buf in u:
-      if buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0: continue
+      if buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0:
+        continue
       cur, base = assigned.get(buf, buf), assigned.get(buf.base, buf.base)
       if buf._base is not None:
         assert cur.base == base.base and cur.offset == buf.offset + base.offset, f"failed: {buf} {cur} {base} {buf.offset} {base.offset}"
       else:
         for part in taken_parts:
           assert buf.base == part[3] or part[0] != cur.base or part[1] + part[2] <= cur.offset or part[1] >= cur.offset + buf.nbytes
-        if first_appearance[buf.base] == i: taken_parts.add((cur.base, cur.offset, buf.nbytes, buf.base))
-        if last_appearance[buf.base] == i: taken_parts.remove((cur.base, cur.offset, buf.nbytes, buf.base))
+        if first_appearance[buf.base] == i:
+          taken_parts.add((cur.base, cur.offset, buf.nbytes, buf.base))
+        if last_appearance[buf.base] == i:
+          taken_parts.remove((cur.base, cur.offset, buf.nbytes, buf.base))
+
 
 class TestMemoryPlanner(unittest.TestCase):
   def setUp(self):
@@ -110,7 +121,6 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3, base=1, offset=0, size=8), b(2, base=0, offset=0, size=8)],
       [b(5, base=1, offset=8, size=8), b(4, base=0, offset=8, size=8)],
       [b(7, base=1, offset=4, size=8), b(6, base=0, offset=4, size=8)],
-
       [b(4), b(5), b(2)],
       [b(3), b(7)],
       [b(10), b(6), b(7)],
@@ -133,6 +143,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3, size=1 << 128), b(4, size=1 << 64)],
     ]
     check_assign(bs)
+
 
 if __name__ == "__main__":
   unittest.main()

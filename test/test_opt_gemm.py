@@ -5,6 +5,7 @@ from tinygrad.helpers import get_single_element
 from tinygrad.codegen.opt.kernel import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 
+
 class TestOptGemm(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -39,5 +40,6 @@ class TestOptGemm(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=2), Opt(op=OptOps.UPCAST, axis=1, arg=2)]
     self._test_gemm_unrolled_permute_l(opts)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

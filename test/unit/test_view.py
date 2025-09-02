@@ -3,61 +3,63 @@ import unittest
 from tinygrad.shape.view import View, merge_dims
 # from tinygrad.shape.shapetracker import ShapeTracker
 
+
 class TestView(unittest.TestCase):
   def test_canonicalize_empty_mask(self):
-    v = View.create(shape=(2,2,2), strides=(4,2,1), mask=((0,2),(0,2),(0,2)))
+    v = View.create(shape=(2, 2, 2), strides=(4, 2, 1), mask=((0, 2), (0, 2), (0, 2)))
     self.assertIsNone(v.mask)
-    v = View.create(shape=(4,3,2), strides=(1,4,10), mask=((0,4),(0,3),(0,2)))
+    v = View.create(shape=(4, 3, 2), strides=(1, 4, 10), mask=((0, 4), (0, 3), (0, 2)))
     self.assertIsNone(v.mask)
 
   def test_minify_zero_strided_dims(self):
-    target = View.create(shape=(2,2), strides=(30,2), offset=7, mask=None)
-    v = View.create(shape=(2,1,2), strides=(30,0,2), offset=7, mask=None)
+    target = View.create(shape=(2, 2), strides=(30, 2), offset=7, mask=None)
+    v = View.create(shape=(2, 1, 2), strides=(30, 0, 2), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(1,2,2), strides=(0,30,2), offset=7, mask=None)
+    v = View.create(shape=(1, 2, 2), strides=(0, 30, 2), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(2,2,1), strides=(30,2,0), offset=7, mask=None)
+    v = View.create(shape=(2, 2, 1), strides=(30, 2, 0), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(2,1,1,2), strides=(30,0,0,2), offset=7, mask=None)
+    v = View.create(shape=(2, 1, 1, 2), strides=(30, 0, 0, 2), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(1,1,2,2), strides=(0,0,30,2), offset=7, mask=None)
+    v = View.create(shape=(1, 1, 2, 2), strides=(0, 0, 30, 2), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(2,2,1,1), strides=(30,2,0,0), offset=7, mask=None)
+    v = View.create(shape=(2, 2, 1, 1), strides=(30, 2, 0, 0), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(1,2,2,1), strides=(0,30,2,0), offset=7, mask=None)
+    v = View.create(shape=(1, 2, 2, 1), strides=(0, 30, 2, 0), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
-    v = View.create(shape=(1,2,1,2), strides=(0,30,0,2), offset=7, mask=None)
+    v = View.create(shape=(1, 2, 1, 2), strides=(0, 30, 0, 2), offset=7, mask=None)
     self.assertEqual(v.minify(), target)
 
   def test_empty_mask_contiguous(self):
-    v1 = View.create(shape=(2,2,2), strides=(4,2,1), mask=None)
-    v2 = View.create(shape=(2,2,2), strides=(4,2,1), mask=((0,2),(0,2),(0,2)))
+    v1 = View.create(shape=(2, 2, 2), strides=(4, 2, 1), mask=None)
+    v2 = View.create(shape=(2, 2, 2), strides=(4, 2, 1), mask=((0, 2), (0, 2), (0, 2)))
     self.assertEqual(v1.contiguous, v2.contiguous)
-    v1 = View.create(shape=(1,1,1,4), strides=(0,0,0,1), offset=0, mask=None)
-    v2 = View.create(shape=(1,1,1,4), strides=(0,0,0,1), offset=0, mask=((0,1),(0,1),(0,1),(0,4)))
+    v1 = View.create(shape=(1, 1, 1, 4), strides=(0, 0, 0, 1), offset=0, mask=None)
+    v2 = View.create(shape=(1, 1, 1, 4), strides=(0, 0, 0, 1), offset=0, mask=((0, 1), (0, 1), (0, 1), (0, 4)))
     self.assertEqual(v1.contiguous, v2.contiguous)
-    v = View.create(shape=(2,3,4), mask=((0,2),(0,3),(0,4)))
+    v = View.create(shape=(2, 3, 4), mask=((0, 2), (0, 3), (0, 4)))
     self.assertTrue(v.contiguous)
 
   def test_reshape_all_invalid(self):
-    v = View.create((4,5), mask=((0,0), (0,0))).reshape((20,))
+    v = View.create((4, 5), mask=((0, 0), (0, 0))).reshape((20,))
     self.assertIsNotNone(v)
-    self.assertEqual(v, View.create((20,), mask=((0,0),)))
+    self.assertEqual(v, View.create((20,), mask=((0, 0),)))
 
   def test_add_0(self):
-    v1 = View.create((2,3,4))
-    v2 = View.create((2,0,4))
-    self.assertEqual(v2, v1+v2)
+    v1 = View.create((2, 3, 4))
+    v2 = View.create((2, 0, 4))
+    self.assertEqual(v2, v1 + v2)
 
   def test_add_0_masked(self):
-    v1 = View.create((2,3,4), mask=((0, 0), (0, 0), (0, 0)))
-    v2 = View.create((2,0,4))
-    self.assertEqual(v2, v1+v2)
+    v1 = View.create((2, 3, 4), mask=((0, 0), (0, 0), (0, 0)))
+    v2 = View.create((2, 0, 4))
+    self.assertEqual(v2, v1 + v2)
+
 
 class TestMergeDims(unittest.TestCase):
   def test_contiguous(self):
     shape = (2, 3, 4)
-    strides = (12, 4, 1) #=strides_for_shape(shape)
+    strides = (12, 4, 1)  # =strides_for_shape(shape)
     m = merge_dims(shape, strides)
     self.assertEqual(m, ((24, 1, 24),))
 
@@ -87,6 +89,7 @@ class TestMergeDims(unittest.TestCase):
 
     # print(f"{ShapeTracker.from_shape((2, 1, 1)).pad(((0, 0), (0, 1), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 2), (1, 0, 0), ((0, 2), (0, 2), (0, 1))), ((2, 1, 2), (4, 0, 4)))
+
 
 class TestMergeViews(unittest.TestCase):
   def test_with_mask_0(self):
@@ -187,11 +190,12 @@ class TestMergeViews(unittest.TestCase):
 
   def test_merge_views_variable(self):
     from tinygrad import Variable
+
     N = 100
-    start_pos = Variable("start_pos", 1, N-1)
+    start_pos = Variable("start_pos", 1, N - 1)
     v0 = View(shape=(N, 32, 2), strides=(32, 1, 0), offset=0, mask=((0, N), (0, 32), (0, 1)), contiguous=False)
-    v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=start_pos*64, mask=None, contiguous=False)
-    target = View(shape=(1, 8, 1, 32), strides=(0,0,0,1), offset=start_pos*32, mask=None, contiguous=False)
+    v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=start_pos * 64, mask=None, contiguous=False)
+    target = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 1), offset=start_pos * 32, mask=None, contiguous=False)
     v = v0 + v1
     self.assertIsNotNone(v)
     self.assertEqual(v, target)
@@ -244,5 +248,6 @@ class TestMergeViews(unittest.TestCase):
     # TODO: why is this different?
     self.assertIsNone(v)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import unittest
 
+
 class ExternalTestLosses(unittest.TestCase):
   def setUp(self):
     np.random.seed(42)
@@ -22,8 +23,10 @@ class ExternalTestLosses(unittest.TestCase):
     self._assert_loss(pred, label, tinygrad_metrics_res, ref_metrics_res, atol=1e-4)
 
   def test_sigmoid_focal_loss(self):
-    def _apply_logit(p): return np.log(p / (1 - p))
-    pred, tgt = _apply_logit(np.random.rand(5,2).astype(np.float32)), np.random.randint(0, 2, (5, 2)).astype(np.float32)
+    def _apply_logit(p):
+      return np.log(p / (1 - p))
+
+    pred, tgt = _apply_logit(np.random.rand(5, 2).astype(np.float32)), np.random.randint(0, 2, (5, 2)).astype(np.float32)
     for reduction in ["mean", "sum", "none"]:
       for alpha, gamma in zip([-1, 0.58], [0, 2]):
         self._assert_loss(pred, tgt, sigmoid_focal_loss, ref_sigmoid_focal_loss, rtol=1e-4, alpha=alpha, gamma=gamma, reduction=reduction)
@@ -36,5 +39,6 @@ class ExternalTestLosses(unittest.TestCase):
         pred, tgt = np.random.randint(shape).astype(np.float32), np.random.randint(shape)
         self._assert_loss(pred, tgt, l1_loss, torch.nn.functional.l1_loss, reduction=reduction)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

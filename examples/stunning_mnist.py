@@ -33,7 +33,7 @@ if __name__ == "__main__":
     opt.schedule_steps(i)
     """
     # TODO: this shouldn't be a for loop. something like: (contract is still up in the air)
-    vi = Variable('i', 0, samples.shape[0]-1)
+    vi = Variable("i", 0, samples.shape[0] - 1)
     losses = []
     for i in range(samples.shape[0]):
       vib = vi.bind(i)
@@ -41,11 +41,12 @@ if __name__ == "__main__":
       losses.append(model(X_samp[vib]).sparse_categorical_crossentropy(Y_samp[vib]).backward())
       opt.schedule_step()
     # TODO: this stack currently breaks the "generator" aspect of losses. it probably shouldn't
-    if getenv("STACK", 0): losses = Tensor.stack(*losses)
+    if getenv("STACK", 0):
+      losses = Tensor.stack(*losses)
   print("*** scheduled training")
 
   # evaluate the model
-  test_acc = ((model(X_test).argmax(axis=1) == Y_test).mean()*100)
+  test_acc = (model(X_test).argmax(axis=1) == Y_test).mean() * 100
   print("*** scheduled eval")
 
   # NOTE: there's no kernels run in the scheduling phase
@@ -53,7 +54,7 @@ if __name__ == "__main__":
 
   # only actually do anything at the end
   if getenv("LOSS", 1):
-    for i in (t:=trange(len(losses))):
+    for i in (t := trange(len(losses))):
       GlobalCounters.reset()
       t.set_description(f"loss: {losses[i].item():6.2f}")
   if getenv("TEST", 1):

@@ -10,4 +10,3 @@ __kernel void test(__global half *out, __global half *a, __global half *b) {
 }
 """)
   prg = CLProgram(dev, "test", lib)
-

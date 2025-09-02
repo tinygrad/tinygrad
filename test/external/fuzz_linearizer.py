@@ -10,14 +10,18 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
   try:
     import extra.nv_gpu_driver.nv_ioctl
     from tinygrad import Device
+
     _, _ = Device["NV"], Device["CUDA"]
-  except Exception: pass
+  except Exception:
+    pass
 
   try:
     import extra.qcom_gpu_driver.opencl_ioctl
     from tinygrad import Device
+
     _, _ = Device["QCOM"], Device["GPU"]
-  except Exception: pass
+  except Exception:
+    pass
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
@@ -29,14 +33,24 @@ from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Tim
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.device import is_dtype_supported
 
-def on_linearizer_will_run(): pass
-def on_linearizer_did_run(): pass
-def compare_states(x, y): return (True, "")
+
+def on_linearizer_will_run():
+  pass
+
+
+def on_linearizer_did_run():
+  pass
+
+
+def compare_states(x, y):
+  return (True, "")
+
 
 if getenv("VALIDATE_HCQ"):
   if Device.DEFAULT == "NV":
     print("VALIDATE_HCQ: Comparing NV to CUDA")
     import extra.nv_gpu_driver.nv_ioctl
+
     validate_device = Device["CUDA"]
     on_linearizer_will_run = extra.nv_gpu_driver.nv_ioctl.before_launch
     on_linearizer_did_run = extra.nv_gpu_driver.nv_ioctl.collect_last_launch_state
@@ -44,15 +58,18 @@ if getenv("VALIDATE_HCQ"):
   elif Device.DEFAULT == "QCOM":
     print("VALIDATE_HCQ: Comparing QCOM to GPU")
     import extra.qcom_gpu_driver.opencl_ioctl
+
     validate_device = Device["GPU"]
     on_linearizer_will_run = extra.qcom_gpu_driver.opencl_ioctl.before_launch
     on_linearizer_did_run = extra.qcom_gpu_driver.opencl_ioctl.collect_last_launch_state
     compare_states = extra.qcom_gpu_driver.opencl_ioctl.compare_launch_state
   else:
-    print(colored("VALIDATE_HCQ options is ignored", 'red'))
+    print(colored("VALIDATE_HCQ options is ignored", "red"))
 
-def tuplize_uops(uops:list[UOp]) -> tuple:
+
+def tuplize_uops(uops: list[UOp]) -> tuple:
   return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
+
 
 def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
@@ -60,7 +77,7 @@ def get_fuzz_rawbufs(lin):
   # Reallocate output buffer with additional area to detect out-of-bounds writes.
   RED_AREA_SIZE = 1024
   # setting output  # TODO: multi-output kernel
-  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size + RED_AREA_SIZE)
   # setting inputs
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
@@ -77,10 +94,12 @@ def get_fuzz_rawbufs(lin):
       rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().uop.base.realized.as_buffer())
   return rawbufs
 
+
 def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_device=None):
   rawbuf = type(old_rawbuf)(force_device or old_rawbuf.device, old_rawbuf.size if size is None else size, old_rawbuf.dtype).allocate()
   if copy:
-    with Context(DEBUG=0): rawbuf.copyin(old_rawbuf.as_buffer())
+    with Context(DEBUG=0):
+      rawbuf.copyin(old_rawbuf.as_buffer())
   elif zero:
     with Context(DEBUG=0):
       mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
@@ -88,30 +107,39 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
       rawbuf.copyin(mv)
   return rawbuf
 
-def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
-  if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.vars}
+
+def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]:  # (error msg, run state)
+  if rawbufs is None:
+    rawbufs = bufs_from_lin(lin)
+  if var_vals is None:
+    var_vals = {v: v.min for v in lin.vars}
 
   # TODO: images needs required_optimization
   try:
     prg = CompiledRunner(get_program(lin.get_optimized_ast(), lin.opts))
-  except KeyboardInterrupt: raise
+  except KeyboardInterrupt:
+    raise
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR", None
 
-  if getenv("VALIDATE_HCQ"): on_linearizer_will_run()
+  if getenv("VALIDATE_HCQ"):
+    on_linearizer_will_run()
   try:
     prg(rawbufs, var_vals, wait=True)
-  except KeyboardInterrupt: raise
+  except KeyboardInterrupt:
+    raise
   except Exception:
     traceback.print_exc()
     return "EXEC_ERROR", None
 
-  if getenv("VALIDATE_HCQ"): run_state = on_linearizer_did_run()
-  else: run_state = None
+  if getenv("VALIDATE_HCQ"):
+    run_state = on_linearizer_did_run()
+  else:
+    run_state = None
 
   return "PASS", run_state
+
 
 def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
@@ -122,8 +150,9 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
     if rawbufs is None:
       rawbufs = get_fuzz_rawbufs(lin)
     else:
-      rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
-  except KeyboardInterrupt: raise
+      rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)  # get a new output buffer
+  except KeyboardInterrupt:
+    raise
   except BaseException:
     return ("RAWBUFS_ERROR", rawbufs, var_vals, ground_truth, None)
 
@@ -137,15 +166,17 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
       return ("BASELINE_ERROR", rawbufs, var_vals, ground_truth, None)
     ground_truth = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype)).copy()
 
-  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)  # get a new output buffer
   run_msg, run_state = run_linearizer(lin, rawbufs, var_vals)
-  if run_msg != "PASS": return (run_msg, rawbufs, var_vals, ground_truth, run_state)
+  if run_msg != "PASS":
+    return (run_msg, rawbufs, var_vals, ground_truth, run_state)
 
   try:
     if not has_bf16:
       result = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype))
       np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
-  except KeyboardInterrupt: raise
+  except KeyboardInterrupt:
+    raise
   except AssertionError as e:
     if DEBUG >= 2:
       print(f"COMPARE_ERROR details: {e}")
@@ -159,6 +190,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   return ("PASS", rawbufs, var_vals, ground_truth, run_state)
 
+
 def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
   SEED = getenv("SEED", 42)
   random.seed(SEED)
@@ -167,7 +199,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
   print(lin.colored_shape())
   seen_uops = {}
   last_lins = [lin]
-  failures:defaultdict[str, list[tuple[tuple[UOp, ...], list[Opt]]]] = defaultdict(list)
+  failures: defaultdict[str, list[tuple[tuple[UOp, ...], list[Opt]]]] = defaultdict(list)
   rawbufs, var_vals, ground_truth, validate_rawbufs = None, None, None, None
 
   FUZZ_ALL_ACTIONS = getenv("FUZZ_ALL_ACTIONS", 0)
@@ -185,30 +217,40 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
   for depth in range(test_depth):
     next_lins = []
     for lin in last_lins:
-      if opts_list is None: actions = get_kernel_actions(lin, include_0=False)
+      if opts_list is None:
+        actions = get_kernel_actions(lin, include_0=False)
       else:
         actions = {}
-        for oi,opts in enumerate(opts_list):
+        for oi, opts in enumerate(opts_list):
           lin2 = lin.copy()
-          for o in opts: lin2.apply_opt(o)
+          for o in opts:
+            lin2.apply_opt(o)
           actions[oi] = lin2
 
-      if not actions: continue
+      if not actions:
+        continue
       if depth == 0 and getenv("FUZZ_REQUIRE_TC", 0):
         tc_acts = {i: k for k in actions.values() if k.applied_opts[0].op == OptOps.TC}
-        if len(tc_acts) == 0: return failures
-        else: actions = tc_acts
+        if len(tc_acts) == 0:
+          return failures
+        else:
+          actions = tc_acts
 
       test_lins = list(actions.values())
-      if FUZZ_ALL_ACTIONS: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
-      elif opts_list is None: test_lins = [random.choice(test_lins)]
+      if FUZZ_ALL_ACTIONS:
+        print(f"testing {lin.applied_opts=} with {len(actions)} actions")
+      elif opts_list is None:
+        test_lins = [random.choice(test_lins)]
 
       for test_lin in test_lins:
-        if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
+        if not FUZZ_ALL_ACTIONS and test_lin.applied_opts:
+          print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(get_program(test_lin.get_optimized_ast(), test_lin.opts).uops)
-        except KeyboardInterrupt: raise
+        try:
+          tuops = tuplize_uops(get_program(test_lin.get_optimized_ast(), test_lin.opts).uops)
+        except KeyboardInterrupt:
+          raise
         except BaseException as e:
           print(test_lin.ast)
           print(test_lin.applied_opts)
@@ -216,10 +258,12 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
           failures["LINEARIZE_ERROR"].append((test_lin.ast, test_lin.applied_opts))
           continue
 
-        if tuops in seen_uops: continue
+        if tuops in seen_uops:
+          continue
         seen_uops[tuops] = tuple(test_lin.applied_opts)
 
-        if not FUZZ_ALL_ACTIONS: print(test_lin.colored_shape())
+        if not FUZZ_ALL_ACTIONS:
+          print(test_lin.colored_shape())
 
         (msg, rawbufs, var_vals, ground_truth, state1) = compare_linearizer(test_lin, rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
         if state1 is not None and validate_device is not None:
@@ -229,10 +273,12 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
             validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.device) for x in rawbufs]
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
 
-          if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
+          if _msg != "PASS":
+            failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
 
           ok, err_msg = compare_states(state1, state2)
-          if not ok: failures["HCQ_COMPARE_FAILURE"].append((err_msg, test_lin.ast, test_lin.applied_opts, state1, state2))
+          if not ok:
+            failures["HCQ_COMPARE_FAILURE"].append((err_msg, test_lin.ast, test_lin.applied_opts, state1, state2))
 
         if msg != "PASS":
           print(test_lin.ast)
@@ -244,14 +290,19 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         next_lins.append(test_lin)
 
     last_lins = next_lins
-    if FUZZ_ALL_ACTIONS: print(f"depth={depth} total_lins={len(last_lins)} {failures=}")
+    if FUZZ_ALL_ACTIONS:
+      print(f"depth={depth} total_lins={len(last_lins)} {failures=}")
   return failures
 
+
 def _is_simple(lin: Kernel) -> bool:
-  if len(lin.ast.src) > 1: return False
-  ast:UOp = lin.ast.src[0]
-  if ast.src[0].op is Ops.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
+  if len(lin.ast.src) > 1:
+    return False
+  ast: UOp = lin.ast.src[0]
+  if ast.src[0].op is Ops.CAST and ast.src[0].src[0].op is Ops.LOAD:
+    return True
   return False
+
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run a fuzz testing on one or more kernels", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -270,21 +321,23 @@ if __name__ == "__main__":
     ast_strs = [args.ast]
   elif args.file is not None:
     print(f"loading ASTs from file '{args.file}'")
-    with open(args.file, 'r') as file:
+    with open(args.file, "r") as file:
       ast_strs = file.readlines()
   elif args.beamreplay is not None:
     print(f"loading BEAM replay from file '{args.beamreplay}'")
-    with open(args.beamreplay, 'r') as file: fdata = file.readlines()
-    ast_strs, opts_list = [x.split(' :: ')[0] for x in fdata if not x.startswith("#")], [x.split(' :: ')[1] for x in fdata if not x.startswith("#")]
+    with open(args.beamreplay, "r") as file:
+      fdata = file.readlines()
+    ast_strs, opts_list = [x.split(" :: ")[0] for x in fdata if not x.startswith("#")], [x.split(" :: ")[1] for x in fdata if not x.startswith("#")]
 
     # dedup ast_strs and opts_list
     dct = defaultdict(list)
-    for i in range(len(ast_strs)): dct[ast_strs[i]].append(eval(opts_list[i]))
+    for i in range(len(ast_strs)):
+      dct[ast_strs[i]].append(eval(opts_list[i]))
     ast_strs_items = list(dct.keys())
     opts_list = [dct[c] for c in ast_strs_items]
   elif args.logfile is not None:
     print(f"loading ASTs from LOGKERNS file '{args.file}'")
-    with open(args.logfile, 'r') as file:
+    with open(args.logfile, "r") as file:
       kern_strs = file.readlines()
       test_lins = [kern_str_to_lin(kern_str) for kern_str in kern_strs]
       ast_strs = [f"{lin.ast}" for lin in test_lins]
@@ -299,11 +352,15 @@ if __name__ == "__main__":
   seen_ast_strs = set()
 
   try:
-    for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
-      if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
-      if getenv("FUZZ_IMAGEONLY") and "dtypes.image" not in ast: continue
-      if "dtypes.image" in ast and Device.DEFAULT not in {"GPU", "QCOM"}: continue  # IMAGE is only for GPU
-      if ast in seen_ast_strs: continue
+    for i, ast in enumerate(ast_strs[: getenv("FUZZ_N", len(ast_strs))]):
+      if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth:
+        continue
+      if getenv("FUZZ_IMAGEONLY") and "dtypes.image" not in ast:
+        continue
+      if "dtypes.image" in ast and Device.DEFAULT not in {"GPU", "QCOM"}:
+        continue  # IMAGE is only for GPU
+      if ast in seen_ast_strs:
+        continue
       seen_ast_strs.add(ast)
 
       lin = ast_str_to_lin(ast)
@@ -314,15 +371,17 @@ if __name__ == "__main__":
       with Timing(f"tested ast {i}: "):
         tested += 1
         fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol, opts_list=(opts_list[i] if opts_list else None))
-        if fuzz_failures: failed_ids.append(i)
+        if fuzz_failures:
+          failed_ids.append(i)
         for k, v in fuzz_failures.items():
           for f in v:
             failures[k].append(f)
-  except KeyboardInterrupt: print(colored("STOPPING...", 'red'))
+  except KeyboardInterrupt:
+    print(colored("STOPPING...", "red"))
 
   for msg, errors in failures.items():
     for i, payload in enumerate(errors):
-      print(f"{msg} {i} kernel: {payload}") # easier to use with output with verify_kernel.py
+      print(f"{msg} {i} kernel: {payload}")  # easier to use with output with verify_kernel.py
 
   print(f"{tested=}")
   if failures:

@@ -19,11 +19,13 @@ import tempfile
 import torch
 import unittest
 
+
 class ExternalTestDatasets(unittest.TestCase):
   def _set_seed(self):
     np.random.seed(42)
     random.seed(42)
     torch.manual_seed(42)
+
 
 class TestKiTS19Dataset(ExternalTestDatasets):
   def _create_samples(self, val, num_samples=2):
@@ -85,6 +87,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_sample[0][:, 0], ref_sample[0])
       np.testing.assert_equal(tinygrad_sample[1], ref_sample[1])
 
+
 class TestOpenImagesDataset(ExternalTestDatasets):
   @classmethod
   def setUpClass(cls):
@@ -99,28 +102,29 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     lbls, img_size = ["cls_1", "cls_2"], (447, 1024)
     cats = [{"id": i, "name": c, "supercategory": None} for i, c in enumerate(lbls)]
     imgs = [
-      {
-        "id": i, "file_name": f"img_{i}.jpg",
-        "height": img_size[0], "width": img_size[1],
-        "subset": subset, "license": None, "coco_url": None
-      }
+      {"id": i, "file_name": f"img_{i}.jpg", "height": img_size[0], "width": img_size[1], "subset": subset, "license": None, "coco_url": None}
       for i in range(len(lbls))
     ]
     annots = [
       {
-        "id": i, "image_id": i,
-        "category_id": 0, "bbox": [23.217183744, 31.75409775, 964.1241282560001, 326.09017434000003],
-        "area": 314391.4050683996, "IsOccluded": 0,
-        "IsInside": 0, "IsDepiction": 0,
-        "IsTruncated": 0, "IsGroupOf": 0,
-        "iscrowd": 0
+        "id": i,
+        "image_id": i,
+        "category_id": 0,
+        "bbox": [23.217183744, 31.75409775, 964.1241282560001, 326.09017434000003],
+        "area": 314391.4050683996,
+        "IsOccluded": 0,
+        "IsInside": 0,
+        "IsDepiction": 0,
+        "IsTruncated": 0,
+        "IsGroupOf": 0,
+        "iscrowd": 0,
       }
       for i in range(len(lbls))
     ]
     info = {"dataset": "openimages_mlperf", "version": "v6"}
     coco_annotations = {"info": info, "licenses": [], "categories": cats, "images": imgs, "annotations": annots}
 
-    with open(ann_file:=base_dir / Path(f"{subset}/labels/openimages-mlperf.json"), "w") as fp:
+    with open(ann_file := base_dir / Path(f"{subset}/labels/openimages-mlperf.json"), "w") as fp:
       json.dump(coco_annotations, fp)
 
     for i in range(len(lbls)):
@@ -141,14 +145,14 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     return ((img / 255.0) - np.array(self.img_mean)) / np.array(self.img_std)
 
   def test_training_set(self):
-    base_dir, ann_file = self._create_samples((subset:="train"))
+    base_dir, ann_file = self._create_samples((subset := "train"))
     transform = GeneralizedRCNNTransform(self.img_size, self.img_mean, self.img_std)
     anchors = torch.ones((120087, 4))
 
     tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset)
     ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, subset)
 
-    for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
+    for (tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _, _), (ref_img, ref_tgt) in zip(tinygrad_dataloader, ref_dataloader):
       ref_img, ref_tgt = transform(ref_img.unsqueeze(0), [ref_tgt])
       ref_tgt = postprocess_targets(ref_tgt, anchors.unsqueeze(0))
       ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
@@ -158,15 +162,16 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
 
   def test_validation_set(self):
-    base_dir, ann_file = self._create_samples((subset:="validation"))
+    base_dir, ann_file = self._create_samples((subset := "validation"))
     transform = GeneralizedRCNNTransform(self.img_size, self.img_mean, self.img_std)
 
     tinygrad_dataloader = self._create_tinygrad_dataloader(base_dir, ann_file, subset)
     ref_dataloader = self._create_ref_dataloader(base_dir, ann_file, "val")
 
-    for ((tinygrad_img, _, _, _), (ref_img, _)) in zip(tinygrad_dataloader, ref_dataloader):
+    for (tinygrad_img, _, _, _), (ref_img, _) in zip(tinygrad_dataloader, ref_dataloader):
       ref_img, _ = transform(ref_img.unsqueeze(0))
       np.testing.assert_allclose(self._normalize_img(tinygrad_img.numpy()), ref_img.tensors.transpose(1, 3).numpy(), rtol=1e-6)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

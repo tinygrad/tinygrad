@@ -5,15 +5,28 @@ from tinygrad.device import Buffer, CompiledRunner
 import ctypes
 import gpuctypes.hip as hip
 from tinygrad.helpers import to_char_p_p, init_c_var
-def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]  # noqa: E501
+
+
+def get_bytes(arg, get_sz, get_str, check) -> bytes:
+  return (
+    sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))),
+    ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value),
+  )[1]  # noqa: E501
+
+
 def check(status):
-  if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
-def compile_hip(prg:str, arch="gfx1100") -> bytes:
+  if status != 0:
+    raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
+
+
+def compile_hip(prg: str, arch="gfx1100") -> bytes:
   check(hip.hiprtcCreateProgram(ctypes.byref(prog := hip.hiprtcProgram()), prg.encode(), "<null>".encode(), 0, None, None))
-  compile_options = [f'--offload-arch={arch}', '-I/opt/rocm/include']
+  compile_options = [f"--offload-arch={arch}", "-I/opt/rocm/include"]
   status = hip.hiprtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
-  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, hip.hiprtcGetProgramLogSize, hip.hiprtcGetProgramLog, check).decode()}")
+  if status != 0:
+    raise RuntimeError(f"compile failed: {get_bytes(prog, hip.hiprtcGetProgramLogSize, hip.hiprtcGetProgramLog, check).decode()}")
   return get_bytes(prog, hip.hiprtcGetCodeSize, hip.hiprtcGetCode, check)
+
 
 prefix = """
 typedef long unsigned int size_t;
@@ -208,15 +221,15 @@ extern "C" __attribute__((global))void r_2_8_7_7_4_8_3_7_7_4_4_2_2(float* data0,
 """
 
 dev = "HIP"
-lib = Device[dev].compiler.compile(prefix+code)
-#lib = compile_hip(code)
+lib = Device[dev].compiler.compile(prefix + code)
+# lib = compile_hip(code)
 b0 = Buffer(dev, 1605632, dtypes.float)
 b1 = Buffer(dev, 301506, dtypes.float)
 b2 = Buffer(dev, 9408, dtypes.float)
-print(hex(b0._buf.value), hex(b0._buf.value+1605632*4))
+print(hex(b0._buf.value), hex(b0._buf.value + 1605632 * 4))
 print(hex(b1._buf.value))
 print(hex(b2._buf.value))
-#prg = CompiledRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [7, 1, 1], [8, 4, 1], precompiled=lib)
+# prg = CompiledRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [7, 1, 1], [8, 4, 1], precompiled=lib)
 prg = CompiledRunner("r_2_8_7_7_4_8_3_7_7_4_4_2_2", "", dev, [49, 8, 2], [8, 4, 1], precompiled=lib)
 print("compiled")
 prg([b0, b1, b2], {})

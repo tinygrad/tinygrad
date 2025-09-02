@@ -5,20 +5,21 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
 from tinygrad.uop.ops import Ops, UOp, UPat
 
+
 class TestTensorUOp(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
     def helper(a: np.ndarray):
       print(a.shape, a.strides, a.flags.c_contiguous)
       b = Tensor(a).uop
-      #assert b.st.contiguous == a.flags.c_contiguous
+      # assert b.st.contiguous == a.flags.c_contiguous
       assert b.st.shape == a.shape
       np.testing.assert_equal(a, Tensor(b).numpy())
 
     for ndims in range(1, 4):
-      a = np.random.randn(*(4,)*ndims).astype(np.float32)
+      a = np.random.randn(*(4,) * ndims).astype(np.float32)
       for stride in [-2, 1, 2]:
         for start in [0, 1]:
-          helper(a[(slice(start, None, stride),)*ndims])
+          helper(a[(slice(start, None, stride),) * ndims])
 
   def test_shuffle_pad_ops_cmpeq(self):
     y = Tensor([1]).cat(Tensor([1]) == 0).numpy()
@@ -47,15 +48,15 @@ class TestTensorUOp(unittest.TestCase):
 
   def test_shrink_const_into_zero(self):
     # regression test to make sure the shapetracker is preserved
-    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None))
-    b = Tensor.zeros(4,1,4)
+    a = Tensor.zeros(4, 4, 4).shrink((None, (0, 0), None))
+    b = Tensor.zeros(4, 1, 4)
     c = a.cat(b, dim=1)
     np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
   def test_shrink_const_then_cast(self):
     # regression test to make sure the shapetracker is preserved
-    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None)).cast(dtypes.int32)
-    b = Tensor.zeros(4,1,4)
+    a = Tensor.zeros(4, 4, 4).shrink((None, (0, 0), None)).cast(dtypes.int32)
+    b = Tensor.zeros(4, 1, 4)
     c = a.cat(b, dim=1)
     np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
@@ -71,12 +72,12 @@ class TestTensorUOp(unittest.TestCase):
   def test_contiguous_alu(self):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
-    add = (a+b).contiguous()
-    out = add+2
+    add = (a + b).contiguous()
+    out = add + 2
     sched = out.schedule()
     self.assertEqual(len(sched), 2)
     run_schedule(sched)
-    np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
+    np.testing.assert_allclose(out.numpy(), a.numpy() + b.numpy() + 2)
 
   # NOTE: contiguous on a buffer collapses
   def test_contiguous_empty(self):
@@ -87,12 +88,15 @@ class TestTensorUOp(unittest.TestCase):
   def test_contiguous_folded_alu(self):
     a = Tensor.empty(8, 8)
     # NOTE: the buffer for mul_0 late folds to just a CONST
-    mul_0 = a*0
+    mul_0 = a * 0
     out = mul_0.shrink(((4, 8), (0, 8))).contiguous()
     out.realize()
     self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
+
 reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat(Ops.REDUCE_AXIS)))))
+
+
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
     a = Tensor.rand(4, 4).realize()
@@ -116,6 +120,7 @@ class TestReduceOp(unittest.TestCase):
     assert len(sched) == 2
     for s in sched:
       assert reduce_kernel.match(s.ast, {})
+
 
 if __name__ == "__main__":
   unittest.main()

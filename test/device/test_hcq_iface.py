@@ -4,17 +4,18 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.usb import USBMMIOInterface
 from test.mockgpu.usb import MockUSB
 
+
 class TestHCQIface(unittest.TestCase):
   def setUp(self):
     self.size = 4 << 10
     self.buffer = bytearray(self.size)
-    self.mv = memoryview(self.buffer).cast('I')
-    self.mmio = MMIOInterface(mv_address(self.mv), self.size, fmt='I')
+    self.mv = memoryview(self.buffer).cast("I")
+    self.mmio = MMIOInterface(mv_address(self.mv), self.size, fmt="I")
 
   def test_getitem_setitem(self):
-    self.mmio[1] = 0xdeadbeef
-    self.assertEqual(self.mmio[1], 0xdeadbeef)
-    values = array.array('I', [10, 20, 30, 40])
+    self.mmio[1] = 0xDEADBEEF
+    self.assertEqual(self.mmio[1], 0xDEADBEEF)
+    values = array.array("I", [10, 20, 30, 40])
     self.mmio[2:6] = values
     read_slice = self.mmio[2:6]
     # self.assertIsInstance(read_slice, array.array)
@@ -28,12 +29,12 @@ class TestHCQIface(unittest.TestCase):
     self.assertEqual(full[0], 0x12345678)
 
     # offset-only view
-    self.mmio[1] = 0xdeadbeef
+    self.mmio[1] = 0xDEADBEEF
     off = self.mmio.view(offset=4)
-    self.assertEqual(off[0], 0xdeadbeef)
+    self.assertEqual(off[0], 0xDEADBEEF)
 
     # offset + size view: write into sub-view and confirm underlying buffer
-    values = array.array('I', [11, 22, 33])
+    values = array.array("I", [11, 22, 33])
     sub = self.mmio.view(offset=8, size=12)
     sub[:] = values
     self.assertEqual(sub[:], values.tolist())
@@ -42,23 +43,24 @@ class TestHCQIface(unittest.TestCase):
   def test_speed(self):
     start = time.perf_counter()
     for i in range(10000):
-      self.mmio[3:100] = array.array('I', [i] * 97)
+      self.mmio[3:100] = array.array("I", [i] * 97)
       _ = self.mmio[3:100]
     end = time.perf_counter()
 
     mvstart = time.perf_counter()
     for i in range(10000):
-      self.mv[3:100] = array.array('I', [i] * 97)
+      self.mv[3:100] = array.array("I", [i] * 97)
       _ = self.mv[3:100].tolist()
     mvend = time.perf_counter()
     print(f"speed: hcq {end - start:.6f}s vs plain mv {mvend - mvstart:.6f}s")
+
 
 class TestUSBMMIOInterface(unittest.TestCase):
   def setUp(self):
     self.size = 256
     self.buffer = bytearray(self.size)
     self.usb = MockUSB(self.buffer)
-    self.mmio = USBMMIOInterface(self.usb, 0, self.size, fmt='B', pcimem=False)
+    self.mmio = USBMMIOInterface(self.usb, 0, self.size, fmt="B", pcimem=False)
 
   def test_getitem_setitem_byte(self):
     self.mmio[1] = 0xAB
@@ -86,20 +88,21 @@ class TestUSBMMIOInterface(unittest.TestCase):
 
   def test_pcimem_byte(self):
     usb2 = MockUSB(bytearray(self.size))
-    mmio_pci = USBMMIOInterface(usb2, 0, self.size, fmt='B', pcimem=True)
+    mmio_pci = USBMMIOInterface(usb2, 0, self.size, fmt="B", pcimem=True)
     mmio_pci[3] = 0x11
     self.assertEqual(mmio_pci[3], 0x11)
     self.assertEqual(usb2.mem[3], 0x11)
 
   def test_pcimem_slice(self):
     usb3 = MockUSB(bytearray(self.size))
-    mmio_pci = USBMMIOInterface(usb3, 0, self.size, fmt='B', pcimem=True)
+    mmio_pci = USBMMIOInterface(usb3, 0, self.size, fmt="B", pcimem=True)
     values = [2, 3, 4]
     mmio_pci[4:7] = values
     raw = mmio_pci[4:7]
     self.assertIsInstance(raw, bytes)
     self.assertEqual(list(raw), values)
     self.assertEqual([mmio_pci[i] for i in range(4, 7)], values)
+
 
 if __name__ == "__main__":
   unittest.main()

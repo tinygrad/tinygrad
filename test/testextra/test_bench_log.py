@@ -6,6 +6,7 @@ from tinygrad.helpers import Context, CI
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 
+
 class TestBenchLog(unittest.TestCase):
   def setUp(self):
     clear_events()
@@ -104,5 +105,6 @@ class TestBenchLog(unittest.TestCase):
       self.assertEqual(len(_events[event]), 1)
       self.assertEqual(_events[event][0], 1000)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

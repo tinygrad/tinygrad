@@ -13,6 +13,7 @@ from test.helpers import not_support_multi_device
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
+
 # https://gist.github.com/devries/11405101
 def ksprob(a):
   fac, total, termbf = 2.0, 0.0, 0.0
@@ -25,6 +26,7 @@ def ksprob(a):
     fac = -fac
     termbf = math.fabs(term)
   return 1.0
+
 
 def kstest(l1, l2):
   n1, n2 = len(l1), len(l2)
@@ -47,6 +49,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
+
 def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 43), alpha=0.04):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
@@ -54,12 +57,18 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 4
   assert not (torch_func is None and numpy_func is None), "no function to compare with"
   x1 = tiny_func(*shape).numpy().flatten()
   x2 = tiny_func(shape).numpy().flatten()
-  if numpy_func is not None: y = numpy_func(shape).flatten()
-  if torch_func is not None: z = torch_func(shape).numpy().flatten()
-  return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and \
-    (torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha))
+  if numpy_func is not None:
+    y = numpy_func(shape).flatten()
+  if torch_func is not None:
+    z = torch_func(shape).numpy().flatten()
+  return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and (
+    torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha)
+  )
 
-def normal_test(func, shape=(20, 23), alpha=0.05): return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
+
+def normal_test(func, shape=(20, 23), alpha=0.05):
+  return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
+
 
 class TestRandomness(unittest.TestCase):
   def test_rand(self):
@@ -88,19 +97,38 @@ class TestRandomness(unittest.TestCase):
     values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([2221762175, 1752107825, 653745012, 1967534793, 1395205442, 3840423848, 2159346757,
-                   603508235, 3319473678, 3363866483, 3544324138, 1436466838, 2169858556, 2570072943,
-                   2387150698, 3678370550, 2911697663, 403244401, 2560861638, 1692360114])
+    jr = np.array([
+      2221762175,
+      1752107825,
+      653745012,
+      1967534793,
+      1395205442,
+      3840423848,
+      2159346757,
+      603508235,
+      3319473678,
+      3363866483,
+      3544324138,
+      1436466838,
+      2169858556,
+      2570072943,
+      2387150698,
+      3678370550,
+      2911697663,
+      403244401,
+      2560861638,
+      1692360114,
+    ])
 
     counts = Tensor.arange(20, dtype=dtypes.uint32)
     counts0, counts1 = counts.chunk(2)
-    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
+    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype="uint32"), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
 
   @unittest.skipIf(getenv("PTX"), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
-    for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
+    for _, ei in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
         for u in ei.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
@@ -117,24 +145,79 @@ class TestRandomness(unittest.TestCase):
     values =  values.view(np.float32) - 1
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([0.9073467254638672, 0.8235964775085449, 0.6872662305831909, 0.9920015335083008, 0.4941047430038452,
-                   0.3108327388763428, 0.09639489650726318, 0.004686474800109863, 0.8435229063034058, 0.824237585067749,
-                   0.5873836278915405, 0.4232727289199829, 0.2530076503753662, 0.40300023555755615, 0.03966474533081055,
-                   0.27904558181762695, 0.9150195121765137, 0.48057758808135986, 0.23821306228637695, 0.7676635980606079], dtype=np.float32)
+    jr = np.array(
+      [
+        0.9073467254638672,
+        0.8235964775085449,
+        0.6872662305831909,
+        0.9920015335083008,
+        0.4941047430038452,
+        0.3108327388763428,
+        0.09639489650726318,
+        0.004686474800109863,
+        0.8435229063034058,
+        0.824237585067749,
+        0.5873836278915405,
+        0.4232727289199829,
+        0.2530076503753662,
+        0.40300023555755615,
+        0.03966474533081055,
+        0.27904558181762695,
+        0.9150195121765137,
+        0.48057758808135986,
+        0.23821306228637695,
+        0.7676635980606079,
+      ],
+      dtype=np.float32,
+    )
     r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
     # next 20, np.arange(20, 40, dtype=np.uint32)
-    jr = np.array([0.7444133758544922, 0.7713677883148193, 0.8233780860900879, 0.43871235847473145, 0.517757773399353,
-                   0.6437174081802368, 0.967403769493103, 0.26167726516723633, 0.6825339794158936, 0.14966607093811035,
-                   0.28920769691467285, 0.017063498497009277, 0.2627382278442383, 0.9525482654571533, 0.9351049661636353,
-                   0.43904995918273926, 0.043945908546447754, 0.6616791486740112, 0.6667773723602295, 0.5228077173233032], dtype=np.float32)
+    jr = np.array(
+      [
+        0.7444133758544922,
+        0.7713677883148193,
+        0.8233780860900879,
+        0.43871235847473145,
+        0.517757773399353,
+        0.6437174081802368,
+        0.967403769493103,
+        0.26167726516723633,
+        0.6825339794158936,
+        0.14966607093811035,
+        0.28920769691467285,
+        0.017063498497009277,
+        0.2627382278442383,
+        0.9525482654571533,
+        0.9351049661636353,
+        0.43904995918273926,
+        0.043945908546447754,
+        0.6616791486740112,
+        0.6667773723602295,
+        0.5228077173233032,
+      ],
+      dtype=np.float32,
+    )
     r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
     # next 10, np.arange(40, 50, dtype=np.uint32)
-    jr = np.array([0.9614430665969849, 0.059279561042785645, 0.01909029483795166, 0.47882091999053955, 0.9677121639251709,
-                   0.36863112449645996, 0.3102607727050781, 0.06608951091766357, 0.35329878330230713, 0.26518797874450684], dtype=np.float32)
+    jr = np.array(
+      [
+        0.9614430665969849,
+        0.059279561042785645,
+        0.01909029483795166,
+        0.47882091999053955,
+        0.9677121639251709,
+        0.36863112449645996,
+        0.3102607727050781,
+        0.06608951091766357,
+        0.35329878330230713,
+        0.26518797874450684,
+      ],
+      dtype=np.float32,
+    )
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
@@ -167,7 +250,7 @@ class TestRandomness(unittest.TestCase):
     s2 = Tensor.rand(20).schedule()
 
     assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
-    for x,y in zip(s, s2):
+    for x, y in zip(s, s2):
       if not (x.ast == y.ast):
         print(f"{x.ast} != {y.ast}")
 
@@ -178,7 +261,7 @@ class TestRandomness(unittest.TestCase):
 
     assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
     assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"
-    for x,y in zip(s3, s4):
+    for x, y in zip(s3, s4):
       if not (x.ast == y.ast):
         print(f"{x.ast} != {y.ast}")
 
@@ -247,17 +330,18 @@ class TestRandomness(unittest.TestCase):
     assert rand.device == empty.device
 
   def test_randn(self):
-    self.assertEqual(Tensor.randn(3,3,dtype=dtypes.half).dtype, dtypes.half)
+    self.assertEqual(Tensor.randn(3, 3, dtype=dtypes.half).dtype, dtypes.half)
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
   def test_randn_device(self):
-    self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
+    self.assertEqual(Tensor.randn(3, 3, device="CPU").device, "CPU")
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
   def test_randn_finite(self, default_float):
-    if not is_dtype_supported(default_float): return
+    if not is_dtype_supported(default_float):
+      return
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float
@@ -271,37 +355,57 @@ class TestRandomness(unittest.TestCase):
 
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
-    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5),
-                                       numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
-    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5, dtype="int32"),
-                                       numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
-    self.assertTrue(Tensor.randint(1, device="CPU").device=="CPU")
+    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
+    self.assertTrue(
+      equal_distribution(partial(Tensor.randint, low=-2, high=5, dtype="int32"), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x))
+    )
+    self.assertTrue(Tensor.randint(1, device="CPU").device == "CPU")
     # check types of args
-    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0.1, high=3)
-    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
-    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=1, high=3, dtype="float")
-    with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
+    with self.assertRaises(TypeError):
+      Tensor.randint((3, 4), low=0.1, high=3)
+    with self.assertRaises(TypeError):
+      Tensor.randint((3, 4), low=0, high=3.5)
+    with self.assertRaises(TypeError):
+      Tensor.randint((3, 4), low=1, high=3, dtype="float")
+    with self.assertRaises(TypeError):
+      Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
-    self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1),
-                                                      lambda x: np.random.normal(loc=0, scale=1, size=x)))
+    self.assertTrue(
+      equal_distribution(
+        Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1), lambda x: np.random.normal(loc=0, scale=1, size=x)
+      )
+    )
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x)), lambda x: np.random.uniform(size=x)))
-    self.assertTrue(equal_distribution(partial(Tensor.uniform, low=-100, high=100, dtype=dtypes.int32),
-                                       numpy_func=lambda x: np.random.randint(low=-100, high=100, size=x)))
+    self.assertTrue(
+      equal_distribution(
+        partial(Tensor.uniform, low=-100, high=100, dtype=dtypes.int32), numpy_func=lambda x: np.random.randint(low=-100, high=100, size=x)
+      )
+    )
 
   def test_scaled_uniform(self):
     self.assertFalse(normal_test(Tensor.scaled_uniform))
-    self.assertTrue(equal_distribution(Tensor.scaled_uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1) / math.sqrt(math.prod(x)),
-                                                              lambda x: np.random.uniform(-1, 1, size=x) / math.sqrt(math.prod(x))))
+    self.assertTrue(
+      equal_distribution(
+        Tensor.scaled_uniform,
+        lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1) / math.sqrt(math.prod(x)),
+        lambda x: np.random.uniform(-1, 1, size=x) / math.sqrt(math.prod(x)),
+      )
+    )
 
   def test_glorot_uniform(self):
     self.assertFalse(normal_test(Tensor.glorot_uniform))
-    self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)),
-                                                              lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
+    self.assertTrue(
+      equal_distribution(
+        Tensor.glorot_uniform,
+        lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)),
+        lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:]))),
+      )
+    )
 
   def test_kaiming_uniform(self):
     for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
@@ -314,6 +418,7 @@ class TestRandomness(unittest.TestCase):
   def test_multinomial(self):
     self.assertRaises(AssertionError, lambda: Tensor(2).multinomial(1, replacement=False))
     self.assertRaises(AssertionError, lambda: Tensor([1, 9]).multinomial(0, replacement=False))
+
     def _check_with_torch(w, num_samples, replacement):
       tiny_res = Tensor(w).multinomial(num_samples, replacement=replacement)
       torch_res = torch.tensor(w).multinomial(num_samples, replacement=replacement)
@@ -323,15 +428,17 @@ class TestRandomness(unittest.TestCase):
         torch_res = torch_res.unsqueeze(0)
       for i in range(torch_res.shape[0]):
         self.assertTrue(equal_distribution(lambda *_: tiny_res[i], lambda _: torch_res[i]))
-    _check_with_torch(w=[0.231, 0., 1., 0.5], num_samples=2000, replacement=True)
+
+    _check_with_torch(w=[0.231, 0.0, 1.0, 0.5], num_samples=2000, replacement=True)
     _check_with_torch(w=[[0.2, 0.8]], num_samples=2000, replacement=True)  # 2D but only 1 row
-    _check_with_torch(w=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=2000, replacement=True)
+    _check_with_torch(w=[[0.453, 0.0, 1.0, 0.81], [0.1, 0.8, 0.0, 0.1]], num_samples=2000, replacement=True)
     # no-replacement isn't supported, unless taking only one sample
     w = [0.1, 0.9]
     self.assertRaises(AssertionError, lambda: Tensor(w).multinomial(100, replacement=False))
 
     @TinyJit
-    def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
+    def sample_one():
+      return Tensor(w).multinomial(1, replacement=False).realize()
 
     tiny_samples = [sample_one().item() for _ in range(1000)]
     torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
@@ -345,7 +452,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(equal_distribution(lambda *_: tiny_res, lambda _: torch_res))
 
   def test_conv2d_init(self):
-    params = (128, 256, (3,3))
+    params = (128, 256, (3, 3))
     assert equal_distribution(lambda *_: nn.Conv2d(*params).weight, lambda _: torch.nn.Conv2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.Conv2d(*params).bias, lambda _: torch.nn.Conv2d(*params).bias.detach())
 
@@ -358,6 +465,7 @@ class TestRandomness(unittest.TestCase):
     params = (64,)
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).weight, lambda _: torch.nn.BatchNorm2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).bias, lambda _: torch.nn.BatchNorm2d(*params).bias.detach())
+
 
 if __name__ == "__main__":
   unittest.main()

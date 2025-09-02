@@ -4,6 +4,7 @@ from tinygrad.device import Buffer
 from tinygrad.helpers import Context
 from test.helpers import REAL_DEV
 
+
 @unittest.skipUnless(hasattr(Device[Device.DEFAULT].allocator, "_offset"), "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
   def setUp(self):
@@ -20,7 +21,7 @@ class TestSubBuffer(unittest.TestCase):
     # NOTE: bitcast depends on endianness
     vbuf = self.buf.view(2, dtypes.uint16, offset=3).ensure_allocated()
     tst = vbuf.as_buffer().cast("H").tolist()
-    assert tst == [3|(4<<8), 5|(6<<8)]
+    assert tst == [3 | (4 << 8), 5 | (6 << 8)]
 
   def test_subbuffer_double(self):
     vbuf = self.buf.view(4, dtypes.uint8, offset=3).ensure_allocated()
@@ -106,8 +107,8 @@ class TestSubBuffer(unittest.TestCase):
     self.assertTrue(sub_buf.is_initialized())
 
   def test_subbuffer_copy_in_out(self):
-    sub_buf = self.buf.view(3, dtypes.uint8, offset=3).ensure_allocated() # [3:6]
-    data_out_sub = bytearray([0]*3)
+    sub_buf = self.buf.view(3, dtypes.uint8, offset=3).ensure_allocated()  # [3:6]
+    data_out_sub = bytearray([0] * 3)
     sub_buf.copyout(memoryview(data_out_sub))
     assert data_out_sub == bytearray(range(3, 6))
     sub_buf.copyin(memoryview(bytearray(range(3))))
@@ -115,28 +116,28 @@ class TestSubBuffer(unittest.TestCase):
     assert self.buf.as_buffer().tolist()[3:6] == list(range(3))
     sub_buf.copyout(memoryview(data_out_sub))
     assert data_out_sub == bytearray(range(3))
-    data_out_base = bytearray([0]*10)
+    data_out_base = bytearray([0] * 10)
     self.buf.copyout(memoryview(data_out_base))
     assert data_out_base[0:3] == bytearray(range(0, 3))
     assert data_out_base[3:6] == data_out_sub
     assert data_out_base[6:10] == bytearray(range(6, 10))
 
   def test_subbuffer_copy_in_out_view_of_view(self):
-    view1 = self.buf.view(7, dtypes.uint8, offset=2).ensure_allocated() # [2:9]
-    view2 = view1.view(3, dtypes.uint8, offset=2).ensure_allocated()   # [4:7]
+    view1 = self.buf.view(7, dtypes.uint8, offset=2).ensure_allocated()  # [2:9]
+    view2 = view1.view(3, dtypes.uint8, offset=2).ensure_allocated()  # [4:7]
     self.assertTrue(view1.is_allocated())
     self.assertTrue(view2.is_allocated())
 
     data_in = bytearray([7, 8, 9])
     view2.copyin(memoryview(data_in))
-    data_out_v2 = bytearray([0]*3)
+    data_out_v2 = bytearray([0] * 3)
     view2.copyout(memoryview(data_out_v2))
     assert data_in == data_out_v2
 
     expected_base_data = memoryview(bytearray(range(10)))
     expected_base_data[4:7] = data_in
 
-    data_out_base = bytearray([0]*10)
+    data_out_base = bytearray([0] * 10)
     self.buf.copyout(memoryview(data_out_base))
     assert expected_base_data == data_out_base
 
@@ -179,5 +180,6 @@ class TestSubBuffer(unittest.TestCase):
     with self.assertRaises(AssertionError):
       sub_buf.as_buffer().tolist()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
   unittest.main()

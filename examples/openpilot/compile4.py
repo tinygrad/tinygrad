@@ -16,7 +16,7 @@ if __name__ == "__main__":
   run_onnx = OnnxRunner(onnx_file)
 
   inputs = run_onnx.get_empty_input_data("npy", dtypes.float32)
-  out: Tensor = next(iter(run_onnx({k:v.to(None) for k,v in inputs.items()}).values())).to('cpu')
+  out: Tensor = next(iter(run_onnx({k: v.to(None) for k, v in inputs.items()}).values())).to("cpu")
   root = out.uop
   targets = [x.uop for x in inputs.values()]
   print(targets)
@@ -25,7 +25,8 @@ if __name__ == "__main__":
 
   # compute the target path (top down)
   in_target_path: dict[UOp, bool] = {}
-  for u in root.toposort(): in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
+  for u in root.toposort():
+    in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
   independent_set = {}
   for u in root.toposort():
     if in_target_path[u]:
