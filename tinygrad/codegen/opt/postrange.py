@@ -76,7 +76,7 @@ class Scheduler:
     store_rngs = self.ast.src[0].src[2:]
 
     # filter any not in local stores
-    local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].dtype.addrspace == AddrSpace.LOCAL) \
+    local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].ptrdtype.addrspace == AddrSpace.LOCAL) \
                         or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
@@ -126,7 +126,7 @@ class Scheduler:
     try:
       if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
         check(opt.axis is not None)
-        rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][opt.axis]
+        rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][cast(int, opt.axis)]
         check(rng.arg[-1] in {AxisType.REDUCE}, "can only unroll/upcast reduce")
       else:
         rng = self.rngs[opt.axis]
@@ -140,7 +140,7 @@ class Scheduler:
       OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
 
     if opt.op in opt_to_at:
-      amt = rng.src[0].arg if opt.arg == 0 else opt.arg
+      amt:int = (rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
       if opt.op is OptOps.UNROLL: check(amt <= 32, "don't unroll more than 32")
       if opt.op is OptOps.UPCAST: check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
@@ -157,6 +157,7 @@ class Scheduler:
         altrng = self.rngs[opt.arg]
       except IndexError:
         raise KernelOptError
+      check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
       self.ast = graph_rewrite(self.ast, remove_tags)
@@ -186,12 +187,12 @@ class Scheduler:
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
-          if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): return None
+          if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): continue
 
           # pick ranges
           # NOTE: why are in1 and in0 switched?
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
-          if not (axis < len(axis_choices)): return None
+          if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
 
           # do optimizations and save the ranges
@@ -246,7 +247,7 @@ class Scheduler:
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.parents if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
-  return [Buffer(dname, x.dtype.size, x.dtype.base) for x in glbls]
+  return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
 
 def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None

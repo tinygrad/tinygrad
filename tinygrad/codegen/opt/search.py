@@ -139,7 +139,7 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
   return acted_lins
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value) -> Kernel:
+def beam_search(lin, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
