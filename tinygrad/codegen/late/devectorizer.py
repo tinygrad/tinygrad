@@ -316,7 +316,6 @@ def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparent
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
-  # ((UPat.var("x")+UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
