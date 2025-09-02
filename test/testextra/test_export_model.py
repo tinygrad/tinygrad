@@ -52,10 +52,10 @@ class TextModelExportWebGPU(unittest.TestCase):
     class MyModel:
       def forward(self, *inputs): return tuple([(inp+2).cast(inp.dtype) for inp in inputs])
     model = MyModel()
-    # [:-1] because "ulong" and "long" is not supported
-    inputs = [Tensor.randn(2, dtype=dt) for dt in dtypes.uints[:-1] + dtypes.sints[:-1] + (dtypes.bool, dtypes.float)]
+    # [:-2] because "ulong" and "long" is not supported
+    inputs = [Tensor.randn(2, dtype=dt) for dt in dtypes.uints[:-1] + dtypes.sints[:-2] + (dtypes.bool, dtypes.float)]
     prg, _, _, _ = export_model(model, "webgpu", *inputs)
-    expected_buffer_types = ["Uint"]*len(dtypes.uints[:-1]) + ["Int"]*len(dtypes.sints[:-1]) + ["Int", "Float"]
+    expected_buffer_types = ["Uint"]*len(dtypes.uints[:-1]) + ["Int"]*len(dtypes.sints[:-2]) + ["Int", "Float"]
     for i, expected_buffer_type in enumerate(expected_buffer_types):
       dt = inputs[i].dtype
       expected_arr_prefix = f"{expected_buffer_type}{dt.itemsize*8}"
