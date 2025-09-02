@@ -434,8 +434,9 @@ class TestOpsBFloat16(unittest.TestCase):
     expected = torch.tensor(data, dtype=torch.bfloat16).sqrt().float().numpy()
     np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).sqrt().numpy(), expected)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "log2(x) is undefined on METAL when x<0")
   def test_log_nan(self):
-    a = 32769
+    a = 32769 # 0x8001
     data = [from_storage_scalar(a, dtypes.bfloat16)]
     expected = torch.tensor(data, dtype=torch.bfloat16).log().float().numpy()
     np.testing.assert_equal(expected.item(), math.nan)
