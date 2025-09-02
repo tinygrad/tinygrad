@@ -69,9 +69,6 @@ symbolic_simple = PatternMatcher([
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
-  # if the intermediate cast doesnt narrow we can do it in one cast, we have to be carefull with bfloat16
-  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) and
-    not (a.dtype==dtypes.float and (b.dtype==dtypes.bfloat16 or x.dtype==dtypes.bfloat16)) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
@@ -287,6 +284,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  # if the intermediate cast doesnt narrow we can do it in one cast, we have to be carefull with bfloat16
+  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) and
+    not (a.dtype==dtypes.float and (b.dtype==dtypes.bfloat16 or x.dtype==dtypes.bfloat16)) else None),
   (UPat.var('x', dtypes.ints).cast(dtypes.ints, name="a").cast(dtypes.ints, name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # a conditional with the same results either way is a noop, also fold const conditionals
