@@ -2,7 +2,7 @@ from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
@@ -184,6 +184,7 @@ def beam_search(lin, rawbufs:list[Buffer], amt:int, allow_test_size=True, disabl
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
         except Exception as e:
           if BEAM_DEBUG: print(f"BEAM failed for opts: {acted_lins[i].applied_opts}\n{e}")
+          print('\n'.join(pyrender(lin.ast)))
           if isinstance(e, RuntimeError): continue
           raise
         timed_lins.append((acted_lins[i], min(tms)))
