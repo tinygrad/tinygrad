@@ -1221,7 +1221,7 @@ class TestOps(unittest.TestCase):
   def test_einsum_shape_check(self):
     a = Tensor.zeros(3,8,10,5)
     b = Tensor.zeros(11,5,13,16,8)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       Tensor.einsum('pqrs,tuqvr->pstuv',a,b)
 
   def test_einsum_arity_check1(self):

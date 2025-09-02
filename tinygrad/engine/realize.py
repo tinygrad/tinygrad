@@ -26,7 +26,7 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: pyrender(ast)
+  if DEBUG >= 5: print('\n'.join(pyrender(ast)))
 
   # linearize
   if renderer is None: renderer = Device.default.renderer
