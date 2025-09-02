@@ -342,7 +342,7 @@ def abi(ctx, x:UOp):
   i = ctx.arg_pos
   if sys.platform == "win32":
     if i < 4: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[1,2,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-    else: return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-3)*8+40, 4)), 1)
+    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-3)*8+40, 4)), 1)
   if i < 6: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[7,6,2,1,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
   return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-5)*8+8, 4)), 1)
 

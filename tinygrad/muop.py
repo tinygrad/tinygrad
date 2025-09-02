@@ -163,18 +163,13 @@ class MUOpX86(MUOp):
   @staticmethod
   def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
-  def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
-    def _sub(x):
-      for old,new in zip((self.out,)+self.ins, (out,)+ins):
-        if x is old: return new
-      return x
-    return MUOpX86(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, _sub(self.reg), _sub(self.rm), self.pp, self.map_select, self.we,
-                   self.l, _sub(self.vvvv), self.prefix, self.w, _sub(self.imm))
+  @staticmethod
   def i_ops(op:Ops, dt:DType):
     if dt.itemsize == 1: return {Ops.ADD: ("add", 0x02), Ops.SUB: ("sub", 0x2A), Ops.AND: ("and", 0x22), Ops.OR: ("or", 0x0A),
                                  Ops.XOR: ("xor", 0x32), Ops.CMPNE: ("cmp", 0x3A), Ops.CMPLT: ("cmp", 0x3A), Ops.CMPEQ: ("cmp", 0x3A)}[op]
     return {Ops.ADD: ("add", 0x03), Ops.SUB: ("sub", 0x2B), Ops.MUL: ("imul", 0x0FAF), Ops.AND: ("and", 0x23), Ops.OR: ("or", 0x0B),
             Ops.XOR: ("xor", 0x33), Ops.CMPNE: ("cmp", 0x3B), Ops.CMPLT: ("cmp", 0x3B), Ops.CMPEQ: ("cmp", 0x3B)}[op]
+  @staticmethod
   def imm_ops(op:Ops, dt:DType):
     if dt.itemsize == 1:
       if op is Ops.SHR: return ("shr", 0xC0, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC0, 7)
@@ -183,6 +178,7 @@ class MUOpX86(MUOp):
     if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
     return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
             Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7), Ops.CMPEQ: ("cmp", 0x81, 7)}[op]
+  @staticmethod
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
     rax = Register("rax", 0, 8)
     rdx = Register("rdx", 2, 8)
@@ -204,6 +200,7 @@ class MUOpX86(MUOp):
       div = MUOpX86._RM("idiv", 0xF7, 7, b, 1, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
     pop = MUOpX86._RM("pop", 0x8F, 0, rdx)
     return [move, push, extend, div, pop]
+  @staticmethod
   def load(dest:Register, src:Memory) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
     if dest in GPR and dest.size == 2: return MUOpX86.R_RM("mov", 0x8B, dest, src, 0, 0x66)
@@ -214,6 +211,7 @@ class MUOpX86(MUOp):
     if dest in VEC and dest.size == 8: return MUOpX86.V_M("vmovsd", 0x10, dest, src, 3, 1)
     if dest in VEC and dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
     raise RuntimeError("load missing")
+  @staticmethod
   def store(dest:Memory, src:Register) -> MUOp:
     if src in GPR and src.size == 1: return MUOpX86.RM_R("mov", 0x88, dest, src)
     if src in GPR and src.size == 2: return MUOpX86.RM_R("mov", 0x89, dest, src, 0, 0x66)
@@ -224,6 +222,7 @@ class MUOpX86(MUOp):
     if src in VEC and src.size == 8: return MUOpX86.M_V("vmovsd", 0x11, dest, src, 3, 1)
     if src in VEC and src.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
     raise RuntimeError("store missing")
+  @staticmethod
   def assign(dest:Register, src:Register) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
     if dest in GPR and dest.size == 2: return MUOpX86.R_RM("mov", 0x8B, dest, src, 0, 0x66)
@@ -233,6 +232,13 @@ class MUOpX86(MUOp):
     if dest in VEC and dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
     if dest in VEC and dest.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
     raise RuntimeError("assign missing")
+  def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
+    def _sub(x):
+      for old,new in zip((self.out,)+self.ins, (out,)+ins):
+        if x is old: return new
+      return x
+    return MUOpX86(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, _sub(self.reg), _sub(self.rm), self.pp, self.map_select, self.we,
+                   self.l, _sub(self.vvvv), self.prefix, self.w, _sub(self.imm))
   # TODO: clean up all of this, more fields should be in class
   def encode(self) -> bytes:
     inst = bytearray()
