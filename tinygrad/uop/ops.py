@@ -970,7 +970,7 @@ class RewriteContext:
           for x in reversed(new_n.src): stack.append((x, 0, x))
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
-          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          except KeyError: raise RewriteNotReady
           if new_src == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
@@ -985,7 +985,7 @@ class RewriteContext:
         else:
           # in stage 2, we link the result of new_n to the result of n
           try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          except KeyError: raise RewriteNotReady
       except RewriteNotReady:
         # retry this later
         stack.insert(0, (n, stage, new_n))
