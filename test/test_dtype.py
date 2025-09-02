@@ -5,6 +5,7 @@ from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype
+from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import assume, given, settings, strategies as strat
 from test.helpers import rand_for_dtype
@@ -432,6 +433,12 @@ class TestOpsBFloat16(unittest.TestCase):
     data = [326.0, 339.0, 10603200512.0]
     expected = torch.tensor(data, dtype=torch.bfloat16).sqrt().float().numpy()
     np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).sqrt().numpy(), expected)
+
+  def test_log_nan(self):
+    a = 32769
+    data = [from_storage_scalar(a, dtypes.bfloat16)]
+    expected = torch.tensor(data, dtype=torch.bfloat16).log().float().numpy() # nan
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).log().numpy(), expected)
 
 if __name__ == '__main__':
   unittest.main()
