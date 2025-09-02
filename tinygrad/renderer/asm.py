@@ -130,7 +130,8 @@ asm_matcher = PatternMatcher([
   # loading from register is a noop
   #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
   # rewrite index with gate to cmove
-  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
+  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
+  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
   # move mask from INDEX to the load/store
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
    lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
@@ -512,7 +513,7 @@ x86_lowerer = PatternMatcher([
                                                                                                                    MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), # noqa: E501
                                                                                                                    MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
   # if / endif
-  (UPat(Ops.IF, name="x"), lambda ctx,x: [MUOpX86._RM_I("test", 0xF6, 0, ctx[x.src[0]], Immediate(1, 1)), MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),))]),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: [MUOpX86._RM_I("test", 0xF6, 0, ctx[x.src[0]], Immediate(1, 1)), MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),))]), # noqa: E501
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x.src[0])}:"))),
 ])
 
