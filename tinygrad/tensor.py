@@ -1278,13 +1278,16 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
+    # Ensure indices go through tensor indexing path for setitem
+    if isinstance(indices, int):
+        indices = [indices]
+    res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+      self.assign(res)
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      res.assign(v)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
