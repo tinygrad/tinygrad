@@ -218,6 +218,13 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
     res.en = perf_counter_us()
     if PROFILE and display: cpu_events.append(res)
 
+TINY:str = f"TINY:{os.getpid()}"
+
+def tracefp(name:str) -> pathlib.Path:
+  os.makedirs(dest:=pathlib.Path(temp(f"tinygrad_trace/{name}", append_user=True)), exist_ok=True)
+  if not os.path.exists(dest/"start"): (dest/"start").touch()
+  return dest/f"{os.getpid()}.pkl"
+
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
 

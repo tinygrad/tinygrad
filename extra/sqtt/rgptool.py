@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
+import argparse, ctypes, struct, hashlib, code, typing, functools, pathlib
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.helpers import round_up, flatten, all_same
+from tinygrad.viz.serve import load_pickle
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -144,7 +145,7 @@ class RGP:
     return RGP(file_header, chunks)
   @staticmethod
   def from_profile(profile_pickled, device:str|None=None):
-    profile: list[ProfileEvent] = pickle.loads(profile_pickled)
+    profile: list[ProfileEvent] = profile_pickled
     device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD')}
     if device is None:
       if len(device_events) == 0: raise RuntimeError('No supported devices found in profile')
@@ -311,7 +312,9 @@ if __name__ == '__main__':
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
 
-  with open(args.input, 'rb') as fd: input_bytes = fd.read()
+  if args.command == "create": input_bytes = load_pickle(pathlib.Path(args.input))
+  else:
+    with open(args.input, 'rb') as fd: input_bytes = fd.read()
 
   match args.command:
     case 'print':

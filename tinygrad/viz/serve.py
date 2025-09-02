@@ -188,13 +188,19 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if end_ts is None or et > end_ts: end_ts = et
     if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
+  # first sort all per-device events by timestamp
+  dev_starts:dict[str, list[tuple[str, int]]] = {}
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
+    dev_starts.setdefault(k.split(":")[0], []).append((k, v[0][0]))
+  sorted_devs = [s for k,v in dev_starts.items() for s,_ in sorted(v, key=lambda e:e[1])]
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
+  for k in sorted_devs:
+    v = dev_events[k]
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
@@ -296,6 +302,15 @@ def reloader():
 
 def load_pickle(path:pathlib.Path|None) -> list:
   if path is None or not path.exists(): return []
+  # load the most recent files and remove stale traces
+  if path.is_dir():
+    st, ret = start.stat().st_mtime_ns if (start:=path/"start").exists() else 0, []
+    for e in path.iterdir():
+      if (stat:=e.stat()).st_mtime_ns < st: e.unlink()
+      elif stat.st_size != 0:
+        with e.open("rb") as f: ret.extend(pickle.load(f))
+    start.unlink(missing_ok=True)
+    return ret
   with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
