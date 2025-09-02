@@ -151,6 +151,11 @@ class Scheduler:
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
+    elif opt.op is OptOps.SWAP:
+      raise RuntimeError("broken, this can form a loop")
+      altrng = self.rngs[opt.arg]
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
+                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))})
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
