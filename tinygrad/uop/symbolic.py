@@ -103,10 +103,10 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
   seen_const, ans = [], None
   for u in split_uop(divs, Ops.ADD):
-    if u.op is Ops.CAST and u.src[0].dtype == dtypes.index: u = u.src[0]
     if fac!=1:
       if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
       u = u.src[0]
+    if u.op is Ops.CAST and u.src[0].dtype == dtypes.index: u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
     if denominator != u.src[1].arg: return None
     if (s0:=u.src[0]).vmin < 0: return None
@@ -330,7 +330,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # unrolled arange div folding
   ((UPat() + (UPat()//UPat.cvar("d", vec=False)).or_casted()).named("divs"),
     lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat() + ((UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).or_casted()).named("divs"), lambda divs,d,c:
+  ((UPat() + ((UPat()//UPat.cvar("d", vec=False)).or_casted()*UPat.cvar("c"))).named("divs"), lambda divs,d,c:
     fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
