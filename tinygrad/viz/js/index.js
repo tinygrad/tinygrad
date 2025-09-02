@@ -359,7 +359,6 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
-      ctx.textAlign = "left";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
@@ -367,7 +366,6 @@ async function renderProfiler() {
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
-        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
