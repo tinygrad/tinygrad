@@ -196,14 +196,20 @@ class LLVMRenderer(Renderer):
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+# https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
+# llvm.log2/llvm.exp2 don't support double
+llvm_intrinsics = {Ops.SQRT: "sqrt"}
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
   shared_max = AMDRenderer.shared_max
   global_max = AMDRenderer.global_max
   abi = "amdgpu_kernel"
+  code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+    (UPat(tuple(llvm_intrinsics), name="x"),
+    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([

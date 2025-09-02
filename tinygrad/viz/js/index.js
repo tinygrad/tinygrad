@@ -168,7 +168,7 @@ const drawLine = (ctx, x, y) => {
 const dominantColor = map => {
   let best = null, max = -Infinity
   for (const [color, width] of map) if (width > max) { max = width; best = color }
-  return best ?? "rgb(0,0,0)"
+  return best;
 }
 
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -362,8 +362,8 @@ async function renderProfiler() {
         }
       }
       for (const [k, v] of proxies) {
-        const [x, y] = k.split(",")
-        draw.push({ x, y, fillColor:dominantColor(v.colors), height:v.height, y, width:minWidth });
+        let [x, y] = k.split(",")
+        draw.push({ x, y, fillColor:dominantColor(v.colors), height:v.height, y, width:minWidth/2 });
       }
     }
     // draw shapes
