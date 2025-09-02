@@ -10,6 +10,13 @@ from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
+axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
+                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+
+# NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
+axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.LOCAL: 1, AxisType.UPCAST: 2,
+               AxisType.GROUP_REDUCE: 1, AxisType.REDUCE: 3, AxisType.UNROLL: 4}
+
 def flatten_range(r:UOp):
   off = 2 if r.op is Ops.STORE else 1
   rngs = r.src[off:]
@@ -30,7 +37,9 @@ class Scheduler:
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
 
   @property
-  def rngs(self): return sorted([u for u in self.ast.parents if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: x.arg)
+  def rngs(self):
+    # always in order by axistype
+    return sorted([u for u in self.ast.parents if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def full_shape(self): return [x.vmax+1 for x in self.rngs]
   @property
@@ -106,10 +115,11 @@ class Scheduler:
       i += 1
 
   def colored_shape(self) -> str:
-    return ' '.join([colored(f'{x.src[0].render():2s}', axis_colors[x.arg[-1]]) for x in self.rngs])
+    return ' '.join([colored(f'{x.src[0].render():3s}', axis_colors[x.arg[-1]]) for x in self.rngs])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
-    if rng.src[0].divides(amount) is None: raise KernelOptError("can't divide that")
+    if rng.src[0].divides(amount) is None:
+      raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     old_sz = rng.src[0].arg // amount
     assert old_sz > 0, f"bad old_sz on {amount} {rng}"
 
@@ -126,13 +136,12 @@ class Scheduler:
     try:
       if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
         check(opt.axis is not None)
-        rng = [x for x in self.rngs if x.arg[-1] is AxisType.REDUCE][cast(int, opt.axis)]
-        check(rng.arg[-1] in {AxisType.REDUCE}, "can only unroll/upcast reduce")
+        rng = [x for x in self.rngs if x.arg[-1] in {AxisType.REDUCE, AxisType.GROUP_REDUCE}][cast(int, opt.axis)]
       else:
         rng = self.rngs[opt.axis]
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP})
     except IndexError:
-      raise KernelOptError(f"bad opt {opt} on axis")
+      raise KernelOptError(f"bad opt {opt} on {self.colored_shape()}")
 
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
@@ -143,6 +152,8 @@ class Scheduler:
       amt:int = (rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
       if opt.op is OptOps.UNROLL: check(amt <= 32, "don't unroll more than 32")
       if opt.op is OptOps.UPCAST: check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
+      if opt.op is OptOps.LOCAL: check(rng.arg[-1] == AxisType.GLOBAL, "local is for globals")
+      if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}: check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps

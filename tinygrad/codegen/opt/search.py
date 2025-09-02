@@ -55,7 +55,9 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
   return tms
 
 class TimeoutException(Exception): pass
-def timeout_handler(signum, frame): raise TimeoutException()
+def timeout_handler(signum, frame):
+  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
+  raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
