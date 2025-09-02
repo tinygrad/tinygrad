@@ -179,12 +179,14 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
+  markers:list[ProfilePointEvent] = []
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
+    if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
   # first sort all per-device events by timestamp
   dev_starts:dict[str, list[tuple[str, int]]] = {}
@@ -202,7 +204,7 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size}).encode()
+  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
 def get_runtime_stats(key) -> list[dict]:

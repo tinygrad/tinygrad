@@ -135,6 +135,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
+  @property
+  def ptrdtype(self) -> PtrDType:
+    if not isinstance(self.dtype, PtrDType): raise RuntimeError("ptrdtype called on UOp without PtrDType")
+    return self.dtype
+
   # *** uop shape stuff ***
 
   @functools.cached_property
@@ -163,7 +168,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
     if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
     if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
-      sz = cast(PtrDType, self.dtype).size
+      sz = self.ptrdtype.size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
 
     # CONTIGUOUS with RANGE
@@ -967,7 +972,7 @@ class RewriteContext:
           for x in reversed(new_n.src): stack.append((x, 0, x))
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
-          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          except KeyError: raise RewriteNotReady
           if new_src == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
@@ -982,7 +987,7 @@ class RewriteContext:
         else:
           # in stage 2, we link the result of new_n to the result of n
           try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RewriteNotReady  # pylint: disable=raise-missing-from
+          except KeyError: raise RewriteNotReady
       except RewriteNotReady:
         # retry this later
         stack.insert(0, (n, stage, new_n))

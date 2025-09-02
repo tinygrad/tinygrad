@@ -225,6 +225,9 @@ def tracefp(name:str) -> pathlib.Path:
   if not os.path.exists(dest/"start"): (dest/"start").touch()
   return dest/f"{os.getpid()}.pkl"
 
+def profile_marker(name:str, color="gray") -> None:
+  cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
+
 # *** universal database cache ***
 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
