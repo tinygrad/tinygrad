@@ -290,7 +290,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var('x', dtypes.ints).cast(dtypes.ints, name="a").cast(dtypes.ints, name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   (UPat(GroupOp.Binary, dtypes.long, src=(UPat.var("x",dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y: u.replace(dtype=dtypes.int,
-    src=(x.cast(dtypes.int), y.cast(dtypes.int))).cast(dtypes.long) if all(not v.overflows(dtypes.int) for v in (u,x,y)) else None),
+    src=(x.cast(dtypes.int), y.cast(dtypes.int))).cast(dtypes.long) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   (UPat(GroupOp.Comparison, src=(UPat.var("x",dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
     u.replace(src=(x.cast(dtypes.int), y.cast(dtypes.int))) if not (x.overflows(dtypes.int) or y.overflows(dtypes.int)) else None),
   # a conditional with the same results either way is a noop, also fold const conditionals
