@@ -13,7 +13,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    if hasattr(k, "sts"):
+    if hasattr(k, "sts") and False:
       st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
       def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
@@ -40,13 +40,18 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   for buf_index,buf in enumerate(k.bufs):
     if isinstance(buf.src[0].dtype, ImageDType):
       if hasattr(k, "sts"):
-        if (unit_stride_axes_mul_4 := [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]):
-          if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
-            k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
-          elif axis in k.unrollable_dims:
-            k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+        unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
       else:
-        assert buf.op is Ops.INDEX
+        # part of real_strides
+        unit_stride_axes_mul_4 = []
+        for c in k.bufs[buf_index].src[1].split_uop(Ops.ADD):
+          if c.op is Ops.RANGE and (c.vmax+1)%4 == 0:
+            unit_stride_axes_mul_4.append(k.rngs.index(c))
+      if len(unit_stride_axes_mul_4):
+        if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
+          k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
+        elif axis in k.unrollable_dims:
+          k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k.applied_opts
@@ -62,6 +67,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         to_upcast.append(axis)
+    else:
+      pass
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
@@ -74,10 +81,23 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       if hasattr(k, "sts"):
+        # must have stride 0 on a view
+        # must have all non stride 0 on what's upcasted before
         if any(st.views[-1].strides[axis] == 0 and \
               all(x != 0 for t,x in zip(k.axis_types, st.real_strides()) if t in (AxisType.UPCAST, AxisType.UNROLL)) for st in k.sts):
           xb_choices.append((sum(st.views[-1].strides[axis]>0 for st in k.sts),
                             sum(st.views[-1].strides[axis] for st in k.sts), axis, upcast_amount))
+      else:
+        rng = k.rngs[axis]
+        if any(rng not in b.src[1].parents and all(r2 in b.src[1].parents for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
+          num_strides, sum_strides = 0, 0
+          for b in k.bufs:
+            if rng in b.src[1].parents: num_strides += 1
+            for c in b.src[1].split_uop(Ops.ADD):
+              if c is rng: sum_strides += 1
+              if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
+              if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
+          xb_choices.append((num_strides, sum_strides, axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)
       if DEBUG >= 4: print(f"more upcast axis : {xb_choices}")
@@ -118,8 +138,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       if hasattr(k, "sts"):
         local_axis_ranking = [(any(st.views[-1].strides[axis] == 0 for st in k.sts), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
       else:
-        # TODO: get this differently in range world
-        local_axis_ranking = [(0, axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
+        local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)

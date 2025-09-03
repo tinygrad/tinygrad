@@ -129,6 +129,7 @@ class Scheduler:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
     return replaced_rng, new_rng
 
+  def ranges_of(self, *axis_type:AxisType) -> list[int]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
   @property
   def upcastable_dims(self): return self.axes_of(AxisType.GLOBAL, AxisType.LOCAL)
