@@ -34,7 +34,6 @@ class TestBEAM(unittest.TestCase):
     capturing.clear()
     self.assertNotEqual(k_beam_0[-1].prg.p.src, k_beam_1[-1].prg.p.src)
 
-  @unittest.skip("removed speed optimization")
   def test_get_kernel_actions_dedup(self):
     from test.test_linearizer import helper_realized_ast
     from tinygrad.codegen.opt.search import get_kernel_actions

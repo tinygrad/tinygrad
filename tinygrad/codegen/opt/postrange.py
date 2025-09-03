@@ -39,6 +39,8 @@ class Scheduler:
     # always in order by axistype
     return sorted([u for u in self.ast.parents if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
+  def shape_len(self): return len(self.rngs)
+  @property
   def full_shape(self): return [x.vmax+1 for x in self.rngs]
   @property
   def axis_types(self): return [x.arg[-1] for x in self.rngs]
@@ -127,20 +129,26 @@ class Scheduler:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
     return replaced_rng, new_rng
 
+  def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
+  @property
+  def upcastable_dims(self): return self.axes_of(AxisType.GLOBAL, AxisType.LOCAL)
+  @property
+  def unrollable_dims(self): return self.axes_of(AxisType.REDUCE, AxisType.GROUP_REDUCE)
+
+  def real_axis(self, op:OptOps, axis:int|None):
+    try:
+      if axis is None: return -1
+      if op is OptOps.UNROLL: return self.unrollable_dims[axis]
+      if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
+      check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
+      return axis
+    except IndexError as e: raise KernelOptError from e
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
       check(self.opts.has_local, "locals needed for opt")
 
-    try:
-      if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
-        check(opt.axis is not None)
-        rng = [x for x in self.rngs if x.arg[-1] in {AxisType.REDUCE, AxisType.GROUP_REDUCE}][cast(int, opt.axis)]
-      elif opt.op is OptOps.NOLOCALS: pass
-      else:
-        rng = self.rngs[opt.axis]
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP})
-    except IndexError:
-      raise KernelOptError(f"bad opt {opt} on {self.colored_shape()}")
+    rng = self.rngs[self.real_axis(opt.op, opt.axis)]
 
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
@@ -277,11 +285,6 @@ class Scheduler:
   @property
   def output_shape(self):
     return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
-  def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
-  @property
-  def upcastable_dims(self): return self.axes_of(AxisType.GLOBAL, AxisType.LOCAL)
-  @property
-  def unrollable_dims(self): return self.axes_of(AxisType.REDUCE, AxisType.GROUP_REDUCE)
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
