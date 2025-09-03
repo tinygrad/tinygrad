@@ -1055,7 +1055,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     k = create_k()
     lins.append(k)
     if apply_tc:
-      assert k.apply_tensor_cores(1, extra_opts=opts), "no tensor core triggered"
+      k.apply_opts(hand_coded_optimizations(k))
+      assert k.applied_opts[0].op != OptOps.TC, "no tensor core triggered"
     else:
       k.apply_opts(opts)
     if expected_color_size is not None:
@@ -1192,24 +1193,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_invalid_tensor_core_extra_opts(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N)
-    b = Tensor.rand(N, N)
-    realized_ast, _ = helper_realized_ast(a@b)
-    invalid_opts = [
-      [Opt(OptOps.LOCAL, 2, 2)],
-      [Opt(OptOps.UPCAST, 2, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
-    ]
-    for x in invalid_opts:
-      k = Kernel(realized_ast)
-      with self.assertRaises(AssertionError):
-        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),

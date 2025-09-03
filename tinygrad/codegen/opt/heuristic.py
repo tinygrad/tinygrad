@@ -1,12 +1,49 @@
 import itertools
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_SELECT, TC_OPT, USE_TC, AMX
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
 
 def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # make a copy so it does not mutate the input
   k = k.copy()
+
+  # first try tensor cores
+  """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
+  Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
+
+  Keyword arguments:
+  use_tensor_cores -- controls how tensor cores are applied (default 1)
+    0: will disable any tensor core matching
+    1: enable tensor cores
+    2: apply tensor core shape but don't use UOp.WMMA
+  extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
+  tc_select -- specifies which tensor core(s) to use for optimization (default -1)
+    -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
+    [0-N]: uses only the n'th tensor core available; useful for search
+  tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
+    0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
+    1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
+    2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
+  """
+  if USE_TC > 0:
+    try:
+      # check TC first and apply hand-coded opts if successful
+      # NOTE: this is always axis 0 (the first tensor core option)
+      k.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
+
+      # skip hand-coded TC opts if AMX, upcasting will make kernel slower
+      if (tc_opts:=k.tensor_core_opts) is not None and not AMX:
+        # hand-coded TC opts
+        for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
+          szs = [sz for sz in [5,4,3,2] if k.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
+          if szs: k.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
+
+        if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if k.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
+          k.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
+      return k.applied_opts
+    except KernelOptError:
+      pass
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)

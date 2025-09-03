@@ -23,7 +23,6 @@ if __name__ == "__main__":
   ast_strs = ast_strs[:2000]
   for ast_str in tqdm(ast_strs):
     lin = ast_str_to_lin(ast_str)
-    #if not lin.apply_tensor_cores():
     lin.apply_opts(hand_coded_optimizations(lin))
     test_rebuild(lin)
 
