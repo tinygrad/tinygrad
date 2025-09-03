@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -99,7 +99,8 @@ class Scheduler:
     while i < len(self.rngs)-1:
       r0, r1 = self.rngs[i], self.rngs[i+1]
       # same axistype and same termination
-      if r0.arg[1] == r1.arg[1] and self.termination[r0] == self.termination[r1]:
+      termination = self.termination
+      if r0.arg[1] == r1.arg[1] and r0 in termination and r1 in termination and termination[r0] == termination[r1]:
         s0, s1 = r0.src[0], r1.src[0]
         new_range = r0.replace(src=(s0*s1,)).simplify()
         # this checks the legality of a merge
@@ -172,7 +173,7 @@ class Scheduler:
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, "upcast is for GLOBAL/LOCAL/LOOP")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
-        check(rng.arg[-1] == AxisType.GLOBAL, "local is for globals")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
@@ -309,7 +310,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   elif ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  else:
+  elif not NOOPT:
     k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     for opt in hand_coded_optimizations(k): k.apply_opt(opt)
