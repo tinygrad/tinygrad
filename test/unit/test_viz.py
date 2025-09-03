@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -267,7 +267,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
   ret = get_profile(lst)
   u = TinyUnpacker(ret)
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
+  strings, dtypes, markers = json.loads(ret[u.offset:u.offset+index_len]).values()
   u.offset += index_len
   layout:dict[str, dict] = {}
   for _ in range(layout_len):
@@ -286,7 +286,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
         else: v["events"].append({"event":"free", "ts":ts, "key":key})
-  return {"dur":total_dur, "peak":global_peak, "layout":layout}
+  return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
@@ -366,6 +366,21 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     with self.assertRaises(struct.error):
       get_profile(prof)
+
+  def test_python_marker(self):
+    with Context(PROFILE=1):
+      a = Tensor.empty(1, device="NULL")
+      b = Tensor.empty(1, device="NULL")
+      (a+b).realize()
+      profile_marker("test 1")
+      (a*b).realize()
+      profile_marker("test 2")
+    profile_ret = load_profile(cpu_events)
+    markers = profile_ret["markers"]
+    kernels = profile_ret["layout"]["NULL"]["events"]
+    self.assertEqual(len(markers), 2)
+    assert kernels[0]["st"] <= markers[0]["ts"] <= kernels[1]["st"]
+    assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

@@ -760,7 +760,9 @@ jobs:
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-
+    env:
+      MOCKGPU: 1
+      FORWARD_ONLY: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -772,7 +774,7 @@ jobs:
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
-        run: printf "${{ matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nPTX=1\nMOCKGPU=1' || matrix.backend == 'nv' && 'NV=1\nMOCKGPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'PTX' && 'CUDA=1\nPTX=1' || matrix.backend == 'nv' && 'NV=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"

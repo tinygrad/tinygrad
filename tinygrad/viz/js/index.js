@@ -157,11 +157,11 @@ const rescaleTrack = (source, tid, k) => {
   return change;
 }
 
-const drawLine = (ctx, x, y) => {
+const drawLine = (ctx, x, y, opts) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
   ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
   ctx.stroke();
 }
 
@@ -188,7 +188,7 @@ async function renderProfiler() {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -305,17 +305,18 @@ async function renderProfiler() {
     ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xrange = [0, canvas.clientWidth];
-    const xscale = d3.scaleLinear().domain(data.axes.x).range(xrange);
-    xscale.domain(domain=[xscale.invert(zoomLevel.invertX(0)), xscale.invert(zoomLevel.invertX(xrange[1]))]);
-    let yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
+    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
+    const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    xscale.domain(visibleX);
+    const yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
     // rescale / merge shapes
     const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
       const proxies = new Map();
       for (const e of shapes) {
-        const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (start>domain[1] || end<domain[0]) continue;
+        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
+        else { start = e.x; end = e.x+e.width; }
+        if (start>visibleX[1] || end<visibleX[0]) continue;
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
@@ -385,14 +386,13 @@ async function renderProfiler() {
       }
     }
     // draw axes
-    drawLine(ctx, xrange, [0, 0]);
+    drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
-      ctx.textAlign = "left";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
@@ -400,10 +400,15 @@ async function renderProfiler() {
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
-        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
+    }
+    // draw markers
+    for (const m of markers) {
+      const x = xscale(m.ts);
+      drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
+      ctx.fillText(m.name, x+2, 1);
     }
     ctx.restore();
   }
