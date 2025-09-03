@@ -81,7 +81,7 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   # add gpu dims (late). this works after devectorize, but it's faster here
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
-  # we try lowering using the gate first so we dont use an uneccesarily large dtype if we dont have to
+  # lower the index dtype to a concrete int
   ret.append(RewriteStep(pm_lower_index_dtype, lambda _: opts.device, name="lower all index dtypes"))
 
   # devectorize (TODO: does this need opts?)

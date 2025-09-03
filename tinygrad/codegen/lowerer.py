@@ -86,8 +86,11 @@ pm_lowerer = PatternMatcher([
    lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0], sz) for a,sz in x.arg])) if x.tag is None else None),
 ])
 
-def select_dtype(ctx, u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+# ***** index dtype lowering *****
 
+# we dont check for overflow or if the dtype is supported here because later rewrites might remove them: simplify_valid_load+symbolic
+# the dtype is sometimes larger than it needs to be because we dont use the gate here
+def select_dtype(ctx, u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(GroupOp.Binary, dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lambda ctx,u,x,y:
