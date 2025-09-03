@@ -31,6 +31,7 @@ def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDI
 class Scheduler:
   def __init__(self, ast:UOp, opts:Renderer):
     self.ast, self.opts = ast, opts
+    self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
 
   @property
@@ -70,12 +71,12 @@ class Scheduler:
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
     else:
-      name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), axis_colors[x.arg[-1]]) for x in self.rngs])
+      name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')
     self.ast = graph_rewrite(self.ast, pm_flatten_range, "flatten range")
-    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
+    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def convert_loop_to_global(self):
     if not self.opts.has_local: return None
@@ -111,8 +112,8 @@ class Scheduler:
             continue
       i += 1
 
-  def colored_shape(self) -> str:
-    return ' '.join([colored(f'{x.src[0].render():4s}', axis_colors[x.arg[-1]]) for x in self.rngs])
+  def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
+  def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():4s}', color) for x,color in zip(self.rngs, self.colors())])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
     if rng.src[0].divides(amount) is None:
@@ -134,6 +135,7 @@ class Scheduler:
       if opt.op in {OptOps.UNROLL, OptOps.GROUP, OptOps.GROUPTOP}:
         check(opt.axis is not None)
         rng = [x for x in self.rngs if x.arg[-1] in {AxisType.REDUCE, AxisType.GROUP_REDUCE}][cast(int, opt.axis)]
+      elif opt.op is OptOps.NOLOCALS: pass
       else:
         rng = self.rngs[opt.axis]
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP})
@@ -153,8 +155,11 @@ class Scheduler:
       if opt.op is OptOps.UPCAST:
         check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, "upcast is for GLOBAL/LOCAL/LOOP")
-      if opt.op is OptOps.LOCAL: check(rng.arg[-1] == AxisType.GLOBAL, "local is for globals")
+      if opt.op is OptOps.LOCAL:
+        check(not self.dont_use_locals, "can't use locals")
+        check(rng.arg[-1] == AxisType.GLOBAL, "local is for globals")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
+        check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
@@ -174,6 +179,9 @@ class Scheduler:
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
       self.ast = graph_rewrite(self.ast, remove_tags)
+    elif opt.op is OptOps.NOLOCALS:
+      check(all(x not in {AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
+      self.dont_use_locals = True
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
