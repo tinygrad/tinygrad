@@ -266,6 +266,27 @@ class Scheduler:
           return True
     return False
 
+  # helpers for hand_coded_optimizations
+  @property
+  def reduceop(self) -> UOp|None:
+    red = [x for x in self.ast.parents if x.op is Ops.REDUCE]
+    if not len(red): return None
+    return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
+  @property
+  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
+  @property
+  def output_shape(self):
+    return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
+  def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
+  @property
+  def upcastable_dims(self): return self.axes_of(AxisType.GLOBAL, AxisType.LOCAL)
+  @property
+  def unrollable_dims(self): return self.axes_of(AxisType.REDUCE, AxisType.GROUP_REDUCE)
+  @property
+  def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
+  @property
+  def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
+
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.parents if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
@@ -279,9 +300,12 @@ def apply_opts(ctx:Renderer, ast:UOp):
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+  elif ast.arg is not None and ast.arg.opts_to_apply is not None:
+    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   else:
-    if ast.arg is not None and ast.arg.opts_to_apply is not None:
-      for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
+    k.simplify_merge_adjacent()
+    from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+    for opt in hand_coded_optimizations(k): k.apply_opt(opt)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 pm_postrange_opt = PatternMatcher([
