@@ -1535,7 +1535,9 @@ def train_stable_diffusion():
 
     optimizer.step()
     lr_scheduler.step()
-    return loss
+    loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
+    Tensor.realize(loss, out_lr)
+    return loss, out_lr
 
   if getenv("RUN_EVAL", ""):
     if not getenv("EVAL_OVERFIT_SET", ""):
@@ -1786,7 +1788,7 @@ def train_stable_diffusion():
       t2 = time.perf_counter()
 
       #loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
-      loss = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+      loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
       t3 = time.perf_counter()
 
       if WANDB:
@@ -1798,14 +1800,16 @@ def train_stable_diffusion():
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
             f.write(f"wandb.run.id = {wandb.run.id}")
 
-      preloss = time.perf_counter()
-      loss_item = loss.item()
-      print(f"step {i}: loss: {loss_item:.9f}, loss_elapsed: {time.perf_counter() - preloss:.2f}")
-      pre_lr = time.perf_counter()
-      lr_item = optimizer.lr.item()
-      print(f"lr:{lr_item:0.3e}, lr_elapsed: {time.perf_counter() - pre_lr:.2f}")
-      if WANDB: wandb_log["train/loss"] = loss_item
-      if WANDB: wandb_log["train/lr"] = lr_item
+      #if i < 30 or (i >= 30 and i % 2 == 0):
+      if True:
+        preloss = time.perf_counter()
+        loss_item = loss.item()
+        print(f"step {i}: loss: {loss_item:.9f}, loss_elapsed: {time.perf_counter() - preloss:.2f}")
+        pre_lr = time.perf_counter()
+        lr_item = lr.item()
+        print(f"lr:{lr_item:0.3e}, lr_elapsed: {time.perf_counter() - pre_lr:.2f}")
+        if WANDB: wandb_log["train/loss"] = loss_item
+        if WANDB: wandb_log["train/lr"] = lr_item
 
       if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
