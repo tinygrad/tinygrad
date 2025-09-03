@@ -88,23 +88,25 @@ pm_lowerer = PatternMatcher([
 
 # ***** index dtype lowering *****
 
-# we dont check for overflow or if the dtype is supported here because later rewrites might remove them: simplify_valid_load+symbolic
+# we dont check for overflow or if the dtype is supported here because later rewrites might remove them: cast_folding+simplify_valid_load
 # the dtype is sometimes larger than it needs to be because we dont use the gate here
-def select_dtype(ctx, u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
-  (UPat(GroupOp.Binary, dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lambda ctx,u,x,y:
-    x.cast(dt:=least_upper_dtype(select_dtype(ctx, u), x.dtype, y.dtype)).alu(u.op, y.cast(dt))),
-  (UPat(GroupOp.Comparison, name="u", src=(UPat.var("x",dtypes.ints), UPat.var("y", dtypes.ints))), lambda ctx,u,x,y:
+  (UPat(GroupOp.Binary, dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lambda u,x,y:
+    x.cast(dt:=least_upper_dtype(select_dtype(u), x.dtype, y.dtype)).alu(u.op, y.cast(dt))),
+  (UPat(GroupOp.Comparison, name="u", src=(UPat.var("x",dtypes.ints), UPat.var("y", dtypes.ints))), lambda u,x,y:
     x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)).alu(u.op, y.cast(dt)) if x.dtype!=y.dtype else None),
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lambda cond,u,x,y:
     cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt))),
-  (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda ctx,u: u.replace(dtype=select_dtype(ctx,u))),
+  (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u))),
   (UPat((Ops.RANGE,), dtype=dtypes.index, src=(UPat.var("end")), name="r"), lambda ctx,r,end:
-    r.replace(dtype=(dt:=select_dtype(ctx,r)), src=(end.cast(dt),))),
+    r.replace(dtype=(dt:=select_dtype(r)), src=(end.cast(dt),))),
   (UPat(Ops.CAST, dtype=dtypes.index, src=(UPat.var("x", dtypes.ints),), name="u"), lambda u,x: x),
   (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(
     dtype=(dt:=least_upper_dtype(*[x.dtype for x in u.src])).vec(u.dtype.count), src=tuple(x.cast(dt) for x in u.src))),
   (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=(dt:=(dtypes.long if any(v.overflows(dtypes.int) for v in u.src)
-    else dtypes.long)).vec(u.dtype.count),src=tuple(x.cast(dt) for x in u.src)))
+    else dtypes.long)).vec(u.dtype.count),src=tuple(x.cast(dt) for x in u.src))),
+  (UPat((Ops.SPECIAL,), dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int32)),
+  # (UPat((Ops.SPECIAL,), dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u))),
 ])
