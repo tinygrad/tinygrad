@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1386,7 +1385,7 @@ def train_stable_diffusion():
   from collections import namedtuple
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state
-  import csv, PIL, pickle
+  import csv, PIL, pickle, subprocess
   import numpy as np
 
   config = {}
@@ -1475,11 +1474,11 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
+  # this seems to prevent a lot of memory use somehow, allowing bigger BS
   Tensor.realize(*get_parameters(unet))
   safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
   load_state_dict(unet, safe_load(init_fn))
   if not getenv("KEEP_INIT_MODEL", ""): Path(init_fn).unlink()
-  load_state_dict(unet, gv.unet)
 
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
@@ -1514,12 +1513,12 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep, latent_randn, noise, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
-    #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-    #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-    #noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
       t.shard_(GPUS, axis=0)
 
@@ -1770,9 +1769,6 @@ def train_stable_diffusion():
     dl = batch_load_train_stable_diffusion(BS)
     t0 = t6 = time.perf_counter()
     for i, batch in enumerate(dl, start=1):
-      if i == 1:
-        lr_scheduler.step()
-        continue
       loop_time = time.perf_counter() - t0
       t0 = time.perf_counter()
       dl_time = t0 - t6
@@ -1780,28 +1776,15 @@ def train_stable_diffusion():
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      #mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
-      #mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-      mean_logvar = [gv.data["mean_logvar"][i-1:i].numpy()] * BS
-      mean, logvar = np.split(np.concatenate(mean_logvar, axis=0), 2, axis=1)
+      mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
       mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-
-      #for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
-      tokens = model.cond_stage_model.tokenizer.encode(gv.prompts[i-1], pad_with_zeros=True) * BS
+      tokens = []
+      for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
       tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
-      timestep = gv.data["timestep"][i-1:i]
-      timestep = Tensor.cat(*([timestep] * BS)).cast(dtypes.int).to(GPUS[0])
-
-      latent_randn = gv.data['latent_randn'][i-1:i]
-      latent_randn = Tensor.cat(*([latent_randn] * BS)).to(GPUS[0])
-
-      noise = gv.data["noise"][i-1:i]
-      noise = Tensor.cat(*([noise] * BS)).to(GPUS[0])
-
       t1 = time.perf_counter()
-      loss, lr = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
-      #loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+      #loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
+      loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
       t2 = time.perf_counter()
 
       if WANDB:
@@ -1840,7 +1823,7 @@ def train_stable_diffusion():
             print(f"deleting {to_delete.name}")
             to_delete.unlink()
 
-      if i % CKPT_STEP_INTERVAL == 0:
+      if i % CKPT_STEP_INTERVAL == 0 or i == BACKUP_INTERVAL:
         # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
         # "evaluation is done offline, the time is not counted towards the submission time."
         fn = f"{UNET_CKPTDIR}/{i}.safetensors"
@@ -1863,25 +1846,13 @@ def train_stable_diffusion():
 
       t3 = time.perf_counter()
       if WANDB: wandb.log(wandb_log)
+      #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
       t5 = time.perf_counter()
       print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
     loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
     t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}
     """)
-
-      if i == 20:
-        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
-        # diff.abs().mean(): 2.6550915979695056e-11
-        # a.abs().mean(): 1.2747265465407054e-08
-        # diff.abs().max(): 6.412069764039074e-10
-
-        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
-        # diff.abs().mean(): 3.6348701826227625e-12
-        # a.abs().mean(): 1.6649142509095327e-08
-        # diff.abs().max(): 5.24913446042774e-12
-
-        import sys
-        sys.exit()
+      #print("rocm-smi output:\n" + rocm_out + "\n")
 
       t6 = time.perf_counter()
 

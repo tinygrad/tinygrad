@@ -19,10 +19,11 @@
 #pip install webdataset
 source venv/bin/activate
 apt list --installed | grep amdgpu
-export DEBUG=2
-#export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
-#export IGNORE_JIT_FIRST_BEAM=1
+#export DEBUG=2
+export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
+export IGNORE_JIT_FIRST_BEAM=1
 
+export BASEDIR="/home/hooved/stable_diffusion"
 #export SEED=$RANDOM
 DATETIME=$(date "+%m%d%H%M")
 #LOGFILE="sd_red_${DATETIME}_${SEED}.log"
@@ -32,17 +33,19 @@ export HCQDEV_WAIT_TIMEOUT_MS=300000
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
 
-#export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08221929"
-#export RESUME_ITR=8260
+#export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307"
+#export RESUME_ITR=1524
 #export BACKUP_INTERVAL=2065
-export BACKUP_INTERVAL=413
+#export BACKUP_INTERVAL=413
+#export BACKUP_INTERVAL=640
+export BACKUP_INTERVAL=762
 
 # mi300x
 # use separate BS for the various jits in eval to maximize throughput
 #export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
+
 export AMD_LLVM=0 # bf16 seems to require this
-#export GPUS=8 BS=248
-export GPUS=8 BS=344
+export GPUS=8 BS=336
 export CONTEXT_BS=816
 export DENOISE_BS=600
 export DECODE_BS=384
@@ -59,14 +62,15 @@ export CLIP_BS=240
 ####export DENOISE_BS=144
 ####export DECODE_BS=138
 
-#export RUN_EVAL=1
+export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
+mkdir -p $UNET_CKPTDIR
+export RUN_EVAL=1
+export EVAL_ONLY=1
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762"
+#export KEEP_EVAL_CACHE=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
-#export EVAL_ONLY=1
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/08241246/run_eval"
 #export LIMIT_EVAL_SAMPLES=600
-
-export BASEDIR="/home/hooved/stable_diffusion"
 
 # mi300x
 export DATADIR="/raid/datasets/stable_diffusion"
@@ -75,11 +79,9 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 # tinybox red
 #export DATADIR="/home/hooved/stable_diffusion/datasets"
 #export CKPTDIR="/home/hooved/stable_diffusion/checkpoints"
-export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
-mkdir -p $UNET_CKPTDIR
 
-#export WANDB=1
-#export PARALLEL=0
-export PARALLEL=16
+export WANDB=1
+#export PARALLEL=4
+export PARALLEL=0
 
-RUNMLPERF=1 python3 examples/mlperf/model_train.py
+EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py

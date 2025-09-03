@@ -147,6 +147,10 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
+  print(f"beaming ast key: {lin.ast.key}")
+  print(lin.ast)
+  print(rawbufs)
+
   beam: list[tuple[Kernel, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
@@ -161,7 +165,15 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:
-    rawbufs = _ensure_buffer_alloc(rawbufs)
+    try:
+      rawbufs = _ensure_buffer_alloc(rawbufs)
+    except Exception as e:
+      fn = "beam_crash.pickle"
+      print(f"OOM in beam, saving kernel/bufs to {fn}")
+      import pickle
+      export = {"lin": lin, "rawbufs": [Buffer(b.device, b.size, b.dtype) for b in rawbufs], "amt": amt}
+      with open(fn, "wb") as f: pickle.dump(export, f)
+      raise e
     var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
@@ -178,6 +190,11 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         least_compute_ops = min(this_compute_ops:=sym_infer(p.estimates.ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops: continue
         seen_libs.add(lib)
+
+        print("acted_lins[i].applied_opts:")
+        for opt in acted_lins[i].applied_opts:
+          print(opt)
+
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
         except RuntimeError: continue # for runtime issues

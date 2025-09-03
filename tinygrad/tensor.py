@@ -3948,7 +3948,10 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    return qk.cast(self.dtype).softmax(-1, softmax_dtype).cast(self.dtype).dropout(dropout_p) @ value
+    if softmax_dtype is None:
+      return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    else:
+      return qk.cast(softmax_dtype).softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
