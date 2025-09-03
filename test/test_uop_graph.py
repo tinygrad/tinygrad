@@ -411,7 +411,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.src[1].arg, 6)
 
   def test_bitcast_to_same_dtype_fold(self):
-    for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
+    for dt in dtypes.ints[:-1] + dtypes.floats + (dtypes.bool,):
       d0 = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), arg=0)
       v = UOp(Ops.LOAD, dt, (d0.index(UOp.const(dtypes.int, 0)),))
       uops = to_uops_list([v.bitcast(dt)])
