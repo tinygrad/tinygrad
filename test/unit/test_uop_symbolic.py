@@ -587,6 +587,12 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
     self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
 
+  def test_arange_unrolled4_with_cast(self):
+    gidx = Variable("gidx", 0, 2559, dtypes.long)
+    dt = dtypes.int
+    unrolled_div = ((gidx+2561)//4 + 2).cast(dt)+((gidx+2562)//4).cast(dt)+((gidx+2560)//4).cast(dt)+((gidx+2559)//4).cast(dt)
+    self.helper_test_variable(unrolled_div, 2561, 5120, "((int)(gidx)+2561)")
+
   def test_arange_unrolled4_small(self):
     gidx = Variable("gidx", 0, 3)
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
