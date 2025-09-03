@@ -1507,12 +1507,18 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep:Tensor, latent_randn:Tensor, noise:Tensor, unet:UNetModel,
-                 optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
+    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    for t in (mean, logvar, tokens, timestep, latent_randn, noise):
+      t.shard_(GPUS, axis=0)
+
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * latent_randn).cast(dtypes.bfloat16) * 0.18215
+    #latent = (mean + std * latent_randn).cast(dtypes.bfloat16) * 0.18215
+    latent = (mean + std * latent_randn) * 0.18215
 
     sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
     sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
@@ -1521,10 +1527,10 @@ def train_stable_diffusion():
 
     context = model.cond_stage_model.embed_tokens(tokens)
 
-    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
     loss = ((out - v_true) ** 2).mean()
-    del out, v_true, context
+    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
+    del out, v_true, context, latent_randn, tokens, timestep
     loss.backward()
 
     optimizer.step()
@@ -1744,19 +1750,10 @@ def train_stable_diffusion():
       return clip_score, fid_score
     
   @TinyJit
-  def prepare_data(mean_logvars:list[Tensor], tokens:list[Tensor]) -> list[Tensor]:
-    mean_logvar = Tensor.cat(*mean_logvars, dim=0)
-    mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.bfloat16), 2, dim=1)
-    mean = mean.contiguous()
-    logvar = logvar.contiguous()
-    tokens = Tensor.cat(*tokens, dim=0)
+  def prepare_data(mean:Tensor, logvar:Tensor, tokens:Tensor) -> list[Tensor]:
     timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
     latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
     noise = Tensor.randn(*mean.shape, device=GPUS[0])
-    return [mean, logvar, tokens, timestep, latent_randn, noise]
-
-  @TinyJit
-  def shard_data(mean, logvar, tokens, timestep, latent_randn, noise):
     return [t.shard(GPUS,axis=0) for t in (mean, logvar, tokens, timestep, latent_randn, noise)]
 
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
@@ -1774,33 +1771,22 @@ def train_stable_diffusion():
       loop_time = time.perf_counter() - t0
       t0 = time.perf_counter()
       dl_time = t0 - t6
-    #i = 0
-    #with open("/home/hooved/stable_diffusion/checkpoints/overfit_set_12.pickle", "rb") as f:
-      #batch = pickle.load(f)
-    #while True:
-      #i += 1
       i = RESUME_ITR + i
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      mean_logvars = [Tensor(x, device="CPU") for x in batch['npy']]
-      tokens = [model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']]
-
-      t0b = time.perf_counter()
-      mean, logvar, tokens, timestep, latent_randn, noise = prepare_data(mean_logvars, tokens)
-      #for j, t in enumerate((mean, logvar, tokens, timestep, latent_randn, noise)):
-        #print(f"checking tensor {j} before shard")
-        #print(t.mean().cast(dtypes.float).item())
-        #print(t.std().cast(dtypes.float).item())
-      mean, logvar, tokens, timestep, latent_randn, noise = shard_data(mean, logvar, tokens, timestep, latent_randn, noise)
-      #for j, t in enumerate((mean, logvar, tokens, timestep, latent_randn, noise)):
-        #print(f"checking tensor {j} after shard")
-        #print(t.mean().cast(dtypes.float).item())
-        #print(t.std().cast(dtypes.float).item())
+      mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+      mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
+      tokens = []
+      for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+      tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
       t1 = time.perf_counter()
+      #mean, logvar, tokens, timestep, latent_randn, noise = prepare_data(mean, logvar, tokens)
       t2 = time.perf_counter()
-      loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
+
+      #loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
+      loss = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
       t3 = time.perf_counter()
 
       if WANDB:
@@ -1811,6 +1797,15 @@ def train_stable_diffusion():
         if i == 1 and wandb_run is not None:
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
             f.write(f"wandb.run.id = {wandb.run.id}")
+
+      preloss = time.perf_counter()
+      loss_item = loss.item()
+      print(f"step {i}: loss: {loss_item:.9f}, loss_elapsed: {time.perf_counter() - preloss:.2f}")
+      pre_lr = time.perf_counter()
+      lr_item = optimizer.lr.item()
+      print(f"lr:{lr_item:0.3e}, lr_elapsed: {time.perf_counter() - pre_lr:.2f}")
+      if WANDB: wandb_log["train/loss"] = loss_item
+      if WANDB: wandb_log["train/lr"] = lr_item
 
       if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
@@ -1851,21 +1846,21 @@ def train_stable_diffusion():
 
           Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
 
-      if i % 50 == 0:
-        loss_item = loss.item()
-        print(f"step {i}: loss: {loss_item:.9f}")
-        if WANDB: wandb_log["train/loss"] = loss_item
-        if i <= 1100:
-          lr_item = optimizer.lr.item()
-          print(f"lr:{optimizer.lr.item():0.3e}")
-          if WANDB: wandb_log["train/lr"] = lr_item
+      #if i % 50 == 0:
+        #loss_item = loss.item()
+        #print(f"step {i}: loss: {loss_item:.9f}")
+        #if WANDB: wandb_log["train/loss"] = loss_item
+        #if i <= 1100:
+          #lr_item = optimizer.lr.item()
+          #print(f"lr:{optimizer.lr.item():0.3e}")
+          #if WANDB: wandb_log["train/lr"] = lr_item
       t4 = time.perf_counter()
 
       if WANDB: wandb.log(wandb_log)
       t5 = time.perf_counter()
       print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t3-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
     loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f} prerealize_time: {t1-t0:.2f}, input_realize_time: {t2-t1:.2f}, train_step_time: {t3-t2:.2f},
-    t4-t3: {t4-t3:.2f}, wandb_log_time: {t5-t4:.2f}, t0b-t0: {t0b-t0:.2f}, t1-t0b: {t1-t0b:.2f}
+    t4-t3: {t4-t3:.2f}, wandb_log_time: {t5-t4:.2f}
     """)
 
       t6 = time.perf_counter()
