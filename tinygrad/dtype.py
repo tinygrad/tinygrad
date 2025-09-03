@@ -67,7 +67,7 @@ class PtrDType(DType):
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
-    if self.size == -1: return 0  # TODO: this should be an exception
+    if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
     return self.size*self.itemsize
   @property
   def vcount(self): return self.v
