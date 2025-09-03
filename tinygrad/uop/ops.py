@@ -7,7 +7,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, Invalid
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -319,6 +319,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert len(axis) == len(new_axis)
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+  @staticmethod
+  def invalid(): return UOp(Ops.CONST, dtypes.index, src=(), arg=Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
@@ -556,7 +558,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if self.op is Ops.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
         if self.op is Ops.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     # float has NAN issue and we use explicit NAN in transcendental
-    if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
+    if self.op is Ops.WHERE and dtypes.is_int(self.dtype):
+      if self.dtype == dtypes.index and self.src[2] is UOp.invalid(): return self.src[1]._min_max
+      return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is Ops.RANGE: return 0, (self.src[0]-1).vmax
@@ -620,6 +624,7 @@ python_alu: dict[Ops, Callable]  = {
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
+  if dtype==dtypes.index and op in GroupOp.Binary and Invalid in operands: return None
   alu = python_alu[op](*operands)
   return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 

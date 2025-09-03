@@ -1,6 +1,7 @@
 # all of symbolic lives here now
 from typing import cast
 import math, operator, struct, functools
+from tinygrad.helpers import Invalid
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
@@ -22,7 +23,24 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-symbolic_simple = PatternMatcher([
+invalid_pat = UPat.const(dtypes.index, Invalid).named("i")
+invalid_gate = UPat.var("cond").where(UPat.var("x",dtype=dtypes.index), invalid_pat)
+
+propagate_invalid = PatternMatcher([
+  # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
+  # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda cond,x,i,cast: cond.where(cast.replace(src=(x,)), i.replace(dtype=cast.dtype))),
+  *((invalid_gate.alu(op, UPat.var("y")).named("alu"),
+    lambda cond,x,y,alu,i: cond.where(newx:=x.alu(alu.op,y),i.replace(dtype=newx.dtype))) for op in GroupOp.Binary),
+  (invalid_gate.where(UPat.var("y"), UPat.var("z")), lambda cond,x,i,y,z: cond.where(x.where(y,z),i.replace(dtype=y.dtype))),
+  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
+  # order of gate&!cond matters!, and-clauses are only simplified left to right and we need to gate to be used to fold cond
+  (UPat.var("gate").where(invalid_gate, UPat.var("y")), lambda gate,cond,x,y,i: ((gate&cond.logical_not()).logical_not()).where(gate.where(x,y), i)),
+  # unswap the branches for the rule above
+  (UPat.var("gate").where(UPat.var("y"), invalid_gate).named("where"), lambda gate,cond,x,y,i: gate.logical_not().where(cond.where(x,i), y))
+])
+
+symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -294,7 +312,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
-  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f:
+    cond.where(f,t) if f is not UOp.invalid() else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -442,6 +461,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+pm_simplify_valid = PatternMatcher([(UPat(Ops.AND, name="valid"), simplify_valid),])
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
 def reduce_mul_chain(r:UOp):
@@ -514,4 +534,7 @@ sym = symbolic_flat+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  # move INVALID from idx where to a gate
+  (UPat(Ops.INDEX, src=(UPat(), invalid_gate,), name="idx"), lambda idx,cond,x,i: idx.replace(src=(idx.src[0], x, cond))),
+  (UPat(Ops.INDEX, src=(UPat(), invalid_pat,), name="idx"), lambda idx,i: idx.replace(src=(idx.src[0], i, UOp.const(dtypes.bool, False))))
 ])

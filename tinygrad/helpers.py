@@ -94,6 +94,11 @@ class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequen
   def __init__(self, gen:Callable[[int], T]): self.gen = gen
   def __getitem__(self, idx:int) -> T: return self.gen(idx)
 
+class _Invalid:
+    def __eq__(self, other): return self is other
+    def __hash__(self): return id(self)
+Invalid = _Invalid()
+
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
