@@ -1056,7 +1056,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     lins.append(k)
     if apply_tc:
       k.apply_opts(hand_coded_optimizations(k))
-      assert k.applied_opts[0].op != OptOps.TC, "no tensor core triggered"
+      assert k.applied_opts[0].op == OptOps.TC, "no tensor core triggered"
     else:
       k.apply_opts(opts)
     if expected_color_size is not None:
