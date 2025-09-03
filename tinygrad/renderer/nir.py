@@ -114,7 +114,7 @@ aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dty
 def code(t:DType) -> str: return "i" if t in dtypes.ints else ("f" if t in dtypes.floats else "b")
 def ncast(b:nir.nir_builder, src:nir.nir_def, it:DType, ot:DType) -> nir.nir_def:
   if isinstance(it, PtrDType) and ot == dtypes.long: return src
-  if ot == dtypes.bool: return nir_build_alu(b, nir.nir_op_b2b1, ncast(b, src, it, dtypes.int))
+  if ot == dtypes.bool: return nir_build_alu(b, getattr(nir, f"nir_op_{code(it)}ne{'u' if code(it) == 'f' else ''}"), src, nir_imm(b, 0, it))
   return nir_build_alu(b, getattr(nir, f"nir_op_{code(it)}2{code(ot)}{ot.itemsize * 8}"), src)
 
 def nif(b:nir.nir_builder, cond:nir.nir_def, go:Callable):
