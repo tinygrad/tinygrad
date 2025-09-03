@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
+from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
@@ -112,13 +112,6 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = (actions if candidates is None else candidates).copy()
 
-  if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
-    for i, action in enumerate(kernel_actions):
-      if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
-        # replace every tc_action with default tc with one tc_action for each available tc
-        kernel_actions[i:i+1] = \
-          [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1], tc_arg[2])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
-
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
       try: ax = lin.real_axis(a.op, a.axis)
@@ -127,12 +120,12 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
+      up, lcl = 1, 1
       for s,c in zip(lin2.full_shape, lin2.axis_types):
         if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
         elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s
-      if up//tc_up > max_up or lcl > max_lcl:
-        if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up//tc_up=}, {max_up=}, {lcl=}, {max_lcl=}")
+      if up > max_up or lcl > max_lcl:
+        if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many upcast/local. {up=}, {max_up=}, {lcl=}, {max_lcl=}")
         continue
       acted_lins[i+1] = lin2
     except KernelOptError: pass
