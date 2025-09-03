@@ -1,6 +1,6 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, time
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -60,7 +60,25 @@ def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg("GPUEndTime",
 
 def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
-  raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
+  try:
+    domain_obj = msg("domain", objc_instance)(error)
+    domain = from_ns_str(domain_obj) if domain_obj.value is not None else None
+  except Exception:
+    domain = None
+  try:
+    code = msg("code", ctypes.c_long)(error)
+  except Exception:
+    code = None
+  try:
+    desc = from_ns_str(msg("localizedDescription", objc_instance)(error))
+  except Exception:
+    desc = None
+  emsg = desc or "Metal error"
+  extra = []
+  if domain is not None: extra.append(f"domain={domain}")
+  if code is not None: extra.append(f"code={code}")
+  if extra: emsg += " ("+", ".join(extra)+")"
+  raise error_constructor(emsg)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
@@ -160,17 +178,32 @@ class MetalProgram:
       error_check(error_lib)
     else:
       # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.dev, lib.decode())
+      try:
+        if DEBUG is not None and DEBUG >= 2: print("Metal: creating library from source")
+        st_lib = time.perf_counter()
+        self.library = metal_src_to_library(self.dev, lib.decode())
+        if DEBUG is not None and DEBUG >= 2:
+          dt_lib_ms = (time.perf_counter()-st_lib)*1000.0
+          print(f"Metal: library created in {dt_lib_ms:.2f} ms")
       except CompileError as e: raise RuntimeError from e
     self.fxn = msg("newFunctionWithName:", objc_instance)(self.library, to_ns_str(name))
     descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"))
     msg("setComputeFunction:")(descriptor, self.fxn)
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
-    self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
-      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
-    error_check(error_pipeline_creation)
-    # cache these msg calls
-    self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
+    try:
+      if DEBUG is not None and DEBUG >= 2: print("Metal: building compute pipeline")
+      st_pipe = time.perf_counter()
+      self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
+        descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
+      error_check(error_pipeline_creation)
+      if DEBUG is not None and DEBUG >= 2:
+        dt_pipe_ms = (time.perf_counter()-st_pipe)*1000.0
+        print(f"Metal: compute pipeline built in {dt_pipe_ms:.2f} ms")
+      # cache these msg calls
+      self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
+    except Exception as e:
+      print(f"Metal: compute pipeline failed to build: {e}")
+      raise RuntimeError from e
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.max_total_threads:
