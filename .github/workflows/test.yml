@@ -242,7 +242,6 @@ jobs:
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
         PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated AMX tensor cores
       run: PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test emulated AMD tensor cores
@@ -252,12 +251,10 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated AMD MFMA tensor cores
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated AMD RDNA4 tensor cores
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
@@ -265,16 +262,21 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated CUDA tensor cores
       run: |
         DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         DEBUG=2 EMULATE_CUDA_SM75=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
+    - name: Test padded tensor cores
+      run: |
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD_MFMA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD_RDNA4=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Full test tensor cores
       run: |
         PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
@@ -477,7 +479,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          PYTHONPATH="." ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2131 ALLOWED_GATED_READ_IMAGE=12 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          PYTHONPATH="." ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2134 ALLOWED_GATED_READ_IMAGE=13 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)

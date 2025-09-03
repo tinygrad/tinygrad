@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -250,7 +250,7 @@ class Scheduler:
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in p]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
+            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in argsort(p)]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
 
             # get reduce/upcast axes for the tensor cores
             tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
@@ -265,7 +265,7 @@ class Scheduler:
             # TODO: remove tc_upcast_axes from the arg
             # do the reduce_axes always disappear? i think they don't
             # they need to be moved into the WMMA srcs
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, ()) #tc_reduce_axes)
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, ()) #, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
