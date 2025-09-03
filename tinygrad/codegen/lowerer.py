@@ -87,11 +87,7 @@ pm_lowerer = PatternMatcher([
    lambda ctx,x: x.replace(tag=1, arg=tuple([(ctx.idxs[a].arg[0], sz) for a,sz in x.arg])) if x.tag is None else None),
 ])
 
-def select_dtype(ctx, u):
-  if u.overflows(dtypes.int32):
-    if is_dtype_supported(dtypes.long, ctx): return dtypes.long.vec(u.dtype.count)
-    raise OverflowError(f"indexing overflows int32 and int64 not supported on {ctx}")
-  return dtypes.int.vec(u.dtype.count)
+def select_dtype(ctx, u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
 
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
