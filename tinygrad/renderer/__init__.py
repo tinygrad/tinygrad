@@ -83,7 +83,7 @@ class ProgramSpec:
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
-          special_size = {'g':self.global_size, 'l':self.local_size}.get(u.arg[0][0], None)
+          special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
           if special_size is not None: special_size[int(u.arg[0][-1])] = u.arg[1]
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
