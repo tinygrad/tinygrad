@@ -117,7 +117,7 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  device = "LLVM"
+  device = "CPU"
   abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
