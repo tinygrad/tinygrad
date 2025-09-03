@@ -1,7 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from tinygrad.dtype import DType, dtypes
-from tinygrad.uop import Ops
 
 @dataclass(frozen=True)
 class Register:
@@ -101,26 +99,33 @@ class MUOpX86(MUOp):
   imm: Immediate|Register|None = None
   # REX methods
   @staticmethod
-  def RM(opstr, opcode, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, prefix=prefix, w=w)
+  def prefix_w(reg: Register): return {"prefix": 0x66 if reg.size == 2 else 0, "w": 1 if reg.size == 8 else 0}
   @staticmethod
-  def _RM(opstr, opcode, reg, rm, w=0, prefix=0, in_cons=GPR):
-    return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, prefix=prefix, w=w)
+  def RM(opstr:str, opcode:int, rm:Register): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
+  def _RM(opstr:str, opcode:int, reg:int, rm:Register, in_cons=GPR):
+    return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def _R_RM(opstr, opcode, reg, rm, w=0, prefix=0): return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, prefix=prefix, w=w)
+  def R_RM(opstr:str, opcode:int, reg:Register, rm:Register|Memory):
+    return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def RM_R(opstr, opcode, rm, reg, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, prefix=prefix, w=w)
+  def _R_RM(opstr:str, opcode:int, reg:Register, rm:Register):
+    return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def R_I(opstr, opcode, reg, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, reg, (imm,), GPR, ((),), reg, prefix=prefix, w=w, imm=imm)
+  def RM_R(opstr:str, opcode:int, rm:Memory, reg:Register):
+    return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0): return MUOpX86(opstr, opcode, rm, (imm,), GPR, ((),), reg, rm, prefix=prefix, w=w, imm=imm)
+  def R_I(opstr:str, opcode:int, reg:Register, imm:Immediate):
+    return MUOpX86(opstr, opcode, reg, (imm,), GPR, ((),), reg, imm=imm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def _RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0):
-    return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
+  def RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
+    return MUOpX86(opstr, opcode, rm, (imm,), GPR, ((),), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def R_RM_I(opstr, opcode, reg, rm, imm, w=0, prefix=0):
-    return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, prefix=prefix, w=w, imm=imm)
+  def _RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
+    return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+  @staticmethod
+  def R_RM_I(opstr:str, opcode:int, reg:Register, rm:Register, imm:Immediate):
+    return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   # VEX methods
   @staticmethod
   def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, ((),), reg, rm, pp, sel, w, l)
@@ -164,21 +169,6 @@ class MUOpX86(MUOp):
   def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
-  def i_ops(op:Ops, dt:DType):
-    if dt.itemsize == 1: return {Ops.ADD: ("add", 0x02), Ops.SUB: ("sub", 0x2A), Ops.AND: ("and", 0x22), Ops.OR: ("or", 0x0A),
-                                 Ops.XOR: ("xor", 0x32), Ops.CMPNE: ("cmp", 0x3A), Ops.CMPLT: ("cmp", 0x3A), Ops.CMPEQ: ("cmp", 0x3A)}[op]
-    return {Ops.ADD: ("add", 0x03), Ops.SUB: ("sub", 0x2B), Ops.MUL: ("imul", 0x0FAF), Ops.AND: ("and", 0x23), Ops.OR: ("or", 0x0B),
-            Ops.XOR: ("xor", 0x33), Ops.CMPNE: ("cmp", 0x3B), Ops.CMPLT: ("cmp", 0x3B), Ops.CMPEQ: ("cmp", 0x3B)}[op]
-  @staticmethod
-  def imm_ops(op:Ops, dt:DType):
-    if dt.itemsize == 1:
-      if op is Ops.SHR: return ("shr", 0xC0, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC0, 7)
-      return {Ops.ADD: ("add", 0x80, 0), Ops.OR: ("or", 0x80, 1), Ops.AND: ("and", 0x80, 4), Ops.SUB: ("sub", 0x80, 5), Ops.XOR: ("xor", 0x80, 6),
-              Ops.SHL: ("shl", 0xC0, 4), Ops.CMPNE: ("cmp", 0x80, 7), Ops.CMPLT: ("cmp", 0x80, 7), Ops.CMPEQ: ("cmp", 0x80, 7)}[op]
-    if op is Ops.SHR: return ("shr", 0xC1, 5) if dtypes.is_unsigned(dt) else ("sar", 0xC1, 7)
-    return {Ops.ADD: ("add", 0x81, 0), Ops.OR: ("or", 0x81, 1), Ops.AND: ("and", 0x81, 4), Ops.SUB: ("sub", 0x81, 5), Ops.XOR: ("xor", 0x81, 6),
-            Ops.SHL: ("shl", 0xC1, 4), Ops.CMPNE: ("cmp", 0x81, 7), Ops.CMPLT: ("cmp", 0x81, 7), Ops.CMPEQ: ("cmp", 0x81, 7)}[op]
-  @staticmethod
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
     rax = Register("rax", 0, 8)
     rdx = Register("rdx", 2, 8)
@@ -189,23 +179,20 @@ class MUOpX86(MUOp):
       extend = MUOpX86("cbw", 0x98, prefix=0x66) if is_signed else MUOpX86.R_RM("movzx", 0x0FB6, x, x)
       div = MUOpX86._RM("idiv", 0xF6, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF6, 6, b, in_cons=in_cons)
     elif x.size == 2:
-      extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
-      div = MUOpX86._RM("idiv", 0xF7, 7, b, prefix=0x66, in_cons=in_cons) if is_signed else \
-            MUOpX86._RM("div", 0xF7, 6, b, prefix=0x66, in_cons=in_cons)
+      extend = MUOpX86("cwd", 0x99, prefix=0x66) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
     elif x.size == 4:
-      extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
+      extend = MUOpX86("cdq", 0x99) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx)
       div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
     else:
-      extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx, 1)
-      div = MUOpX86._RM("idiv", 0xF7, 7, b, 1, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, 1, in_cons=in_cons)
+      extend = MUOpX86("cqo", 0x99, w=1) if is_signed else MUOpX86.R_RM("xor", 0x33, rdx, rdx)
+      div = MUOpX86._RM("idiv", 0xF7, 7, b, in_cons=in_cons) if is_signed else MUOpX86._RM("div", 0xF7, 6, b, in_cons=in_cons)
     pop = MUOpX86._RM("pop", 0x8F, 0, rdx)
     return [move, push, extend, div, pop]
   @staticmethod
   def load(dest:Register, src:Memory) -> MUOp:
     if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
-    if dest in GPR and dest.size == 2: return MUOpX86.R_RM("mov", 0x8B, dest, src, 0, 0x66)
-    if dest in GPR and dest.size == 4: return MUOpX86.R_RM("mov", 0x8B, dest, src)
-    if dest in GPR and dest.size == 8: return MUOpX86.R_RM("mov", 0x8B, dest, src, 1)
+    if dest in GPR and dest.size in (2, 4, 8): return MUOpX86.R_RM("mov", 0x8B, dest, src)
     if dest in VEC and dest.size == 2: return MUOpX86.V_V_RM_I("vpinsrw", 0xC4, dest, dest, src, Immediate(0, 1), 1, 1)
     if dest in VEC and dest.size == 4: return MUOpX86.V_M("vmovss", 0x10, dest, src, 2, 1)
     if dest in VEC and dest.size == 8: return MUOpX86.V_M("vmovsd", 0x10, dest, src, 3, 1)
@@ -214,23 +201,20 @@ class MUOpX86(MUOp):
   @staticmethod
   def store(dest:Memory, src:Register) -> MUOp:
     if src in GPR and src.size == 1: return MUOpX86.RM_R("mov", 0x88, dest, src)
-    if src in GPR and src.size == 2: return MUOpX86.RM_R("mov", 0x89, dest, src, 0, 0x66)
-    if src in GPR and src.size == 4: return MUOpX86.RM_R("mov", 0x89, dest, src)
-    if src in GPR and src.size == 8: return MUOpX86.RM_R("mov", 0x89, dest, src, 1)
+    if src in GPR and src.size in (2, 4, 8): return MUOpX86.RM_R("mov", 0x89, dest, src)
     if src in VEC and src.size == 2: return MUOpX86.RM_V_I("vpextrw", 0x15, dest, src, Immediate(0, 1), 1, 3)
     if src in VEC and src.size == 4: return MUOpX86.M_V("vmovss", 0x11, dest, src, 2, 1)
     if src in VEC and src.size == 8: return MUOpX86.M_V("vmovsd", 0x11, dest, src, 3, 1)
     if src in VEC and src.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
     raise RuntimeError("store missing")
   @staticmethod
-  def assign(dest:Register, src:Register) -> MUOp:
-    if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
-    if dest in GPR and dest.size == 2: return MUOpX86.R_RM("mov", 0x8B, dest, src, 0, 0x66)
-    if dest in GPR and dest.size == 4: return MUOpX86.R_RM("mov", 0x8B, dest, src)
-    if dest in GPR and dest.size == 8: return MUOpX86.R_RM("mov", 0x8B, dest, src, 1)
-    if dest in VEC and dest.size <= 4: return MUOpX86.V_V_V("vmovss", 0x10, dest, src, src, 2, 1)
-    if dest in VEC and dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
-    if dest in VEC and dest.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
+  def assign(dest:Register, src:Register, vec:bool=False) -> MUOp:
+    if not vec:
+      if dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
+      if dest.size in (2, 4, 8): return MUOpX86.R_RM("mov", 0x8B, dest, src)
+    if dest.size <= 4: return MUOpX86.V_V_V("vmovss", 0x10, dest, src, src, 2, 1)
+    if dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
+    if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
     raise RuntimeError("assign missing")
   def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
     def _sub(x):

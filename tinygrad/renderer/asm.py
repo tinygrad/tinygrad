@@ -117,8 +117,8 @@ asm_matcher = PatternMatcher([
    lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
   # zero extending scalar 32bit int is a noop
   (UPat.var("y", dtypes.uint32).cast(dtypes.ints64, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
-  # cast between signed and unsigned is a noop
-  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
+  # cast between ints of same size is a noop
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
    lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
   # bitcasts between scalar float/mask and scalar int are real, rest are noops
   (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
@@ -207,16 +207,6 @@ x86_matcher = asm_matcher + PatternMatcher([
 
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
 def shuf_imm(x:UOp) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(x.src))
-def x86_setcc(dt:DType, op:Ops):
-  if op is Ops.CMPEQ: return ("sete", 0x0F94)
-  if op is Ops.CMPNE: return ("setne", 0x0F95)
-  if op is Ops.CMPLT: return ("setl", 0x0F9C) if dt in dtypes.sints else ("setb", 0x0F92)
-def x86_mov(dt:DType): return ("mov", 0x8A) if dt in dtypes.ints8+(dtypes.bool,) else ("mov", 0x8B)
-def x86_pre(x:UOp):
-  if x.dtype in dtypes.ints16: return (0, 0x66)
-  if x.dtype in dtypes.ints64: return (1,)
-  if x.dtype in (dtypes.bool,)+dtypes.ints8+dtypes.ints32: return ()
-  raise RuntimeError("invalid dtype")
 def disp(c:UOp, a:UOp): return Immediate(c.arg * a.dtype.base.scalar().itemsize, 4)
 
 #https://www.felixcloutier.com/x86/
@@ -224,49 +214,6 @@ def disp(c:UOp, a:UOp): return Immediate(c.arg * a.dtype.base.scalar().itemsize,
 # pp field: None == 0, 66 == 1, F3 == 2, F2 == 3
 # map select: 0F == 1, 0F38 == 2, 0F3A == 3
 x86_vec_lowerer = PatternMatcher([
-  # int binary
-  ((UPat.var("a", dtypes.ints8) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddb", 0xFC, ctx[x], ctx[a], ctx[b], 1, 1)),
-  ((UPat.var("a", dtypes.ints16) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddw", 0xFD, ctx[x], ctx[a], ctx[b], 1, 1)),
-  ((UPat.var("a", dtypes.ints32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddd", 0xFE, ctx[x], ctx[a], ctx[b], 1, 1)),
-  ((UPat.var("a", dtypes.ints64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddq", 0xD4, ctx[x], ctx[a], ctx[b], 1, 1)),
-  ((UPat.var("a", dtypes.ints16) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpmullw", 0xD5, ctx[x], ctx[a], ctx[b], 1, 1)),
-  ((UPat.var("a", dtypes.ints32) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpmulld", 0x40, ctx[x], ctx[a], ctx[b], 1, 2)),
-  ((UPat.var("a", dtypes.ints32) << UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsllvd", 0x47, ctx[x], ctx[a], ctx[b], 1, 2)),
-  ((UPat.var("a", dtypes.ints64) << UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsllvq", 0x47, ctx[x], ctx[a], ctx[b], 1, 2, 1)),
-  ((UPat.var("a", dtypes.uint32) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsrlvd", 0x45, ctx[x], ctx[a], ctx[b], 1, 2)),
-  ((UPat.var("a", dtypes.uint64) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsrlvq", 0x45, ctx[x], ctx[a], ctx[b], 1, 2, 1)),
-  ((UPat.var("a", dtypes.int32) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsravd", 0x46, ctx[x], ctx[a], ctx[b], 1, 2)),
-  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpand", 0xDB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) | UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpor", 0xEB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) ^ UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpxor", 0xEF, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.SUB, dtypes.ints8, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubb", 0xF8, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.SUB, dtypes.ints16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubw", 0xF9, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.SUB, dtypes.ints32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubd", 0xFA, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.SUB, dtypes.ints64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubq", 0xFB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtb", 0x64, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtw", 0x65, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtd", 0x66, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtq", 0x37, ctx[x], ctx[a], ctx[b], 1, 2)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqb", 0x74, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqw", 0x75, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqd", 0x76, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqq", 0x29, ctx[x], ctx[a], ctx[b], 1, 2)), # noqa: E501
-  # int ternary # NOTE: all ints use same cmove with single byte mask granularity
-  (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vpblendvb", 0x4C, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
-  # TODO: int load/store
-  (UPat.var("a").load(UPat.cvar("c"), dtype=(dtypes.int32.vec(4), dtypes.uint32.vec(4)), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.V_VM("vmovdqu", 0x6F, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 2, 1)), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=(dtypes.int32.vec(2), dtypes.uint32.vec(2)), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.V_VM("vmovq", 0x7E, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 2, 1)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", (dtypes.int32.vec(4), dtypes.uint32.vec(4))), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovdqu", 0x7F, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 2, 1)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", (dtypes.int32.vec(2), dtypes.uint32.vec(2))), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovq", 0xD6, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 1, 1)), # noqa: E501
-  # int shuffles, broadcast if possible otherwise insert elements individually
-  (UPat.var("y", dtypes.ints8+(dtypes.bool,)).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastb", 0x78, ctx[x], ctx[x], 1, 2)]), # noqa: E501
-  (UPat.var("y", dtypes.ints16).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastw", 0x79, ctx[x], ctx[x], 1, 2)]), # noqa: E501
-  (UPat.var("y", dtypes.ints32).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastd", 0x58, ctx[x], ctx[x], 1, 2)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
-  (UPat.var("y", dtypes.ints64).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovq", 0x6E, ctx[x], ctx[y], 1, 1, 1), MUOpX86.V_VM("vpbroadcastq", 0x59, ctx[x], ctx[x], 1, 2)]), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrb", 0x20, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints16, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 1) for i,s in enumerate(x.src)]), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints64, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrq", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
   # casts
   (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints16, name="x"), lambda ctx,y,x: MUOpX86.V_VM("vpmovzxbw", 0x30, ctx[x], ctx[y], 1, 2)),
   (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpX86.V_VM("vpmovzxbd", 0x31, ctx[x], ctx[y], 1, 2)),
@@ -288,33 +235,77 @@ x86_vec_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpX86.VM_V_I("vcvtps2ph", 0x1D, ctx[x], ctx[y], Immediate(4, 1), 1, 3)), # noqa: E501
   (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpX86.V_VM("vcvtps2pd", 0x5A, ctx[x], ctx[y], 0, 1)),
   (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpX86.V_VM("vcvtpd2ps", 0x5A, ctx[x], ctx[y], 1, 1)),
-  # float unary
+  # unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtps", 0x51, ctx[x], ctx[y], 0, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_VM("vsqrtpd", 0x51, ctx[x], ctx[y], 1, 1)),
   (UPat.var("y", dtypes.float32).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundps", 0x08, ctx[x], ctx[y], Immediate(3, 1), 1, 3)),
   (UPat.var("y", dtypes.float64).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_VM_I("vroundpd", 0x09, ctx[x], ctx[y], Immediate(3, 1), 1, 3)),
-  # float binary
+  # binary
+  ((UPat.var("a", dtypes.ints8) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddb", 0xFC, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints16) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddw", 0xFD, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddd", 0xFE, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpaddq", 0xD4, ctx[x], ctx[a], ctx[b], 1, 1)),
   ((UPat.var("a", dtypes.float32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vaddps", 0x58, ctx[x], ctx[a], ctx[b], 0, 1)),
   ((UPat.var("a", dtypes.float64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vaddpd", 0x58, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints16) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpmullw", 0xD5, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints32) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpmulld", 0x40, ctx[x], ctx[a], ctx[b], 1, 2)),
   ((UPat.var("a", dtypes.float32) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vmulps", 0x59, ctx[x], ctx[a], ctx[b], 0, 1)),
   ((UPat.var("a", dtypes.float64) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vmulpd", 0x59, ctx[x], ctx[a], ctx[b], 1, 1)),
+  ((UPat.var("a", dtypes.ints32) << UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsllvd", 0x47, ctx[x], ctx[a], ctx[b], 1, 2)),
+  ((UPat.var("a", dtypes.ints64) << UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsllvq", 0x47, ctx[x], ctx[a], ctx[b], 1, 2, 1)),
+  ((UPat.var("a", dtypes.uint32) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsrlvd", 0x45, ctx[x], ctx[a], ctx[b], 1, 2)),
+  ((UPat.var("a", dtypes.uint64) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsrlvq", 0x45, ctx[x], ctx[a], ctx[b], 1, 2, 1)),
+  ((UPat.var("a", dtypes.int32) >> UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsravd", 0x46, ctx[x], ctx[a], ctx[b], 1, 2)),
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpand", 0xDB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) | UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpor", 0xEB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) ^ UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpxor", 0xEF, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints8, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubb", 0xF8, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubw", 0xF9, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubd", 0xFA, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpsubq", 0xFB, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
   (UPat(Ops.SUB, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vsubps", 0x5C, ctx[x], ctx[a], ctx[b], 0, 1)), # noqa: E501
   (UPat(Ops.SUB, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vsubpd", 0x5C, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtb", 0x64, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtw", 0x65, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtd", 0x66, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPGT, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpgtq", 0x37, ctx[x], ctx[a], ctx[b], 1, 2)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 0, 1)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 1, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqb", 0x74, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqw", 0x75, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqd", 0x76, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vpcmpeqq", 0x29, ctx[x], ctx[a], ctx[b], 1, 2)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 0, 1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 1, 1)), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 0, 1)), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 1, 1)), # noqa: E501
   (UPat(Ops.FDIV, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vdivps", 0x5E, ctx[x], ctx[a], ctx[b], 0, 1)), # noqa: E501
   (UPat(Ops.FDIV, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vdivpd", 0x5E, ctx[x], ctx[a], ctx[b], 1, 1)), # noqa: E501
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 0, 1)), # noqa: E501
-  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 0, 1)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqps", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 0, 1)), # noqa: E501
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 1, 1)), # noqa: E501
-  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 1, 1)), # noqa: E501
-  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqpd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 1, 1)), # noqa: E501
-  # float ternary
+  # ternary
+  (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vpblendvb", 0x4C, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvps", 0x4A, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
-  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.V_VM("vmovups", 0x10, ctx[x], ctx[x.src[0]], 0, 1),
-                                                              MUOpX86.V_V_VM("vfmadd213ps", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]),
-  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.V_VM("vmovupd", 0x10, ctx[x], ctx[x.src[0]], 1, 1),
-                                                              MUOpX86.V_V_VM("vfmadd213pd", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]),
+  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213ps", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]), # noqa: E501
+  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213pd", 0xA8, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]), # noqa: E501
+  # int shuffles, broadcast if possible otherwise insert elements individually
+  (UPat.var("y", dtypes.ints8+(dtypes.bool,)).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastb", 0x78, ctx[x], ctx[x], 1, 2)]), # noqa: E501
+  (UPat.var("y", dtypes.ints16).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastw", 0x79, ctx[x], ctx[x], 1, 2)]), # noqa: E501
+  (UPat.var("y", dtypes.ints32).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovd", 0x6E, ctx[x], ctx[y], 1, 1), MUOpX86.V_VM("vpbroadcastd", 0x58, ctx[x], ctx[x], 1, 2)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
+  (UPat.var("y", dtypes.ints64).broadcast(name="x"), lambda ctx,y,x: [MUOpX86.V_RM("vmovq", 0x6E, ctx[x], ctx[y], 1, 1, 1), MUOpX86.V_VM("vpbroadcastq", 0x59, ctx[x], ctx[x], 1, 2)]), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrb", 0x20, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.ints16, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 1) for i,s in enumerate(x.src)]), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.ints64, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrq", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
+  # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
+  (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
+   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
+   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[2]], Immediate(shuf_imm(x), 1), 0, 1) if len(x.src) == 4 and x.src[0].src == x.src[1].src and x.src[2].src == x.src[3].src else \
+   [MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[s], Immediate(gep_imm(s.arg[0] if s.op is Ops.NOOP and isinstance(s.arg, tuple) else 0,i), 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
+  # TODO: int load/store
+  (UPat.var("a").load(UPat.cvar("c"), dtype=(dtypes.int32.vec(4), dtypes.uint32.vec(4)), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.V_VM("vmovdqu", 0x6F, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 2, 1)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=(dtypes.int32.vec(2), dtypes.uint32.vec(2)), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.V_VM("vmovq", 0x7E, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 2, 1)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", (dtypes.int32.vec(4), dtypes.uint32.vec(4))), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovdqu", 0x7F, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 2, 1)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", (dtypes.int32.vec(2), dtypes.uint32.vec(2))), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovq", 0xD6, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 1, 1)), # noqa: E501
   # float load/store TODO: can share with scalar pm
   (UPat.var("a").load(UPat.cvar("c"), UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float32.vec(2), name="x"), lambda ctx,a,c,b,m,x:
    [MUOpX86.V_VM("vmovq", 0x7E, ctx[x], ctx[b], 2, 1), MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)),
@@ -331,87 +322,32 @@ x86_vec_lowerer = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtypes.float32.vec(2)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovq", 0xD6, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 1, 1)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float32.vec(4)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovups", 0x11, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 0, 1)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float64.vec(2)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.VM_V("vmovupd", 0x11, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 1, 1)), # noqa: E501
-  # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
-  (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
-   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
-   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[2]], Immediate(shuf_imm(x), 1), 0, 1) if len(x.src) == 4 and x.src[0].src == x.src[1].src and x.src[2].src == x.src[3].src else \
-   [MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[s], Immediate(gep_imm(s.arg[0] if s.op is Ops.NOOP and isinstance(s.arg, tuple) else 0,i), 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
 ])
 
 def abi(ctx, x:UOp):
   i = ctx.arg_pos
   if sys.platform == "win32":
     if i < 4: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[1,2,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-3)*8+40, 4)), 1)
+    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-3)*8+40, 4)))
   if i < 6: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[7,6,2,1,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-5)*8+8, 4)), 1)
+  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-5)*8+8, 4)))
 
 x86_lowerer = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_lowerer.rewrite(x, ctx) if x.dtype.count > 1 or x.op is Ops.STORE and x.src[1].dtype.count > 1 else None), # noqa: E501
   # defines, define global is modeled as a move from real to vitual
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), name="x"), abi),
-  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], Register("rbp", 5, 8), 1),
-                                                                      MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4), 1)]),
-  # index
-  (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 1)), # noqa: E501
-  (UPat.var("a").index(UPat.var("idx")).named("x"), lambda ctx,a,idx,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], ctx[idx], a.dtype.itemsize), 1)), # noqa: E501
-  # int binary with immediate
-  ((UPat.var("a", dtypes.ints16) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 2), 0, 0x66)), # noqa: E501
-  ((UPat.var("a", dtypes.ints32) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 4))),
-  ((UPat.var("a", dtypes.ints64) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, 4), 1)), # noqa: E501
-  (UPat((Ops.SHL, Ops.SHR), dtypes.ints, (UPat.var("a"), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
-                                                                                                        MUOpX86.RM_I(*MUOpX86.imm_ops(x.op, x.dtype), ctx[x], Immediate(c.arg, 1), *x86_pre(x))]), # noqa: E501
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86._RM_I(*MUOpX86.imm_ops(x.op, a.dtype), ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(a)), # noqa: E501
-                                                                                                                MUOpX86.RM(*x86_setcc(x.src[0].dtype, x.op), ctx[x])]), # noqa: E501
-  (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints+(dtypes.bool,)), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
-                                                                                                                       MUOpX86.RM_I(*MUOpX86.imm_ops(x.op, x.dtype), ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)), *x86_pre(x))]), # noqa: E501
-  # int binary with register/memory
-  ((UPat.var("a", dtypes.ints) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.idiv(ctx[x], ctx[a], ctx[b], a.dtype in dtypes.sints)),
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpX86._R_RM(*MUOpX86.i_ops(x.op, a.dtype), ctx[a], ctx[b], *x86_pre(a)), # noqa: E501
-                                                                                                               MUOpX86.RM(*x86_setcc(x.src[0].dtype, x.op), ctx[x])]), # noqa: E501
-  (UPat(GroupOp.Binary, src=(UPat.var("a", dtypes.ints+(dtypes.bool,)), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpX86.R_RM(*x86_mov(x.dtype), ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
-                                                                                                                      MUOpX86.R_RM(*MUOpX86.i_ops(x.op, x.dtype), ctx[x], ctx[b], *x86_pre(x))]), # noqa: E501
-  # int ternary TODO: shouldn't need to set the flag everytime
-  (UPat.var("m").where(UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a], *x86_pre(x)), # noqa: E501
-                                                                                                                                 MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                                 MUOpX86.R_RM("cmove", 0x0F44, ctx[x], ctx[b], *x86_pre(x))]), # noqa: E501
+  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], Register("rbp", 5, 8)), MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4))]), # noqa: E501
   # immediate loads
   (UPat.cvar("c", dtypes.ints8+(dtypes.bool,)).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(c.arg, 1))),
-  (UPat.cvar("c", dtypes.ints16).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 2), 0, 0x66)),
+  (UPat.cvar("c", dtypes.ints16).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 2))),
   (UPat.cvar("c", dtypes.ints32).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 4))),
-  (UPat.cvar("c", dtypes.ints64).load(name="x"), lambda ctx,c,x: MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(c.arg, 8), 1)),
-  (UPat.cvar("c", dtypes.float16).load(dtype=dtypes.int16, name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(int.from_bytes(struct.pack("<e", c.arg), "little"), 2), 0, 0x66)), # noqa: E501
+  (UPat.cvar("c", dtypes.ints64).load(name="x"), lambda ctx,c,x: MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(c.arg, 8))),
+  (UPat.cvar("c", dtypes.float16).load(dtype=dtypes.int16, name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(int.from_bytes(struct.pack("<e", c.arg), "little"), 2))), # noqa: E501
   (UPat.cvar("c", dtypes.float32).load(dtype=dtypes.int32, name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(int.from_bytes(struct.pack("<f", c.arg), "little"), 4))), # noqa: E501
-  (UPat.cvar("c", dtypes.float64).load(dtype=dtypes.int64, name="x"), lambda ctx,c,x: MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(int.from_bytes(struct.pack("<d", c.arg), "little"), 8), 1)), # noqa: E501
-  # int load/store
-  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(b.arg, 1)), # noqa: E501
-                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
-                                                                                                                       MUOpX86.R_RM("mov", 0x8A, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a))), # noqa: E501
-                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints32, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(b.arg, 4)), # noqa: E501
-                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
-                                                                                                                       MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a))), # noqa: E501
-                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints64, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(b.arg, 4)), # noqa: E501
-                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
-                                                                                                                       MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 1), # noqa: E501
-                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints8+(dtypes.bool,), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8A, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)))), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints16, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 0, 0x66)), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints32, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)))), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints64, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), 1)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dtypes.ints8+(dtypes.bool,)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x88, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b])), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dtypes.ints16), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x89, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b], 0, 0x66)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dtypes.ints32), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x89, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b])), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dtypes.ints64), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x89, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b], 1)), # noqa: E501
-  # int extract
-  (UPat.var("y", dtypes.ints8+(dtypes.bool,)).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrb", 0x14, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)), # noqa: E501
-  (UPat.var("y", dtypes.ints16).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrw", 0x15, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
-  (UPat.var("y", dtypes.ints32).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrd", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
-  (UPat.var("y", dtypes.ints64).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrq", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3, 1)),
+  (UPat.cvar("c", dtypes.float64).load(dtype=dtypes.int64, name="x"), lambda ctx,c,x: MUOpX86.R_I("movabs", 0xB8, ctx[x], Immediate(int.from_bytes(struct.pack("<d", c.arg), "little"), 8))), # noqa: E501
+  # index
+  (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)))),
+  (UPat.var("a").index(UPat.var("idx")).named("x"), lambda ctx,a,idx,x: MUOpX86.R_RM("lea", 0x8D, ctx[x], Memory(ctx[x].size, ctx[a], ctx[idx], a.dtype.itemsize))), # noqa: E501
   # bitcasts
   (UPat.var("y", dtypes.ints8).bitcast(dtypes.mask8).named("x"), lambda ctx,y,x: MUOpX86.V_V_RM_I("vpinsrb", 0x20, ctx[x], ctx[x], ctx[y], Immediate(0, 1), 1, 3)), # noqa: E501
   (UPat.var("y", dtypes.ints16).bitcast((dtypes.float16, dtypes.mask16)).named("x"), lambda ctx,y,x: MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[y], Immediate(0, 1), 1, 1)), # noqa: E501
@@ -422,17 +358,11 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", (dtypes.float32, dtypes.mask32)).bitcast(dtypes.ints32).named("x"), lambda ctx,y,x: MUOpX86.RM_V("vmovd", 0x7E, ctx[x], ctx[y], 1, 1)), # noqa: E501
   (UPat.var("y", (dtypes.float64, dtypes.mask64)).bitcast(dtypes.ints64).named("x"), lambda ctx,y,x: MUOpX86.RM_V("vmovq", 0x7E, ctx[x], ctx[y], 1, 1, 1)), # noqa: E501
   # casts
-  (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints16, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB6, ctx[x], ctx[y], 0, 0x66)),
-  (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB6, ctx[x], ctx[y])),
-  (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB6, ctx[x], ctx[y], 1)),
-  (UPat.var("y", dtypes.uint16).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB7, ctx[x], ctx[y])),
-  (UPat.var("y", dtypes.uint16).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB7, ctx[x], ctx[y], 1)),
-  (UPat.var("y", dtypes.int8).cast(dtypes.ints16, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBE, ctx[x], ctx[y], 0, 0x66)),
-  (UPat.var("y", dtypes.int8).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBE, ctx[x], ctx[y])),
-  (UPat.var("y", dtypes.int8).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBE, ctx[x], ctx[y], 1)),
-  (UPat.var("y", dtypes.int16).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBF, ctx[x], ctx[y])),
-  (UPat.var("y", dtypes.int16).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBF, ctx[x], ctx[y], 1)),
-  (UPat.var("y", dtypes.int32).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsxd", 0x63, ctx[x], ctx[y], 1)),
+  (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints16+dtypes.ints32+dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB6, ctx[x], ctx[y])), # noqa: E501
+  (UPat.var("y", dtypes.int8).cast(dtypes.ints16+dtypes.ints32+dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBE, ctx[x], ctx[y])), # noqa: E501
+  (UPat.var("y", dtypes.uint16).cast(dtypes.ints32+dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movzx", 0x0FB7, ctx[x], ctx[y])),
+  (UPat.var("y", dtypes.int16).cast(dtypes.ints32+dtypes.ints64, name="x"),  lambda ctx,y,x: MUOpX86.R_RM("movsx", 0x0FBF, ctx[x], ctx[y])),
+  (UPat.var("y", dtypes.int32).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpX86.R_RM("movsxd", 0x63, ctx[x], ctx[y])),
   (UPat.var("y", dtypes.int32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpX86.V_V_RM("vcvtsi2ss", 0x2A, ctx[x], ctx[x], ctx[y], 2, 1)),
   (UPat.var("y", dtypes.int32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpX86.V_V_RM("vcvtsi2sd", 0x2A, ctx[x], ctx[x], ctx[y], 3, 1)),
   (UPat.var("y", dtypes.int64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpX86.V_V_RM("vcvtsi2ss", 0x2A, ctx[x], ctx[x], ctx[y], 2, 1, 1)),
@@ -445,11 +375,57 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpX86.VM_V_I("vcvtps2ph", 0x1D, ctx[x], ctx[y], Immediate(4, 1), 1, 3)), # noqa: E501
   (UPat.var("y", dtypes.float32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpX86.V_V_VM("vcvtss2sd", 0x5A, ctx[x], ctx[x], ctx[y], 2, 1)),
   (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpX86.V_V_VM("vcvtsd2ss", 0x5A, ctx[x], ctx[x], ctx[y], 3, 1)),
-  # float unary
+  # unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtss", 0x51, ctx[x], ctx[y], ctx[y], 2, 1)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM("vsqrtsd", 0x51, ctx[x], ctx[y], ctx[y], 3, 1)),
   (UPat.var("y", dtypes.float32).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundss", 0x0A, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
   (UPat.var("y", dtypes.float64).trunc().named("x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vroundsd", 0x0B, ctx[x], ctx[y], ctx[y], Immediate(3, 1), 1, 3)), # noqa: E501
+  # binary, immediates first
+  ((UPat.var("a", dtypes.ints) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.idiv(ctx[x], ctx[a], ctx[b], a.dtype in dtypes.sints)),
+  ((UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)))), # noqa: E501
+  ((UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64) * UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("imul", 0x0FAF, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) << UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shl", 0xC0, 4, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) << UPat.cvar("c")).named("x"),  lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shl", 0xC1, 4, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.uint8) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shr", 0xC0, 5, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.uints) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shr", 0xC1, 5, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.int8) >> UPat.cvar("c")).named("x"),  lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("sar", 0xC0, 7, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.sints) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("sar", 0xC1, 7, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("add", 0x80, 0, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) + UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("add", 0x02, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("add", 0x81, 0, ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) + UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("add", 0x03, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) & UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("and", 0x80, 4, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) & UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("and", 0x22, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) & UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("and", 0x81, 4, ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) & UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("and", 0x23, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) | UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("or", 0x80, 1, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) | UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("or", 0x0A, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) | UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("or", 0x81, 1, ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) | UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("or", 0x0B, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) ^ UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("xor", 0x80, 6, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8+(dtypes.bool,)) ^ UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("xor", 0x32, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) ^ UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("xor", 0x81, 6, ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)))]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) ^ UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("xor", 0x33, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.uint8) < UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x80, 7, ctx[a], Immediate(c.arg, 1)), MUOpX86.RM("setb", 0x0F92, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.uint8) < UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3A, ctx[a], ctx[b]), MUOpX86.RM("setb", 0x0F92, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.uints) < UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4))), MUOpX86.RM("setb", 0x0F92, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.uints) < UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), MUOpX86.RM("setb", 0x0F92, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.int8) < UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x80, 7, ctx[a], Immediate(c.arg, 1)), MUOpX86.RM("setl", 0x0F9C, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.int8) < UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3A, ctx[a], ctx[b]), MUOpX86.RM("setl", 0x0F9C, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.sints) < UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4))), MUOpX86.RM("setl", 0x0F9C, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.sints) < UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), MUOpX86.RM("setl", 0x0F9C, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) != UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x80, 7, ctx[a], Immediate(c.arg, 1)), MUOpX86.RM("setne", 0x0F95, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) != UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3A, ctx[a], ctx[b]), MUOpX86.RM("setne", 0x0F95, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) != UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4))), MUOpX86.RM("setne", 0x0F95, ctx[x])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints) != UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), MUOpX86.RM("setne", 0x0F95, ctx[x])]), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints8), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x80, 7, ctx[a], Immediate(c.arg, 1)), MUOpX86.RM("sete", 0x0F94, ctx[x])]), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3A, ctx[a], ctx[b]), MUOpX86.RM("sete", 0x0F94, ctx[x])]), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4))), MUOpX86.RM("sete", 0x0F94, ctx[x])]), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"),  lambda ctx,a,b,x: [MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), MUOpX86.RM("sete", 0x0F94, ctx[x])]), # noqa: E501
+  (UPat(Ops.SUB, src=(UPat.var("a", dtypes.ints8), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("sub", 0x80, 5, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
+  (UPat(Ops.SUB, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("sub", 0x2A, ctx[x], ctx[b])]), # noqa: E501
+  (UPat(Ops.SUB, src=(UPat.var("a", dtypes.ints), UPat.cvar("c")), name="x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(c.arg, min(c.dtype.itemsize, 4)))]), # noqa: E501
+  (UPat(Ops.SUB, src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("sub", 0x2B, ctx[x], ctx[b])]), # noqa: E501
   # mask binary NOTE: only bitwise and packed
   ((UPat.var("a", dtypes.mask32) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vandps", 0x54, ctx[x], ctx[a], ctx[b], 0, 1)),
   ((UPat.var("a", dtypes.mask64) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.V_V_VM("vandpd", 0x54, ctx[x], ctx[a], ctx[b], 1, 1)),
@@ -472,13 +448,40 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpltsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(1, 1), 3, 1)), # noqa: E501
   (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpneqsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(4, 1), 3, 1)), # noqa: E501
   (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpX86.V_V_VM_I("vcmpeqsd", 0xC2, ctx[x], ctx[a], ctx[b], Immediate(0, 1), 3, 1)), # noqa: E501
-  # float ternary NOTE: packed where
+  # ternary TODO: shouldn't need to set the flag everytime
+  (UPat.var("m").where(UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], ctx[a]), # noqa: E501
+                                                                                                                                 MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
+                                                                                                                                 MUOpX86.R_RM("cmove", 0x0F44, ctx[x], ctx[b])]), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvps", 0x4A, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
-  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.V_V_V("vmovss", 0x10, ctx[x], ctx[x.src[0]], ctx[x.src[0]], 2, 1),
-                                                              MUOpX86.V_V_VM("vfmadd213ss", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]),
-  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.V_V_V("vmovsd", 0x10, ctx[x], ctx[x.src[0]], ctx[x.src[0]], 3, 1),
-                                                              MUOpX86.V_V_VM("vfmadd213sd", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]),
+  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213ss", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]), # noqa: E501
+  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213sd", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]), # noqa: E501
+  # extract TODO: add float64
+  (UPat.var("y", dtypes.ints8+(dtypes.bool,)).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrb", 0x14, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)), # noqa: E501
+  (UPat.var("y", dtypes.ints16).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrw", 0x15, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
+  (UPat.var("y", dtypes.ints32).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrd", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
+  (UPat.var("y", dtypes.ints64).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrq", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3, 1)),
+  (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)), # noqa: E501
+  # int load/store
+  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(b.arg, 1)), # noqa: E501
+                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
+                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                       MUOpX86.R_RM("mov", 0x8A, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a))), # noqa: E501
+                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints32, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(b.arg, 4)), # noqa: E501
+                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
+                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                       MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a))), # noqa: E501
+                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints64, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(b.arg, 4)), # noqa: E501
+                                                                                                                       MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
+                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                       MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a))), # noqa: E501
+                                                                                                                       MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints8+(dtypes.bool,), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8A, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)))), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)))), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints8+(dtypes.bool,)), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x88, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b])), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.RM_R("mov", 0x89, Memory(ctx[a].size, ctx[a], disp=disp(c,a)), ctx[b])), # noqa: E501
   # float load/store
   (UPat.var("a").load(UPat.cvar("c"), UPat.var("b"), UPat.var("m", dtypes.bool), dtype=dtypes.float16, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.V_V_V("vmovss", 0x10, ctx[x], ctx[b], ctx[b], 2, 1), # noqa: E501
                                                                                                                                          MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
@@ -501,11 +504,8 @@ x86_lowerer = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtypes.float16), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpX86.RM_V_I("vpextrw", 0x15, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], Immediate(0, 1), 1, 3)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float32), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpX86.M_V("vmovss", 0x11, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 2, 1)), # noqa: E501
   (UPat.var("a").store(UPat.var("b", dtypes.float64), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpX86.M_V("vmovsd", 0x11, Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], 3, 1)), # noqa: E501
-  # float extract TODO: add float64
-  (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)), # noqa: E501
   # range / endrange
-  (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)),
-                                                           MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]),
+  (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)), MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
                                                                                                                     MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, 4)), # noqa: E501
                                                                                                                     MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
@@ -693,12 +693,13 @@ class X86Renderer(AsmRenderer):
 
   def load(self, dest:Register, src:Memory): return MUOpX86.load(dest, src)
   def store(self, dest:Memory, src:Register): return MUOpX86.store(dest, src)
-  def assign(self, dest:Register, src:Register): return MUOpX86.assign(dest, src)
+  def assign(self, dest:Register, src:Register): return MUOpX86.assign(dest, src, dest in VEC)
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
-    prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
+    rbp, rsp = Register("rbp", 5, 8), Register("rsp", 4, 8)
+    prologue = [MUOpX86._RM("push", 0xFF, 6, rbp), MUOpX86.R_RM("mov", 0x8B, rbp, rsp)] + \
                [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
-               [MUOpX86.RM_I("sub", 0x81, 5, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)]
-    epilogue = [MUOpX86.RM_I("add", 0x81, 0, Register("rsp", 4, 8), Immediate(self.stack_size, 4), 1)] + \
-               [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
+               [MUOpX86.RM_I("sub", 0x81, 5, rsp, Immediate(self.stack_size, 4))]
+    epilogue = [MUOpX86.RM_I("add", 0x81, 0, rsp, Immediate(self.stack_size, 4))] + \
+               [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, rbp)]
     kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
     return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
