@@ -26,7 +26,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
   (UPat(Ops.PRECAST, name="x"), lambda ctx,x: ctx[x.src[0]]),
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {sint_to_uop(x.arg[1]).render()} */"),
+  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x:
+    f"{ctx.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {sint_to_uop(x.arg[1], dtypes.int).render()} */"),
   # const
   (UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, ctx.infinity)})"),
   (UPat(Ops.CONST, arg=-math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, f'-{ctx.infinity}')})"),

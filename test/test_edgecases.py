@@ -26,6 +26,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes, nn
+from tinygrad.device import is_dtype_supported
 
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
@@ -230,10 +231,8 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.expectedFailure
+  @unittest.skipIf(not is_dtype_supported(dtypes.long), "int64 is supported")
   def test_tensor_index_overflow(self):
-    # Advanced indexing on tensors expanded past int32 should not error, but
-    # tinygrad fails with a UOp verification error.
     val = Tensor([1])
     big = val.expand(2**31 + 3)
     idx = Tensor([0, 2**31 + 2])

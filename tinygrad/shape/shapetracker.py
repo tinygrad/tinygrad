@@ -5,22 +5,9 @@ import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
-from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
-from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
+from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid, pm_simplify_valid
 
-# If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
-# or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
-def handle_upcast(u: UOp) -> UOp|None:
-  dtype = dtypes.int64.vec(u.dtype.count) if u.dtype.count > 1 else dtypes.int64
-  # check for overflow, upcast this to int64
-  if u.vmax > dtypes.max(dtypes.int) or u.vmin < dtypes.min(dtypes.int):
-    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src]))
-  # if any inputs are int64 and this *doesn't* overflow, cast back to int
-  if any(x.dtype == dtypes.int64 for x in u.src):
-    return u.replace(dtype=dtype, src=tuple([x.cast(dtype) for x in u.src])).cast(u.dtype)
-  return None
-pm_upcast = PatternMatcher([(UPat(GroupOp.ALU, dtype=dtypes.int, name="u"), handle_upcast),])
 
 @functools.cache
 def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
@@ -35,7 +22,16 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=No
     if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
     if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
     # symbolic again, upcast if needed
-    return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
+    return graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 2").src
+
+@functools.cache
+def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
+  idx = views[-1].to_valid_uop(_idxs)
+  for view in reversed(views[0:-1]):
+    view = view.minify()
+    idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
+  # with Context(TRACK_MATCH_STATS=0):
+  return graph_rewrite(idx, symbolic_flat+pm_simplify_valid, name="indexing sym @ 1")
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:
@@ -85,6 +81,9 @@ class ShapeTracker:
 
   def to_indexed_uops(self, _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
     return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
+
+  def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
+    return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
   # upper bound on buffer size required to fit this shapetracker
   def real_size(self) -> int:

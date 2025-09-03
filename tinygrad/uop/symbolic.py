@@ -1,6 +1,7 @@
 # all of symbolic lives here now
 from typing import cast
 import math, operator, struct, functools
+from tinygrad.helpers import Invalid
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
@@ -22,7 +23,24 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-symbolic_simple = PatternMatcher([
+invalid_pat = UPat.const(dtypes.index, Invalid).named("i")
+invalid_gate = UPat.var("cond").where(UPat.var("x",dtype=dtypes.index), invalid_pat)
+
+propagate_invalid = PatternMatcher([
+  # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
+  # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda cond,x,i,cast: cond.where(cast.replace(src=(x,)), i.replace(dtype=cast.dtype))),
+  *((invalid_gate.alu(op, UPat.var("y")).named("alu"),
+    lambda cond,x,y,alu,i: cond.where(newx:=x.alu(alu.op,y),i.replace(dtype=newx.dtype))) for op in GroupOp.Binary),
+  (invalid_gate.where(UPat.var("y"), UPat.var("z")), lambda cond,x,i,y,z: cond.where(x.where(y,z),i.replace(dtype=y.dtype))),
+  (UPat.var("c1").where(UPat.var("c2").where(UPat.var("x"), UPat.var("y")), UPat.var("y")), lambda c1,c2,x,y: (c1&c2).where(x,y)),
+  # order of gate&!cond matters!, and-clauses are only simplified left to right and we need to gate to be used to fold cond
+  (UPat.var("gate").where(invalid_gate, UPat.var("y")), lambda gate,cond,x,y,i: ((gate&cond.logical_not()).logical_not()).where(gate.where(x,y), i)),
+  # unswap the branches for the rule above
+  (UPat.var("gate").where(UPat.var("y"), invalid_gate).named("where"), lambda gate,cond,x,y,i: gate.logical_not().where(cond.where(x,i), y))
+])
+
+symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -106,6 +124,7 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
     if fac!=1:
       if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
       u = u.src[0]
+    if u.op is Ops.CAST and u.src[0].dtype == dtypes.index: u = u.src[0]
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
     if denominator != u.src[1].arg: return None
     if (s0:=u.src[0]).vmin < 0: return None
@@ -121,7 +140,7 @@ def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
   for i in range(denominator-len(seen_const)):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
   if sorted(seen_const)==list(range(denominator)):
-    return fac*ans
+    return (fac*ans).cast(divs.dtype)
   return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
@@ -271,7 +290,8 @@ gep_pushing = PatternMatcher([
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for ints) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.int, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=(dtypes.index,dtypes.int), name='x'),
+    lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -287,12 +307,13 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
-  (UPat.var('x', dtypes.ints).cast(dtypes.ints, name="a").cast(dtypes.ints, name="b"),
+  (UPat.var('x', dtypes.ints).cast(dtypes.ints, name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
-  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f:
+    cond.where(f,t) if f is not UOp.invalid() else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -326,8 +347,10 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  ((UPat() + UPat()//UPat.cvar("d", vec=False)).named("divs"), lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat() + (UPat()//UPat.cvar("d", vec=False))*UPat.cvar("c")).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
+  ((UPat() + (UPat()//UPat.cvar("d", vec=False)).or_casted()).named("divs"),
+    lambda divs,d: fold_unrolled_divs(divs, d.arg)),
+  ((UPat() + ((UPat()//UPat.cvar("d", vec=False)).or_casted()*UPat.cvar("c"))).named("divs"), lambda divs,d,c:
+    fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.sints)*-1 < UPat.var("y", dtypes.sints)*-1, lambda x,y: y<x),
@@ -363,6 +386,8 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  # working around casts in arange
+  ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
@@ -373,9 +398,9 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
 
   # (X < c).ne(True) -> X >= c
   if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
-    (s0:=valid.src[0]).op is Ops.CMPLT and s0.src[1].op is Ops.CONST: return s0.src[0], False, s0.src[1].arg
+    (s0:=valid.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype): return s0.src[0], False, int(s0.src[1].vmin)
   # X < c -> X <= c-1
-  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, valid.src[1].arg-1
+  if valid.op is Ops.CMPLT and valid.src[1].op and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, int((valid.src[1]-1).vmax)
   raise ValueError(f"not able to parse {valid=}")
 
 def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
@@ -436,6 +461,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+pm_simplify_valid = PatternMatcher([(UPat(Ops.AND, name="valid"), simplify_valid),])
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
 def reduce_mul_chain(r:UOp):
@@ -508,4 +534,7 @@ sym = symbolic_flat+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  # move INVALID from idx where to a gate
+  (UPat(Ops.INDEX, src=(UPat(), invalid_gate,), name="idx"), lambda idx,cond,x,i: idx.replace(src=(idx.src[0], x, cond))),
+  (UPat(Ops.INDEX, src=(UPat(), invalid_pat,), name="idx"), lambda idx,i: idx.replace(src=(idx.src[0], i, UOp.const(dtypes.bool, False))))
 ])

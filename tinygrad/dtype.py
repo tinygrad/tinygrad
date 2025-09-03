@@ -108,6 +108,7 @@ class dtypes:
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
+    if dtype==dtypes.index: return val
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
@@ -128,6 +129,7 @@ class dtypes:
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
+  index: Final[DType] = DType.new(-1, 8, "index", 'I')
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
@@ -162,7 +164,7 @@ class dtypes:
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
-  sints = (int8, int16, int32, int64)
+  sints = (int8, int16, int32, int64, index)
   ints = uints + sints
   all = floats + ints + (bool,)
 
@@ -189,8 +191,8 @@ def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds])) if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void"}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index"))}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
 def can_safe_cast(dt0:DType, dt1:DType) -> bool:
@@ -198,6 +200,7 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
+    case dtypes.index: return dt0 in dtypes.ints
     case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
     case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
