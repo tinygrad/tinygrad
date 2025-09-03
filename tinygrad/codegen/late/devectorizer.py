@@ -58,7 +58,7 @@ load_store_indexing = PatternMatcher([
   # index True is just Index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
   # remove hanging cast
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx").cast()),), lambda buf,idx: buf.index(idx))
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx").cast()),), lambda buf,idx: buf.index(idx)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx").cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
