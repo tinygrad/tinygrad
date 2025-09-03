@@ -289,9 +289,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   (UPat.var('x', dtypes.ints).cast(dtypes.ints, name="a").cast(dtypes.ints, name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
-  (UPat(GroupOp.Binary, dtypes.long, src=(UPat.var("x",dtypes.long), UPat.var("x", dtypes.long)), name="u"), lambda u,x,y: u.replace(dtype=dtypes.int,
+  (UPat(GroupOp.Binary, dtypes.long, src=(UPat.var("x",dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y: u.replace(dtype=dtypes.int,
     src=(x.cast(dtypes.int), y.cast(dtypes.int))).cast(dtypes.long) if not (x.overflows(dtypes.int) or y.overflows(dtypes.int)) else None),
-  (UPat(GroupOp.Comparison, src=(UPat.var("x",dtypes.long), UPat.var("x", dtypes.long)), name="u"), lambda u,x,y:
+  (UPat(GroupOp.Comparison, src=(UPat.var("x",dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
     u.replace(src=(x.cast(dtypes.int), y.cast(dtypes.int))) if not (x.overflows(dtypes.int) or y.overflows(dtypes.int)) else None),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
