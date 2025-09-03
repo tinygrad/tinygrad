@@ -61,8 +61,8 @@ def hand_coded_optimizations(k) -> list[Opt]:
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
-    is_masked = any(st.axis_is_masked(axis) for st in k.sts) if hasattr(k, "sts") else \
-      any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs)
+    if hasattr(k, "sts"): is_masked = any(st.axis_is_masked(axis) for st in k.sts)
+    else: is_masked = any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
