@@ -122,7 +122,7 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, 1 #prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
+      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if hasattr(lin2, 'tensor_core') and (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.axis_types):
         if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
         elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s

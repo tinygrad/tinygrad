@@ -45,6 +45,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
             k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
           elif axis in k.unrollable_dims:
             k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+      else:
+        assert buf.op is Ops.INDEX
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k.applied_opts

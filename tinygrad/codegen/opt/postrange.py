@@ -145,6 +145,12 @@ class Scheduler:
     except IndexError as e: raise KernelOptError from e
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
+    if opt.op is OptOps.NOLOCALS:
+      check(all(x not in {AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
+      self.dont_use_locals = True
+      self.applied_opts.append(opt)
+      return
+
     if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
       check(self.opts.has_local, "locals needed for opt")
 
@@ -187,9 +193,6 @@ class Scheduler:
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
       self.ast = graph_rewrite(self.ast, remove_tags)
-    elif opt.op is OptOps.NOLOCALS:
-      check(all(x not in {AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
-      self.dont_use_locals = True
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
     if append_opt:
