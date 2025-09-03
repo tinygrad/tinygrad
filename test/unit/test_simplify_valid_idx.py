@@ -195,6 +195,17 @@ class TestValidIdxSimplification(unittest.TestCase):
       "1",
       "((((ridx0+ridx1)<1)!=True)&(((ridx2+ridx3)<1)!=True))")
 
+  def test_valid_with_non_const_rhs(self):
+    ridx0 = Range(0, 2**16)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    valid = (ridx0<(ridx1*4 + ridx2))&(ridx0<-1).ne(True)
+    idx = ridx0%1024
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "ridx0",
+      "(ridx0<((ridx1*4)+ridx2))")
+
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = full_rewrite_to_sink(load.sink()).src[0]
