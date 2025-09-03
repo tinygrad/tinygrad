@@ -128,7 +128,7 @@ class dtypes:
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  index: Final[DType] = DType.new(-1, 8, "index", 'I')
+  index: Final[DType] = DType.new(-1, math.inf, "index", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
