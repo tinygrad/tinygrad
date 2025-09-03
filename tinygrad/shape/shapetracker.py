@@ -5,8 +5,8 @@ import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
+from tinygrad.uop.symbolic import symbolic_flat, uop_given_valid, simplify_valid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
-from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
 
 
 @functools.cache
@@ -30,7 +30,7 @@ def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[sint|None] = [None] * len(views[-1].shape)
   idx, valid = views_to_indexed_uops(views)
-  for c in split_uop(idx, Ops.ADD):
+  for c in idx.split_uop(Ops.ADD):
     if c.op is Ops.RANGE: ret[c.arg[0]] = 1
     if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
     if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg

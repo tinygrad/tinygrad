@@ -329,6 +329,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
+  # *** ShapeTracker helpers ***
+
+  def split_uop(self:UOp, sep:Ops):
+    if self.op is sep:
+      for s in self.src: yield from s.split_uop(sep)
+    else: yield self
+
   # *** from MultiLazyBuffer ***
 
   def multi(self, axis:int|None):
@@ -710,7 +717,8 @@ class UPat(MathTrait):
   def assign(self, x:UPat, **kwargs): return UPat(Ops.ASSIGN, self.dtype, (self,x), **kwargs)
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
-  def or_broadcasted(self, **kwargs): return UPat.any(self, UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs))
+  def broadcast(self, **kwargs): return UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs)
+  def or_broadcasted(self, **kwargs): return UPat.any(self, self.broadcast(**kwargs))
   def contiguous(self, *args, **kwargs): return UPat(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
@@ -1051,7 +1059,7 @@ pm_pyrender = PatternMatcher([
   (UPat({Ops.MAX, Ops.THREEFRY, Ops.CMPLT, Ops.CMPNE}, src=UPat(Ops.NOOP), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.alu({x.op}, {x.src[1].arg})")),
   (UPat(Ops.RANGE, src=(UPat(Ops.NOOP),), name="x"), lambda x:
-    UOp(Ops.NOOP, arg=f"UOp.range({x.src[0].arg}, arg=({str(x.arg[0])}, {str(x.arg[1])}))")),
+    UOp(Ops.NOOP, arg=f"UOp.range({x.src[0].arg}, {str(x.arg[0])}, {str(x.arg[1])})")),
   (UPat(set(sugar.keys()), src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP,
     arg=f"{x.src[0].arg}.{sugar[x.op]}({', '.join([y.arg for y in x.src[1:]] + ([f'arg={str(x.arg)}'] if x.arg is not None else []))})")),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.NOOP),), name="x"),

@@ -399,7 +399,7 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:list[Opt]|None=None, axis:int=0, tc_select:int|None=None, tc_opt:int|None=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1) -> bool: # , extra_opts:list[Opt]|None=None) -> bool:
     """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
@@ -417,23 +417,19 @@ class Kernel:
       1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
       2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
     """
-    if tc_select is None: tc_select = TC_SELECT.value
-    if tc_opt is None: tc_opt = TC_OPT.value
     if not self.opts.tensor_cores: return False
     try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt, use_tensor_cores)))
+      self.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, use_tensor_cores)))
 
       if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None: self.apply_opts(extra_opts)
-        else:
-          if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-          # hand-coded TC opts
-          for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
-            szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
-            if szs: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
+        if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
+        # hand-coded TC opts
+        for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
+          szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
+          if szs: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
 
-          if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if self.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
-            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
+        if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if self.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
+          self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
       return True
     except KernelOptError:
       return False

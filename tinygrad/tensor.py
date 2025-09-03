@@ -2255,7 +2255,7 @@ class Tensor(MathTrait):
     xs:tuple[Tensor, ...] = argfix(*operands)
     inputs_str, output = parse_formula(formula, *xs)
     inputs = inputs_str.split(",")
-    assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
+    if len(xs)!=len(inputs): raise ValueError(f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}")
 
     # map the value of each letter in the formula
     letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
