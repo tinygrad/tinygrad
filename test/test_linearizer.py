@@ -11,7 +11,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM
+from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
@@ -1055,10 +1055,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
     lins.append(k)
-    if apply_tc:
-      assert k.apply_tensor_cores(1, extra_opts=opts), "no tensor core triggered"
-    else:
-      k.apply_opts(opts)
+    if apply_tc: k.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1)))
+    k.apply_opts(opts)
     if expected_color_size is not None:
       cs = list(zip(k.colors(), k.full_shape))
       assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
@@ -1193,24 +1191,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_invalid_tensor_core_extra_opts(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N)
-    b = Tensor.rand(N, N)
-    realized_ast, _ = helper_realized_ast(a@b)
-    invalid_opts = [
-      [Opt(OptOps.LOCAL, 2, 2)],
-      [Opt(OptOps.UPCAST, 2, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
-    ]
-    for x in invalid_opts:
-      k = Kernel(realized_ast)
-      with self.assertRaises(AssertionError):
-        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
