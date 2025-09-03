@@ -83,8 +83,7 @@ class ProgramSpec:
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
-          if u.arg[0][0] == 't': self.local_size, self.global_size = [1, 1, 1], None
-          special_size = {'g':self.global_size, 't':self.local_size, 'l':self.local_size}.get(u.arg[0][0], None)
+          special_size = {'g':self.global_size, 'l':self.local_size}.get(u.arg[0][0], None)
           if special_size is not None: special_size[int(u.arg[0][-1])] = u.arg[1]
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
@@ -113,6 +112,7 @@ class Renderer:
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
+  has_threads: bool = False
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now

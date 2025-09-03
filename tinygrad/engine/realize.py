@@ -47,7 +47,8 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   src = renderer.render(uops)
 
   return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
-                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
+                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
+                     local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
 
@@ -90,8 +91,9 @@ class CompiledRunner(Runner):
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
+    global_is_threads = Device[self.p.device].renderer.has_threads
     global_size, local_size = self.p.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    if not global_is_threads and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)

@@ -185,14 +185,14 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
-def multicore_range(r:UOp):
-  if any(x.op is Ops.SPECIAL for x in r.toposort()): return None
-  core = UOp(Ops.SPECIAL, dtypes.int, arg=("t0", os.cpu_count()))
-  q = r.src[0] // os.cpu_count()
-  pq = r.src[0] % os.cpu_count()
-  do_cnt = (core < pq).where(q + 1, q)
-  start_offset = core * q + (core < pq).where(core, pq)
-  return r.substitute({r:r.replace(src=(do_cnt,)) + start_offset})
+# def multicore_range(r:UOp):
+#   if any(x.op is Ops.SPECIAL for x in r.toposort()): return None
+#   core = UOp(Ops.SPECIAL, dtypes.int, arg=("t0", os.cpu_count()))
+#   q = r.src[0] // os.cpu_count()
+#   pq = r.src[0] % os.cpu_count()
+#   do_cnt = (core < pq).where(q + 1, q)
+#   start_offset = core * q + (core < pq).where(core, pq)
+#   return r.substitute({r:r.replace(src=(do_cnt,)) + start_offset})
 
 class ClangRenderer(CStyleLanguage):
   device = "CPU"
@@ -200,10 +200,11 @@ class ClangRenderer(CStyleLanguage):
   float4_style = ('{', '}')
   gep_arr_threshold = 0
   has_local = False
-  global_max = None
+  has_threads = True
+  global_max = (os.cpu_count(), 0x0, 0x0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  code_for_workitem = {"t": lambda _: "core_id"}
+  code_for_workitem = {"g": lambda _: "core_id"}
   extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
 
@@ -216,8 +217,7 @@ class ClangRenderer(CStyleLanguage):
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
   # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
-    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu),
-    (UPat(Ops.RANGE, name="r", arg=(0, AxisType.LOOP)), multicore_range)]) + CStyleLanguage.extra_matcher
+    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu)]) + CStyleLanguage.extra_matcher
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
