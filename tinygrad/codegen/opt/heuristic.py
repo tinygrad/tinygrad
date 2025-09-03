@@ -1,10 +1,10 @@
 import itertools
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
+from tinygrad.codegen.opt.kernel import Opt, OptOps, KernelOptError, AxisType
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
 
-def hand_coded_optimizations(k:Kernel) -> list[Opt]:
+def hand_coded_optimizations(k) -> list[Opt]:
   # make a copy so it does not mutate the input
   k = k.copy()
 
@@ -13,7 +13,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    if hasattr(k, "sts") and False:
+    """
+    if hasattr(k, "sts"):
       st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
       def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
@@ -27,6 +28,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k.applied_opts
+    """
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
@@ -133,7 +135,8 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       if hasattr(k, "sts"):
         local_axis_ranking = [(any(st.views[-1].strides[axis] == 0 for st in k.sts), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
       else:
-        local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
+        local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) \
+                                for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
