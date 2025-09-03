@@ -6,10 +6,11 @@ from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.late.devectorizer import sym
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer, track_rewrites
 from tinygrad import Variable
 from tinygrad.uop.spec import uops_to_z3
 
+@track_rewrites(name="render symbolic uop")
 def render(self) -> tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
@@ -209,12 +210,12 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
 
   def test_range_div_its_symbolic_bound(self):
-    a = Variable("a", 1, 10)
+    a = Variable("a", 1, 10, dtypes.index)
     ridx0 = UOp.range(a+2, 0)
     self.helper_test_variable(ridx0//(a+2), 0, 0, "0")
 
   def test_range_mod_its_symbolic_bound(self):
-    a = Variable("a", 1, 10)
+    a = Variable("a", 1, 10, dtypes.index)
     ridx = UOp.range(a+2, 0)
     self.helper_test_variable(ridx%(a+2), 0, 11, "ridx0")
 
@@ -586,7 +587,8 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559, dtypes.index)
     dt = dtypes.int
     unrolled_div = ((gidx+2561)//4 + 2).cast(dt)+((gidx+2562)//4).cast(dt)+((gidx+2560)//4).cast(dt)+((gidx+2559)//4).cast(dt)
-    self.helper_test_variable(unrolled_div, 2561, 5120, "((int)(gidx)+2561)")
+    # cast dissapears because of a rule in load_store_indexing
+    self.helper_test_variable(unrolled_div, 2561, 5120, "(gidx+2561)")
 
   def test_arange_unrolled4_mul(self):
     gidx = Variable("gidx", 0, 2559)
