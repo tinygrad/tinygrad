@@ -20,8 +20,8 @@
 source venv/bin/activate
 apt list --installed | grep amdgpu
 export DEBUG=2
-export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
-export IGNORE_JIT_FIRST_BEAM=1
+#export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
+#export IGNORE_JIT_FIRST_BEAM=1
 
 #export SEED=$RANDOM
 DATETIME=$(date "+%m%d%H%M")
@@ -41,7 +41,8 @@ export BACKUP_INTERVAL=413
 # use separate BS for the various jits in eval to maximize throughput
 #export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
 export AMD_LLVM=0 # bf16 seems to require this
-export GPUS=8 BS=248
+#export GPUS=8 BS=248
+export GPUS=8 BS=344
 export CONTEXT_BS=816
 export DENOISE_BS=600
 export DECODE_BS=384
@@ -77,7 +78,7 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
 
-export WANDB=1
+#export WANDB=1
 #export PARALLEL=0
 export PARALLEL=16
 

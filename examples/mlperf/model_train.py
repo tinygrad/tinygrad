@@ -1,3 +1,4 @@
+import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1474,6 +1475,12 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
+  Tensor.realize(*get_parameters(unet))
+  safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
+  load_state_dict(unet, safe_load(init_fn))
+  if not getenv("KEEP_INIT_MODEL", ""): Path(init_fn).unlink()
+  load_state_dict(unet, gv.unet)
+
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
@@ -1507,12 +1514,12 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep, latent_randn, noise, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
-    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-    noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    #noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
       t.shard_(GPUS, axis=0)
 
@@ -1751,13 +1758,6 @@ def train_stable_diffusion():
           Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
       return clip_score, fid_score
     
-  @TinyJit
-  def prepare_data(mean:Tensor, logvar:Tensor, tokens:Tensor) -> list[Tensor]:
-    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-    noise = Tensor.randn(*mean.shape, device=GPUS[0])
-    return [t.shard(GPUS,axis=0) for t in (mean, logvar, tokens, timestep, latent_randn, noise)]
-
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
@@ -1770,6 +1770,9 @@ def train_stable_diffusion():
     dl = batch_load_train_stable_diffusion(BS)
     t0 = t6 = time.perf_counter()
     for i, batch in enumerate(dl, start=1):
+      if i == 1:
+        lr_scheduler.step()
+        continue
       loop_time = time.perf_counter() - t0
       t0 = time.perf_counter()
       dl_time = t0 - t6
@@ -1777,39 +1780,47 @@ def train_stable_diffusion():
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+      #mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+      #mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
+      mean_logvar = [gv.data["mean_logvar"][i-1:i].numpy()] * BS
+      mean, logvar = np.split(np.concatenate(mean_logvar, axis=0), 2, axis=1)
       mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-      tokens = []
-      for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+
+      #for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+      tokens = model.cond_stage_model.tokenizer.encode(gv.prompts[i-1], pad_with_zeros=True) * BS
       tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
-      t1 = time.perf_counter()
-      #mean, logvar, tokens, timestep, latent_randn, noise = prepare_data(mean, logvar, tokens)
-      t2 = time.perf_counter()
+      timestep = gv.data["timestep"][i-1:i]
+      timestep = Tensor.cat(*([timestep] * BS)).cast(dtypes.int).to(GPUS[0])
 
-      #loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
-      loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
-      t3 = time.perf_counter()
+      latent_randn = gv.data['latent_randn'][i-1:i]
+      latent_randn = Tensor.cat(*([latent_randn] * BS)).to(GPUS[0])
+
+      noise = gv.data["noise"][i-1:i]
+      noise = Tensor.cat(*([noise] * BS)).to(GPUS[0])
+
+      t1 = time.perf_counter()
+      loss, lr = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
+      #loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+      t2 = time.perf_counter()
 
       if WANDB:
         wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
-                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t3-t1), "train/prerealize_time": t1-t0, "train/input_realize_time": t2-t1,
-                     "train/train_step_time": t3-t2}
+                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
+                     "train/train_step_time": t2-t1}
 
         if i == 1 and wandb_run is not None:
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
             f.write(f"wandb.run.id = {wandb.run.id}")
 
-      #if i < 30 or (i >= 30 and i % 2 == 0):
-      if True:
-        preloss = time.perf_counter()
-        loss_item = loss.item()
-        print(f"step {i}: loss: {loss_item:.9f}, loss_elapsed: {time.perf_counter() - preloss:.2f}")
-        pre_lr = time.perf_counter()
-        lr_item = lr.item()
-        print(f"lr:{lr_item:0.3e}, lr_elapsed: {time.perf_counter() - pre_lr:.2f}")
-        if WANDB: wandb_log["train/loss"] = loss_item
-        if WANDB: wandb_log["train/lr"] = lr_item
+      preloss = time.perf_counter()
+      loss_item = loss.item()
+      print(f"step {i}: loss: {loss_item:.9f}, loss_elapsed: {time.perf_counter() - preloss:.2f}")
+      pre_lr = time.perf_counter()
+      lr_item = lr.item()
+      print(f"lr:{lr_item:0.3e}, lr_elapsed: {time.perf_counter() - pre_lr:.2f}")
+      if WANDB: wandb_log["train/loss"] = loss_item
+      if WANDB: wandb_log["train/lr"] = lr_item
 
       if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
@@ -1850,22 +1861,27 @@ def train_stable_diffusion():
 
           Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
 
-      #if i % 50 == 0:
-        #loss_item = loss.item()
-        #print(f"step {i}: loss: {loss_item:.9f}")
-        #if WANDB: wandb_log["train/loss"] = loss_item
-        #if i <= 1100:
-          #lr_item = optimizer.lr.item()
-          #print(f"lr:{optimizer.lr.item():0.3e}")
-          #if WANDB: wandb_log["train/lr"] = lr_item
-      t4 = time.perf_counter()
-
+      t3 = time.perf_counter()
       if WANDB: wandb.log(wandb_log)
       t5 = time.perf_counter()
-      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t3-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
-    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f} prerealize_time: {t1-t0:.2f}, input_realize_time: {t2-t1:.2f}, train_step_time: {t3-t2:.2f},
-    t4-t3: {t4-t3:.2f}, wandb_log_time: {t5-t4:.2f}
+      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
+    t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}
     """)
+
+      if i == 20:
+        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
+        # diff.abs().mean(): 2.6550915979695056e-11
+        # a.abs().mean(): 1.2747265465407054e-08
+        # diff.abs().max(): 6.412069764039074e-10
+
+        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
+        # diff.abs().mean(): 3.6348701826227625e-12
+        # a.abs().mean(): 1.6649142509095327e-08
+        # diff.abs().max(): 5.24913446042774e-12
+
+        import sys
+        sys.exit()
 
       t6 = time.perf_counter()
 
