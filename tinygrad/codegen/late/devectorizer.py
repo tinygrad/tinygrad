@@ -354,8 +354,6 @@ pm_reduce_collapse = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
   # index/load/where. TODO: this is more aggressive than needed
   (UPat((Ops.INDEX, Ops.LOAD, Ops.WHERE), name="alu"), no_vectorized_alu),
-  # working around casts for fold_unrolled_divs
-  ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
 ])+sym
 
 def reduce_collapse(red:UOp):
