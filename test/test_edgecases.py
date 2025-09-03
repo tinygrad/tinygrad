@@ -171,33 +171,26 @@ class TestZeroFolding(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       (x % x).numpy()
 
-# class TestArangeUOpValidationIssue(unittest.TestCase):
-#   # these fail with UOp verification error.
-#   # we don't need more of these involving arange
+class TestArangeUOpOverflowIssue(unittest.TestCase):
+  # these used to fail with UOp verification error but now fail because of overflow
 
-#   @unittest.expectedFailure
-#   def test_large_arange_sum(self):
-#     # Summing a huge arange should either succeed or raise a MemoryError.
-#     n = 2**31 + 3
-#     expected = (n - 1) * n // 2
-#     out = Tensor.arange(n).sum().item()
-#     self.assertEqual(out, expected)
+  @unittest.expectedFailure
+  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
+  def test_large_arange_sum(self):
+    # Summing a huge arange should either succeed or raise a MemoryError.
+    n = 2**31 + 3
+    expected = (n - 1) * n // 2
+    out = Tensor.arange(n).sum().item()
+    self.assertEqual(out, expected)
 
-#   @unittest.expectedFailure
-#   def test_large_arange_index(self):
-#     # Indexing a huge arange should return the correct value instead of failing
-#     # with a UOp verification error.
-#     n = 2**31 + 3
-#     out = Tensor.arange(n)[0].item()
-#     self.assertEqual(out, 0)
-
-#   @unittest.expectedFailure
-#   def test_large_arange_permute(self):
-#     # Permuting a huge tensor should not trigger UOp verification failures.
-#     n = 2**31 + 3
-#     out = Tensor.arange(n).reshape(n, 1).permute(1, 0)
-#     self.assertEqual(out.shape, (1, n))
-#     out.realize()
+  @unittest.expectedFailure
+  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
+  def test_large_arange_index(self):
+    # Indexing a huge arange should return the correct value instead of failing
+    # with a UOp verification error.
+    n = 2**31 + 3
+    out = Tensor.arange(n)[0].item()
+    self.assertEqual(out, 0)
 
 class TestAssignIssues(unittest.TestCase):
   # these are good failures. i'm not sure we need more, but we need to fix these.
@@ -234,7 +227,7 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "Hangs gpuocelot")
+  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
   def test_tensor_index_overflow(self):
     val = Tensor([1])
     big = val.expand(2**31 + 3)
