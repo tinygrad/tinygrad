@@ -2,7 +2,7 @@ from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
@@ -55,7 +55,9 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
   return tms
 
 class TimeoutException(Exception): pass
-def timeout_handler(signum, frame): raise TimeoutException()
+def timeout_handler(signum, frame):
+  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
+  raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
@@ -150,7 +152,9 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     def close_pool(): beam_pool.close()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
-  if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
+  if BEAM_DEBUG:
+    print("BEAM_SEARCH:")
+    print('\n'.join(pyrender(lin.ast.replace(arg=None))))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:

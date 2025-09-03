@@ -38,7 +38,7 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   except RuntimeError as e:
     print("***** LINEARIZE FAILURE *****")
     print(e)
-    print(f"ast = {ast}")
+    print('\n'.join(pyrender(ast)))
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
