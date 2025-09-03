@@ -7,7 +7,7 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
-from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
+from tinygrad.uop.symbolic import symbolic_flat, uop_given_valid, simplify_valid
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
@@ -43,7 +43,7 @@ def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[sint|None] = [None] * len(views[-1].shape)
   idx, valid = views_to_indexed_uops(views)
-  for c in split_uop(idx, Ops.ADD):
+  for c in idx.split_uop(Ops.ADD):
     if c.op is Ops.RANGE: ret[c.arg[0]] = 1
     if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
     if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
