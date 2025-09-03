@@ -329,6 +329,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
+  # *** ShapeTracker helpers ***
+
+  def split_uop(self:UOp, sep:Ops):
+    if self.op is sep:
+      for s in self.src: yield from s.split_uop(sep)
+    else: yield self
+
   # *** from MultiLazyBuffer ***
 
   def multi(self, axis:int|None):
