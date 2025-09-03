@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, struct, sys
+import pickle, base64, itertools, time, struct, sys, math
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -115,7 +115,7 @@ class PythonProgram:
           ul[i] = list(struct.unpack(str(warp_size) +  storage_fmt_for_dtype(dtype.scalar()), packed))
           ul[i] = [from_storage_scalar(x, dtype.scalar()) for x in ul[i]]
         elif uop is Ops.CAST:
-          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+          ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) if math.isfinite(x) else x for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j, dtype.scalar()) \

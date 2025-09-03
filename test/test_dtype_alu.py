@@ -1,13 +1,13 @@
 import unittest, operator, math
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, float_to_fp8, fp8_to_float
 from tinygrad.helpers import CI, getenv, AMD_LLVM
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 import numpy as np
 import pytest
-from hypothesis import given, strategies as strat, settings, HealthCheck
+from hypothesis import given, strategies as strat, settings, HealthCheck, assume
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -54,6 +54,8 @@ class ht:
   int64 = strat.integers(-9223372036854775808, 9223372036854775807)
   bool = strat.booleans()
 ht.bfloat16 = ht.uint16
+ht.fp8e4m3 = ht.uint8
+ht.fp8e5m2 = ht.uint8
 
 def universal_test(a, b, dtype, op):
   # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
@@ -63,8 +65,10 @@ def universal_test(a, b, dtype, op):
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
   tensor_value = (op[0](ta, tb)).numpy()
   numpy_value = op[1](ta.numpy(), tb.numpy())
+  if dtype in dtypes.fp8s: # TODO: this can be removed?
+    numpy_value = fp8_to_float(float_to_fp8(numpy_value, dtype), dtype)
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2)}.get(dtype, (1e-10, 1e-7))
+    atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2: (1.0, 5e-1)}.get(dtype, (1e-10, 1e-7))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -77,8 +81,11 @@ def universal_test_unary(a, dtype, op):
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
+  if dtype in dtypes.fp8s: # TODO: this can be removed?
+    numpy_value = fp8_to_float(float_to_fp8(numpy_value, dtype), dtype) if math.isfinite(numpy_value) else numpy_value
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2)}.get(dtype, (1e-6, 1e-5))
+    atol, rtol = { dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2),
+      dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2: (1.0, 5e-1)}.get(dtype, (1e-6, 1e-5))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -113,6 +120,28 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
+  @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
+  def test_fp8e4m3(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
+  @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
+  def test_fp8e5m2(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.fp8e5m2), from_storage_scalar(b, dtypes.fp8e5m2), dtypes.fp8e5m2, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  def test_fp8e4m3_unary(self, a, op):
+    if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
+    universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
+  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  def test_fp8e5m2_unary(self, a, op):
+    if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
+    universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
