@@ -190,23 +190,25 @@ class MUOpX86(MUOp):
     pop = MUOpX86._RM("pop", 0x8F, 0, rdx)
     return [move, push, extend, div, pop]
   @staticmethod
-  def load(dest:Register, src:Memory) -> MUOp:
-    if dest in GPR and dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
-    if dest in GPR and dest.size in (2, 4, 8): return MUOpX86.R_RM("mov", 0x8B, dest, src)
-    if dest in VEC and dest.size == 2: return MUOpX86.V_V_RM_I("vpinsrw", 0xC4, dest, dest, src, Immediate(0, 1), 1, 1)
-    if dest in VEC and dest.size == 4: return MUOpX86.V_M("vmovss", 0x10, dest, src, 2, 1)
-    if dest in VEC and dest.size == 8: return MUOpX86.V_M("vmovsd", 0x10, dest, src, 3, 1)
-    if dest in VEC and dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
-    raise RuntimeError("load missing")
+  def load(dest:Register, src:Memory, vec:bool=False) -> MUOp:
+    if not vec:
+      if dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
+      if dest.size in (2, 4, 8): return MUOpX86.R_RM("mov", 0x8B, dest, src)
+    if dest.size == 2: return MUOpX86.V_V_RM_I("vpinsrw", 0xC4, dest, dest, src, Immediate(0, 1), 1, 1)
+    if dest.size == 4: return MUOpX86.V_M("vmovss", 0x10, dest, src, 2, 1)
+    if dest.size == 8: return MUOpX86.V_M("vmovsd", 0x10, dest, src, 3, 1)
+    if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
+    raise RuntimeError("invalid load size")
   @staticmethod
-  def store(dest:Memory, src:Register) -> MUOp:
-    if src in GPR and src.size == 1: return MUOpX86.RM_R("mov", 0x88, dest, src)
-    if src in GPR and src.size in (2, 4, 8): return MUOpX86.RM_R("mov", 0x89, dest, src)
-    if src in VEC and src.size == 2: return MUOpX86.RM_V_I("vpextrw", 0x15, dest, src, Immediate(0, 1), 1, 3)
-    if src in VEC and src.size == 4: return MUOpX86.M_V("vmovss", 0x11, dest, src, 2, 1)
-    if src in VEC and src.size == 8: return MUOpX86.M_V("vmovsd", 0x11, dest, src, 3, 1)
-    if src in VEC and src.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
-    raise RuntimeError("store missing")
+  def store(dest:Memory, src:Register, vec:bool=False) -> MUOp:
+    if not vec:
+      if src.size == 1: return MUOpX86.RM_R("mov", 0x88, dest, src)
+      if src.size in (2, 4, 8): return MUOpX86.RM_R("mov", 0x89, dest, src)
+    if src.size == 2: return MUOpX86.RM_V_I("vpextrw", 0x15, dest, src, Immediate(0, 1), 1, 3)
+    if src.size == 4: return MUOpX86.M_V("vmovss", 0x11, dest, src, 2, 1)
+    if src.size == 8: return MUOpX86.M_V("vmovsd", 0x11, dest, src, 3, 1)
+    if src.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
+    raise RuntimeError("invalid store size")
   @staticmethod
   def assign(dest:Register, src:Register, vec:bool=False) -> MUOp:
     if not vec:
@@ -215,7 +217,7 @@ class MUOpX86(MUOp):
     if dest.size <= 4: return MUOpX86.V_V_V("vmovss", 0x10, dest, src, src, 2, 1)
     if dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
     if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
-    raise RuntimeError("assign missing")
+    raise RuntimeError("invalid assign size")
   def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
     def _sub(x):
       for old,new in zip((self.out,)+self.ins, (out,)+ins):
