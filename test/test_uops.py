@@ -201,6 +201,7 @@ class TestSafeCast(TestUOps):
     self.assertEqual(a.cast(dtypes.int16).cast(dtypes.int).simplify(), a.cast(dtypes.int))
     a = UOp.variable("a", -10, 10, dtype=dtypes.int32)
     self.assertEqual(a.cast(dtypes.int8).cast(dtypes.int64).simplify(), a.cast(dtypes.int64))
+    self.assertEqual(a.cast(dtypes.int8).cast(dtypes.float).simplify(), a.cast(dtypes.float))
 
 class TestExecALU(TestUOps):
   def test_sqrt(self):
