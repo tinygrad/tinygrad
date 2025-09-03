@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1475,8 +1474,6 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
-  load_state_dict(unet, gv.unet)
-
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
@@ -1745,6 +1742,26 @@ def train_stable_diffusion():
         for name in disk_tensor_names:
           Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
       return clip_score, fid_score
+    
+  @TinyJit
+  def prepare_data(mean_logvars:list[Tensor], tokens:list[Tensor]) -> list[Tensor]:
+    mean_logvar = Tensor.cat(*mean_logvars, dim=0)
+    mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.bfloat16), 2, dim=1)
+    mean = mean.contiguous()
+    logvar = logvar.contiguous()
+    tokens = Tensor.cat(*tokens, dim=0)
+    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    return [mean, logvar, tokens, timestep, latent_randn, noise]
+
+  @TinyJit
+  def shard_data(mean, logvar, tokens, timestep, latent_randn, noise):
+    return [t.shard(GPUS,axis=0) for t in (mean, logvar, tokens, timestep, latent_randn, noise)]
+
+  BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
+  RUN_EVAL=getenv("RUN_EVAL", "")
+  if WANDB: wandb_run=wandb.run
 
   if not getenv("EVAL_ONLY", ""):
     # training loop
@@ -1752,62 +1769,50 @@ def train_stable_diffusion():
       with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
     else: seen_keys = []
     dl = batch_load_train_stable_diffusion(BS)
+    t0 = t6 = time.perf_counter()
     for i, batch in enumerate(dl, start=1):
-    
-      if i == 1:
-        # in ref: first sample generates non-finite grad with fp16/loss scaler, which skips the opt step, but not lr_scheduler.step
-        lr_scheduler.step()
-        continue
-
+      loop_time = time.perf_counter() - t0
+      t0 = time.perf_counter()
+      dl_time = t0 - t6
     #i = 0
     #with open("/home/hooved/stable_diffusion/checkpoints/overfit_set_12.pickle", "rb") as f:
       #batch = pickle.load(f)
     #while True:
       #i += 1
       i = RESUME_ITR + i
-      t0 = time.perf_counter()
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      #mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
-      step_idx = Tensor([i - 1], device="CPU")
-      mean_logvar = gv.data["mean_logvar"][step_idx]
-      mean_logvar = Tensor.cat(*([mean_logvar] * BS))
-      mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
+      mean_logvars = [Tensor(x, device="CPU") for x in batch['npy']]
+      tokens = [model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']]
 
-      #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
-      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in [gv.prompts[i-1]]*BS], dim=0)
+      t0b = time.perf_counter()
+      mean, logvar, tokens, timestep, latent_randn, noise = prepare_data(mean_logvars, tokens)
+      #for j, t in enumerate((mean, logvar, tokens, timestep, latent_randn, noise)):
+        #print(f"checking tensor {j} before shard")
+        #print(t.mean().cast(dtypes.float).item())
+        #print(t.std().cast(dtypes.float).item())
+      mean, logvar, tokens, timestep, latent_randn, noise = shard_data(mean, logvar, tokens, timestep, latent_randn, noise)
+      #for j, t in enumerate((mean, logvar, tokens, timestep, latent_randn, noise)):
+        #print(f"checking tensor {j} after shard")
+        #print(t.mean().cast(dtypes.float).item())
+        #print(t.std().cast(dtypes.float).item())
 
-      #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-      timestep = gv.data["timestep"][step_idx]
-      timestep = Tensor.cat(*([timestep] * BS)).cast(dtypes.int).to(GPUS[0])
-
-      #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-      latent_randn = gv.data['latent_randn'][step_idx]
-      latent_randn = Tensor.cat(*([latent_randn] * BS)).to(GPUS[0])
-
-      #noise = Tensor.randn(*mean.shape, device=GPUS[0])
-      noise = gv.data["noise"][step_idx]
-      noise = Tensor.cat(*([noise] * BS)).to(GPUS[0])
-
-      for t in (mean, logvar, tokens, timestep, latent_randn, noise):
-        t.shard_(GPUS,axis=0)
-
+      t1 = time.perf_counter()
+      t2 = time.perf_counter()
       loss = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
-
-      elapsed = time.perf_counter() - t0
-      print(f"""step {i}: loss: {loss.item():.9f}, elapsed:{elapsed:0.3f}, lr:{optimizer.lr.item():0.3e},
-    {GlobalCounters.global_ops * 1e-9 / elapsed:9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB""")
+      t3 = time.perf_counter()
 
       if WANDB:
-        wandb_log = {"train/loss": loss.item(), "train/step_time": elapsed, "lr": optimizer.lr.item(),
-                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / elapsed, "train/step": i}
+        wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t3-t1), "train/prerealize_time": t1-t0, "train/input_realize_time": t2-t1,
+                     "train/train_step_time": t3-t2}
 
-        if i == 1 and wandb.run is not None:
+        if i == 1 and wandb_run is not None:
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
             f.write(f"wandb.run.id = {wandb.run.id}")
 
-      if (BACKUP_INTERVAL:=getenv("BACKUP_INTERVAL", 0)) and i % BACKUP_INTERVAL == 0:
+      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
         prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
         # seen keys from dataset
@@ -1832,7 +1837,7 @@ def train_stable_diffusion():
         print(f"saving unet checkpoint at {fn}")
         safe_save(get_state_dict(unet), fn)
 
-      if getenv("RUN_EVAL", ""):
+      if RUN_EVAL:
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
         if i % EVAL_INTERVAL == 0:
           # prevent OOM
@@ -1846,20 +1851,24 @@ def train_stable_diffusion():
 
           Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
 
+      if i % 50 == 0:
+        loss_item = loss.item()
+        print(f"step {i}: loss: {loss_item:.9f}")
+        if WANDB: wandb_log["train/loss"] = loss_item
+        if i <= 1100:
+          lr_item = optimizer.lr.item()
+          print(f"lr:{optimizer.lr.item():0.3e}")
+          if WANDB: wandb_log["train/lr"] = lr_item
+      t4 = time.perf_counter()
+
       if WANDB: wandb.log(wandb_log)
-      if i == 20:
-        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
-        # diff.abs().mean(): 3.3577463726119916e-11
-        # a.abs().mean(): 1.2747265465407054e-08
-        # diff.abs().max(): 5.35436806003986e-10
+      t5 = time.perf_counter()
+      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t3-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f} prerealize_time: {t1-t0:.2f}, input_realize_time: {t2-t1:.2f}, train_step_time: {t3-t2:.2f},
+    t4-t3: {t4-t3:.2f}, wandb_log_time: {t5-t4:.2f}, t0b-t0: {t0b-t0:.2f}, t1-t0b: {t1-t0b:.2f}
+    """)
 
-        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
-        # diff.abs().mean(): 2.4946711363327267e-12  
-        # a.abs().mean(): 1.6649142509095327e-08
-        # diff.abs().max(): 4.027889133340068e-12
-
-        import sys
-        sys.exit()
+      t6 = time.perf_counter()
 
   else:
     EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
