@@ -43,10 +43,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
         unit_stride_axes_mul_4 = [i for i in k.sts[buf_index].unit_stride_axes(ignore_valid=True) if k.sts[buf_index].shape[i]%4 == 0]
       else:
         # part of real_strides
-        unit_stride_axes_mul_4 = []
-        for c in k.bufs[buf_index].src[1].split_uop(Ops.ADD):
-          if c.op is Ops.RANGE and (c.vmax+1)%4 == 0:
-            unit_stride_axes_mul_4.append(k.rngs.index(c))
+        unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
       if len(unit_stride_axes_mul_4):
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
