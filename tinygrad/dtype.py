@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal, cast
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -22,7 +22,7 @@ class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E7
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
-  itemsize: int
+  itemsize: int|Literal[math.inf]
   name: str
   fmt: FmtStr|None
   count: int
@@ -42,6 +42,7 @@ class DType(metaclass=DTypeMetaClass):
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
+    if self.itemsize==math.inf: raise RuntimeError("cant make a pointer out of dtypes.index")
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
   def nbytes(self): raise RuntimeError("only ptr types have nbytes")
@@ -68,7 +69,7 @@ class PtrDType(DType):
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
-    return self.size*self.itemsize
+    return self.size*cast(self.itemsize, int)
   @property
   def vcount(self): return self.v
   def __repr__(self):

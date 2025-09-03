@@ -364,7 +364,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # mod folding
   (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
-])+gep_pushing
+])+gep_pushing+cast_folding
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
@@ -461,7 +461,7 @@ def reduce_mul_chain(r:UOp):
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
 REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
-sym = symbolic_flat+cast_folding+PatternMatcher([
+sym = symbolic_flat+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
   (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
