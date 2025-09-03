@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up
 from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -77,7 +77,7 @@ class Scheduler:
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')
-    self.ast = graph_rewrite(self.ast, pm_flatten_range, "flatten range")
+    self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def convert_loop_to_global(self):
@@ -183,6 +183,16 @@ class Scheduler:
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
+    elif opt.op is OptOps.PADTO:
+      check(rng.src[0].op is Ops.CONST, "only pad const")
+      replaced_rng = UOp.range(round_up(rng.vmax+1, opt.arg), *rng.arg)
+      replaces = {rng:replaced_rng}
+      for b in self.bufs:
+        if rng in b.src[1].sparents:
+          valid = replaced_rng < rng.vmax+1
+          if len(b.src) > 2: valid = b.src[2] & valid
+          replaces[b] = b.replace(src=b.src[0:2]+(valid,))
+      self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
         altrng = self.rngs[opt.arg]
