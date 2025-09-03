@@ -119,11 +119,8 @@ class Scheduler:
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():4s}', color) for x,color in zip(self.rngs, self.colors())])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
-    if rng.src[0].divides(amount) is None:
+    if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
-    old_sz = rng.src[0].arg // amount
-    assert old_sz > 0, f"bad old_sz on {amount} {rng}"
-
     new_rng = UOp.range(amount, self.maxarg+1, new_type)
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
