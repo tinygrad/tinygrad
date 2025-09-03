@@ -26,8 +26,8 @@ if __name__ == "__main__":
     ast = c15.sink()
 
     # this does have tons of locals
-    opts = [Opt(op=OptOps.LOCAL, axis=1, arg=16), Opt(op=OptOps.UPCAST, axis=3, arg=0),
-            Opt(op=OptOps.LOCAL, axis=0, arg=16), Opt(op=OptOps.UPCAST, axis=3, arg=2),
+    opts = [Opt(op=OptOps.LOCAL, axis=1, arg=8), Opt(op=OptOps.UPCAST, axis=3, arg=0),
+            Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=3, arg=2),
             Opt(op=OptOps.GROUPTOP, axis=0, arg=16)]
   else:
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(10616832), arg=0, src=())
