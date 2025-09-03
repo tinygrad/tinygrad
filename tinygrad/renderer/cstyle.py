@@ -185,15 +185,6 @@ class CStyleLanguage(Renderer):
     return (name, kernel, list(bufs.values()))
   def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
-# def multicore_range(r:UOp):
-#   if any(x.op is Ops.SPECIAL for x in r.toposort()): return None
-#   core = UOp(Ops.SPECIAL, dtypes.int, arg=("t0", os.cpu_count()))
-#   q = r.src[0] // os.cpu_count()
-#   pq = r.src[0] % os.cpu_count()
-#   do_cnt = (core < pq).where(q + 1, q)
-#   start_offset = core * q + (core < pq).where(core, pq)
-#   return r.substitute({r:r.replace(src=(do_cnt,)) + start_offset})
-
 class ClangRenderer(CStyleLanguage):
   device = "CPU"
   float4 = "(float4)"
@@ -201,7 +192,7 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = True
-  global_max = (os.cpu_count(), 0x0, 0x0)
+  global_max = (os.cpu_count(), 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
   code_for_workitem = {"g": lambda _: "core_id"}
