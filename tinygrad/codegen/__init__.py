@@ -7,7 +7,7 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_lowerer, get_index, pm_lower_index_dtype_with_gate, pm_lower_index_dtype
+from tinygrad.codegen.lowerer import pm_lowerer, get_index, pm_lower_index_dtype
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
@@ -82,7 +82,6 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # we try lowering using the gate first so we dont use an uneccesarily large dtype if we dont have to
-  ret.append(RewriteStep(pm_lower_index_dtype_with_gate, lambda _: opts.device, name="lower index dtype using gate"))
   ret.append(RewriteStep(pm_lower_index_dtype, lambda _: opts.device, name="lower all index dtypes"))
 
   # devectorize (TODO: does this need opts?)
