@@ -1,4 +1,4 @@
-import ctypes, platform
+import ctypes, platform, sys, subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.runtime.support.elf import jit_loader
