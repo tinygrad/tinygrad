@@ -473,6 +473,8 @@ sym = symbolic_flat+PatternMatcher([
   # ** self folding **
   # x!=0 -> (bool)x
   (UPat.var("x")!=0, lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
+  # cancel x!=0 * x = x
+  (UPat.var("x") * UPat.var("x").cast(dtype=dtypes.bool).where(UPat.cvar("t"), UPat.cvar("f")), lambda x,t,f: x if t.arg==1 and f.arg==0 else None),
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
