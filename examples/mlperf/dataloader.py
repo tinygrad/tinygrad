@@ -538,7 +538,7 @@ def batch_load_train_stable_diffusion(BS:int, device:str|None=None):
   dataset = dataset.decode()
   dataset = dataset.map(filter_dataset)
   dataset = dataset.batched(BS, partial=False, collation_fn=functools.partial(collate, device=device))
-  dataset = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=1, persistent_workers=True, collate_fn=collate_fn)
+  dataset = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=4, persistent_workers=True, collate_fn=collate_fn)
 
   for x in dataset:
     yield x

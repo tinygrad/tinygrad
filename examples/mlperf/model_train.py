@@ -1,3 +1,4 @@
+import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1474,6 +1475,8 @@ def train_stable_diffusion():
       zero_module(bb.proj_out)
   zero_module(unet.out[2])
 
+  load_state_dict(unet, gv.unet)
+
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
@@ -1750,6 +1753,12 @@ def train_stable_diffusion():
     else: seen_keys = []
     dl = batch_load_train_stable_diffusion(BS)
     for i, batch in enumerate(dl, start=1):
+    
+      if i == 1:
+        # in ref: first sample generates non-finite grad with fp16/loss scaler, which skips the opt step, but not lr_scheduler.step
+        lr_scheduler.step()
+        continue
+
     #i = 0
     #with open("/home/hooved/stable_diffusion/checkpoints/overfit_set_12.pickle", "rb") as f:
       #batch = pickle.load(f)
@@ -1760,12 +1769,26 @@ def train_stable_diffusion():
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
-      mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.bfloat16), 2, dim=1)
-      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
-      timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-      latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-      noise = Tensor.randn(*mean.shape, device=GPUS[0])
+      #mean_logvar = Tensor.cat(*[Tensor(x, device="CPU") for x in batch['npy']], dim=0)
+      step_idx = Tensor([i - 1], device="CPU")
+      mean_logvar = gv.data["mean_logvar"][step_idx]
+      mean_logvar = Tensor.cat(*([mean_logvar] * BS))
+      mean, logvar = Tensor.chunk(mean_logvar.cast(dtypes.half), 2, dim=1)
+
+      #tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in batch['txt']], dim=0)
+      tokens = Tensor.cat(*[model.cond_stage_model.tokenize(text, device="CPU") for text in [gv.prompts[i-1]]*BS], dim=0)
+
+      #timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+      timestep = gv.data["timestep"][step_idx]
+      timestep = Tensor.cat(*([timestep] * BS)).cast(dtypes.int).to(GPUS[0])
+
+      #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+      latent_randn = gv.data['latent_randn'][step_idx]
+      latent_randn = Tensor.cat(*([latent_randn] * BS)).to(GPUS[0])
+
+      #noise = Tensor.randn(*mean.shape, device=GPUS[0])
+      noise = gv.data["noise"][step_idx]
+      noise = Tensor.cat(*([noise] * BS)).to(GPUS[0])
 
       for t in (mean, logvar, tokens, timestep, latent_randn, noise):
         t.shard_(GPUS,axis=0)
@@ -1824,8 +1847,17 @@ def train_stable_diffusion():
           Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
 
       if WANDB: wandb.log(wandb_log)
-      if i > 50:
-        # just for testing/beaming
+      if i == 20:
+        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
+        # diff.abs().mean(): 3.3577463726119916e-11
+        # a.abs().mean(): 1.2747265465407054e-08
+        # diff.abs().max(): 5.35436806003986e-10
+
+        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
+        # diff.abs().mean(): 2.4946711363327267e-12  
+        # a.abs().mean(): 1.6649142509095327e-08
+        # diff.abs().max(): 4.027889133340068e-12
+
         import sys
         sys.exit()
 

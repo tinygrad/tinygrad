@@ -18,9 +18,10 @@
 #pip install --index-url https://download.pytorch.org/whl/cpu torch # for torch.utils.data.DataLoader, which webdataset depends on
 #pip install webdataset
 source venv/bin/activate
+apt list --installed | grep amdgpu
 #export DEBUG=2
-export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
-export IGNORE_JIT_FIRST_BEAM=1
+#export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
+#export IGNORE_JIT_FIRST_BEAM=1
 
 #export SEED=$RANDOM
 DATETIME=$(date "+%m%d%H%M")
