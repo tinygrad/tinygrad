@@ -1051,7 +1051,7 @@ pm_pyrender = PatternMatcher([
   (UPat({Ops.MAX, Ops.THREEFRY, Ops.CMPLT, Ops.CMPNE}, src=UPat(Ops.NOOP), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.alu({x.op}, {x.src[1].arg})")),
   (UPat(Ops.RANGE, src=(UPat(Ops.NOOP),), name="x"), lambda x:
-    UOp(Ops.NOOP, arg=f"UOp.range({x.src[0].arg}, arg=({str(x.arg[0])}, {str(x.arg[1])}))")),
+    UOp(Ops.NOOP, arg=f"UOp.range({x.src[0].arg}, {str(x.arg[0])}, {str(x.arg[1])})")),
   (UPat(set(sugar.keys()), src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP,
     arg=f"{x.src[0].arg}.{sugar[x.op]}({', '.join([y.arg for y in x.src[1:]] + ([f'arg={str(x.arg)}'] if x.arg is not None else []))})")),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.NOOP),), name="x"),

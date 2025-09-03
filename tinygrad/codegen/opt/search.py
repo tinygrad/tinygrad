@@ -2,10 +2,10 @@ from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
+from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
@@ -55,7 +55,9 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
   return tms
 
 class TimeoutException(Exception): pass
-def timeout_handler(signum, frame): raise TimeoutException()
+def timeout_handler(signum, frame):
+  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
+  raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
@@ -112,13 +114,6 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = (actions if candidates is None else candidates).copy()
 
-  if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
-    for i, action in enumerate(kernel_actions):
-      if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
-        # replace every tc_action with default tc with one tc_action for each available tc
-        kernel_actions[i:i+1] = \
-          [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1], tc_arg[2])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
-
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
       try: ax = lin.real_axis(a.op, a.axis)
@@ -157,7 +152,9 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     def close_pool(): beam_pool.close()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
-  if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
+  if BEAM_DEBUG:
+    print("BEAM_SEARCH:")
+    print('\n'.join(pyrender(lin.ast.replace(arg=None))))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:
