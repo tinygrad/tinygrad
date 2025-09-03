@@ -1,5 +1,5 @@
-from typing import cast
-from tinygrad.dtype import DType, PtrDType, dtypes
+from typing import Callable, cast
+from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
@@ -37,7 +37,7 @@ def nir_channel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def: retur
 # TODO: @functools.cache
 def nir_imm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
   assert dtype.fmt
-  instr = nir.nir_load_const_instr_create(b.shader, 1, dtype.itemsize * 8)
+  instr = nir.nir_load_const_instr_create(b.shader, 1, 1 if dtype == dtypes.bool else dtype.itemsize * 8)
   struct.pack_into(dtype.fmt, (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, x)
   nir.nir_builder_instr_insert(b, instr.contents.instr)
   return getattr(instr.contents, "def")
@@ -72,7 +72,7 @@ def nir_load_global(b:nir.nir_builder, addr:nir.nir_def, dtype:DType):
   ctypes.cast(load.contents.src, ctypes.POINTER(nir.nir_src))[0] = nir_src_for_ssa(addr)
   nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, load, 4)
   nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, load, 0) # TODO
-  nir.nir_def_init(load.contents.instr, getattr(load.contents, "def"), dtype.count, 8 * dtype.itemsize)
+  nir.nir_def_init(load.contents.instr, getattr(load.contents, "def"), dtype.count, dtype.itemsize * 8 // dtype.count)
   nir.nir_builder_instr_insert(b, load.contents.instr)
   return getattr(load.contents, "def")
 
@@ -103,19 +103,28 @@ def nv_param(b:nir.nir_builder, dtype:DType, idx:int) -> nir.nir_def:
   return getattr(intrin.contents, "def")
 
 # alu ops, aop[<dtype>][<op>]
-# TODO: test imod?
 u_aop = { Ops.ADD: nir.nir_op_uadd_sat, Ops.MUL: nir.nir_op_imul, Ops.IDIV: nir.nir_op_udiv, Ops.MOD: nir.nir_op_umod, Ops.CMPLT: nir.nir_op_ult,
-          Ops.CMPNE: nir.nir_op_ine, Ops.CMPEQ: nir.nir_op_ieq, Ops.OR: nir.nir_op_ior, Ops.AND: nir.nir_op_iand, Ops.XOR: nir.nir_op_ixor}
+          Ops.CMPNE: nir.nir_op_ine, Ops.CMPEQ: nir.nir_op_ieq, Ops.OR: nir.nir_op_ior, Ops.AND: nir.nir_op_iand, Ops.XOR: nir.nir_op_ixor,
+          Ops.WHERE: nir.nir_op_bcsel}
 s_aop = {**u_aop, Ops.ADD: nir.nir_op_iadd, Ops.CMPLT: nir.nir_op_ilt, Ops.IDIV: nir.nir_op_idiv, Ops.MOD: nir.nir_op_irem}
 f_aop = { Ops.ADD: nir.nir_op_fadd, Ops.MUL: nir.nir_op_fmul, Ops.CMPLT: nir.nir_op_flt, Ops.CMPNE: nir.nir_op_fneu, Ops.CMPEQ: nir.nir_op_fequ,
-              Ops.FDIV: nir.nir_op_fdiv}
+          Ops.FDIV: nir.nir_op_fdiv}
 aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dtypes.sints}, **{x:f_aop for x in dtypes.floats}}
 
-def ncast(b:nir.nir_builder, src:nir.nir_def, input_type:DType, output_type:DType) -> nir.nir_def:
-  match input_type, output_type:
-    case dtypes.int, dtypes.long: return nir_build_alu(b, nir.nir_op_i2i64, src)
-    case dtypes.long, PtrDType(): return src
-    case _: raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
+def code(t:DType) -> str: return "i" if t in dtypes.ints else ("f" if t in dtypes.floats else "b")
+def ncast(b:nir.nir_builder, src:nir.nir_def, it:DType, ot:DType) -> nir.nir_def:
+  if isinstance(it, PtrDType) and ot == dtypes.long: return src
+  if ot == dtypes.bool: return nir_build_alu(b, nir.nir_op_b2b1, ncast(b, src, it, dtypes.int))
+  return nir_build_alu(b, getattr(nir, f"nir_op_{code(it)}2{code(ot)}{ot.itemsize * 8}"), src)
+
+def nif(b:nir.nir_builder, cond:nir.nir_def, go:Callable):
+  nif = nir.nir_push_if(b, cond)
+  go()
+  nir.nir_pop_if(b, nif)
+
+def if_phi(b:nir.nir_builder, cond:nir.nir_def, then_def:nir.nir_def, else_def:nir.nir_def) -> nir.nir_def:
+  nir.nir_pop_if(b, nir.nir_push_if(b, cond))
+  return nir.nir_if_phi(b, then_def, else_def).contents
 
 class NIRRenderer(Renderer):
   device = "NV"
@@ -123,10 +132,25 @@ class NIRRenderer(Renderer):
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
 
   extra_matcher = PatternMatcher([
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(Ops.CONST, dtype=dtypes.int, name="idx"))),
-      lambda buf,idx: UOp(Ops.INDEX, dtype=dtypes.long, src=(buf, UOp(Ops.CONST, dtype=dtypes.long, arg=idx.arg)))),
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat(dtype=dtypes.int, name="idx"))),
-     lambda buf,idx: UOp(Ops.INDEX, dtype=dtypes.long, src=(buf, UOp(Ops.CAST, dtype=dtypes.long, src=(idx,)))))
+    # why is this even allowed?
+    (UPat.cvar("x"), lambda x: UOp(Ops.CONST, dtype=x.dtype, arg=x.dtype.max+x.arg+1) if x.arg < 0 and x.dtype in dtypes.uints else None),
+    # from ptx
+    (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
+    # load/store bool -> uint8
+    (UPat(Ops.LOAD, dtypes.bool, src=(UPat(dtype=dtypes.int64),), name="x", allow_any_len=True),
+     lambda x: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ()) + x.src[2:]).cast(dtypes.bool)),
+    (UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+     lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[2:])),
+    # load/store use pointer arithmetic, and the cast does nothing
+    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
+     lambda buf,idx: (buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize) if buf.dtype.addrspace != AddrSpace.REG else None),
+    (UPat(Ops.CAST, name="x"),
+     lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
+    # move mask from INDEX to the load/store to enable pointer arithmetic
+    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat.var("gate"))), UPat.var("alt"))),
+     lambda buf,idx,gate,alt: UOp(Ops.LOAD, alt.dtype, (buf.index(idx), alt, gate))),
+    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat())), UPat.var("val"), UPat.var("gate")), allow_any_len=True),
+     lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
   ])
 
   def_rewrite = PatternMatcher([
@@ -134,16 +158,17 @@ class NIRRenderer(Renderer):
     (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: nv_param(ctx[0], x.dtype, x.arg)),
     (UPat(Ops.SPECIAL, name="x"),
       lambda ctx,x: nir_channel(ctx[0], nir_gid(ctx[0]) if x.arg[0][0] == 'g' else nir_lid(ctx[0]), int(x.arg[0][-1]))),
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
-      lambda ctx,buf,idx: nir_build_alu(ctx[0], nir.nir_op_iadd, ctx[1][buf],
-                                        nir_build_alu(ctx[0], nir.nir_op_imul, ctx[1][idx], nir_imm(ctx[0], buf.dtype.itemsize, dtypes.long)))),
     # TODO: local (a la ptx's mem_types)
     (UPat(Ops.STORE, src=(UPat.var("addr"), UPat.var("val")), allow_any_len=True),
       lambda ctx,addr,val: nir_store_global(ctx[0], ctx[1][addr], ctx[1][val], ~0)),
     (UPat(Ops.LOAD, src=(UPat.var("addr")), name="x"), lambda ctx,x,addr: nir_load_global(ctx[0], ctx[1][addr], x.dtype)),
-    (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: nir_build_alu(ctx[0], nir.nir_op_vec4, *[ctx[1][src] for src in x.src])),
-    (UPat(GroupOp.Binary, name="x"), lambda ctx,x: nir_build_alu(ctx[0], aop[x.src[0].dtype.scalar()][x.op], ctx[1][x.src[0]], ctx[1][x.src[1]])),
+    (UPat(Ops.LOAD, name="x", src=(UPat.var('addr'), UPat(name='alt'), UPat(name="gate", op=GroupOp.ALU))),
+      lambda ctx,x,addr,alt,gate: if_phi(ctx[0], ctx[1][gate], nir_load_global(ctx[0], ctx[1][addr], x.dtype), ctx[1][alt])),
+    (UPat(Ops.LOAD, src=(UPat.var("addr")), name="x"), lambda ctx,x,addr: nir_load_global(ctx[0], ctx[1][addr], x.dtype)),
+    (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: nir_build_alu(ctx[0], getattr(nir, f"nir_op_vec{x.dtype.count}"), *[ctx[1][src] for src in x.src])),
+    (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nir_build_alu(ctx[0], aop[x.src[0].dtype.scalar()][x.op], *[ctx[1][src] for src in x.src])),
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx[0], ctx[1][x.src[0]], x.src[0].dtype, x.dtype)),
+    (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx[1][a]),
   ])
 
   def __init__(self, arch:str, device="NV"): self.device, self.arch = device, arch
@@ -153,7 +178,11 @@ class NIRRenderer(Renderer):
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l"]: b.shader.contents.info.workgroup_size[int(u.arg[0][-1])] = u.arg[1]
     r: dict[UOp, nir.nir_def] = {}
 
+    # import os
+    # input(f"pid: {os.getpid()}")
     for u in uops:
+      # print(u)
+      # nir.nir_print_shader(b.shader, stdout)
       match u:
         case UOp(Ops.NOOP): pass
         # TODO: https://elixir.bootlin.com/mesa/mesa-25.2.1/source/src/compiler/nir/nir_builder.c#L33
