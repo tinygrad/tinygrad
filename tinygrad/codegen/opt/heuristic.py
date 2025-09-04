@@ -125,12 +125,13 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   # **** threading ****
 
   if k.opts.has_threads and k.opts.global_max is not None:
-    # Approx 64K ops per thread is fine for one thread (based on benchmarks).
-    elems = prod(x if isinstance(x, int) else (x.vmax + x.vmin) // 2 for x in k.full_shape)
-    max_threads = max(1, min(elems // (128 << 10), k.opts.global_max[0]))
-    for axis in sorted(k.axes_of(AxisType.LOOP)):
-      if max_threads > 1 and k.full_shape[axis] % max_threads == 0:
-        k.apply_opt(Opt(OptOps.THREAD, axis, max_threads))
-        break
+    for threads in [32,16,12,8,6,5,4,3,2]:
+      # Skip is too many threads. Heuristic: use about 128K ops
+      if threads > k.opts.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
+      for axis in k.axes_of(AxisType.LOOP):
+        if k.full_shape[axis] % threads == 0:
+          k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          break
+      if k.applied_opts and k.applied_opts[-1].op is OptOps.THREAD: break
 
   return k.applied_opts
