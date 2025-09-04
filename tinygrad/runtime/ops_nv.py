@@ -197,6 +197,7 @@ class NVProgram(HCQProgram):
 
     if NIR:
       image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
+      self.lcmem_usage += 0x240
       self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
       cbuf0_size = 0x160 # ?
       self.prog_addr, self.prog_sz = self.lib_gpu.va_addr, image.nbytes
@@ -534,7 +535,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    cc = NAKCompiler(self) if NIR else (PTXCompiler if PTX else (CUDACompiler if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)))(self.arch)
+    cc = NAKCompiler(self) if NIR else ((PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler))(self.arch)
     rr = PTXRenderer(self.arch, device="NV") if PTX else (NIRRenderer(self.arch) if NIR else NVRenderer(self.arch))
     super().__init__(device, NVAllocator(self), rr, cc, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
