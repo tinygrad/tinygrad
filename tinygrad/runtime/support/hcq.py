@@ -6,7 +6,7 @@ except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
-from tinygrad.uop.ops import sym_infer, sint, Variable, UOp
+from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 
 class MMIOInterface:

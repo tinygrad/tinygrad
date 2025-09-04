@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem

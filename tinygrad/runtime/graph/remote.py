@@ -1,5 +1,4 @@
 import time, itertools
-from tinygrad.uop.ops import Variable
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import CompiledRunner, BufferXfer, ExecItem
 from tinygrad.device import Device, Compiled, Buffer
