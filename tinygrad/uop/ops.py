@@ -940,7 +940,7 @@ if TRACK_MATCH_STATS or PROFILE:
 # *** simple graph rewrite engine ***
 
 class RewriteNotReady(Exception): pass
-class DontRewriteParents(Exception): pass
+class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
@@ -980,7 +980,8 @@ class RewriteContext:
                 new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
             stack.append((n, 1, new_n))
             for x in reversed(new_n.src): stack.append((x, 0, x))
-          except DontRewriteParents:self.replace[n] = new_n
+          # if the bpm matching raised a gate, we are done with this node
+          except BottomUpGate: self.replace[n] = new_n
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
           except KeyError: raise RewriteNotReady

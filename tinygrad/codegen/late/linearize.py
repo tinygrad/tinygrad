@@ -2,7 +2,7 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, DontRewriteParents
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, BottomUpGate
 from tinygrad.helpers import dedup, all_same, flatten, BLOCK_REORDER
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
@@ -155,11 +155,12 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-def raise_dont_rewrite_parents(): raise DontRewriteParents
+# we prevent the source of the SPECIAL from being linearized since its not part of the kernel
+def raise_bottom_up_gate(): raise BottomUpGate()
 
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
-  (UPat(Ops.SPECIAL), raise_dont_rewrite_parents)
+  (UPat(Ops.SPECIAL), raise_bottom_up_gate)
 ])
 
 # ***** blockend merging ****
