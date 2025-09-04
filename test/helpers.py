@@ -1,5 +1,6 @@
 import time, struct
 from typing import Any, Callable
+import ml_dtypes
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops
@@ -28,7 +29,7 @@ def assert_jit_cache_len(fxn, expected_len):
     # until we have a better way of typing the prg in ExecItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
-
+ml_map = { dtypes.bfloat16: ml_dtypes.bfloat16, dtypes.fp8e4m3: ml_dtypes.float8_e4m3fn, dtypes.fp8e5m2: ml_dtypes.float8_e5m2 }
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):
     return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
@@ -36,7 +37,7 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.randint(-100, 100, size=size, dtype=_to_np_dtype(dt))
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
-  elif dt in dtypes.fp8s: return np.random.randint(0, 255, size=size, dtype=np.uint8).astype(_to_np_dtype(dt))
+  elif dt in dtypes.fp8s: return np.random.randint(0, 255, size=size, dtype=np.uint8).view(ml_map[dt])
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
