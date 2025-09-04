@@ -185,7 +185,9 @@ class Scheduler:
       check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const")
-      replaced_rng = UOp.range(round_up(rng.vmax+1, cast(int, opt.arg)), *rng.arg)
+      new_sz = round_up(rng.vmax+1, cast(int, opt.arg))
+      check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
+      replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
       for b in self.bufs:
         if rng in b.src[1].sparents:
@@ -239,10 +241,12 @@ class Scheduler:
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
-              # apply_opt should return the updated range?
               idx = self.rngs.index(a)
-              self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
-              axes[i] = self.rngs[idx]
+              if (a.vmax+1) % tc.dims[i] != 0:
+                if opt_level < 2: raise KernelOptError("tc padding requires opt_level >= 2")
+                # apply_opt should return the updated range?
+                self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
+                axes[i] = self.rngs[idx]
           except KernelOptError: continue
 
           ne: list[UOp] = []
