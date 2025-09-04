@@ -190,8 +190,8 @@ async function renderProfiler() {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
+  const tickSize = 10;
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*2+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -204,14 +204,14 @@ async function renderProfiler() {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("border-top-width", i === 0 ? "0px" : "1px");
     const { y:baseY, height:baseHeight } = rect(div.node());
-    const offsetY = baseY-canvasTop+padding/2;
+    const offsetY = baseY-canvasTop;
     const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
-      const levelHeight = baseHeight-padding;
+      const levelHeight = baseHeight;
       const levels = [];
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
@@ -238,7 +238,7 @@ async function renderProfiler() {
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
-      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
+      div.style("height", levelHeight*levels.length+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
       const height = heightScale(peak);
@@ -279,7 +279,7 @@ async function renderProfiler() {
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
-      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+      div.style("height", height+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
@@ -389,13 +389,12 @@ async function renderProfiler() {
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize])
+      drawLine(ctx, [x, x], [0, tickSize*2])
       // tick label
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
     if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
@@ -409,13 +408,15 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    // draw gridlines
+    for (const [_, { offsetY }] of data.tracks) drawLine(ctx, xscale.range(), [y=offsetY+0.5, y], { color:"#4a4b56" });
   }
 
   function resize() {
     const profiler = document.querySelector(".profiler");
     // NOTE: use clientWidth to account for the scrollbar
     let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
-    width -= rect("#device-list").width+padding;
+    width -= rect("#device-list").width;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
