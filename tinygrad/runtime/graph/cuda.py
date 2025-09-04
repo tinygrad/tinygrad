@@ -4,12 +4,11 @@ import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, dedup
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
-from tinygrad.uop.ops import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
 
 class CUDAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
@@ -48,7 +47,7 @@ class CUDAGraph(MultiGraphRunner):
 
     self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
-  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[Variable, int], wait=False) -> float|None:
+  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
     # Update rawbuffers in the c_args struct.
     for (j,i),input_idx in self.input_replace.items():
       if not self.updatable_nodes[j][3]: setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)

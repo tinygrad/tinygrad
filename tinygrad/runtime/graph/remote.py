@@ -18,7 +18,7 @@ def dev_key(dev:RemoteDevice): return dev.conn if dev.properties.graph_supports_
 def map_rawbuf(rawbuf:Buffer): return (cast(RemoteDevice, Device[rawbuf.device]).session, rawbuf._buf)
 
 class RemoteGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], rawbufs: list[Buffer], var_vals: dict[Variable, int]):
+  def __init__(self, jit_cache: list[ExecItem], rawbufs: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, rawbufs, var_vals)
     devices = dedup(flatten([[Device[unwrap(buf).device] for buf in ji.bufs] for ji in jit_cache]))
     c2d = {device.conn: device for device in devices}
@@ -93,7 +93,7 @@ class RemoteGraph(MultiGraphRunner):
     for req in self.template:
       match req:
         case GraphExec(): RemoteConnection(unwrap(req.session).host).q(GraphFree(req.graph_num, session=req.session))
-  def __call__(self, rawbufs: list[Buffer], var_vals: dict[Variable, int], wait=False):
+  def __call__(self, rawbufs: list[Buffer], var_vals: dict[str, int], wait=False):
     if wait: st = time.perf_counter()
     rmap = {orig: map_rawbuf(rawbufs[replace_idx]) for orig,replace_idx in self.handle_indexes.items()}
     for req in self.template:

@@ -239,7 +239,7 @@ class Tensor(MathTrait):
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 

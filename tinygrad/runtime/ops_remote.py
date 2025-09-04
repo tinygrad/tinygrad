@@ -12,7 +12,7 @@ import multiprocessing, threading, functools, itertools, asyncio, http, http.cli
 import traceback, builtins
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
-from tinygrad.uop.ops import UOp, Ops, Variable, sint
+from tinygrad.uop.ops import UOp, Ops, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
@@ -99,8 +99,8 @@ class GraphComputeItem:
   name: str
   datahash: str
   bufs: tuple[int, ...]
-  vars: tuple[Variable, ...]
-  fixedvars: dict[Variable, int]
+  vars: tuple[str, ...]
+  fixedvars: dict[str, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -111,7 +111,7 @@ class GraphAlloc(RemoteRequest):
   graph_num: int
   jit_cache: tuple[GraphComputeItem|Transfer, ...]
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
 
 @dataclass(frozen=True)
 class GraphFree(RemoteRequest):
@@ -121,7 +121,7 @@ class GraphFree(RemoteRequest):
 class GraphExec(RemoteRequest):
   graph_num: int
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
   wait: bool
 
 # for safe deserialization
