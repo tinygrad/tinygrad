@@ -1,6 +1,6 @@
 import functools, queue
 from tinygrad.helpers import capstone_flatdump
-from tinygrad.renderer.asm import X86Renderer
+from tinygrad.renderer.isa import X86Renderer
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.runtime.ops_cpu import CPUWorker, CPUAllocator, CPUProgram, Compiler, CPUSignal, CPUComputeQueue
 
@@ -11,5 +11,5 @@ class X86Compiler(Compiler):
 class X86Device(HCQCompiled):
   def __init__(self, device:str):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self).start()
+    CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), X86Renderer(), X86Compiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

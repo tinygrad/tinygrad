@@ -105,7 +105,7 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
    tuple(y.bitcast(x.dtype.scalar().vec(x.dtype.count*2)).gep(i*2) for i in range(2))) if y.dtype.count > 1 else None),
 ]) + mask_matcher
 
-asm_matcher = PatternMatcher([
+base_matcher = PatternMatcher([
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # *** NOOP ***
@@ -167,7 +167,7 @@ def x86_load_consts(x:UOp) -> UOp|None:
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
-x86_matcher = asm_matcher + PatternMatcher([
+x86_matcher = base_matcher + PatternMatcher([
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
@@ -473,7 +473,7 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x.src[0])}:"))),
 ])
 
-class AsmRenderer(Renderer):
+class ISARenderer(Renderer):
   lowerer = PatternMatcher([])
   callee_saved: tuple[Register, ...] = ()
 
@@ -635,7 +635,7 @@ class AsmRenderer(Renderer):
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]: raise NotImplementedError("arch specific")
   def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
 
-class X86Renderer(AsmRenderer):
+class X86Renderer(ISARenderer):
   device = "X86"
   max_vec_sz = 16
   has_local = False
