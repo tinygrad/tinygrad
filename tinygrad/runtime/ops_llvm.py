@@ -27,7 +27,9 @@ class LLVMCompiler(Compiler):
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
-      self.passes = b'default<O2>'
+      # Use O3 for better reduction performance on Mac M1/M2
+      opt_level = getenv("LLVM_OPT_LEVEL", "3")
+      self.passes = f"default<O{opt_level}>".encode()
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
