@@ -340,7 +340,7 @@ class Kernel:
       check(self.axis_types[axis] is AxisType.LOOP, "threads is for loops")
       check(self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
       check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
-      new_axis = self.shift_to(axis, amt, AxisType.THREAD, insert_at=0)
+      new_axis = self.shift_to(axis, amt, AxisType.THREAD, insert_at=0, top=True)
 
     if append_opt: self.applied_opts.append(opt)
     if self.simplify_ones() and self.tensor_core_opts:
