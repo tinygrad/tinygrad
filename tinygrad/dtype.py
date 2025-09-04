@@ -90,7 +90,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
+  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints + (dtypes.index,)
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
@@ -164,9 +164,9 @@ class dtypes:
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
-  sints = (int8, int16, int32, int64, index)
+  sints = (int8, int16, int32, int64)
   ints = uints + sints
-  all = floats + ints + (bool,)
+  all = floats + ints + (bool, index)
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
