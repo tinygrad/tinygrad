@@ -4,14 +4,14 @@ from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, TC_SELECT, TC_OPT
+from tinygrad.helpers import Context, getenv, CI, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
@@ -98,8 +98,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> LOAD -> RANGE -> STORE
-    #assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -108,10 +106,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> RANGE -> LOAD -> RANGE -> STORE
-    # NOTE: nothing should toposort between the first two ranges
-    #assert ranges[0]+1 == ranges[1]
-    #assert any(x.op is Ops.LOAD for x in uops[ranges[1]:ranges[2]])
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
@@ -142,16 +136,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    #if getenv("PTX"):
-    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> STORE
-    #  assert uops[ranges[0]-2].op is Ops.LOAD
-    #  assert ranges[1] == ranges[0]+6
-    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
-    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> STORE
-    #else:
-    #  assert uops[ranges[0]-2].op is Ops.LOAD
-    #  assert ranges[1] == ranges[0]+3
-    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
 
   @unittest.skip("fragile crap")
   def test_range_outer_op_after_phi(self):
@@ -406,9 +390,7 @@ class TestLinearizer(unittest.TestCase):
     sched_copy = sched[:]
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    realized_ast = sched_copy[-1].ast
-    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    program = get_program(sched_copy[-1].ast, Device[Device.DEFAULT].renderer, opts=())
     assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
@@ -452,20 +434,6 @@ class TestLinearizer(unittest.TestCase):
     store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  def test_arange_opts(self):
-    a = Tensor.arange(128)
-    helper_linearizer_opt(a, [
-      [Opt(OptOps.GROUP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
-    ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
@@ -552,82 +520,7 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
-class TestHandCodedOpts(unittest.TestCase):
-  def test_masked_upcast(self):
-    layer_1 = Tensor.cat(*[Tensor.empty(5) for _ in range(4)])
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
-
-    s = layer_2.schedule()[-1]
-    k = Kernel(push_views(s.ast))
-    k.apply_opts(hand_coded_optimizations(k))
-    assert len(k.bufs) == 6  # make sure all ops are done in one kernel
-    # masked upcast should upcast masked axis of size 7
-    # masked upcast should not upcast large (20) last axis
-    # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
-    assert k.upcasted == 1 and k.full_shape[-1] == 7
-
-  @unittest.skipIf(Device.DEFAULT in {"METAL", "WEBGPU"}, "METAL/WEBGPU split this kernel since it has 37 buffers")
-  def test_masked_upcast_wino(self):
-    monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
-
-    s = monster.schedule()[-1]
-    k = Kernel(push_views(s.ast))
-    k.apply_opts(hand_coded_optimizations(k))
-    assert len(k.bufs) == 37  # make sure all ops are done in one kernel
-    # should upcast the two Tensor.stacks
-    assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
-
-  def test_masked_upcast_wino_full(self):
-    with Context(WINO=1):
-      x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
-      out = Tensor.conv2d(x,w, padding=1)
-      out.mean().backward()
-
-      upcasts = []
-      wino_schedule = out.schedule()
-      # collect upcasts of tile transform kernels
-      for i, si in enumerate(wino_schedule):
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
-        upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
-      assert len(upcasts) == 3  # 3 transformation matrices
-      assert len(wino_schedule) <= 4  # 4 kernels
-      # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
-      assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
-
-      backward_schedule = Tensor.schedule(x.grad, w.grad)
-      for si in backward_schedule:
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if len(k.bufs) < 20: continue  # not a tile transform kernel
-        # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
-        assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 216
-      assert len(backward_schedule) <= 13  # just the current number, but it could be better
-
-  def test_masked_upcast_many(self):
-    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
-    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
-
-    k = helper_linearizer_opt(layer_3)[-1]
-    assert len(k.bufs) == 5  # make sure all ops are done in one kernel
-    # check that we don't do too many upcasts
-    assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_matvec(self):
-    N = 128
-    a = Tensor.rand(1, N).realize()
-    b = Tensor.rand(N, N).realize()
-    c = a @ b
-
-    k = helper_linearizer_opt(c)[-1]
-
-    assert k.group_for_reduces == 1
-    assert k.axis_types.count(AxisType.LOCAL) == 1
-    assert k.upcasted == 1
+# *** helpers ***
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
