@@ -1,4 +1,4 @@
-import math, itertools, functools, operator
+import math, itertools
 from collections import defaultdict
 from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify
@@ -24,10 +24,6 @@ def flatten_range(r:UOp):
 pm_flatten_range = PatternMatcher([
   # real ranges only
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
-])
-
-pm_sort_add_chain = PatternMatcher([
-  (UPat(Ops.ADD, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.tuplize))),
 ])
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
@@ -107,17 +103,14 @@ class Scheduler:
       termination = self.termination
       if r0.arg[1] == r1.arg[1] and r0 in termination and r1 in termination and termination[r0] == termination[r1]:
         s0, s1 = r0.src[0], r1.src[0]
-        new_range = r0.replace(src=(s0*s1,)).simplify()
-        # this checks the legality of a merge
+        # do the merge
         oidx = self.ast.simplify()
+        new_range = r0.replace(src=(s0*s1,))
         nidx = graph_rewrite(oidx, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
-        # it simplifies
+        # check if it simplifies
         if count_divmod(nidx) <= count_divmod(oidx):
-          # it is correct
-          midx = graph_rewrite(nidx, _substitute+symbolic_flat+pm_flatten_range, ctx={new_range:r0*s1+r1}, name=f"correct_merge_{i}_{i+1}")
-          if graph_rewrite(oidx, pm_sort_add_chain) is graph_rewrite(midx, pm_sort_add_chain):
-            self.ast = nidx
-            continue
+          self.ast = nidx
+          continue
       i += 1
 
   def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
