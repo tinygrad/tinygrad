@@ -8,7 +8,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
-from tinygrad.codegen.opt.kernel import Opt
+from tinygrad.codegen.opt import Opt
 
 # creation can recurse a lot
 import sys
