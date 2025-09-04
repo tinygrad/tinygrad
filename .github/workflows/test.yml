@@ -242,8 +242,7 @@ jobs:
     - name: Test emulated METAL tensor cores
       run: |
         DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
-        DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated AMX tensor cores
       run: DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test emulated AMD tensor cores
@@ -252,37 +251,28 @@ jobs:
         DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated AMD MFMA tensor cores
       run: |
         DEBUG=2 EMULATE=AMD_MFMA FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 EMULATE=AMD_MFMA FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=AMD_MFMA FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 EMULATE=AMD_MFMA FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated AMD RDNA4 tensor cores
       run: |
         DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 EMULATE=AMD_RDNA4 FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated CUDA tensor cores
       run: |
         DEBUG=2 EMULATE=CUDA FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         DEBUG=2 EMULATE=CUDA_SM75 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
-        PYTHONPATH="." DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores
-        PYTHONPATH="." DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        PYTHONPATH="." DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE=INTEL FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
-    - name: Full test tensor cores
-      run: |
-        DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=AMD FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 EMULATE=INTEL FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
-        DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+    - name: Test emulated AMX tensor cores
+      run: DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
         DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf

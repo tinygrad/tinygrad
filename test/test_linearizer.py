@@ -2,18 +2,21 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from tinygrad.codegen.opt.kernel import Opt, OptOps, KernelOptError, Kernel, AxisType
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX, AMD_LLVM, TC_SELECT, TC_OPT
+from tinygrad.helpers import Context, getenv, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
+
+# TODO: remove this
+from tinygrad.codegen.opt.kernel import Kernel
 
 def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
 
@@ -26,44 +29,6 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # create fresh buffers for the outputs
   bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return push_views(s[-1].ast), bufs
-
-def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
-  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
-  np_a, np_b = a.numpy(), b.numpy()
-  r = a.matmul(b, dtype=dtype_out)
-  if dtype_in == dtypes.bfloat16: r = r.float()
-  realized_ast, bufs = helper_realized_ast(r)
-  opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
-  prg = CompiledRunner(replace(get_program(realized_ast, opts=opts), device=Device.DEFAULT))
-  if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
-  assert len([x for x in prg.p.uops[-1].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  prg.exec(bufs)
-  if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
-  elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
-  else: tc_atol, tc_rtol = 5e-3, 1e-4
-  c = bufs[0].numpy().reshape((M,N))
-  np.testing.assert_allclose(c, np_a @ np_b, atol=tc_atol, rtol=tc_rtol)
-
-def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
-                                         ensure_triggered:bool=True):
-  a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
-  r = a.matmul(b, dtype=dtype_out)
-  sched = r.schedule()
-  realized_ast = sched[-1].ast
-  opts_to_apply = [Opt(OptOps.TC, axis, (tc_select, tc_opt, 1))]
-  realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-
-  if ensure_triggered:
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-    wmmas = len([uop for uop in program.uops if uop.op is Ops.WMMA])
-    tcs = len([x for x in program.applied_opts if x.op is OptOps.TC])
-    assert wmmas > 0, "tensor core not triggered"
-    assert tcs == 1, "tensor core opt not included"
-  else:
-    try:
-      program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-      assert False, "OptOps.TC triggered, expected KernelOptError"
-    except KernelOptError: pass
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -116,16 +81,6 @@ class TestLinearizer(unittest.TestCase):
         if skip and i in skip: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
-  @unittest.skip("broken. should not depends on push_views and implementation details of getitem")
-  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
-  def test_indexing_multireduce(self):
-    dataset = Tensor.rand(16384, 256).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    with Context(FUSE_ARANGE=1):
-      sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
-    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
-    helper_linearizer_ast(push_views(sink), [dataset, idxs], wanna_output=[real_index])
-
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
@@ -133,8 +88,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> LOAD -> RANGE -> STORE
-    #assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
 
   def test_three_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -143,10 +96,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    # RANGE -> RANGE -> LOAD -> RANGE -> STORE
-    # NOTE: nothing should toposort between the first two ranges
-    #assert ranges[0]+1 == ranges[1]
-    #assert any(x.op is Ops.LOAD for x in uops[ranges[1]:ranges[2]])
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
@@ -177,38 +126,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-    #if getenv("PTX"):
-    # LOAD -> RANGE -> CAST -> ALU -> ALU -> LOAD -> ALU -> RANGE -> ALU -> STORE
-    #  assert uops[ranges[0]-2].op is Ops.LOAD
-    #  assert ranges[1] == ranges[0]+6
-    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
-    # LOAD -> RANGE -> LOAD -> ALU -> RANGE -> STORE
-    #else:
-    #  assert uops[ranges[0]-2].op is Ops.LOAD
-    #  assert ranges[1] == ranges[0]+3
-    #  assert [x.op for x in uops[ranges[1]-2:ranges[1]]] == [Ops.LOAD, Ops.ALU]
-
-  @unittest.skip("fragile crap")
-  def test_range_outer_op_after_phi(self):
-    a = Tensor.randn(4, 1).realize()
-    out = a.sum() * a.sum()
-    lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
-    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> STORE -> ALU
-    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
-    # the INDEX can be first
-    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
-
-  @unittest.skip("fragile crap")
-  def test_range_outer_op_after_phi_nested_range(self):
-    a = Tensor.randn(2, ).realize()
-    out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
-    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> STORE -> ALU
-    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
-    # the INDEX can be first
-    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -311,142 +228,6 @@ class TestLinearizer(unittest.TestCase):
         helper_arg_acc_dtype(Tensor.einsum("ki,ij->kj", a, b, dtype=acc_dtype), expected_dtype)
         d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
         helper_arg_acc_dtype(d.conv2d(w, dtype=acc_dtype), expected_dtype)
-
-  # TODO: don't skip bf16 for real device (METAL, AMD)
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
-      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_codegen(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
-      a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
-      r = a.matmul(b, dtype=tc.dtype_out)
-      prg = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
-      if Device.DEFAULT == "LLVM":
-        assert "0x201000" in prg.src
-      elif Device.DEFAULT == "AMD" and AMD_LLVM:
-        assert "@llvm.amdgcn.wmma" in prg.src
-      elif Device[Device.DEFAULT].renderer.suffix == "PTX":
-        assert "mma.sync.aligned" in prg.src
-      else:
-        assert "__WMMA_" in prg.src
-
-  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.device == "AMD"), "broken for AMD")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_padded(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
-
-  # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
-  # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
-  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.device == "AMD"), "test for AMD's tc")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skip("warp elements not duplicated properly across lanes")
-  def test_tensor_cores_padded_amd(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_padded_uops(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      pad = 1
-
-      # check that TC is triggered for TC_OPT=2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
-                                           tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=True)
-
-      # check that TC is not triggered for TC_OPT<2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
-                                           tc.dtype_in, tc.dtype_out, tc_opt=1, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]+pad, tc.dims[1]+pad, tc.dims[2]+pad,
-                                           tc.dtype_in, tc.dtype_out, tc_opt=0, ensure_triggered=False)
-
-      # check excessive padding doesn't trigger padded TC in TC_OPT=2
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0]//4, tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1]//4, tc.dims[2], tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-      if not AMX: # AMX tc.dims[2] == 1
-        helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
-
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_multi_reduce(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
-      if tc.dtype_in is dtypes.bfloat16: continue # <-- broken with numpy
-      # this will be a M=G16, N=G32, M=G16, M=G16, K=R16, K=R16, K=R16 with 9 choices of TC MNK axes
-      golden_result = None
-      for axis in range(9):
-        a = Tensor.rand(16, 16, 29, 29, dtype=tc.dtype_in).realize()
-        b = Tensor.rand(32, 16, 16, 16, dtype=tc.dtype_in).realize()
-        c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
-        realized_ast, real_bufs = helper_realized_ast(c)
-
-        opts_to_apply = [Opt(OptOps.TC, axis, (-1, 2, 1))]
-        realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-        program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
-        assert len([uop for uop in program.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-        assert len([x for x in program.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-
-        prg = CompiledRunner(program)
-        # TODO: support this even if numpy doesn't
-        if _to_np_dtype(real_bufs[0].dtype) is None: continue
-        real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
-        prg.exec(real_bufs)
-        result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
-
-        # ensure the results for each choice of axis matches
-        if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
-        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
-
-      # check that get_kernel_actions produces all 9 options
-      from tinygrad.codegen.opt.search import get_kernel_actions
-      tc_actions = [k for i, k in get_kernel_actions(Kernel(realized_ast), False).items() if k.applied_opts[0].op == OptOps.TC]
-
-      available_tc = len([x for x in Device[Device.DEFAULT].renderer.tensor_cores if x.dtype_in == tc.dtype_in and x.dtype_out == tc.dtype_out])
-      assert len(tc_actions) == 9 * available_tc, f"should contain 9 possible TC actions for every available TC, got {len(tc_actions)}"
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_unroll_phi(self):
-    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
-    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, dtype=tc.dtype_out)
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
-      if u.op is Ops.WMMA:
-        assert u.src[-1].src[0].op != Ops.STORE
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
-  def test_tensor_cores_unroll_casted_phi(self):
-    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
-    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, dtype=tc.dtype_out)
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
-  def test_tensor_cores_unroll_casted_phi_with_children(self):
-    # all STORE children are outside the loop
-    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
-    x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
-    r = x.matmul(y, dtype=tc.dtype_out).relu()
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
@@ -577,9 +358,7 @@ class TestLinearizer(unittest.TestCase):
     sched_copy = sched[:]
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    realized_ast = sched_copy[-1].ast
-    realized_ast = realized_ast.replace(arg=KernelInfo(opts_to_apply=tuple()))
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer)
+    program = get_program(sched_copy[-1].ast, Device[Device.DEFAULT].renderer, opts=())
     assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
@@ -623,20 +402,6 @@ class TestLinearizer(unittest.TestCase):
     store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  def test_arange_opts(self):
-    a = Tensor.arange(128)
-    helper_linearizer_opt(a, [
-      [Opt(OptOps.GROUP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
-    ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
@@ -723,82 +488,7 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
-class TestHandCodedOpts(unittest.TestCase):
-  def test_masked_upcast(self):
-    layer_1 = Tensor.cat(*[Tensor.empty(5) for _ in range(4)])
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
-
-    s = layer_2.schedule()[-1]
-    k = Kernel(push_views(s.ast))
-    k.apply_opts(hand_coded_optimizations(k))
-    assert len(k.bufs) == 6  # make sure all ops are done in one kernel
-    # masked upcast should upcast masked axis of size 7
-    # masked upcast should not upcast large (20) last axis
-    # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
-    assert k.upcasted == 1 and k.full_shape[-1] == 7
-
-  @unittest.skipIf(Device.DEFAULT in {"METAL", "WEBGPU"}, "METAL/WEBGPU split this kernel since it has 37 buffers")
-  def test_masked_upcast_wino(self):
-    monster = Tensor.stack(*[Tensor.stack(*[Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
-
-    s = monster.schedule()[-1]
-    k = Kernel(push_views(s.ast))
-    k.apply_opts(hand_coded_optimizations(k))
-    assert len(k.bufs) == 37  # make sure all ops are done in one kernel
-    # should upcast the two Tensor.stacks
-    assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
-
-  def test_masked_upcast_wino_full(self):
-    with Context(WINO=1):
-      x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
-      out = Tensor.conv2d(x,w, padding=1)
-      out.mean().backward()
-
-      upcasts = []
-      wino_schedule = out.schedule()
-      # collect upcasts of tile transform kernels
-      for i, si in enumerate(wino_schedule):
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
-        upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
-      assert len(upcasts) == 3  # 3 transformation matrices
-      assert len(wino_schedule) <= 4  # 4 kernels
-      # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
-      assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
-
-      backward_schedule = Tensor.schedule(x.grad, w.grad)
-      for si in backward_schedule:
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if len(k.bufs) < 20: continue  # not a tile transform kernel
-        # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
-        assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 216
-      assert len(backward_schedule) <= 13  # just the current number, but it could be better
-
-  def test_masked_upcast_many(self):
-    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
-    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
-
-    k = helper_linearizer_opt(layer_3)[-1]
-    assert len(k.bufs) == 5  # make sure all ops are done in one kernel
-    # check that we don't do too many upcasts
-    assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  def test_matvec(self):
-    N = 128
-    a = Tensor.rand(1, N).realize()
-    b = Tensor.rand(N, N).realize()
-    c = a @ b
-
-    k = helper_linearizer_opt(c)[-1]
-
-    assert k.group_for_reduces == 1
-    assert k.axis_types.count(AxisType.LOCAL) == 1
-    assert k.upcasted == 1
+# *** helpers ***
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
