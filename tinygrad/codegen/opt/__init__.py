@@ -1,51 +1,26 @@
 # opt opinionatedly transforms an ast into an optimized ast using either heuristics or beam search
+from __future__ import annotations
+from enum import Enum, auto
+from dataclasses import dataclass
+from tinygrad.uop.ops import AxisType
 
-from tinygrad.codegen.opt.kernel import Kernel
-from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, KernelInfo
-from tinygrad.helpers import NOOPT, BEAM, getenv, POSTOPT
-from tinygrad.renderer import Renderer
-from tinygrad.uop.spec import type_verify
+class OptOps(Enum):
+  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
+  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  def __lt__(self, x:OptOps): return self.value < x.value
 
-def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
-  """
-  Optimize an AST based on heuristics or BEAM search.
+@dataclass(frozen=True, order=True)
+class Opt:
+  op: OptOps
+  axis: int|None = None
+  arg: int|tuple|None = None
+  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
 
-  Args:
-    ast: The Ops.SINK rooted AST
-    renderer: The renderer used to generate the code
+axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
+                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
+axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
+               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
-  Returns:
-    The Ops.SINK rooted AST transformed to apply the opts and with a KernelInfo in the arg.
-  """
-
-  # no shape, no opt
-  if ast.src[0].st is None: return None
-  new_arg = ast.arg
-  if new_arg is None:
-    k = Kernel(ast, opts=renderer)
-    if not NOOPT:
-      k.apply_opts(hand_coded_optimizations(k))
-      if not POSTOPT and BEAM >= 1:
-        from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
-        kb = Kernel(ast, opts=renderer)
-        rawbufs = bufs_from_lin(kb, allocate=False)
-        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-    new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
-  elif len(new_arg.applied_opts): return None
-  return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
-
-pm_get_optimization = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx)),
-])
-
-def apply_opt(ast:UOp, renderer:Renderer):
-  k = Kernel(ast, opts=renderer)
-  k.apply_opts(ast.arg.opts_to_apply)
-  ret = k.get_optimized_ast()
-  if __debug__: type_verify(list(ret.toposort()))
-  return ret
-
-pm_do_optimize = PatternMatcher([
-  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
-])
+class KernelOptError(Exception): pass
+def check(cond:bool, msg:str=""):
+  if not cond: raise KernelOptError(msg)

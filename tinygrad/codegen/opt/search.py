@@ -7,11 +7,14 @@ from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
-from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
+
+# both versions
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.postrange import Scheduler
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]

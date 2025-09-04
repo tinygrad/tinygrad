@@ -1,9 +1,12 @@
 import itertools
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
-from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
 from tinygrad.dtype import ImageDType
-from tinygrad.uop.ops import Ops, resolve
+from tinygrad.uop.ops import Ops, resolve, AxisType
+
+# both versions
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.postrange import Scheduler
 
 def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   # first try the tensor cores
