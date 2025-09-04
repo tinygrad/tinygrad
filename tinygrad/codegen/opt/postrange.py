@@ -1,7 +1,7 @@
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
@@ -41,7 +41,7 @@ class Scheduler:
   @property
   def shape_len(self): return len(self.rngs)
   @property
-  def full_shape(self): return [x.vmax+1 for x in self.rngs]
+  def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
   def axis_types(self): return [x.arg[-1] for x in self.rngs]
   @property
@@ -129,10 +129,14 @@ class Scheduler:
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
+
+  # copied from kernel.py
   @property
-  def upcastable_dims(self): return self.axes_of(AxisType.GLOBAL, AxisType.LOCAL)
+  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
+                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
-  def unrollable_dims(self): return self.axes_of(AxisType.REDUCE, AxisType.GROUP_REDUCE)
+  def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
+                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def real_axis(self, op:OptOps, axis:int|None):
     try:
