@@ -31,10 +31,10 @@ class TestSymbolicPickle(unittest.TestCase):
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    # if test_z3:
-    #   solver = z3.Solver()
-    #   expr, expr_simplified = uops_to_z3(solver, v, v.simplify())
-    #   self.assertEqual(solver.check(expr != expr_simplified), z3.unsat, "simplified expression not equal to original")
+    if test_z3:
+      solver = z3.Solver()
+      expr, expr_simplified = uops_to_z3(solver, v, v.simplify())
+      self.assertEqual(solver.check(expr != expr_simplified), z3.unsat, "simplified expression not equal to original")
     rendered, nmin, nmax = render(v)
     if isinstance(s, tuple): self.assertIn(rendered, s)
     else: self.assertEqual(rendered, s)
@@ -112,7 +112,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
 
   def test_xor_0(self):
-    self.helper_test_variable(Variable("a", 0, 8) ^ 0, 0, 8, "a")
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a")
 
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
