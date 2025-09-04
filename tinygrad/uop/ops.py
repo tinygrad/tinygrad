@@ -308,10 +308,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
     return UOp(Ops.RANGE, dtype=dtypes.int, src=(sint_to_uop(end),), arg=arg)
-  @staticmethod
-  def special(end: sint, name:str):
-    if (end:=sint_to_uop(end, dtypes.int32)).dtype is not dtypes.int32: raise RuntimeError("symbolic argument to special needs to be int32")
-    return UOp(Ops.SPECIAL, dtypes.int32, src=(end,), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
