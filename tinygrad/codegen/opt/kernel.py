@@ -3,39 +3,17 @@ import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
-from enum import Enum, auto
-
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
+from tinygrad.codegen.opt import OptOps, Opt, KernelOptError, check, axis_letters, axis_colors
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType, PatternMatcher, UPat
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, NOOPT, BEAM, getenv, POSTOPT
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.codegen.opt.swizzler import view_left, view_left_through_load
-
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: int|None = None
-  arg: int|tuple|None = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
-
-axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
-                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
-               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
-
-class KernelOptError(Exception): pass
-def check(cond:bool, msg:str=""):
-  if not cond: raise KernelOptError(msg)
 
 @dataclass
 class TensorCoreOptions:
@@ -455,3 +433,47 @@ class Kernel:
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left+view_left_through_load, name="fixup optimized AST")
+
+def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
+  """
+  Optimize an AST based on heuristics or BEAM search.
+
+  Args:
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The Ops.SINK rooted AST transformed to apply the opts and with a KernelInfo in the arg.
+  """
+
+  # no shape, no opt
+  if ast.src[0].st is None: return None
+  new_arg = ast.arg
+  if new_arg is None:
+    k = Kernel(ast, opts=renderer)
+    if not NOOPT:
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      k.apply_opts(hand_coded_optimizations(k))
+      if not POSTOPT and BEAM >= 1:
+        from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
+        kb = Kernel(ast, opts=renderer)
+        rawbufs = bufs_from_lin(kb, allocate=False)
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
+  elif len(new_arg.applied_opts): return None
+  return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
+
+pm_get_optimization = PatternMatcher([
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx)),
+])
+
+def apply_opt(ast:UOp, renderer:Renderer):
+  k = Kernel(ast, opts=renderer)
+  k.apply_opts(ast.arg.opts_to_apply)
+  ret = k.get_optimized_ast()
+  if __debug__: type_verify(list(ret.toposort()))
+  return ret
+
+pm_do_optimize = PatternMatcher([
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
+])
