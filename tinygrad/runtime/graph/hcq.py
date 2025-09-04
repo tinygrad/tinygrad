@@ -200,7 +200,8 @@ class HCQGraph(MultiGraphRunner):
                     **{sig.base_buf.va_addr.expr: dev.timeline_signal.base_buf.va_addr for dev, sig in self.virt_timeline_signals.items()}}
 
     # Update rawbuffers
-    for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i)).expr] = input_rawbuffers[input_idx]._buf.va_addr
+    for (j,i),input_idx in self.input_replace.items():
+      hcq_var_vals[self.input_replace_to_var.get((j,i)).expr] = input_rawbuffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
