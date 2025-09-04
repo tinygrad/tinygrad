@@ -68,8 +68,10 @@ jobs:
       run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
     - name: Test AMX tensor cores
       run: |
-        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
-        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
     - name: Run Tensor Core GEMM (float)
       run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (half)
