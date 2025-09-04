@@ -108,8 +108,8 @@ class Scheduler:
         s0, s1 = r0.src[0], r1.src[0]
         new_range = r0.replace(src=(s0*s1,)).simplify()
         # this checks the legality of a merge
-        oidx = graph_rewrite(self.ast, symbolic_flat+pm_flatten_range, name=f"pre_merge_{i}_{i+1}")
-        nidx = graph_rewrite(self.ast, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
+        oidx = self.ast.simplify()
+        nidx = graph_rewrite(oidx, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
         # it simplifies
         if count_divmod(nidx) <= count_divmod(oidx):
           # it is correct

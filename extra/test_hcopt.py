@@ -3,9 +3,12 @@ from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.uop.ops import graph_rewrite
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+from tinygrad.helpers import getenv
 
 if __name__ == "__main__":
   ast_strs = load_worlds()
+  if (n:=getenv("N", -1)) != -1: ast_strs = ast_strs[n:n+1]
+  good = 0
   for i, ast_str in enumerate(ast_strs):
     lin = ast_str_to_lin(ast_str)
     opt1 = hand_coded_optimizations(lin)
@@ -17,8 +20,9 @@ if __name__ == "__main__":
     opt2 = hand_coded_optimizations(sch)
 
     if opt1 != opt2:
-      print("*******")
+      print(f"******* {i:6d}")
       print("Kernel:    ", lin.colored_shape(), opt1)
       print("Scheduler: ", sch.colored_shape(), opt2)
     else:
-      print("******* MATCH")
+      good += 1
+      print(f"******* {i:6d} MATCH {good/(i+1)*100:.2f}%")
