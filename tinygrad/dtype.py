@@ -22,7 +22,7 @@ class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E7
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
-  itemsize: int|Literal[math.inf]
+  itemsize: int
   name: str
   fmt: FmtStr|None
   count: int
@@ -129,7 +129,7 @@ class dtypes:
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  index: Final[DType] = DType.new(-1, math.inf, "index", None)
+  index: Final[DType] = DType.new(-1,100, "index", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
