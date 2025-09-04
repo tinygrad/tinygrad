@@ -36,6 +36,7 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.randint(-100, 100, size=size, dtype=_to_np_dtype(dt))
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
+  elif dt in dtypes.fp8s: return np.random.randint(0, 255, size=size, dtype=np.uint8).astype(_to_np_dtype(dt))
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
