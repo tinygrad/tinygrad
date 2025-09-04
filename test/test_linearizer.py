@@ -704,7 +704,8 @@ class TestLinearizer(unittest.TestCase):
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max is not None and
+                       Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
   def test_thread_opts(self):
     a = Tensor.rand(4, 4, 4, 4)
     b = Tensor.rand(4, 4, 4)
