@@ -195,12 +195,12 @@ class HCQGraph(MultiGraphRunner):
 
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
-    hcq_var_vals = {self.kickoff_var: self.kickoff_value, **var_vals,
-                    **{var: dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
-                    **{sig.base_buf.va_addr: dev.timeline_signal.base_buf.va_addr for dev, sig in self.virt_timeline_signals.items()}}
+    hcq_var_vals = {self.kickoff_var.expr: self.kickoff_value, **var_vals,
+                    **{var.expr: dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
+                    **{sig.base_buf.va_addr.expr: dev.timeline_signal.base_buf.va_addr for dev, sig in self.virt_timeline_signals.items()}}
 
     # Update rawbuffers
-    for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i))] = input_rawbuffers[input_idx]._buf.va_addr
+    for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i)).expr] = input_rawbuffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
