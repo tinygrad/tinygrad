@@ -799,7 +799,7 @@ class TestSymInfer(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    var_vals = {a: 2, b: 3, c: 4}
+    var_vals = {a.expr: 2, b.expr: 3, c.expr: 4}
     assert sym_infer(5, var_vals) == 5
     assert sym_infer(4.2, var_vals) == 4.2
     assert sym_infer(a, var_vals) == 2
@@ -812,7 +812,7 @@ class TestSymInfer(unittest.TestCase):
   def test_sym_infer_cdiv_cmod(self):
     a = Variable("a", -1000, 1)
     b = Variable("b", -1000, 1)
-    var_vals = {a: 1, b: -1000}
+    var_vals = {a.expr: 1, b.expr: -1000}
     assert sym_infer(a%b, var_vals) == 1
     assert sym_infer(a//b, var_vals) == 0
 
