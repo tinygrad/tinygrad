@@ -132,8 +132,10 @@ class TestDType(unittest.TestCase):
       np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
 
   def test_finfo(self):
-    if self.DTYPE not in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]: return
-    info = ml_dtypes.finfo(ml_dtypes.bfloat16 if self.DTYPE is dtypes.bfloat16 else _to_np_dtype(self.DTYPE))
+    if self.DTYPE not in dtypes.floats: return
+    info = ml_dtypes.finfo({
+      dtypes.bfloat16: ml_dtypes.bfloat16, dtypes.fp8e4m3: ml_dtypes.float8_e4m3fn, dtypes.fp8e5m2: ml_dtypes.float8_e5m2
+    }.get(self.DTYPE, _to_np_dtype(self.DTYPE)))
     assert info.bits == self.DTYPE.itemsize*8
     assert info.nexp == dtypes.finfo(self.DTYPE)[0]
     assert info.nmant == dtypes.finfo(self.DTYPE)[1]
