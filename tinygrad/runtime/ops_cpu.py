@@ -35,7 +35,7 @@ class CPUWorker(threading.Thread):
   def push_task(self, tid, cmd, args):
     if len(self.pool) <= tid:
       self.pool.append(queue.Queue())
-      CPUWorker(self, self.pool[tid], tid+1).start()
+      CPUWorker(self, self.pool[tid], core_id=tid+1).start()
     self.pool[tid].put([cmd, 1, len(args)] + args)
 
   def run(self):
@@ -44,11 +44,9 @@ class CPUWorker(threading.Thread):
       for cmd in cmd_iter:
         threads, args_cnt = next(cmd_iter), next(cmd_iter)
         args = [next(cmd_iter) for _ in range(args_cnt)]
-        if threads > 1:
-          for th in range(threads - 1): self.push_task(th, cmd, args)
+        for th in range(threads - 1): self.push_task(th, cmd, args)
         cmd(self.core_id, *args)
-        if threads > 1:
-          for th in range(threads - 1): self.pool[th].join()
+        for th in range(threads - 1): self.pool[th].join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
