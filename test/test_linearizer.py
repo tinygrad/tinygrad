@@ -11,7 +11,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-from tinygrad.helpers import Context, getenv, CI, flatten, dedup, TC_SELECT, TC_OPT
+from tinygrad.helpers import Context, getenv, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
@@ -81,16 +81,6 @@ class TestLinearizer(unittest.TestCase):
         if skip and i in skip: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
-  @unittest.skip("broken. should not depends on push_views and implementation details of getitem")
-  @unittest.skipIf(CI and Device.DEFAULT in {"PTX", "AMD", "NV"}, "very slow")
-  def test_indexing_multireduce(self):
-    dataset = Tensor.rand(16384, 256).realize()
-    idxs = Tensor([0,3,5,6]).realize()
-    with Context(FUSE_ARANGE=1):
-      sink = dataset[idxs].contiguous().kernelize().uop.base.src[1].arg.ast
-    real_index = dataset.numpy()[idxs.numpy()].reshape(4, 256, 1, 1)
-    helper_linearizer_ast(push_views(sink), [dataset, idxs], wanna_output=[real_index])
-
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
@@ -136,28 +126,6 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(lin.get_optimized_ast(), lin.opts).uops
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
-
-  @unittest.skip("fragile crap")
-  def test_range_outer_op_after_phi(self):
-    a = Tensor.randn(4, 1).realize()
-    out = a.sum() * a.sum()
-    lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
-    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> STORE -> ALU
-    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
-    # the INDEX can be first
-    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
-
-  @unittest.skip("fragile crap")
-  def test_range_outer_op_after_phi_nested_range(self):
-    a = Tensor.randn(2, ).realize()
-    out = a.reshape(2, 1).expand(2, 3).sum() + a.reshape(2, 1).expand(2, 3).sum()
-    lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
-    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-    # RANGE -> LOAD -> STORE -> ALU
-    end = max(i for i,u in enumerate(uops) if u.op is Ops.ENDRANGE)
-    # the INDEX can be first
-    assert uops[end+1].op in GroupOp.ALU or uops[end+2].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
