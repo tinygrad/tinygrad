@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal, cast
+from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -69,7 +69,7 @@ class PtrDType(DType):
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
-    return self.size*cast(int, self.itemsize)
+    return self.size*self.itemsize
   @property
   def vcount(self): return self.v
   def __repr__(self):
