@@ -1,10 +1,11 @@
 import itertools
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
+from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve
 
-def hand_coded_optimizations(k:Kernel) -> list[Opt]:
+def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
@@ -29,7 +30,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
 
       # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-      if (tc_opts:=tk.tensor_core_opts) is not None and not AMX:
+      if isinstance(k, Kernel) and (tc_opts:=tk.tensor_core_opts) is not None and not AMX:
         # hand-coded TC opts
         for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
           szs = [sz for sz in [5,4,3,2] if tk.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
@@ -49,8 +50,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    """
-    if hasattr(k, "sts"):
+    if isinstance(k, Kernel):
       st0, st1 = k.sts[k.bufs.index(mulop.src[0])], k.sts[k.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
       def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
@@ -64,7 +64,6 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k.applied_opts
-    """
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
@@ -97,7 +96,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
-    if hasattr(k, "sts"): is_masked = any(st.axis_is_masked(axis) for st in k.sts)
+    if isinstance(k, Kernel): is_masked = any(st.axis_is_masked(axis) for st in k.sts)
     else: is_masked = any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
@@ -113,7 +112,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
-      if hasattr(k, "sts"):
+      if isinstance(k, Kernel):
         # must have stride 0 on a view
         # must have all non stride 0 on what's upcasted before
         if any(st.views[-1].strides[axis] == 0 and \
@@ -168,7 +167,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local
-      if hasattr(k, "sts"):
+      if isinstance(k, Kernel):
         local_axis_ranking = [(any(st.views[-1].strides[axis] == 0 for st in k.sts), axis) for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP)]
       else:
         local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) \

@@ -16,10 +16,7 @@ if __name__ == "__main__":
 
     if opt1 != opt2:
       print("*******")
-      print(opt1)
-      print(opt2)
-
-
-
-
-
+      print("Kernel:    ", opt1)
+      print("Scheduler: ", opt2)
+    else:
+      print("******* MATCH")
