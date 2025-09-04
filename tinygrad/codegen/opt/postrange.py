@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, POSTOPT
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, POSTOPT, prod
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -77,7 +77,8 @@ class Scheduler:
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
     else:
-      name = "k" + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
+      kernel_type = "r" if self.reduceop is not None else "E"
+      name = kernel_type + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')
@@ -170,6 +171,14 @@ class Scheduler:
 
     if opt.op in opt_to_at:
       amt:int = (rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
+
+      # copied from kernel.py. prevents METAL compiler hangs
+      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
+                                        (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
+        upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+        smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
+        check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
+
       if opt.op is OptOps.UNROLL:
         check(amt <= 32, "don't unroll more than 32")
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
