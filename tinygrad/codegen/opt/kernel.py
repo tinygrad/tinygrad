@@ -337,7 +337,7 @@ class Kernel:
       check(padded, "nothing was padded")
     elif opt.op is OptOps.THREAD:
       check(self.opts.has_threads, "target does not support threads")
-      check(self.axis_types[axis] is AxisType.LOOP, "threads is for loops")
+      check(self.axis_types[axis] is AxisType.LOOP, "thread is for LOOP")
       check(self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
       check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
       new_axis = self.shift_to(axis, amt, AxisType.THREAD, insert_at=0, top=True)

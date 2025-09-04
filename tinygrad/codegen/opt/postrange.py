@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.THREAD: -2, AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.LOCAL: 1, AxisType.UPCAST: 2,
+axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.LOCAL: 1, AxisType.UPCAST: 2,
                AxisType.GROUP_REDUCE: 1, AxisType.REDUCE: 3, AxisType.UNROLL: 4}
 
 def flatten_range(r:UOp):
@@ -174,7 +174,7 @@ class Scheduler:
       if opt.op is OptOps.THREAD:
         check(self.opts is not None and self.opts.has_threads, "target does not support threads")
         check(self.opts is not None and self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
-        check(rng.arg[-1] is AxisType.LOOP, "threads is for LOOP")
+        check(rng.arg[-1] is AxisType.LOOP, "thread is for LOOP")
         check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(not self.dont_use_locals, "can't use locals")
