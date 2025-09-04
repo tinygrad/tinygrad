@@ -10,6 +10,7 @@ if __name__ == "__main__":
   for i, ast_str in enumerate(tqdm(ast_strs)):
     good_ast = ast_str_to_ast(ast_str)
     code = '\n'.join(pyrender(good_ast))
+    print("\n***************\n\n"+code)
     exec(code)
     if str(good_ast) != str(ast):
       print(code)
