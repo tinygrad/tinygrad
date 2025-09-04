@@ -29,10 +29,10 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
   r: Dict[UOp, str] = {}
   for u in uops:
     if u.uop == UOps.SPECIAL:
-      if u.arg[1].startswith("lidx"):
-        r[u] = f'v{u.arg[0]}'
-      elif u.arg[1].startswith("gidx"):
-        r[u] = f's{2+u.arg[0]}'
+      if u.arg.startswith("lidx"):
+        r[u] = f'v{u.src[0].arg}'
+      elif u.arg.startswith("gidx"):
+        r[u] = f's{2+u.src[0].arg}'
       else:
         raise NotImplementedError
     elif u.uop == UOps.CONST:
