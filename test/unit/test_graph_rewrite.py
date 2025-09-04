@@ -97,19 +97,19 @@ class TestFoldingAndReduction(unittest.TestCase):
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_folding_with_define_var(self):
-    x_var_uop = UOp.variable('x', 0, 100)
+    x_var_uop = UOp.variable('x', 0, 100, dtypes.index)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, Ops.CONST)
     self.assertEqual(optimized_mod_uop.arg, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
-    n_var_uop = UOp.variable('n', 1, 1000)
+    n_var_uop = UOp.variable('n', 1, 1000, dtypes.index)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
-    k_var_uop = UOp.variable('k', 0, 50)
+    k_var_uop = UOp.variable('k', 0, 50, dtypes.index)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
@@ -126,8 +126,8 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     if opt.op is Ops.VECTORIZE: self.assertFalse(all_same(opt.src))
 
   def test_full_graph_rewrite_modulo_large_divisor(self):
-    x_var_uop = UOp.variable('x', 1, 5)
-    self.assertIs(apply_rewrite(x_var_uop % 10), x_var_uop)
+    x_var_uop = UOp.variable('x', 1, 5, dtypes.index)
+    self.assertIs(apply_rewrite(x_var_uop % 10).render(simplify=False), x_var_uop.render(simplify=False))
 
   def test_full_graph_rewrite_division_with_remainder(self):
     x_var_uop = UOp.variable('x', 7, 9)
