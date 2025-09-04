@@ -6,7 +6,7 @@ from tinygrad.uop.symbolic import symbolic
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up
-from tinygrad.codegen.opt.kernel import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
+from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
