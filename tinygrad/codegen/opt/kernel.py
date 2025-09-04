@@ -3,39 +3,17 @@ import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import cast, Final, Callable, Sequence
-from enum import Enum, auto
-
-from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType
+from tinygrad.codegen.opt import OptOps, Opt, KernelOptError, check, axis_letters, axis_colors
+from tinygrad.uop.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, resolve, Variable, sint, graph_rewrite, AxisType, PatternMatcher, UPat
 from tinygrad.uop.spec import type_verify, ast_spec
 from tinygrad.device import Device
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, TC_SELECT, TC_OPT, AMX
+from tinygrad.helpers import all_same, colored, ansilen, dedup, prod, round_up, to_function_name, unwrap, argfix, DEBUG, NOOPT, BEAM, getenv, POSTOPT
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape, get_contraction
 from tinygrad.codegen.opt.swizzler import view_left, view_left_through_load
-
-class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
-
-@dataclass(frozen=True, order=True)
-class Opt:
-  op: OptOps
-  axis: int|None = None
-  arg: int|tuple|None = None
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
-
-axis_letters = {AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.LOOP: "L", AxisType.UPCAST: "u",
-                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow",
-               AxisType.GROUP_REDUCE: "green", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
-
-class KernelOptError(Exception): pass
-def check(cond:bool, msg:str=""):
-  if not cond: raise KernelOptError(msg)
 
 @dataclass
 class TensorCoreOptions:
@@ -399,45 +377,6 @@ class Kernel:
         return True
     return False
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:list[Opt]|None=None, axis:int=0, tc_select:int|None=None, tc_opt:int|None=None) -> bool:
-    """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
-    Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
-
-    Keyword arguments:
-    use_tensor_cores -- controls how tensor cores are applied (default 1)
-      0: will disable any tensor core matching
-      1: enable tensor cores
-      2: apply tensor core shape but don't use UOp.WMMA
-    extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
-    tc_select -- specifies which tensor core(s) to use for optimization (default -1)
-      -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
-      [0-N]: uses only the n'th tensor core available; useful for search
-    tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
-      0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
-      1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
-      2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
-    """
-    if tc_select is None: tc_select = TC_SELECT.value
-    if tc_opt is None: tc_opt = TC_OPT.value
-    if not self.opts.tensor_cores: return False
-    try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, axis, (tc_select, tc_opt, use_tensor_cores)))
-
-      if (tc_opts:=self.tensor_core_opts) is not None:
-        if extra_opts is not None: self.apply_opts(extra_opts)
-        else:
-          if AMX: return True # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-          # hand-coded TC opts
-          for tc_dim in [tc_dim for tc_dim in [1,0] if tc_opts.axes_exist[tc_dim]]: # attempt to upcast M and N
-            szs = [sz for sz in [5,4,3,2] if self.full_shape[tc_opts.axes[tc_dim]] % sz == 0]
-            if szs: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], szs[0]))
-
-          if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if self.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
-            self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
-      return True
-    except KernelOptError:
-      return False
-
   # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
   def shape_str(self) -> list[str]:
     ret: list[str] = []
@@ -494,3 +433,47 @@ class Kernel:
     fixed_ast = fixup_ast(self.ast)
     del fixup_ast
     return graph_rewrite(fixed_ast, view_left+view_left_through_load, name="fixup optimized AST")
+
+def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
+  """
+  Optimize an AST based on heuristics or BEAM search.
+
+  Args:
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The Ops.SINK rooted AST transformed to apply the opts and with a KernelInfo in the arg.
+  """
+
+  # no shape, no opt
+  if ast.src[0].st is None: return None
+  new_arg = ast.arg
+  if new_arg is None:
+    k = Kernel(ast, opts=renderer)
+    if not NOOPT:
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      k.apply_opts(hand_coded_optimizations(k))
+      if not POSTOPT and BEAM >= 1:
+        from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
+        kb = Kernel(ast, opts=renderer)
+        rawbufs = bufs_from_lin(kb, allocate=False)
+        k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    new_arg = KernelInfo(opts_to_apply=tuple(k.applied_opts))
+  elif len(new_arg.applied_opts): return None
+  return Kernel(ast.replace(arg=None), opts=renderer).get_optimized_ast().replace(arg=new_arg)
+
+pm_get_optimization = PatternMatcher([
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: get_optimized_ast(ast, ctx)),
+])
+
+def apply_opt(ast:UOp, renderer:Renderer):
+  k = Kernel(ast, opts=renderer)
+  k.apply_opts(ast.arg.opts_to_apply)
+  ret = k.get_optimized_ast()
+  if __debug__: type_verify(list(ret.toposort()))
+  return ret
+
+pm_do_optimize = PatternMatcher([
+  (UPat(Ops.SINK, name="ast"), lambda ctx,ast: apply_opt(ast, ctx) if ast.arg is not None and ast.arg.opts_to_apply is not None else None),
+])
