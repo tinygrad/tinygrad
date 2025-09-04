@@ -28,14 +28,14 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUWorker(threading.Thread):
-  def __init__(self, dev, tasks, core_id):
+  def __init__(self, dev, tasks, thread_id):
     super().__init__()
-    self.dev, self.tasks, self.daemon, self.core_id, self.pool = dev, tasks, True, core_id, []
+    self.dev, self.tasks, self.thread_id, self.pool, self.daemon = dev, tasks, thread_id, [], True
 
   def push_task(self, tid, cmd, args):
     if len(self.pool) <= tid:
       self.pool.append(queue.Queue())
-      CPUWorker(self, self.pool[tid], core_id=tid+1).start()
+      CPUWorker(self, self.pool[tid], thread_id=tid+1).start()
     self.pool[tid].put([cmd, 1, len(args)] + args)
 
   def run(self):
@@ -45,16 +45,16 @@ class CPUWorker(threading.Thread):
         threads, args_cnt = next(cmd_iter), next(cmd_iter)
         args = [next(cmd_iter) for _ in range(args_cnt)]
         for th in range(threads - 1): self.push_task(th, cmd, args)
-        cmd(self.core_id, *args)
+        cmd(self.thread_id, *args)
         for th in range(threads - 1): self.pool[th].join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, core_id, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), core_id)
-  def _signal(self, core_id, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, core_id, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, core_id, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
+  def _exec(self, thread_id, prg, bufs, *args):
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), thread_id)
+  def _signal(self, thread_id, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
+  def _wait(self, thread_id, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _timestamp(self, thread_id, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args, threads=1):
     self.q(cmd, threads, len(args), *args)
     return self
@@ -130,5 +130,5 @@ class CPUAllocator(HCQAllocatorBase):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self, self.tasks, 0).start()
+    CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

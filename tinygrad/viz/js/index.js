@@ -295,7 +295,6 @@ async function renderProfiler() {
   function render(transform) {
     zoomLevel = transform;
     rectLst.length = 0;
-    ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
@@ -376,7 +375,6 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    ctx.restore();
   }
 
   function resize() {
