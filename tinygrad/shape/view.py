@@ -100,6 +100,8 @@ def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # similar to unravel_index in numpy/torch
   acc, idxs = 1, []
   for d in reversed(shape):
+    # shape might be an int32, but indexing is done with dtypes.index
+    if isinstance(d, UOp): d = d.cast(dtypes.index)
     idxs.append((offset//acc)%d)
     acc *= d
   return idxs[::-1]
@@ -117,7 +119,8 @@ class View:
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      # stride might a UOp int, sint_to_uop will do a cast
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*sint_to_uop(st)
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
         if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
@@ -204,15 +207,15 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
+    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1, dtypes.index) for i,s in enumerate(vm1.shape)]
+    merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
     extents: list[tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
       merged_size *= s
       if resolve(merged_term < merged_size, False) and resolve(0 <= merged_term, False):
         extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
+        merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       if (reshaped_vm2 := vm2.reshape(vm2_shape)) is None: return None

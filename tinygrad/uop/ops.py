@@ -307,7 +307,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(end:sint, *arg):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtypes.int, src=(sint_to_uop(end),), arg=arg)
+    return UOp(Ops.RANGE, dtype=dtypes.index, src=(sint_to_uop(end),), arg=arg)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
@@ -573,7 +573,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     if self.op is Ops.GEP: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
-    if self.op is Ops.CAST and self.dtype in (dtypes.floats+dtypes.sints):
+    if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.index,):
       return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
@@ -1025,7 +1025,7 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
 
-def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
+def sint_to_uop(x:sint, dtype:DType=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
@@ -1039,6 +1039,7 @@ renderer = PatternMatcher([
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
   (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
+  (UPat(Ops.CAST, dtype=dtypes.index, name="x"), lambda x: x.src[0]),
   (UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
   #(UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}[={x.src[1].arg}]")),
   (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),

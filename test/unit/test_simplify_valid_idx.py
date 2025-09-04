@@ -18,7 +18,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int32, (UOp.const(dtypes.int, nmax),), expr)
+def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, nmax),), expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 

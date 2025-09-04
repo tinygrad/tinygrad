@@ -7,10 +7,10 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_lowerer, get_index
+from tinygrad.codegen.lowerer import pm_lowerer, get_index, pm_lower_index_dtype
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, cast_folding
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
@@ -89,6 +89,9 @@ def _get_rewrites_for_renderer(opts:Renderer, linearizer:bool, _QUANTIZE, _DEVEC
 
   supported_ops = tuple(opts.code_for_op.keys())
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
+
+  # lower the index dtype to a concrete int
+  ret.append(RewriteStep(pm_lower_index_dtype+cast_folding+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
 
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))

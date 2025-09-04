@@ -417,6 +417,17 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_load_idx_becomes_int(self):
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)
+    l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),))
+    idx = l0 * 600
+    valid = (l0<-1).ne(True)&(l0<3000)
+    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx, valid),))
+    uops = to_uops_list([l1])
+    for u in uops:
+      if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
+
   def test_in_out_of_bounds_access(self):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)

@@ -186,9 +186,9 @@ class TestMergeViews(unittest.TestCase):
     self.assertEqual(v, target)
 
   def test_merge_views_variable(self):
-    from tinygrad import Variable
+    from tinygrad import Variable, dtypes
     N = 100
-    start_pos = Variable("start_pos", 1, N-1)
+    start_pos = Variable("start_pos", 1, N-1).cast(dtypes.index)
     v0 = View(shape=(N, 32, 2), strides=(32, 1, 0), offset=0, mask=((0, N), (0, 32), (0, 1)), contiguous=False)
     v1 = View(shape=(1, 8, 1, 32), strides=(0, 0, 0, 2), offset=start_pos*64, mask=None, contiguous=False)
     target = View(shape=(1, 8, 1, 32), strides=(0,0,0,1), offset=start_pos*32, mask=None, contiguous=False)
