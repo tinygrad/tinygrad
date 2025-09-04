@@ -118,7 +118,7 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 # ***** uop type spec *****
 
 def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
-  if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := cast(PtrDType, idx.src[0].dtype).size) == -1: return True
+  if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := idx.src[0].ptrdtype.size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
   mask = idx.src[2]&gate if len(idx.src)==3 else gate

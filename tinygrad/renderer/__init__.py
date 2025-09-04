@@ -39,7 +39,7 @@ class Estimates:
         buf = u
         while len(buf.src): buf = buf.src[0]
         if buf.op is Ops.DEFINE_GLOBAL: # assume all DEFINE_GLOBAL memory is accessed
-          mem[(buf, u.op)] = cast(PtrDType, buf.dtype).size * buf.dtype.itemsize
+          mem[(buf, u.op)] = buf.ptrdtype.size * buf.dtype.itemsize
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         mults *= cast(sint, u.src[0].ssimplify())

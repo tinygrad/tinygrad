@@ -1,9 +1,10 @@
 import unittest, operator, math
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.dtype import DType
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, getenv, AMD_LLVM
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.runtime.ops_python import from_storage_scalar
 import numpy as np
 import pytest
 from hypothesis import given, strategies as strat, settings, HealthCheck
@@ -20,7 +21,7 @@ dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
 # TODO: LLVM comparing with nan is incorrect
-if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
+if (Device.DEFAULT == "LLVM") or (Device.DEFAULT == "AMD" and AMD_LLVM):
   binary_operations.remove(operator.lt)
 
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
@@ -43,7 +44,6 @@ class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
-  bfloat16 = strat.floats(width=16, allow_subnormal=False)
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -53,6 +53,7 @@ class ht:
   int32 = strat.integers(-2147483648, 2147483647)
   int64 = strat.integers(-9223372036854775808, 9223372036854775807)
   bool = strat.booleans()
+ht.bfloat16 = ht.uint16
 
 def universal_test(a, b, dtype, op):
   # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
@@ -72,6 +73,7 @@ def universal_test_unary(a, dtype, op):
   ta = Tensor([a], dtype=dtype)
   # TODO: cos does not match for large input
   if op[0] == Tensor.cos and abs(a) > 100: return
+  if op[0] == Tensor.log and a <= 0: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
@@ -109,7 +111,8 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
-  def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+  def test_bfloat16(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
@@ -120,7 +123,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
+  def test_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)

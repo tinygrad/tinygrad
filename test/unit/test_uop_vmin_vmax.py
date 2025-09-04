@@ -251,6 +251,15 @@ class TestVminVmaxVConst(unittest.TestCase):
     self.assertIs(uop.vmin, False)
     self.assertIs(uop.vmax, True)
 
+  def test_vmin_vmax_vector_with_gep(self):
+    # vmin and vmax for a vector constant of bool values
+    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
+    idx = UOp.const(dtypes.int, 0)
+    val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx),))
+    uop = (val // 32).gep(0)
+    self.assertEqual(uop.vmin, -67108864)
+    self.assertEqual(uop.vmax, 67108863)
+
 class TestConstFactor(unittest.TestCase):
   def test_const_factor_constant(self):
     # const_factor for a constant
