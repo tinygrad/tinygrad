@@ -980,7 +980,7 @@ class RewriteContext:
                 new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
             stack.append((n, 1, new_n))
             for x in reversed(new_n.src): stack.append((x, 0, x))
-          # if the bpm matching raised a gate, we are done with this node
+          # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
           except BottomUpGate: self.replace[n] = new_n
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
