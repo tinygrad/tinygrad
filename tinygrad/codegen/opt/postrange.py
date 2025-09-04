@@ -1,8 +1,8 @@
-import math, itertools
+import math, itertools, functools, operator
 from collections import defaultdict
 from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, POSTOPT
@@ -24,6 +24,10 @@ def flatten_range(r:UOp):
 pm_flatten_range = PatternMatcher([
   # real ranges only
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
+])
+
+pm_sort_add_chain = PatternMatcher([
+  (UPat(Ops.ADD, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.tuplize))),
 ])
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
@@ -104,13 +108,13 @@ class Scheduler:
         s0, s1 = r0.src[0], r1.src[0]
         new_range = r0.replace(src=(s0*s1,)).simplify()
         # this checks the legality of a merge
-        oidx = self.ast.simplify()
-        nidx = graph_rewrite(oidx, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
+        oidx = graph_rewrite(self.ast, symbolic_flat+pm_flatten_range, name=f"pre_merge_{i}_{i+1}")
+        nidx = graph_rewrite(self.ast, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
         # it simplifies
         if count_divmod(nidx) <= count_divmod(oidx):
           # it is correct
-          midx = graph_rewrite(nidx, _substitute+symbolic+pm_flatten_range, ctx={new_range:r0*s1+r1}, name=f"correct_merge_{i}_{i+1}")
-          if oidx is midx:
+          midx = graph_rewrite(nidx, _substitute+symbolic_flat+pm_flatten_range, ctx={new_range:r0*s1+r1}, name=f"correct_merge_{i}_{i+1}")
+          if graph_rewrite(oidx, pm_sort_add_chain) is graph_rewrite(midx, pm_sort_add_chain):
             self.ast = nidx
             continue
       i += 1
