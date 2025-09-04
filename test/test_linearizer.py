@@ -616,7 +616,8 @@ class TestLinearizer(unittest.TestCase):
     """
     x, y = Tensor.randn(64,64), Tensor.randn(64,64)
     out = x.matmul(y)
-    k = helper_linearizer_opt(out)[-1]
+    with Context(TC=0):
+      k = helper_linearizer_opt(out)[-1]
     uops = get_program(k.ast, k.opts, k.applied_opts).uops
     # check that the float4 cast collapses
     store_vals = [u.src[1] for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]

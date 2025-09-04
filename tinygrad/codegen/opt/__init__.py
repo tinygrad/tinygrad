@@ -3,7 +3,7 @@
 from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, KernelInfo
-from tinygrad.helpers import NOOPT, BEAM, USE_TC, getenv, POSTOPT
+from tinygrad.helpers import NOOPT, BEAM, getenv, POSTOPT
 from tinygrad.renderer import Renderer
 from tinygrad.uop.spec import type_verify
 
@@ -25,7 +25,7 @@ def get_optimized_ast(ast:UOp, renderer:Renderer) -> UOp|None:
   if new_arg is None:
     k = Kernel(ast, opts=renderer)
     if not NOOPT:
-      if not k.apply_tensor_cores(USE_TC.value): k.apply_opts(hand_coded_optimizations(k))
+      k.apply_opts(hand_coded_optimizations(k))
       if not POSTOPT and BEAM >= 1:
         from tinygrad.codegen.opt.search import beam_search, bufs_from_lin
         kb = Kernel(ast, opts=renderer)
