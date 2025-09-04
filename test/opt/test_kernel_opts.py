@@ -336,18 +336,18 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
     ])
 
-   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
-   @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max is not None and
-                        Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
-   def test_thread_opts(self):
-     a = Tensor.rand(4, 4, 4, 4)
-     b = Tensor.rand(4, 4, 4)
-     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-     helper_linearizer_opt(r, [
-       [Opt(OptOps.THREAD, 0, 2)],
-       [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
-       [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
-     ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []])
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max is not None and
+                       Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
+  def test_thread_opts(self):
+    a = Tensor.rand(4, 4, 4, 4)
+    b = Tensor.rand(4, 4, 4)
+    r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.THREAD, 0, 2)],
+      [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
+      [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
+    ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []])
 
 if __name__ == '__main__':
   unittest.main()
