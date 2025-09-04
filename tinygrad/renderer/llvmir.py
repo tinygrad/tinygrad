@@ -3,7 +3,7 @@ import math, struct, sys
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
@@ -207,7 +207,7 @@ class AMDLLVMRenderer(LLVMRenderer):
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; "),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(tuple(llvm_intrinsics), name="x"),
     lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
@@ -220,7 +220,8 @@ class AMDLLVMRenderer(LLVMRenderer):
   ])
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
-    requiredMaxThreadsPerBlock = prod(u.arg[1] for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l")
+    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
+    requiredMaxThreadsPerBlock = sint_to_uop(prod(local_dims)).vmax
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'

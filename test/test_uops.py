@@ -201,6 +201,7 @@ class TestSafeCast(TestUOps):
     self.assertEqual(a.cast(dtypes.int16).cast(dtypes.int).simplify(), a.cast(dtypes.int))
     a = UOp.variable("a", -10, 10, dtype=dtypes.int32)
     self.assertEqual(a.cast(dtypes.int8).cast(dtypes.int64).simplify(), a.cast(dtypes.int64))
+    self.assertEqual(a.cast(dtypes.int8).cast(dtypes.float).simplify(), a.cast(dtypes.float))
 
 class TestExecALU(TestUOps):
   def test_sqrt(self):
@@ -269,7 +270,7 @@ class TestConstantFolding(unittest.TestCase):
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     gate = gidx0<UOp.const(dtypes.int, 1)
     idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2), gate))
     val = UOp.const(dtypes.float, 42.0)
@@ -286,7 +287,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_gate_some_stores(self):
     gmem0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0 * UOp.const(dtypes.int, 2)
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gidx0<UOp.const(dtypes.int, 1)))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
@@ -305,7 +306,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_merge_ifs_alt(self):
     gmem0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
+    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0*UOp.const(dtypes.int, 2)
     gate = gidx0<UOp.const(dtypes.int, 1)
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gate))
@@ -478,7 +479,7 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(list(var_vals)[0], a)
 
   def test_const_factor(self):
-    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 8))
+    gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
     self.assertEqual(UOp(Ops.CONST, dtypes.int, (), 17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)

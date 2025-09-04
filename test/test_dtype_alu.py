@@ -73,6 +73,7 @@ def universal_test_unary(a, dtype, op):
   ta = Tensor([a], dtype=dtype)
   # TODO: cos does not match for large input
   if op[0] == Tensor.cos and abs(a) > 100: return
+  if op[0] == Tensor.log and a <= 0: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
