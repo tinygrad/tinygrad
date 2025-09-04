@@ -60,6 +60,7 @@ class TestTensorCores(unittest.TestCase):
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_codegen(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -115,6 +116,7 @@ class TestTensorCores(unittest.TestCase):
       if not AMX: # AMX tc.dims[2] == 1
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//4, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
@@ -144,6 +146,7 @@ class TestTensorCores(unittest.TestCase):
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
         np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_unroll_phi(self):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
@@ -154,6 +157,7 @@ class TestTensorCores(unittest.TestCase):
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
@@ -166,6 +170,7 @@ class TestTensorCores(unittest.TestCase):
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
