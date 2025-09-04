@@ -581,7 +581,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     sself = self.simplify()
     varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
-    print(varnames)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
