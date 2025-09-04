@@ -126,7 +126,7 @@ def hand_coded_optimizations(k:Kernel) -> list[Opt]:
 
   if k.opts.has_threads:
     for axis in sorted(k.axes_of(AxisType.LOOP)):
-      threads = max(1, min(sum(k.full_shape) // (128 << 10), k.opts.global_max[0]))
+      threads = max(1, min(prod(x if isinstance(x, int) else (x.vmax+x.vmin)//2 for x in k.full_shape) // (128 << 10), k.opts.global_max[0]))
       if threads > 1 and k.full_shape[axis] % threads == 0:
         k.apply_opt(Opt(OptOps.THREAD, axis, threads))
         break

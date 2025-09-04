@@ -322,7 +322,7 @@ class Kernel:
       self.permute(tuple(permute))
     elif opt.op is OptOps.PADTO:
       check(not self.vars, "does not work with symbolic shape")
-      check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL), "cannot pad upcasted")
+      check(self.axis_types[axis] not in (AxisType.UPCAST, AxisType.UNROLL, AxisType.THREAD), "cannot pad upcasted/threads")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.axis_types[axis] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
         check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")

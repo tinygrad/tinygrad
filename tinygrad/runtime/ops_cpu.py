@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue, os
-from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile
+from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile, CPU_COUNT
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
@@ -30,7 +30,13 @@ class ClangJITCompiler(Compiler):
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, core_id):
     super().__init__()
-    self.dev, self.tasks, self.daemon, self.core_id = dev, tasks, True, core_id
+    self.dev, self.tasks, self.daemon, self.core_id, self.pool = dev, tasks, True, core_id, []
+
+  def push_task(self, tid, cmd, args):
+    if len(self.pool) <= tid:
+      self.pool.append(queue.Queue())
+      CPUWorker(self, self.pool[tid], tid+1).start()
+    self.pool[tid].put([cmd, 1, len(args)] + args)
 
   def run(self):
     while True:
@@ -39,10 +45,10 @@ class CPUWorker(threading.Thread):
         threads, args_cnt = next(cmd_iter), next(cmd_iter)
         args = [next(cmd_iter) for _ in range(args_cnt)]
         if threads > 1:
-          for th in range(threads - 1): self.dev.subtasks[th].put([cmd, 1, args_cnt] + args)
+          for th in range(threads - 1): self.push_task(th, cmd, args)
         cmd(self.core_id, *args)
         if threads > 1:
-          for th in range(threads - 1): self.dev.subtasks[th].join()
+          for th in range(threads - 1): self.pool[th].join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
@@ -126,8 +132,5 @@ class CPUAllocator(HCQAllocatorBase):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    self.subtasks = []
-    for core_id in range(os.cpu_count()):
-      if core_id != 0: self.subtasks.append(queue.Queue())
-      CPUWorker(self, self.tasks if core_id == 0 else self.subtasks[core_id-1], core_id).start()
+    CPUWorker(self, self.tasks, 0).start()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
