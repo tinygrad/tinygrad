@@ -2,9 +2,9 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, PtrDType, DType, AddrSpace
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import split_uop, uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
 
@@ -19,13 +19,13 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
-  for stmt in split_uop(valid, Ops.AND):
+  for stmt in valid.split_uop(Ops.AND):
     try: X, is_upper_bound, c = parse_valid(stmt)
     except ValueError: return None
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, Ops.ADD), idx)
+    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
       testidx = testidx.simplify()
       if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
@@ -42,7 +42,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
           break
 
   if not drop_stmt and idx is start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, Ops.AND) if s not in drop_stmt]) else None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx, new_valid)
 
 def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
@@ -80,9 +80,6 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
-  # the buf.dtype is always a pointer
-  ptrdtype = cast(PtrDType, buf.dtype)
-
   # then rewrite everything we can into groups
   ret = []
   idxs: list[int|None] = [None]*vec.dtype.count
@@ -92,7 +89,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.cast(ptrdtype.base.vec(len(grp)).ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace))
+      if len(grp) > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(len(grp)).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]: idxs[oo] = global_offset+i
@@ -101,7 +98,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, ptrdtype.base.ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace).vec(vec.dtype.count), tuple(ret))
+  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(vec.dtype.count), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp, sto:UOp):
@@ -157,7 +154,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     must_divide = False
   elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
     pass
-  elif cast(PtrDType, buf.dtype).addrspace == AddrSpace.REG:
+  elif buf.ptrdtype.addrspace == AddrSpace.REG:
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -172,13 +169,12 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # split based on the fold lengths
   global_offset = 0
   ret = []
-  ptrdtype = cast(PtrDType, buf.dtype)
   while global_offset < sz:
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
-      if fold_length > 1: lidx = lidx.cast(ptrdtype.base.vec(fold_length).ptr(size=ptrdtype.size, addrspace=ptrdtype.addrspace))
+      if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
       global_offset += fold_length
@@ -236,8 +232,7 @@ def no_vectorized_alu(alu:UOp):
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
-  dtype = cast(PtrDType, buf.dtype)
-  return buf.replace(dtype=dtype.base.scalar().ptr(dtype.size*dtype.count, dtype.addrspace)).cast(dtype)
+  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count

@@ -2,12 +2,13 @@ from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType
+from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE, TC_SEARCH_OVER_SHAPE
+from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
@@ -56,7 +57,9 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbuf
   return tms
 
 class TimeoutException(Exception): pass
-def timeout_handler(signum, frame): raise TimeoutException()
+def timeout_handler(signum, frame):
+  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
+  raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
@@ -92,6 +95,7 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 # *** external API ***
 
 # get (scrap) buffers for timing the linearizer
+# NOTE: there's also bufs_from_ast in postrange
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
   for x in lin.bufs:
@@ -109,16 +113,9 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel]:
+def get_kernel_actions(lin:Kernel|Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel|Scheduler]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = (actions if candidates is None else candidates).copy()
-
-  if TC_SEARCH_OVER_SHAPE and len(lin.applied_opts) == 0: # tensor core opts must be first
-    for i, action in enumerate(kernel_actions):
-      if action.op == OptOps.TC and (tc_arg := cast(tuple, action.arg))[0] == -1:
-        # replace every tc_action with default tc with one tc_action for each available tc
-        kernel_actions[i:i+1] = \
-          [Opt(op=OptOps.TC, axis=action.axis, arg=(tc_select, tc_arg[1], tc_arg[2])) for tc_select,_ in enumerate(lin.opts.tensor_cores)]
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:
@@ -128,7 +125,7 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
-      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if (tc:=lin2.tensor_core) else 1
+      up, lcl, tc_up = 1, 1, prod(tc.dims)//tc.threads if hasattr(lin2, 'tensor_core') and (tc:=lin2.tensor_core) else 1
       for s,c in zip(lin2.full_shape, lin2.axis_types):
         if c in (AxisType.UPCAST, AxisType.UNROLL): up *= s
         elif c in (AxisType.LOCAL, AxisType.GROUP_REDUCE): lcl *= s
@@ -140,7 +137,7 @@ def get_kernel_actions(lin:Kernel, include_0=True, candidates:list[Opt]|None=Non
   return acted_lins
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value) -> Kernel:
+def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
@@ -148,7 +145,7 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
-  beam: list[tuple[Kernel, float]] = [(lin, float("inf"))]
+  beam: list[tuple[Kernel|Scheduler, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
@@ -158,7 +155,9 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     def close_pool(): beam_pool.close()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
-  if BEAM_DEBUG: print(f"BEAM_SEARCH:\n{lin.ast}")
+  if BEAM_DEBUG:
+    print("BEAM_SEARCH:")
+    print('\n'.join(pyrender(lin.ast.replace(arg=None))))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:
@@ -167,8 +166,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
-      acted_lins: list[Kernel] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
-      timed_lins: list[tuple[Kernel, float]] = []
+      acted_lins: list[Kernel|Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
+      timed_lins: list[tuple[Kernel|Scheduler, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):

@@ -84,8 +84,8 @@ class PythonProgram:
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
-          if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
-          elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
+          if arg[0] == 'g': ul[i] = [idxs[2-int(arg[-1])]] * warp_size
+          elif arg[0] == 'l': ul[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: ul[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
           ret:list = []
@@ -220,7 +220,8 @@ class PythonRenderer(Renderer):
     if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", tc.amx
 
   def render(self, uops:list[UOp]) -> str:
-    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
+    # the value of SPECIAL comes from local/global_size, not form its source
+    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):
