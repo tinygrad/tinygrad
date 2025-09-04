@@ -301,7 +301,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((alu4+1530)%1536, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2))
 
     load = get_load_image_uop(shape, valid, idx)
-    self.check(load, None, "((((idx1*48)+(ridx2*6))+ridx0)+-6)", "(((idx2*2)+ridx1)+-1)")
+    self.check(load, None, "((((ridx2*6)+(idx1*48))+ridx0)+-6)", "(((idx2*2)+ridx1)+-1)")
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
@@ -322,7 +322,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((alu3+765)%768, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2))
     load = get_load_image_uop(shape, valid, idx)
 
-    self.check(load, None, "((((idx1*24)+(ridx2*3))+ridx0)+-3)", "(((idx2*2)+ridx1)+-1)")
+    self.check(load, None, "((((ridx2*3)+(idx1*24))+ridx0)+-3)", "(((idx2*2)+ridx1)+-1)")
 
   def test_openpilot_conv3(self):
     # in openpilot 0.9.7
