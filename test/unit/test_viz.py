@@ -255,6 +255,43 @@ class TestVizIntegration(BaseTestViz):
       graph = next(get_viz_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
+  # tracing also works without a track_rewrites context
+  # all graph_rewrites get put into the a default group
+  def test_default_tracing(self):
+    def test(root):
+      return graph_rewrite(root, sym)
+    test(c:=UOp.const(dtypes.int, 1))
+    test(c+1)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 1)
+    self.assertEqual(ls[0]["name"], "default graph_rewrite")
+
+  # using @track_rewrites organizes function calls into groups
+  # and nicely counts function calls.
+  def test_group_traces(self):
+    @track_rewrites()
+    def test(root):
+      return graph_rewrite(root, sym)
+    test(c:=UOp.const(dtypes.int, 1))
+    test(c+1)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 2)
+    for i in range(2): self.assertEqual(ls[i]["name"], f"test n{i+1}")
+
+  # @track_rewrites always starts a new group.
+  def test_group_combined(self):
+    def default_test(root): return graph_rewrite(root, sym)
+    tracked_test = track_rewrites()(default_test)
+    c = UOp.const(dtypes.int, 1)
+    default_test(c+1) # goes to the default group
+    tracked_test(c)   # all rewrites after this go inside the second group.
+    default_test(c+2)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 2)
+    self.assertEqual(list(next(get_viz_details(0, 0))["graph"]), [id(c+1)])
+    self.assertEqual(list(next(get_viz_details(1, 0))["graph"]), [id(c)])
+    self.assertEqual(list(next(get_viz_details(1, 1))["graph"]), [id(c+2)])
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
