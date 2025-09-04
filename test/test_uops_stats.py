@@ -98,7 +98,6 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
 class TestUOpsStats(unittest.TestCase):
-  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
@@ -110,7 +109,6 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
 
-  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
