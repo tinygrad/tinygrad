@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, Context, nn
-from tinygrad.helpers import CI, Profiling, WINO, getenv
+from tinygrad.helpers import CI, Profiling, WINO
 
 class TestWinogradClose(unittest.TestCase):
   def test_close(self):
@@ -38,7 +38,6 @@ class TestWinograd(unittest.TestCase):
     assert GlobalCounters.kernel_count == 4
     out.numpy()
 
-  @unittest.skipIf(getenv("PTX"), "winograd uses too much in PTX")
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
     #OC, IC, X, Y = 512, 256, 8, 8
