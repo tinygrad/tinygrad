@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue, os
+import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile, CPU_COUNT
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
