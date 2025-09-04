@@ -165,12 +165,6 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-const dominantColor = map => {
-  let best = null, max = -Infinity
-  for (const [color, width] of map) if (width > max) { max = width; best = color }
-  return best;
-}
-
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -296,7 +290,6 @@ async function renderProfiler() {
   updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
-  const minWidth = 1; // dpr?
   const ellipsisWidth = ctx.measureText("...").width;
   const rectLst = [];
   function render(transform) {
@@ -311,7 +304,6 @@ async function renderProfiler() {
     // rescale / merge shapes
     const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
-      const proxies = new Map();
       for (const e of shapes) {
         if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
         else { start = e.x; end = e.x+e.width; }
@@ -338,15 +330,8 @@ async function renderProfiler() {
         // contiguous rect
         const x = xscale(start), y = offsetY+e.y;
         const width = xscale(end)-x;
-        if (width < minWidth) {
-          const px = Math.round(x), pkey = `${px},${y}`;
-          let prects = proxies.get(pkey);
-          if (prects == null) proxies.set(pkey, prects={ colors: new Map(), height:e.height });
-          prects.colors.set(e.fillColor, (prects.colors.get(e.fillColor) || 0)+width);
-        } else {
-          draw.push({ x, y, width, height:e.height, fillColor:e.fillColor });
-          rectLst.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-        }
+        draw.push({ x, y, width, height:e.height, fillColor:e.fillColor });
+        rectLst.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         let [labelX, labelWidth] = [x+2, 0];
@@ -360,10 +345,6 @@ async function renderProfiler() {
           labelWidth += l.width;
           labelX += l.width;
         }
-      }
-      for (const [k, v] of proxies) {
-        let [x, y] = k.split(",")
-        draw.push({ x, y, fillColor:dominantColor(v.colors), height:v.height, y, width:minWidth/2 });
       }
     }
     // draw shapes
