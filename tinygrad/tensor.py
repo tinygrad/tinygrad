@@ -1333,11 +1333,7 @@ class Tensor(MathTrait):
       if isinstance(idx, int):
         res_shape.append(1)
       elif isinstance(idx, slice):
-        start = idx.start or 0
-        stop = idx.stop
-        step = idx.step or 1
-        if idx.stop is None:
-          stop = dim_size if step > 0 else -1
+        start, stop, step = idx.indices(dim_size)
         size = (abs(stop - start) + abs(step) - 1) // abs(step)
         res_shape.append(size)
       elif idx is None:
@@ -1356,12 +1352,9 @@ class Tensor(MathTrait):
       if isinstance(idx, int):
         pass
       elif isinstance(idx, slice):
-        start = idx.start or 0
-        stop = idx.stop or dim_size
-        step = idx.step or 1
+        start, stop, step = idx.indices(dim_size)
         if step < 0:
           vb = vb.flip(dim)
-          stop = idx.stop or -1
         if abs(step) > 1:
           # (10,1,30,4,50) -> (10,1,30,12,50) -> (10,1,30,(1+12+17),50)
           vb = vb.repeat_interleave(abs(step), dim=dim)
