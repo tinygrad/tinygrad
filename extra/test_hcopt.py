@@ -12,11 +12,13 @@ if __name__ == "__main__":
 
     lowered = graph_rewrite(lin.ast, pm_lowerer, ctx=get_index(lin.ast), bottom_up=True)
     sch = Scheduler(lowered, lin.opts)
+    sch.convert_loop_to_global()
+    sch.simplify_merge_adjacent()
     opt2 = hand_coded_optimizations(sch)
 
     if opt1 != opt2:
       print("*******")
-      print("Kernel:    ", opt1)
-      print("Scheduler: ", opt2)
+      print("Kernel:    ", lin.colored_shape(), opt1)
+      print("Scheduler: ", sch.colored_shape(), opt2)
     else:
       print("******* MATCH")

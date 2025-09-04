@@ -120,7 +120,7 @@ class Scheduler:
       i += 1
 
   def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
-  def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():4s}', color) for x,color in zip(self.rngs, self.colors())])
+  def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
     if (old_sz:=rng.src[0].divides(amount)) is None:
@@ -154,8 +154,8 @@ class Scheduler:
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
       check(all(x not in {AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
+      if append_opt: self.applied_opts.append(opt)
       self.dont_use_locals = True
-      self.applied_opts.append(opt)
       return
 
     if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
@@ -190,7 +190,10 @@ class Scheduler:
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      check(self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt), "no tensor core available")
+      ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      check(ret is not None, "no tensor core available")
+      if append_opt: self.applied_opts.append(opt)
+      return ret
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const")
       new_sz = round_up(rng.vmax+1, cast(int, opt.arg))
@@ -214,16 +217,16 @@ class Scheduler:
       self.ast = graph_rewrite(self.ast, remove_tags)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
-    if append_opt:
-      self.applied_opts.append(opt)
 
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> bool:
+    if append_opt: self.applied_opts.append(opt)
+
+  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
     if not len(reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
-      if mul.op is not Ops.MUL: return False
+      if mul.op is not Ops.MUL: return None
       in0, in1 = mul.src
       try:
         tensor_cores = self.opts.tensor_cores if tc_select == -1 else [self.opts.tensor_cores[tc_select]]
@@ -297,8 +300,8 @@ class Scheduler:
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
             self.ast = self.ast.substitute({reduceop: tc_uop})
-          return True
-    return False
+          return axes
+    return None
 
   # helpers for hand_coded_optimizations
   @property
