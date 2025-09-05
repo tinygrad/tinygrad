@@ -1,5 +1,4 @@
 # this converts a lowerer program into a vectorized program
-
 import functools, itertools, operator
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition

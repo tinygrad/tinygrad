@@ -346,8 +346,8 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
 def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
-  k.convert_loop_to_global()
   k.simplify_merge_adjacent()
+  k.convert_loop_to_global()
   if BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
