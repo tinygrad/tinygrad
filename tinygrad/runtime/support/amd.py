@@ -5,9 +5,10 @@ from tinygrad.helpers import getbits, round_up, fetch
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.usb import ASM24Controller
 
-@dataclass(frozen=True)
+@dataclass
 class AMDReg:
-  name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:tuple[int, ...] # noqa: E702
+  name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:dict[int, tuple[int, ...]] # noqa: E702
+  def __post_init__(self): self.addr:dict[int, int] = { inst: bases[self.segment] + self.offset for inst, bases in self.bases.items() }
 
   def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
@@ -15,12 +16,9 @@ class AMDReg:
   def fields_mask(self, *names) -> int:
     return functools.reduce(int.__or__, ((((1 << (self.fields[nm][1]-self.fields[nm][0]+1)) - 1) << self.fields[nm][0]) for nm in names), 0)
 
-  @property
-  def addr(self): return self.bases[self.segment] + self.offset
-
 @dataclass
 class AMDIP:
-  name:str; version:tuple[int, ...]; bases:tuple[int, ...] # noqa: E702
+  name:str; version:tuple[int, ...]; bases:dict[int, tuple[int, ...]] # noqa: E702
   def __post_init__(self): self.version = fixup_ip_version(self.name, self.version)[0]
 
   @functools.cached_property
@@ -45,11 +43,21 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
   return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 
+def header_download(file, name=None, subdir="defines") -> str:
+  url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
+  return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
+
+def import_header(path:str):
+  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines"), flags=re.S)
+  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t)}
+
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
     try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
+
+def import_soc(ip): return type("SOC", (object,), import_header(f"include/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h"))
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
@@ -58,8 +66,7 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
   def _download_file(ver, suff) -> str:
     dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
     fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
-    url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd/include/asic_reg"
-    return fetch(f"{url}/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs").read_text()
+    return header_download(f"include/asic_reg/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs")
 
   for ver in fixup_ip_version(prefix, version):
     try: offs, sh_masks = _extract_regs(_download_file(ver, "offset")), _extract_regs(_download_file(ver, "sh_mask"))

@@ -51,14 +51,14 @@ class NVPageTableEntry:
     return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self._is_dual_pde() else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.is_huge_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
+    if self.is_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
     return (self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t).decode(self.entry(entry_id))
 
-  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
+  def is_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
   def supports_huge_page(self, paddr:int): return self.lv >= self.nvdev.mm.level_cnt - 3 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
-    if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
+    if self.is_page(entry_id): return self.read_fields(entry_id)['valid']
     return self.read_fields(entry_id)['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
 
   def address(self, entry_id:int) -> int:
@@ -66,12 +66,12 @@ class NVPageTableEntry:
     return self.read_fields(entry_id)[f'address{small}{sys}'] << 12
 
 class NVMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 44), base=1 << 30) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 44), base=0x1000000000) # global for all devices.
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev(PCIDevImplBase):
-  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
+  def __init__(self, devfmt:str, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
     self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
@@ -101,10 +101,10 @@ class NVDev(PCIDevImplBase):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
-  def wreg(self, addr, value):
+  def wreg(self, addr:int, value:int):
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
-  def rreg(self, addr): return self.mmio[addr // 4]
+  def rreg(self, addr:int) -> int: return self.mmio[addr // 4]
 
   def _early_init(self):
     self.reg_names:set[str] = set()
@@ -118,7 +118,7 @@ class NVDev(PCIDevImplBase):
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
-      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
+      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       System.pci_reset(self.devfmt)
       time.sleep(0.5)
 
@@ -134,12 +134,12 @@ class NVDev(PCIDevImplBase):
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
-  def _alloc_boot_struct(self, struct):
+  def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
     va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return type(struct).from_address(va), paddrs[0]
 
-  def _download(self, file) -> str:
+  def _download(self, file:str) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
     return fetch(url, subdir="defines").read_text()
 

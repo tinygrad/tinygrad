@@ -3,10 +3,11 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.opt.kernel import Opt, OptOps, Kernel, KernelOptError
+from tinygrad.codegen.opt.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
-from tinygrad.opt.search import get_kernel_actions
+from tinygrad.codegen.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
+from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -14,10 +15,7 @@ class TestArange(unittest.TestCase):
     tt = Tensor.arange(N)
     sched = tt.schedule()
     self.assertEqual(len(sched), 1)
-    k = Kernel(sched[-1].ast)
-    if opts is not None:
-      for o in opts: k.apply_opt(o)
-    p = get_program(k.get_optimized_ast(), k.opts)
+    p = get_program(sched[-1].ast, opts=opts)
     print(p.name)
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
@@ -52,11 +50,11 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
 
   def test_all_opts(self, opts=None, exclude=None):
-    k = Kernel(Tensor.arange(256).schedule()[-1].ast)
+    k = Kernel(apply_rewrites(Tensor.arange(256).schedule()[-1].ast, rewrites_for_views))
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_256 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
-    k = Kernel(Tensor.arange(2560).schedule()[-1].ast)
+    k = Kernel(apply_rewrites(Tensor.arange(2560).schedule()[-1].ast, rewrites_for_views))
     if opts is not None:
       for o in opts: k.apply_opt(o)
     all_opts_2560 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
@@ -104,7 +102,6 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
     self.assertEqual(out.item(), 1337)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_manual_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
@@ -174,7 +171,6 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
@@ -193,7 +189,6 @@ class TestIndexing(unittest.TestCase):
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)

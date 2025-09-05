@@ -93,7 +93,7 @@ class TestMergeDicts(unittest.TestCase):
     assert merge_dicts([a, b]) == {"a": 1, "b": 2, "c": 3}
     assert merge_dicts([a, c]) == a
     assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       merge_dicts([a, d])
 
 class TestStripParens(unittest.TestCase):
@@ -407,6 +407,20 @@ class TestWordWrap(unittest.TestCase):
     st = colored("x"*wrap*2, "red")
     st2 = word_wrap(st, wrap=wrap)
     self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_explicit_newline(self):
+    wrap = 10
+    st = "\n".join(["x"*wrap, "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines()))
+
+    st = "\n".join(["x"*(wrap+1), "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+1)
+
+    st = "\n".join(["x"*(wrap+1), "x"*(wrap+1), "x"*(wrap+1)])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+3)
 
 class TestIsNumpyNdarray(unittest.TestCase):
   def test_ndarray(self):

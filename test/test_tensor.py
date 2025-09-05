@@ -415,6 +415,21 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_list_implicit_cast(self):
+    data = [True, False]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-1, 0, 1, 2, 3]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-3.5, -2.5, -1.5, 0, 1.5, 2.5, 3.5]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    # NOTE: torch and jax raise OverflowError: Python integer -3 out of bounds for uint8
+    # np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+
   def test_tensor_list_special_values(self):
     if is_dtype_supported(dtypes.float16):
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
@@ -511,6 +526,24 @@ class TestTinygrad(unittest.TestCase):
                     shell=True, check=True)
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
+
+    if Device.DEFAULT != "CPU":
+      # setting multiple devices fail
+      with self.assertRaises(subprocess.CalledProcessError):
+        subprocess.run([f'{Device.DEFAULT}=1 CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                        shell=True, check=True)
+
+      # setting device via DEV
+      subprocess.run([f'DEV={Device.DEFAULT.capitalize()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+      subprocess.run([f'DEV={Device.DEFAULT.lower()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+      subprocess.run([f'DEV={Device.DEFAULT.upper()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                      shell=True, check=True)
+
+      with self.assertRaises(subprocess.CalledProcessError):
+        subprocess.run([f'DEV={Device.DEFAULT} CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
+                        shell=True, check=True)
 
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:
@@ -874,13 +907,13 @@ class TestIdxUpcast(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_overflow_sym(self):
-    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   def test_regular(self):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
   def test_regular_sym(self):
-    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
@@ -892,7 +925,7 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises(KeyError):
-      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow(self):

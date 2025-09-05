@@ -1,4 +1,4 @@
-import time
+import time, math
 start = time.perf_counter()
 from pathlib import Path
 import numpy as np
@@ -240,6 +240,52 @@ def eval_mrcnn():
 
   evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
   evaluate_predictions_on_coco(mask_output, iou_type='segm')
+
+def eval_llama3():
+  from extra.models.llama import Transformer
+  from examples.llama3 import MODEL_PARAMS, load, convert_from_huggingface
+  from tinygrad.helpers import tqdm
+
+  BASEDIR = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
+  BS = getenv("BS", 4)
+  SMALL = getenv("SMALL", 0)
+  SEQLEN = getenv("SEQLEN", 8192)
+  MODEL_PATH = Path(getenv("MODEL_PATH", "/raid/weights/llama31_8b/"))
+
+  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  params = params | {"vocab_size": 32000} if not SMALL else params
+  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
+  model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+
+  # load weights
+  weights = load(str(MODEL_PATH / "model.safetensors.index.json"))
+  if "model.embed_tokens.weight" in weights:
+    print("converting from huggingface format")
+    weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"])
+
+  load_state_dict(model, weights, strict=False, consume=True)
+
+  @TinyJit
+  def eval_step(model, tokens):
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten().float()
+
+  if SMALL:
+    from examples.mlperf.dataloader import batch_load_llama3_small
+    iter = batch_load_llama3_small(BS, 5760, SEQLEN, BASEDIR, val=True)
+  else:
+    from examples.mlperf.dataloader import batch_load_llama3
+    iter = batch_load_llama3(BS, 5760, SEQLEN, BASEDIR, val=True)
+
+  losses = []
+  for tokens in tqdm(iter, total=5760//BS):
+    GlobalCounters.reset()
+    losses += eval_step(model, tokens).tolist()
+    tqdm.write(f"loss: {np.mean(losses)}")
+
+  log_perplexity = np.mean(losses)
+  print(f"Log Perplexity: {log_perplexity}")
 
 if __name__ == "__main__":
   # inference only

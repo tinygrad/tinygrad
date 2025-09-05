@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, fcntl
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
@@ -12,16 +12,20 @@ class _System:
 
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
 
+  def lock_memory(self, addr:int, size:int):
+    if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+
+  def system_paddrs(self, vaddr:int, size:int) -> list[int]:
+    self.pagemap().seek(vaddr // mmap.PAGESIZE * 8)
+    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
 
     if data is not None: to_mv(va, len(data))[:] = data
-
-    # Read pagemap to get the physical address of each page. The pages are locked.
-    self.pagemap().seek(va // mmap.PAGESIZE * 8)
-    return va, [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+    return va, self.system_paddrs(va, size)
 
   def pci_reset(self, gpu): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
@@ -55,6 +59,8 @@ class _System:
     except OSError: return None
 
   def flock_acquire(self, name:str) -> int:
+    import fcntl # to support windows
+
     os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
 
     # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
@@ -76,9 +82,13 @@ class PCIDevice:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
 
     for i in resize_bars or []:
-      supported_sizes = int(FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize", os.O_RDONLY).read(), 16)
-      try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize", os.O_RDWR).write(str(supported_sizes.bit_length() - 1))
-      except OSError as e: raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
+      if FileIOInterface.exists(rpath:=f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize"):
+        try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
+        except OSError as e:
+          if e.errno in {errno.EPERM, errno.EACCES}:
+            raise RuntimeError(f"Cannot resize BAR {i}: {e}. Permission error: run `extra/amdpci/setup_python_cap.sh`"
+                                " to allow python accessing device or run with sudo") from e
+          raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio()) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
@@ -153,6 +163,12 @@ class PCIIfaceBase:
     if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    if (ifa:=getattr(b.owner, "iface", None)) is None or not isinstance(ifa, PCIIfaceBase): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
-    paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
-    self.dev_impl.mm.map_range(cast(int, b.va_addr), b.size, paddrs, system=True, snooped=b.meta.mapping.snooped, uncached=b.meta.mapping.uncached)
+    if b.owner is not None and b.owner._is_cpu():
+      System.lock_memory(cast(int, b.va_addr), b.size)
+      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, False
+    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
+      paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
+      snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
+    else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+
+    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)

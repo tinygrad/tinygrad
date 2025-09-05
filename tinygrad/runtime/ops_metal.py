@@ -1,6 +1,6 @@
-import os, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -144,7 +144,10 @@ class MetalCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
       shader.flush()
-      ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+      proc = subprocess.Popen(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}",
+                              stdout=subprocess.PIPE, shell=True, text=True, bufsize=1)
+      for line in unwrap(proc.stdout): print(line, end="")
+      ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
@@ -218,11 +221,14 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     msg("setLabel:")(src_command_buffer, to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
     msg("commit")(src_command_buffer)
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+    # Transfers currently synchronize the completion. Otherwise, copies can sometimes lead to incorrect values.
+    # There is no real metal multidevice support for now, so transfer is used only for tests.
+    src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(cast(int, msg("contents", objc_id)(src.buf).value), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "CPU -> METAL")
-  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> CPU")
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
+  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
