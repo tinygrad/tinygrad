@@ -233,9 +233,10 @@ class TestLinearizer(unittest.TestCase):
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]])[-1]
+    opt = [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]
+    k = helper_linearizer_opt(r, [opt])[-1]
     # the uops graph is DEFINE_REG -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
-    uops = get_program(k.ast, k.opts, k.applied_opts).uops
+    uops = get_program(k.ast, opts=opt).uops
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
     for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
@@ -358,13 +359,13 @@ class TestLinearizer(unittest.TestCase):
     sched_copy = sched[:]
     run_schedule(sched)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    program = get_program(sched_copy[-1].ast, Device[Device.DEFAULT].renderer, opts=())
+    program = get_program(sched_copy[-1].ast, opts=())
     assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
       k = helper_linearizer_opt(t)[-1]
-      uops = get_program(k.ast, k.opts, k.applied_opts).uops
+      uops = get_program(k.ast).uops
       # ignore kernel optimized IF statements for now
       if if_op:=next((u for u in uops if u.op is Ops.IF), None):
         uops = uops[:uops.index(if_op)]
@@ -421,7 +422,7 @@ class TestLinearizer(unittest.TestCase):
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     k = helper_linearizer_opt(out, opts=[opt])[-1]
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
-    uops = get_program(k.ast, k.opts, k.applied_opts).uops
+    uops = get_program(k.ast, opts=opt).uops
     local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
     global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER][0]
@@ -441,7 +442,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     k = helper_linearizer_opt(r)[-1]
-    uops = get_program(k.ast, k.opts, k.applied_opts).uops
+    uops = get_program(k.ast).uops
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
     # the float4 value stores directly in lds and we skip upcast
@@ -511,13 +512,13 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.ast, k.opts, k.applied_opts), device=device))
+  def get_prg(opts): return CompiledRunner(replace(get_program(realized_ast, opts=opts), device=device))
 
   def check_opt(opts):
     k = Kernel(realized_ast)
     lins.append(k)
     k.apply_opts(opts)
-    prg = get_prg(k)
+    prg = get_prg(opts=opts)
     reset_bufs(outbufs)
     prg.exec(real_bufs)
     for x,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
@@ -525,7 +526,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   # Get baseline if it is not provided, which is not optimized at all.
   k = Kernel(realized_ast)
   lins.append(k)
-  prg = get_prg(k)
+  prg = get_prg(opts=())
   prg.exec(real_bufs)
   if len(wanna_output) == 0: wanna_output = copyout_outputs(outbufs)
   else:
@@ -535,7 +536,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   k = Kernel(realized_ast)
   k.apply_opts(hand_coded_optimizations(k))
   lins.append(k)
-  prg = get_prg(k)
+  prg = get_prg(opts=None)
   reset_bufs(outbufs)
   prg.exec(real_bufs)
   for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
