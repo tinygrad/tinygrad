@@ -2,32 +2,18 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final, Sequence
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify, can_pad
-from tinygrad.uop.symbolic import symbolic_flat
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
+from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
 axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
-
-def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
-  rngs = r.src[off:]
-  if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
-
-pm_flatten_range = PatternMatcher([
-  # real ranges only
-  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
-])
-
-def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 
 class Scheduler:
   def __init__(self, ast:UOp, opts:Renderer):
@@ -95,24 +81,6 @@ class Scheduler:
     rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
-
-  def simplify_merge_adjacent(self):
-    i = 0
-    while i < len(self.rngs)-1:
-      r0, r1 = self.rngs[i], self.rngs[i+1]
-      # same axistype and same termination
-      termination = self.termination
-      if r0.arg[1] == r1.arg[1] and r0 in termination and r1 in termination and termination[r0] == termination[r1]:
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        oidx = self.ast.simplify()
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(oidx, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(oidx):
-          self.ast = nidx
-          continue
-      i += 1
 
   def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -346,7 +314,6 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
 def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
-  k.simplify_merge_adjacent()
   k.convert_loop_to_global()
   if BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
