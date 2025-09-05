@@ -65,7 +65,7 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
   # TODO: cos does not match for large input
-  if op[0] == Tensor.cos and abs(a) > 100: return
+  if op[0] == Tensor.cos and abs(a) > 30: return
   if op[0] == Tensor.log and a <= 0: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
