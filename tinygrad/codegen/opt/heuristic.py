@@ -104,7 +104,8 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024):
+  # this 4096 is assuming 128 cores with 32 threads
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 4096):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
