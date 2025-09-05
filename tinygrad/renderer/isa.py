@@ -479,17 +479,17 @@ x86_lowerer = PatternMatcher([
   # load/store
   (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints8+(dtypes.bool,), name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(b.arg, 1)), # noqa: E501
                                                                                                                                                        MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                                                       MUOpX86._I("je", 0x0F84, Label(f".IF_{ctx.uops.index(x)}:")), # noqa: E501
                                                                                                                                                        MUOpX86.load(ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), is_vec(x)), # noqa: E501
                                                                                                                                                        MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
   (UPat.var("a").load(UPat.cvar("c"), UPat.cvar("b"), UPat.var("m", dtypes.bool), dtype=dtypes.ints, name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(b.arg, min(b.dtype.itemsize, 4))), # noqa: E501
                                                                                                                                        MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                                       MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                                       MUOpX86._I("je", 0x0F84, Label(f".IF_{ctx.uops.index(x)}:")), # noqa: E501
                                                                                                                                        MUOpX86.load(ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), is_vec(x)), # noqa: E501
                                                                                                                                        MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
   (UPat.var("a").load(UPat.cvar("c"), UPat.var("b"), UPat.var("m", dtypes.bool), name="x"), lambda ctx,a,c,b,m,x: [MUOpX86.assign(ctx[x], ctx[b], is_vec(x)), # noqa: E501
                                                                                                                    MUOpX86._RM_I("test", 0xF6, 0, ctx[m], Immediate(1, 1)), # noqa: E501
-                                                                                                                   MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),)), # noqa: E501
+                                                                                                                   MUOpX86._I("je", 0x0F84, Label(f".IF_{ctx.uops.index(x)}:")), # noqa: E501
                                                                                                                    MUOpX86.load(ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), is_vec(x)), # noqa: E501
                                                                                                                    MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
   (UPat.var("a").load(UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.load(ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), is_vec(x))), # noqa: E501
@@ -628,12 +628,12 @@ x86_lowerer = PatternMatcher([
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)), MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
                                                                                                                     MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], Immediate(c.arg, 4)), # noqa: E501
-                                                                                                                    MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
+                                                                                                                    MUOpX86._I("jl", 0x0F8C, Label(f".LOOP_{a.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.var("b"),), name="a"),)), lambda ctx,b,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
                                                                                                                    MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), # noqa: E501
-                                                                                                                   MUOpX86("jl", 0x0F8C, ins=(Label(f".LOOP_{a.arg[0]}:"),), ins_con=((),))]), # noqa: E501
+                                                                                                                   MUOpX86._I("jl", 0x0F8C, Label(f".LOOP_{a.arg[0]}:"))]), # noqa: E501
   # if / endif
-  (UPat(Ops.IF, name="x"), lambda ctx,x: [MUOpX86._RM_I("test", 0xF6, 0, ctx[x.src[0]], Immediate(1, 1)), MUOpX86("je", 0x0F84, ins=(Label(f".IF_{ctx.uops.index(x)}:"),), ins_con=((),))]), # noqa: E501
+  (UPat(Ops.IF, name="x"), lambda ctx,x: [MUOpX86._RM_I("test", 0xF6, 0, ctx[x.src[0]], Immediate(1, 1)), MUOpX86._I("je", 0x0F84, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x.src[0])}:"))),
 ])
 

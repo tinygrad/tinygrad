@@ -114,6 +114,8 @@ class MUOpX86(MUOp):
   @staticmethod
   def prefix_w(reg: Register): return {"prefix": 0x66 if reg.size == 2 else 0, "w": 1 if reg.size == 8 else 0}
   @staticmethod
+  def _I(opstr:str, opcode:int, label:Label): return MUOpX86(opstr, opcode, None, (label,), (), ((),), imm=label)
+  @staticmethod
   def RM(opstr:str, opcode:int, rm:Register): return MUOpX86(opstr, opcode, rm, out_con=MUOpX86.GPR, rm=rm, **MUOpX86.prefix_w(rm))
   @staticmethod
   def _RM(opstr:str, opcode:int, reg:int, rm:Register, in_cons=None):
@@ -246,10 +248,6 @@ class MUOpX86(MUOp):
     if self.opcode == 0xB8: # 64bit imm load
       return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(self.out.index > 7) & 0b1)).to_bytes() + \
         int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0)
-    if self.opcode in (0x0F8C, 0x0F84): # jumps
-      inst.extend(self.opcode.to_bytes(2))
-      inst.extend(self.ins[0].value.to_bytes(self.ins[0].size, 'little', signed=True))
-      return bytes(inst)
     # extends reg field
     r = int(isinstance(self.reg, Register) and self.reg.index > 7)
     # extends reg for index
