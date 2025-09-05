@@ -626,7 +626,7 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.ints32).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrd", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
   (UPat.var("y", dtypes.ints64).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrq", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3, 1)),
   (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)), # noqa: E501
-  (UPat.var("y", dtypes.float64).gep(name="x"), lambda ctx,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[0]], Immediate(shuf_imm(x), 1), 1, 1)), # noqa: E501
+  (UPat.var("y", dtypes.float64).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(x.arg[0], 1), 1, 1)), # noqa: E501
   # range / endrange
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)), MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
