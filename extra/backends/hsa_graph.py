@@ -53,7 +53,7 @@ class HSAGraph(MultiGraphRunner):
       self.ji_kargs_structs[j] = ji.prg._prg.args_struct_t.from_address(kernargs_ptrs[ji.prg.dev])
       kernargs_ptrs[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg._prg.args_struct_t), 16)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf)
-      for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
+      for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i].expr])
 
     # Build queues.
     self.virt_aql_queues: Dict[Compiled, VirtAQLQueue] = {dev:VirtAQLQueue(dev, 2*len(self.jit_cache)+16) for dev in self.devices}
@@ -123,7 +123,7 @@ class HSAGraph(MultiGraphRunner):
     # Update var_vals
     for j in self.jc_idx_with_updatable_var_vals:
       for i,v in enumerate(cast(CompiledRunner, self.jit_cache[j].prg).p.vars):
-        self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v])
+        self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[v.expr])
 
     # Update launch dims
     for j in self.jc_idx_with_updatable_launch_dims:

@@ -3,7 +3,7 @@ from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, ssimplify, GroupOp, PatternMatcher
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.codegen.opt.tc import TensorCore
@@ -66,7 +66,7 @@ class ProgramSpec:
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
   local_size:list[int]|None=None
-  vars:list[str]=field(default_factory=list)
+  vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
@@ -76,7 +76,7 @@ class ProgramSpec:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is Ops.DEFINE_VAR: self.vars.append(u.arg[0])
+        if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
@@ -85,7 +85,7 @@ class ProgramSpec:
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
           assert special_size is not None, f"special_size is None but found SPECIAL in uops {u}"
           special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())  # TODO: the type here should be sint
-      self.vars = sorted(self.vars)
+      self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self.ins = sorted(dedup(self.ins))
       self._ran_post_init = True
