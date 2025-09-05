@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device
 from tinygrad.helpers import RANGEIFY
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
 
 @unittest.skipIf(RANGEIFY>0, "arg is partial contig in rangeify")

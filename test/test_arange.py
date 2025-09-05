@@ -1,13 +1,11 @@
-import unittest, contextlib
+import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.codegen.opt.kernel import Opt, OptOps, Kernel, KernelOptError
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
-from tinygrad.codegen.opt.search import get_kernel_actions
 from tinygrad.uop.ops import Ops
-from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -48,28 +46,6 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_local_unroll4(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UNROLL, 0, 4)], limit=0)
     @unittest.skip("doesn't work yet")
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
-
-  def test_all_opts(self, opts=None, exclude=None):
-    k = Kernel(apply_rewrites(Tensor.arange(256).schedule()[-1].ast, rewrites_for_views))
-    if opts is not None:
-      for o in opts: k.apply_opt(o)
-    all_opts_256 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
-    k = Kernel(apply_rewrites(Tensor.arange(2560).schedule()[-1].ast, rewrites_for_views))
-    if opts is not None:
-      for o in opts: k.apply_opt(o)
-    all_opts_2560 = [kk.applied_opts for kk in get_kernel_actions(k, include_0=False).values()]
-    all_opts = [x for x in all_opts_256 if x in all_opts_2560]
-    for opts in all_opts:
-      if exclude is not None and opts[-1] in exclude: continue
-      print(opts)
-      self.test_complexity(opts)
-  def test_all_opts_w_local(self):
-    with contextlib.suppress(KernelOptError):
-      return self.test_all_opts([Opt(OptOps.LOCAL, 0, 16)], [Opt(op=OptOps.PADTO, axis=1, arg=32)])
-  def test_all_opts_w_upcast(self): return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4)])
-  def test_all_opts_w_unroll(self): return self.test_all_opts([Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
-  def test_all_opts_w_upcast_and_unroll(self):
-    return self.test_all_opts([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], [Opt(op=OptOps.GROUP, axis=0, arg=0)])
 
 class TestRand(unittest.TestCase):
   def test_fused_rand_less_ops(self, noopt=1):
