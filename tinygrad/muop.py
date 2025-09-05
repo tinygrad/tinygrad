@@ -49,10 +49,13 @@ class MUOp:
 
   def __str__(self):
     return (self.opstr+" " if self.opstr else "") + ", ".join(([str(self.out)] if self.out is not None else []) + [str(i) for i in self.ins])
+  @staticmethod
+  def load(dest:Register, src:Memory, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
+  @staticmethod
+  def store(dest:Memory, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
+  @staticmethod
+  def assign(dest:Register, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
   def replace(self, out: Operand, ins: tuple[Operand, ...]): raise NotImplementedError("arch specific")
-  def load(self, dest:Register, src:Memory) -> MUOp: raise NotImplementedError("arch specific")
-  def store(self, dest:Memory, src:Register) -> MUOp: raise NotImplementedError("arch specific")
-  def assign(self, dest:Register, src:Register) -> MUOp: raise NotImplementedError("arch specific")
   def encode(self) -> bytes: raise NotImplementedError("arch specific")
 
 def assemble(src:list[MUOp]) -> bytes:
