@@ -380,9 +380,8 @@ async function renderProfiler() {
 
   function resize() {
     const profiler = document.querySelector(".profiler");
-    // NOTE: use clientWidth to account for the scrollbar
-    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
-    width -= rect("#device-list").width+padding;
+    const { height, width:sideWidth } = rect("#device-list");
+    const width = profiler.clientWidth-(sideWidth+padding);
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
