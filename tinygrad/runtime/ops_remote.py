@@ -12,7 +12,7 @@ import multiprocessing, threading, functools, itertools, asyncio, http, http.cli
 import traceback, builtins
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
-from tinygrad.uop.ops import UOp, Ops, sint
+from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
@@ -99,7 +99,7 @@ class GraphComputeItem:
   name: str
   datahash: str
   bufs: tuple[int, ...]
-  vars: tuple[str, ...]
+  vars: tuple[Variable, ...]
   fixedvars: dict[str, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
