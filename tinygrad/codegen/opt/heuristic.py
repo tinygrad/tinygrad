@@ -1,9 +1,12 @@
 import itertools
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps, KernelOptError, AxisType
-from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
 from tinygrad.dtype import ImageDType
-from tinygrad.uop.ops import Ops, resolve
+from tinygrad.uop.ops import Ops, resolve, AxisType
+
+# both versions
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.postrange import Scheduler
 
 def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   # first try the tensor cores
@@ -27,7 +30,7 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   if USE_TC > 0:
     try: # check TC first and apply hand-coded opts if successful
       tk = k.copy()
-      tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
+      rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
 
       # skip hand-coded TC opts if AMX, upcasting will make kernel slower
       if isinstance(k, Kernel) and (tc_opts:=tk.tensor_core_opts) is not None and not AMX:
@@ -38,6 +41,14 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
 
         if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if tk.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
           tk.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
+      elif isinstance(k, Scheduler) and rngs is not None and not AMX:
+        axes = [tk.rngs.index(r) if r in tk.rngs else None for r in rngs]
+        for tc_dim in [1,0]: # attempt to upcast M and N
+          if axes[tc_dim] is None: continue
+          szs = [sz for sz in [5,4,3,2] if tk.full_shape[axes[tc_dim]] % sz == 0]
+          if szs: tk.apply_opt(Opt(OptOps.UPCAST, axes[tc_dim], szs[0]))
+        if axes[0] is not None and (szs := [sz for sz in [4,2] if tk.full_shape[axes[0]] % sz == 0]): # attempt to local N
+          tk.apply_opt(Opt(OptOps.LOCAL, axes[0], szs[0]))
       return tk.applied_opts
     except KernelOptError:
       pass
