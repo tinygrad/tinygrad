@@ -3,7 +3,7 @@ import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, KernelInfo
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
@@ -17,7 +17,7 @@ simple_pm = PatternMatcher([
 
 def to_uops_list(u:List[UOp]) -> List[UOp]:
   # we strip the SINK here for legacy reasons
-  ret = full_rewrite(UOp.sink(*u))
+  ret = full_rewrite(UOp.sink(*u, arg=KernelInfo(opts_to_apply=())))
   assert ret[-1].op is Ops.SINK
   return ret[:-1]
 
@@ -445,7 +445,7 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), src=(), arg=0)
       v = Variable("v", 0, 20)
-      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v), UOp.const(dtypes.int, 0), UOp(Ops.IF, src=(v<16,))))
+      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v, v<16), UOp.const(dtypes.int, 0)))
       to_uops_list([st0])
 
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
@@ -463,7 +463,7 @@ class TestUOpGraph(unittest.TestCase):
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx), UOp.const(dtypes.uint, 1), UOp(Ops.IF, src=(lidx<8,))))
+      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx, lidx<8), UOp.const(dtypes.uint, 1)))
 
       barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
       if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))

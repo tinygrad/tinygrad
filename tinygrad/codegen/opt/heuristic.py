@@ -29,10 +29,14 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
+    good_tc_opt = False
     try: # check TC first and apply hand-coded opts if successful
       tk = k.copy()
       rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
-
+      good_tc_opt = True
+    except KernelOptError:
+      pass
+    if good_tc_opt:
       # skip hand-coded TC opts if AMX, upcasting will make kernel slower
       if isinstance(k, Kernel) and (tc_opts:=tk.tensor_core_opts) is not None and not AMX:
         # hand-coded TC opts
@@ -43,19 +47,14 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
         if tc_opts.axes_exist[0] and (szs := [sz for sz in [4,2] if tk.full_shape[tc_opts.axes[0]] % sz == 0]): # attempt to local N
           tk.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], szs[0]))
       elif isinstance(k, Scheduler) and rngs is not None and not AMX:
-        axes = [tk.rngs.index(r) if r in tk.rngs else None for r in rngs]
         for tc_dim in [1,0]: # attempt to upcast M and N
-          if axes[tc_dim] is None: continue
-          szs = [sz for sz in [5,4,3,2] if tk.full_shape[axes[tc_dim]] % sz == 0]
+          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
           if szs:
-            axis = axes[tc_dim]
-            if tk.full_shape[axis] == szs[0]: axes[tc_dim] = None
-            tk.apply_opt(Opt(OptOps.UPCAST, axis, szs[0]))
-        if axes[0] is not None and (szs := [sz for sz in [4,2] if tk.full_shape[axes[0]] % sz == 0]): # attempt to local N
-          tk.apply_opt(Opt(OptOps.LOCAL, axes[0], szs[0]))
+            # set it to the replaced range
+            rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
+        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+          tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk.applied_opts
-    except KernelOptError:
-      pass
 
   # make a copy so it does not mutate the input
   k = k.copy()
@@ -75,6 +74,18 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
           if k.full_shape[first_reduce]%MV_THREADS_PER_ROW == 0 and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce=} {strides0=} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
+            if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
+            if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+            return k.applied_opts
+    else:
+      idx0, idx1 = mulop.src[0].src[0].src[1], mulop.src[1].src[0].src[1]
+      first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
+      if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
+        for global_idx in k.axes_of(AxisType.GLOBAL):
+          if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
+            if DEBUG >= 3:
+              print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
             if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
@@ -112,7 +123,10 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     if isinstance(k, Kernel): is_masked = any(st.axis_is_masked(axis) for st in k.sts)
-    else: is_masked = any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs)
+    else:
+      # for Schedule, we check if the range is used in INDEX gates or WHERE gates
+      is_masked = any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs) or \
+                  any(any(o is k.rngs[axis] for o in u.src[0].parents) for u in k.ast.parents if u.op is Ops.WHERE)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
