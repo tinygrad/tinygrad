@@ -3,7 +3,7 @@ import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, KernelInfo
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
@@ -17,7 +17,7 @@ simple_pm = PatternMatcher([
 
 def to_uops_list(u:List[UOp]) -> List[UOp]:
   # we strip the SINK here for legacy reasons
-  ret = full_rewrite(UOp.sink(*u))
+  ret = full_rewrite(UOp.sink(*u, arg=KernelInfo(opts_to_apply=())))
   assert ret[-1].op is Ops.SINK
   return ret[:-1]
 
