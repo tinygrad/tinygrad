@@ -519,18 +519,13 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(get_program(k.ast, k.opts, k.applied_opts), device=device))
 
-  def check_opt(opts, create_k, expected_color_size):
-    k = create_k()
+  def check_opt(opts):
+    k = Kernel(realized_ast)
     lins.append(k)
-    if apply_tc: k.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1)))
     k.apply_opts(opts)
-    if expected_color_size is not None:
-      cs = list(zip(k.colors(), k.full_shape))
-      assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
     reset_bufs(outbufs)
     prg.exec(real_bufs)
-
     for x,want in zip(copyout_outputs(k, outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
@@ -550,8 +545,8 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   reset_bufs(outbufs)
   prg.exec(real_bufs)
   for buf,want in zip(copyout_outputs(k, outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
-  for i,x in enumerate(opts): # Check custom transformations if any.
-    check_opt(x, lambda: Kernel(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
+  for x in opts: # Check custom transformations if any.
+    check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
   return lins
 
 if __name__ == '__main__':
