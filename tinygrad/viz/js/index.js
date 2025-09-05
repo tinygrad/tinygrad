@@ -383,6 +383,7 @@ async function renderProfiler() {
     // NOTE: use clientWidth to account for the scrollbar
     let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
     width -= rect("#device-list").width+padding;
+    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -395,7 +396,6 @@ async function renderProfiler() {
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  resize();
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
