@@ -68,7 +68,7 @@ class TestLinAlg(unittest.TestCase):
     for coefs in coefficients:
       for size in sizes:
         a = Tensor.randn(size)
-        b = Tensor.newton_schulz(a, steps=20, params=coefs, eps=0.0)
+        b = Tensor.newton_schulz(a, steps=15, params=coefs, eps=0.0)
         # ns(A) = U @ Vt -> (U @ Vt) @ (U @ Vt)t = I
         orthogonality_helper(b if size[-1] > size[-2] else b.transpose(-2, -1), tolerance=1e-1)
 
