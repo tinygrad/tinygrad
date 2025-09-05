@@ -100,8 +100,6 @@ def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
   # similar to unravel_index in numpy/torch
   acc, idxs = 1, []
   for d in reversed(shape):
-    # shape might be an int32, but indexing is done with dtypes.index
-    if isinstance(d, UOp): d = d.cast(dtypes.index)
     idxs.append((offset//acc)%d)
     acc *= d
   return idxs[::-1]
@@ -119,8 +117,7 @@ class View:
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      # stride might a UOp int, sint_to_uop will do a cast
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*sint_to_uop(st)
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
         if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
@@ -150,8 +147,10 @@ class View:
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # simplify as we go
-    if isinstance(offset, UOp): offset = cast(sint, offset.ssimplify())
-    shape = tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in shape)
+    if isinstance(offset, UOp): offset = cast(sint, offset.cast(dtypes.index).ssimplify())
+    shape = tuple(cast(sint, x.cast(dtypes.index).ssimplify()) if isinstance(x, UOp) else x for x in shape)
+    strides = tuple(cast(sint, x.cast(dtypes.index)) if isinstance(x, UOp) else x for x in strides)
+    if mask: mask = tuple((s.cast(dtypes.index) if isinstance(s, UOp) else s, e.cast(dtypes.index) if isinstance(e, UOp) else e) for s,e in mask)
     # TODO: enabling stride simplification breaks symbolic jit
     """
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
