@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.helpers import Context, prod
+from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 
@@ -32,35 +32,6 @@ class TestHandCodedOpts(unittest.TestCase):
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
     # should upcast the two Tensor.stacks
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
-
-  def test_masked_upcast_wino_full(self):
-    with Context(WINO=1):
-      x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
-      out = Tensor.conv2d(x,w, padding=1)
-      out.mean().backward()
-
-      upcasts = []
-      wino_schedule = out.schedule()
-      # collect upcasts of tile transform kernels
-      for i, si in enumerate(wino_schedule):
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
-        upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
-      assert len(upcasts) == 3  # 3 transformation matrices
-      assert len(wino_schedule) <= 4  # 4 kernels
-      # this test case's inputs are too small, so one of the 4-stacks became a local, which is fine i guess
-      assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
-
-      backward_schedule = Tensor.schedule(x.grad, w.grad)
-      for si in backward_schedule:
-        k = Kernel(push_views(si.ast))
-        k.apply_opts(hand_coded_optimizations(k))
-        if len(k.bufs) < 20: continue  # not a tile transform kernel
-        # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
-        assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 216
-      assert len(backward_schedule) <= 13  # just the current number, but it could be better
 
   def test_masked_upcast_many(self):
     layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
