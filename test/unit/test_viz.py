@@ -70,7 +70,6 @@ class TestViz(BaseTestViz):
 
   def test_rewrite_location(self):
     def inner(sink): return graph_rewrite(sink, PatternMatcher([]))
-    @track_rewrites(name=True)
     def outer(sink): return inner(sink)
     outer(UOp.variable("a", 1, 10))
     lst = get_viz_list()
@@ -181,7 +180,6 @@ class TestVizTree(BaseTestViz):
     c = UOp.variable("c",0,10)
     d = UOp.variable("d",0,10)
     sink = UOp.sink(a+b, c+d)
-    @track_rewrites()
     def tree_rewrite(): return graph_rewrite(sink, root, name="root")
     tree_rewrite()
     lst = get_viz_list()
@@ -256,7 +254,7 @@ class TestVizIntegration(BaseTestViz):
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
   # tracing also works without a track_rewrites context
-  # all graph_rewrites get put into the a default group
+  # all graph_rewrites get put into the default group
   def test_default_tracing(self):
     def test(root):
       return graph_rewrite(root, sym)
