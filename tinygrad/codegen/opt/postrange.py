@@ -155,7 +155,7 @@ class Scheduler:
     if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
       check(self.opts.has_local, "locals needed for opt")
 
-    rng = self.rngs[self.real_axis(opt.op, opt.axis)]
+    rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
 
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
@@ -163,7 +163,7 @@ class Scheduler:
       OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
 
     if opt.op in opt_to_at:
-      amt:int = (rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
+      amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
 
       # copied from kernel.py. prevents METAL compiler hangs
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
@@ -198,7 +198,7 @@ class Scheduler:
       return ret
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const")
-      new_sz = round_up(rng.vmax+1, cast(int, opt.arg))
+      new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
