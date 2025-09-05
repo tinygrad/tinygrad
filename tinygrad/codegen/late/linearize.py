@@ -2,8 +2,8 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
-from tinygrad.helpers import dedup, all_same, flatten, getenv
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, BottomUpGate
+from tinygrad.helpers import dedup, all_same, flatten, BLOCK_REORDER
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(lst:list[UOp]) -> list[UOp]:
@@ -76,12 +76,13 @@ class BlockContext:
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
-    for u in sink.toposort():
+    for u in sink.toposort(gate=lambda u:u.op is not Ops.SPECIAL):
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
       # get children and accumulate the last_ctx
       for s in u.src:
+        if s.op is Ops.SPECIAL: continue
         # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
         ctx.child_count[s] += 1
         this_block_ctx += ctx.last_ctx(s)
@@ -142,7 +143,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs.get(u,()), current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
@@ -150,12 +151,16 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
     srcs.append(add_blockends(base_block, new_ctx, current_ctx))
 
   lst = lst[::-1]
-  if getenv("BLOCK_REORDER", 1): lst = block_reorder(lst)
+  if BLOCK_REORDER: lst = block_reorder(lst)
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
+# we prevent the source of the SPECIAL from being linearized since its not part of the kernel
+def raise_bottom_up_gate(): raise BottomUpGate()
+
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
+  (UPat(Ops.SPECIAL), raise_bottom_up_gate)
 ])
 
 # ***** blockend merging ****
@@ -227,7 +232,7 @@ block_merge = PatternMatcher([
 
 def finalize(sink:UOp) -> UOp:
   if sink.op is not Ops.BLOCK or not all(x.op in DONT_PLACE_IN_BLOCK for x in sink.src):
-    raise RuntimeError("linearize failure")
+    raise RuntimeError(f"linearize failure {sink.op} {[x.op for x in sink.src if x.op not in DONT_PLACE_IN_BLOCK]}")
 
   # place the early things
   lst = sorted(dedup(sink.src), key=lambda x: x.tuplize) + list(sink.arg.lst)

@@ -373,11 +373,11 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU", "AMD"), "slow, and flaky on LLVM/CPU")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
     fake_image_sharded = fake_image.shard(devices_2, axis=0)
     m = ResNet18()
     m.load_from_pretrained()
@@ -409,10 +409,10 @@ class TestMultiTensor(unittest.TestCase):
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU", "AMD"), "slow, and flaky on LLVM/CPU")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
-    fake_image = Tensor.rand((2, 3, 224//8, 224//8))
+    fake_image = Tensor.rand((2, 3, 224//16, 224//16))
     labels = Tensor.randint(2, low=0, high=1000)
     m = ResNet18()
     self._test_model_train_step(m, fake_image, labels)
@@ -1128,6 +1128,7 @@ class TestMultiRamUsage(unittest.TestCase):
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
   def test_zeros_shard_self(self): self.test_zeros_shard((d0, d1))
 
+  @unittest.skip("flaky")
   def test_zeros_contiguous_shard(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage

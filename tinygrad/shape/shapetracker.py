@@ -7,7 +7,7 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, PatternMatcher, UPat, GroupOp
-from tinygrad.uop.symbolic import split_uop, symbolic_flat, uop_given_valid, simplify_valid
+from tinygrad.uop.symbolic import symbolic_flat, uop_given_valid, simplify_valid
 
 # If a node overflow, its srcs need to be checked to see if this overflow is the result of an ALU operation,
 # or that the node simply inherits the dtype from srcs. Upcast is either `Ops.CAST`+`replace` or just `replace`.
@@ -43,14 +43,14 @@ def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[sint|None] = [None] * len(views[-1].shape)
   idx, valid = views_to_indexed_uops(views)
-  for c in split_uop(idx, Ops.ADD):
-    if c.op is Ops.RANGE: ret[c.arg] = 1
-    if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
-    if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
-  used_ranges = [x.arg for x in idx.toposort() if x.op is Ops.RANGE]
+  for c in idx.split_uop(Ops.ADD):
+    if c.op is Ops.RANGE: ret[c.arg[0]] = 1
+    if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
+    if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
+  used_ranges = [x.arg[0] for x in idx.toposort() if x.op is Ops.RANGE]
   ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
   if not ignore_valid:
-    for masked_axis in [x.arg for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
+    for masked_axis in [x.arg[0] for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
   return tuple(ret)
 
 @dataclass(frozen=True, order=True)
@@ -112,7 +112,7 @@ class ShapeTracker:
   def axis_is_masked(self, axis:int) -> bool:
     with Context(TRACK_MATCH_STATS=0):
       _, valid = self.to_indexed_uops()
-      return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
+      return axis in [x.arg[0] for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:

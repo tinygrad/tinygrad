@@ -1,9 +1,9 @@
 import unittest, numpy as np
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.helpers import Timing, CI, OSX
+from tinygrad.helpers import Timing, CI, OSX, getenv
 import multiprocessing.shared_memory as shared_memory
 
-N = 256 if CI else 4096
+N = getenv("NSZ", 256)
 class TestCopySpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()
@@ -54,22 +54,24 @@ class TestCopySpeed(unittest.TestCase):
     @TinyJit
     def _do_copy(t): return t.to('CPU').realize()
 
-    t = Tensor.randn(N, N, 4).contiguous().realize()
+    t = Tensor.randn(N, N).contiguous().realize()
+    Device[Device.DEFAULT].synchronize()
     for _ in range(5):
-      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+      with Timing(f"copy {Device.DEFAULT} -> CPU {t.nbytes()/(1024**2)}M:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         x = _do_copy(t)
         Device[Device.DEFAULT].synchronize()
       np.testing.assert_equal(t.numpy(), x.numpy())
 
-  def testCopytoCPUtoDefaultJit(self):
+  def testCopyCPUtoDefaultJit(self):
     if Device.DEFAULT == "CPU": return unittest.skip("CPU to CPU copy is a no-op")
 
     @TinyJit
-    def _do_copy(x): return t.to(Device.DEFAULT).realize()
+    def _do_copy(x): return x.to(Device.DEFAULT).realize()
 
     for _ in range(5):
-      t = Tensor.randn(N, N, 4, device="CPU").contiguous().realize()
-      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+      t = Tensor.randn(N, N, device="CPU").contiguous().realize()
+      Device["CPU"].synchronize()
+      with Timing(f"copy CPU -> {Device.DEFAULT} {t.nbytes()/(1024**2)}M:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         x = _do_copy(t)
         Device[Device.DEFAULT].synchronize()
       np.testing.assert_equal(t.numpy(), x.numpy())
