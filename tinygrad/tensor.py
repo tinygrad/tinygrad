@@ -175,7 +175,9 @@ class Tensor(MathTrait):
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
-  def __del__(self): all_tensors.pop(weakref.ref(self), None)
+  def __del__(self):
+    try: all_tensors.pop(weakref.ref(self), None)
+    except Exception: pass
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
