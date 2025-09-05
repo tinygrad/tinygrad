@@ -185,7 +185,7 @@ async function renderProfiler() {
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const tickSize = 10;
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*2+"px");
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*2+"px").style("border-right", "1px solid #4a4b56");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -371,7 +371,7 @@ async function renderProfiler() {
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize*2])
+      if (x !== 0) drawLine(ctx, [x, x], [0, tickSize*2])
       // tick label
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
