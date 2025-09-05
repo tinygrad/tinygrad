@@ -89,6 +89,7 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op2, tuple): op2 = (op2, op2)
   # lt with nan is undefined in tinygrad
   if op1[0] == operator.lt and (math.isnan(a) or math.isnan(b)): return
+  if op2[0] == operator.lt and math.isnan(c): return
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
   an, bn, cn = np.array([a]).astype(_to_np_dtype(d1)), np.array([b]).astype(_to_np_dtype(d1)), np.array([c]).astype(_to_np_dtype(d2))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
