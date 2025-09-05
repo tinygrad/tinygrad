@@ -152,8 +152,9 @@ class TestTensorCores(unittest.TestCase):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
+    opts = [Opt(OptOps.UNROLL, 0, 4)]
+    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
+    for u in get_program(ast, opts=opts).uops:
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
@@ -164,8 +165,9 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
+    opts = [Opt(OptOps.UNROLL, 0, 4)]
+    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
+    for u in get_program(ast, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -178,8 +180,9 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out][0]
     x, y = Tensor.rand(128, 128, dtype=tc.dtype_in), Tensor.rand(128, 128, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
-    k = helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 0, 4)]], apply_tc=True, atol=3e-2, rtol=1e-3)[-1]
-    for u in get_program(k.ast, k.opts, k.applied_opts).uops:
+    opts = [Opt(OptOps.UNROLL, 0, 4)]
+    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
+    for u in get_program(ast, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
