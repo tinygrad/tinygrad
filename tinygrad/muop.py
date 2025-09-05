@@ -67,11 +67,11 @@ def assemble(src:list[MUOp]) -> bytes:
     if isinstance(mu.out, Label):
       targets[mu.out] = len(binary)
       continue
-    if mu.ins and isinstance(mu.ins[0], Label):
-      if mu.ins[0] in targets:
-        mu = mu.replace(mu.out, (Immediate(targets[mu.ins[0]] - (len(binary) + 6), 4),))
+    if mu.ins and isinstance(v:=mu.ins[0], Label):
+      if v in targets:
+        mu = mu.replace(mu.out, (Immediate(targets[v] - (len(binary) + 6), 4),))
       else:
-        fixups.append((mu.ins[0], len(binary) + 2))
+        fixups.append((v, len(binary) + 2))
         mu = mu.replace(mu.out, (Immediate(0, 4),))
     binary.extend(mu.encode())
   # patch offsets for forward jumps
@@ -98,7 +98,7 @@ class MUOpX86(MUOp):
   prefix: int = 0
   w: int = 0
   # Immediate field
-  imm: Immediate|Register|None = None
+  imm: Immediate|Register|Label|None = None
   # registers
   RAX = Register("rax", 0, 8, {4:"eax", 2:"ax", 1:"al"})
   RCX = Register("rcx", 1, 8, {4:"ecx", 2:"cx", 1:"cl"})

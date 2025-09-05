@@ -62,8 +62,8 @@ class ISARenderer(Renderer):
     live_range: dict[Register, list[int]] = {}
     label_range: dict[Label, list[int]] = {}
     for i,mu in enumerate(muops):
-      if is_range(mu.out): label_range[mu.out] = [i]
-      if mu.ins and is_range(mu.ins[0]): label_range[mu.ins[0]].append(i)
+      if is_range(mu.out): label_range[cast(Label, mu.out)] = [i]
+      if mu.ins and is_range(mu.ins[0]): label_range[cast(Label, mu.ins[0])].append(i)
       for v in virtuals((mu.out,) + mu.ins):
         if v not in live_range: live_range[v] = [i]
         else: live_range[v].append(i)
@@ -73,7 +73,7 @@ class ISARenderer(Renderer):
       for v in virtuals(mu.ins):
         end = next((label_range[rng][1] for rng in ranges if live_range[v][0] < label_range[rng][0]), 0)
         if end > live_range[v][-1]: live_range[v].append(end)
-      if mu.ins and is_range(mu.ins[0]): ranges.append(mu.ins[0])
+      if mu.ins and is_range(mu.ins[0]): ranges.append(cast(Label, mu.ins[0]))
       if is_range(mu.out): ranges.pop()
 
     # allocate registers
@@ -99,7 +99,7 @@ class ISARenderer(Renderer):
         else: final_muops.append(self.store(mem[spilled], live[spilled]))
       return live.pop(spilled)
 
-    def rewrite(x:Operand, cons:tuple[Register, ...]) -> Operand:
+    def rewrite(x:Operand|None, cons:tuple[Register, ...]) -> Operand|None:
       if isinstance(x, Register):
         if x in MUOpX86.GPR: # real register, if already alocated spill it
           if x in live.values(): reg_pool.insert(0, alloc((x,)))
@@ -128,7 +128,7 @@ class ISARenderer(Renderer):
           # HACK: can't load inside branch, this happens in conditional load
           if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.load(live[v], mem[v]))
           else: final_muops.append(self.load(live[v], mem[v]))
-        return Memory(x.size, live[x.base], live.get(x.index, None), x.scale, x.disp)
+        return Memory(x.size, live[x.base], live[x.index] if isinstance(x.index, Register) else None, x.scale, x.disp)
       return x
 
     live_at_range: list[dict[Register, Register]] = []
