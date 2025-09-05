@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
   if (assert_time:=getenv("ASSERT_JITTED_TIME")):
     avg = sum(jitted_times[-10:])/10
-    assert avg < assert_time, f"Speed regression, expected average jitted time of: {assert_time} ms but took: {avg} ms"
+    assert avg < assert_time, f"Speed regression, expected average jitted time of < {assert_time} ms but took: {avg} ms"
 
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
