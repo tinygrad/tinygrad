@@ -1278,11 +1278,26 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
+    # special fast path: 1D integer indexing -> build full-tensor update lazily
+    if (isinstance(indices, (int,)) or (isinstance(indices, (tuple, list)) and len(indices) == 1 and isinstance(indices[0], int))) and self.ndim == 1:
+      i = indices if isinstance(indices, int) else indices[0]
+      size0 = self.shape[0]
+      if not isinstance(size0, int): raise RuntimeError("symbolic shape not supported for integer setitem")
+      if i >= size0 or i < -size0: raise IndexError(f"{i=} is out of bounds with size={size0}")
+      if i < 0: i += size0
+      if v.device != self.device: v = v.to(self.device)
+      mask = (Tensor.arange(size0, device=self.device, requires_grad=False) == i)
+      # accumulate the update lazily without creating an ASSIGN per iteration
+      self.replace(_masked_setitem(self, v.cast(self.dtype), mask, ()))
+      return
+
+    # default path keeps eager realize to preserve in-place semantics
     res = self.realize()._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
+      # whole-tensor replacement: assign eagerly to preserve semantics
       self.assign(res).realize()
-    else: # no copy, basic setitem
+    else: # basic setitem into a view
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
 
