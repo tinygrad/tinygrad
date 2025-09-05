@@ -1,8 +1,8 @@
 import unittest
+from tinygrad import Tensor, Device
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.search import bufs_from_lin, actions, beam_search
-from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 
@@ -41,7 +41,7 @@ class TestBEAM(unittest.TestCase):
       Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=3),
       Opt(op=OptOps.GROUPTOP, axis=0, arg=0), Opt(op=OptOps.GROUPTOP, axis=0, arg=3),
     ]
-    lins = get_kernel_actions(Scheduler(realized_ast), include_0=False, candidates=candidates).values()
+    lins = get_kernel_actions(Scheduler(realized_ast, Device.default.renderer), include_0=False, candidates=candidates).values()
 
     # ensure amt=0 are not duplicated
     assert all(len(x.applied_opts) == 1 for x in lins)
@@ -68,7 +68,7 @@ class TestBEAM(unittest.TestCase):
     a = Tensor.rand(100)
     b = Tensor.rand(100)
     si = (a+b).schedule()[-1]
-    lin = Scheduler(push_views(si.ast))
+    lin = Scheduler(push_views(si.ast), Device.default.renderer)
     bufs = bufs_from_lin(lin)
     # TODO: beam should have better instrumentation so we don't have to check this indirect thing
     kcount = len(Scheduler.kernel_cnt)

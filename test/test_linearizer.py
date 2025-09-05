@@ -10,13 +10,9 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
-from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import Context, getenv, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
-
-# TODO: remove this
-#from tinygrad.codegen.opt.kernel import Kernel
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -496,7 +492,7 @@ def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
-  return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
+  _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
 def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
@@ -505,8 +501,7 @@ def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> list[Kernel]:
-  lins: list[Kernel] = []
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
   outbufs = [real_bufs[x.src[0].base.arg] for x in realized_ast.src]
   device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
@@ -514,17 +509,12 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   def get_prg(opts): return CompiledRunner(replace(get_program(realized_ast, opts=opts), device=device))
 
   def check_opt(opts):
-    k = Kernel(realized_ast)
-    lins.append(k)
-    k.apply_opts(opts)
     prg = get_prg(opts=opts)
     reset_bufs(outbufs)
     prg.exec(real_bufs)
     for x,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
-  k = Kernel(realized_ast)
-  lins.append(k)
   prg = get_prg(opts=())
   prg.exec(real_bufs)
   if len(wanna_output) == 0: wanna_output = copyout_outputs(outbufs)
@@ -532,16 +522,12 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
-  k = Kernel(realized_ast)
-  k.apply_opts(hand_coded_optimizations(k))
-  lins.append(k)
   prg = get_prg(opts=None)
   reset_bufs(outbufs)
   prg.exec(real_bufs)
   for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
-  return lins
 
 if __name__ == '__main__':
   unittest.main()
