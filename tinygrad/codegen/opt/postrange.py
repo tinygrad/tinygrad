@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final, Sequence
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify, can_pad
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
@@ -203,7 +203,11 @@ class Scheduler:
       if append_opt: self.applied_opts.append(opt)
       return ret
     elif opt.op is OptOps.PADTO:
-      check(rng.src[0].op is Ops.CONST, "only pad const")
+      check(rng.src[0].op is Ops.CONST, "only pad const axes")
+      check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
+      # ok to pad SUM if all parent ALU ops have f(0) = 0
+      if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
+        check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
