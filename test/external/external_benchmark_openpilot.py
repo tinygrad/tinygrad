@@ -39,7 +39,9 @@ if __name__ == "__main__":
       jitted_times.append(t:=(time.perf_counter_ns() - st)*1e-6)
     print(f"jitted:  {t:7.4f} ms")
 
-  if (assert_time:=getenv("ASSERT_JITTED_TIME")): assert sum(jitted_times[-10:])/10 < assert_time
+  if (assert_time:=getenv("ASSERT_JITTED_TIME")):
+    avg = sum(jitted_times[-10:])/10
+    assert avg < assert_time, f"Speed regression, expected average jitted time of: {assert_time} ms but took: {avg} ms"
 
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility

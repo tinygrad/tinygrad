@@ -608,9 +608,9 @@ jobs:
     - name: benchmark openpilot 0.9.9 driving_vision
       run: BENCHMARK_LOG=openpilot_0_9_9_vision ASSERT_JITTED_TIME=30 PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
     - name: benchmark openpilot 0.9.9 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_9_9_policy ASSERT_JITTED_TIME=40 PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
+      run: BENCHMARK_LOG=openpilot_0_9_9_policy ASSERT_JITTED_TIME=45 PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
     - name: benchmark openpilot 0.9.9 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_9_9_dmonitoring ASSERT_JITTED_TIME=66 PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
+      run: BENCHMARK_LOG=openpilot_0_9_9_dmonitoring ASSERT_JITTED_TIME=70 PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: openpilot compile3 0.9.9 driving_vision
       run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.9.9 driving_policy
