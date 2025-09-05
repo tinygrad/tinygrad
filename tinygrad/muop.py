@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from typing import cast
 
 @dataclass(frozen=True)
 class Register:
@@ -55,7 +56,7 @@ class MUOp:
   def store(dest:Memory, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
   @staticmethod
   def assign(dest:Register, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
-  def replace(self, out: Operand, ins: tuple[Operand, ...]): raise NotImplementedError("arch specific")
+  def replace(self, out: Operand|None, ins: tuple[Operand, ...]): raise NotImplementedError("arch specific")
   def encode(self) -> bytes: raise NotImplementedError("arch specific")
 
 def assemble(src:list[MUOp]) -> bytes:
@@ -233,7 +234,7 @@ class MUOpX86(MUOp):
     if dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
     if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
     raise RuntimeError("invalid assign size")
-  def replace(self, out: Operand, ins: tuple[Operand, ...]) -> MUOp:
+  def replace(self, out: Operand|None, ins: tuple[Operand, ...]) -> MUOp:
     def _sub(x):
       for old,new in zip((self.out,)+self.ins, (out,)+ins):
         if x is old: return new
@@ -243,11 +244,12 @@ class MUOpX86(MUOp):
   # TODO: clean up all of this, more fields should be in class
   def encode(self) -> bytes:
     inst = bytearray()
-    # *** EXCEPTIONS *** certain instructions have specific encodings
     if self.opstr == "": return b'' # fake MUOp
-    if self.opcode == 0xB8: # 64bit imm load
-      return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(self.out.index > 7) & 0b1)).to_bytes() + \
-        int(self.opcode + (self.out.index % 8)).to_bytes() + self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0)
+    # 64bit imm load has a unique encoding
+    if self.opcode == 0xB8:
+      out, imm = cast(Register, self.out), cast(Immediate, self.imm)
+      return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(out.index > 7) & 0b1)).to_bytes() + \
+        int(self.opcode + (out.index % 8)).to_bytes() + imm.value.to_bytes(imm.size, 'little', signed=imm.value < 0)
     # extends reg field
     r = int(isinstance(self.reg, Register) and self.reg.index > 7)
     # extends reg for index
@@ -301,5 +303,5 @@ class MUOpX86(MUOp):
       inst.extend(self.rm.disp.value.to_bytes(self.rm.disp.size, 'little', signed=True))
     # *** IMMEDIATE bytes *** the fourth register is in the upper 4 bits of an 8 bit immediate
     if isinstance(self.imm, Register): inst.append((self.imm.index & 0b1111) << 4 | 0b0000)
-    elif self.imm is not None: inst.extend(self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0))
+    elif isinstance(self.imm, Immediate): inst.extend(self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0))
     return bytes(inst)

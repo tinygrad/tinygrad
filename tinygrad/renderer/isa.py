@@ -99,7 +99,7 @@ class ISARenderer(Renderer):
         else: final_muops.append(self.store(mem[spilled], live[spilled]))
       return live.pop(spilled)
 
-    def rewrite(x:Operand|None, cons:tuple[Register, ...]) -> Operand|None:
+    def rewrite(x:Operand, cons:tuple[Register, ...]) -> Operand:
       if isinstance(x, Register):
         if x in MUOpX86.GPR: # real register, if already alocated spill it
           if x in live.values(): reg_pool.insert(0, alloc((x,)))
@@ -164,7 +164,7 @@ class ISARenderer(Renderer):
       for v in mu.ins:
         if isinstance(v, Register) and live_range[v][-1] == i and v in live and isinstance(mu.out, Register): reg_pool.insert(0, live.pop(v))
       # rewrite MUOp with real operands
-      final_muops.append(mu.replace(rewrite(mu.out, mu.out_con), ins_rewrite))
+      final_muops.append(mu.replace(rewrite(mu.out, mu.out_con) if mu.out is not None else None, ins_rewrite))
     # align stack to 16 bytes, required on windows
     self.stack_size += (16 - (self.stack_size + len(callee_saved)*8) % 16) % 16
     return (final_muops, callee_saved)
