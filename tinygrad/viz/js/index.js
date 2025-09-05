@@ -157,21 +157,21 @@ const rescaleTrack = (source, tid, k) => {
   return change;
 }
 
-const drawLine = (ctx, x, y, opts) => {
-  ctx.beginPath();
-  const px = 0.5;
-  ctx.moveTo(x[0]+px, y[0]+px);
-  ctx.lineTo(x[1]+px, y[1]+px);
-  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
-  ctx.stroke();
-}
-
 const clmp = (p) => {
   return Math.floor(p);
 }
 
 const cap = (p) => {
   return Math.max(1, clmp(p));
+}
+
+const drawLine = (ctx, x, y, opts) => {
+  ctx.beginPath();
+  const px = 0.5;
+  ctx.moveTo(clmp(x[0])+px, clmp(y[0])+px);
+  ctx.lineTo(clmp(x[1])+px, clmp(y[1])+px);
+  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
+  ctx.stroke();
 }
 
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -363,9 +363,9 @@ async function renderProfiler() {
       if (d.text != null) {
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(d.text, d.x, d.y);
+        ctx.fillText(d.text, clmp(d.x), clmp(d.y));
       } else if (d.width != null) {
-        ctx.fillRect(clmp(d.x), clmp(d.y), cap(d.width), cap(d.height))
+        ctx.fillRect(clmp(d.x), clmp(d.y), cap(d.width), d.height);
       } else {
         ctx.beginPath();
         ctx.moveTo(clmp(d.x[0]), clmp(d.y0[0]));
@@ -377,28 +377,27 @@ async function renderProfiler() {
     }
     // draw axes
     drawLine(ctx, xscale.range(), [0, 0]);
-    const px = 0.5;
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
       if (x !== 0) drawLine(ctx, [x, x], [0, tickSize*2])
       // tick label
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2+px, tickSize+px);
+      ctx.fillText(formatTime(tick, dur), clmp(x+ctx.lineWidth+2), tickSize);
     }
     if (yscale != null) {
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
         ctx.textBaseline = "middle";
-        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+px, y+px);
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize, clmp(y));
       }
     }
     // draw markers
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
-      ctx.fillText(m.name, x+2+px, 1+px);
+      ctx.fillText(m.name, clmp(x+2), 1);
     }
     // draw gridlines
     for (const [_, { offsetY }] of data.tracks) drawLine(ctx, xscale.range(), [offsetY, offsetY], { color:"#4a4b56" });
