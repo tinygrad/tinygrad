@@ -26,7 +26,7 @@ class VirtAQLQueue(AQLQueue):
     self.available_packet_slots -= 1
 
 class HSAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
@@ -106,7 +106,7 @@ class HSAGraph(MultiGraphRunner):
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 0)
     hsa.hsa_signal_silent_store_relaxed(self.finish_signal, 0)
 
-  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[str, int], wait=False) -> Optional[float]:
     # Wait and restore signals
     hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     for sig in self.signals_to_reset: hsa.hsa_signal_silent_store_relaxed(sig, 1)
