@@ -16,7 +16,7 @@ from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
 
 # TODO: remove this
-from tinygrad.codegen.opt.kernel import Kernel
+#from tinygrad.codegen.opt.kernel import Kernel
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
