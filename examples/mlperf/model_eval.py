@@ -125,6 +125,7 @@ def eval_retinanet():
   proc = data_get()
   tlog("loaded initial data")
   st = time.perf_counter()
+  counter = 0
   while proc is not None:
     GlobalCounters.reset()
     proc = (mdl(proc[0]), proc[1], proc[2], proc[3])
@@ -134,35 +135,42 @@ def eval_retinanet():
     except StopIteration: next_proc = None
     nd = time.perf_counter()
     predictions, img_ids = mdl.postprocess_detections(proc[0][0], proc[0][1], orig_image_sizes=proc[2]), proc[1]
-    # predictions_exp = mdl.postprocess_detections_exp(proc[0][0].numpy(), proc[0][1], orig_image_sizes=proc[2])
-    coco_results  = [{"image_id": img_ids[i], "category_id": label.item(), "bbox": box.tolist(), "score": score.numpy()}
-      for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
+    predictions_exp = mdl.postprocess_detections_exp(proc[0][0].numpy(), proc[0][1], orig_image_sizes=proc[2])
+    for i in range(len(predictions)):
+      print(f"{predictions[i].numpy().shape=} {predictions_exp[i].shape=}")
+      # np.testing.assert_allclose(predictions[i].numpy(), predictions_exp[i])
+    # coco_results  = [{"image_id": img_ids[i], "category_id": label.item(), "bbox": box.tolist(), "score": score.numpy()}
+    #   for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     # coco_results_exp  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
     #   for i, prediction in enumerate(predictions_exp) for box, score, label in zip(*prediction.values())]
-    with redirect_stdout(None):
-      coco_eval.cocoDt = coco.loadRes(coco_results)
-      coco_eval.params.imgIds = img_ids
-      coco_eval.evaluate()
+    # with redirect_stdout(None):
+    #   coco_eval.cocoDt = coco.loadRes(coco_results)
+    #   coco_eval.params.imgIds = img_ids
+    #   coco_eval.evaluate()
     # with redirect_stdout(None):
     #   coco_eval_exp.cocoDt = coco.loadRes(coco_results_exp)
     #   coco_eval_exp.params.imgIds = img_ids
     #   coco_eval_exp.evaluate()
-    evaluated_imgs.extend(img_ids)
-    coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+    # evaluated_imgs.extend(img_ids)
+    # coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
     # coco_evalimgs_exp.append(np.array(coco_eval_exp.evalImgs).reshape(ncats, narea, len(img_ids)))
     n += len(proc)
     et = time.perf_counter()
     tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching. {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
     st = et
-    proc, next_proc = next_proc, None
+    if counter <= 3:
+      proc, next_proc = next_proc, None
+      counter += 1
+    else:
+      proc, next_proc = None, None
 
-  print("---actual start---")
-  coco_eval.params.imgIds = evaluated_imgs
-  coco_eval._paramsEval.imgIds = evaluated_imgs
-  coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
-  coco_eval.accumulate()
-  coco_eval.summarize()
-  print("---actual extend---")
+  # print("---actual start---")
+  # coco_eval.params.imgIds = evaluated_imgs
+  # coco_eval._paramsEval.imgIds = evaluated_imgs
+  # coco_eval.evalImgs = list(np.concatenate(coco_evalimgs, -1).flatten())
+  # coco_eval.accumulate()
+  # coco_eval.summarize()
+  # print("---actual extend---")
 
   # print("---exp start---")
   # coco_eval_exp.params.imgIds = evaluated_imgs

@@ -123,7 +123,11 @@ class RetinaNet:
       obj.assign(dat)
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
-  # @TinyJit
+  @TinyJit
+  def inner_loop(self, scores_img):
+    for scores_level in scores_img
+    return scores_level.masked_select(scores_level > 0.05)
+
   def postprocess_detections2(self, predictions:Tensor, grid_sizes:list[tuple[int, int]],
                               input_size:tuple[int, int]=(800, 800), image_sizes:list[tuple[int, int]]|None=None,
                               orig_image_sizes:list[tuple[int, int]]|None=None, score_thresh=0.05,
@@ -147,47 +151,50 @@ class RetinaNet:
 
       for offsets_level, scores_level, anchors_level in zip(offsets_img, scores_img, anchors):
         # remove low scoring boxes
-        scores_level = scores_level.flatten()
-        topk_idxs = _masked_indices(scores_level > score_thresh)
-        scores_level = scores_level[topk_idxs]
+        res.append(self.inner_loop(scores_level))
+        # scores_level = scores_level.flatten()
+        # topk_idxs = _masked_indices(scores_level > score_thresh)
+        # scores_level = scores_level[topk_idxs]
+        # res.append(scores_level)
 
-        # keep topk
-        num_topk = min(len(topk_idxs), topk_candidates)
-        idxs = scores_level.argsort()[-num_topk:][::-1]
-        topk_idxs, scores_level = topk_idxs[idxs], scores_level[idxs]
+      #   # keep topk
+      #   num_topk = min(len(topk_idxs), topk_candidates)
+      #   idxs = scores_level.argsort()[-num_topk:][::-1]
+      #   topk_idxs, scores_level = topk_idxs[idxs], scores_level[idxs]
 
-        # bbox coords from offsets
-        anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
-        labels_level = topk_idxs % self.num_classes
-        boxes_level = decode_bbox2(offsets_level[anchor_idxs], anchors_level[anchor_idxs])
+      #   # bbox coords from offsets
+      #   anchor_idxs = topk_idxs.div(self.num_classes, rounding_mode="floor")
+      #   labels_level = topk_idxs % self.num_classes
+      #   boxes_level = decode_bbox2(offsets_level[anchor_idxs], anchors_level[anchor_idxs])
 
-        # clip to image size
-        clipped_x = boxes_level[:, 0::2].clamp(0, width)
-        clipped_y = boxes_level[:, 1::2].clamp(0, height)
-        boxes_level = Tensor.stack(clipped_x, clipped_y, dim=2).reshape(-1, 4)
+      #   # clip to image size
+      #   clipped_x = boxes_level[:, 0::2].clamp(0, width)
+      #   clipped_y = boxes_level[:, 1::2].clamp(0, height)
+      #   boxes_level = Tensor.stack(clipped_x, clipped_y, dim=2).reshape(-1, 4)
 
-        img_boxes.append(boxes_level)
-        img_scores.append(scores_level)
-        img_labels.append(labels_level)
+      #   img_boxes.append(boxes_level)
+      #   img_scores.append(scores_level)
+      #   img_labels.append(labels_level)
 
-      img_boxes = Tensor.cat(*img_boxes)
-      img_scores = Tensor.cat(*img_scores)
-      img_labels = Tensor.cat(*img_labels)
+      # img_boxes = Tensor.cat(*img_boxes)
+      # img_scores = Tensor.cat(*img_scores)
+      # img_labels = Tensor.cat(*img_labels)
 
-      # nms for each class
-      keep = batched_nms(img_boxes, img_scores, img_labels)
+      # # nms for each class
+      # keep = batched_nms(img_boxes, img_scores, img_labels)
 
-      # resize bboxes back to original size
-      img_boxes = img_boxes[keep]
-      if orig_image_sizes is not None:
-        resized_x = img_boxes[:, 0::2] * orig_image_sizes[i][1] / width
-        resized_y = img_boxes[:, 1::2] * orig_image_sizes[i][0] / height
-        img_boxes = Tensor.stack(resized_x, resized_y, dim=2).reshape(-1, 4)
+      # # resize bboxes back to original size
+      # img_boxes = img_boxes[keep]
+      # if orig_image_sizes is not None:
+      #   resized_x = img_boxes[:, 0::2] * orig_image_sizes[i][1] / width
+      #   resized_y = img_boxes[:, 1::2] * orig_image_sizes[i][0] / height
+      #   img_boxes = Tensor.stack(resized_x, resized_y, dim=2).reshape(-1, 4)
 
-      # xywh format
-      img_boxes = img_boxes[:, :2].cat(img_boxes[:, 2:] - img_boxes[:, :2], dim=1)
+      # # xywh format
+      # img_boxes = img_boxes[:, :2].cat(img_boxes[:, 2:] - img_boxes[:, :2], dim=1)
 
-      detections.append({"boxes":img_boxes, "scores":img_scores[keep], "labels":img_labels[keep]})
+      # detections.append({"boxes":img_boxes, "scores":img_scores[keep], "labels":img_labels[keep]})
+      detections.extend(res)
     return detections
 
   # predictions: (BS, (H1W1+...+HmWm)A, 4 + K)
@@ -209,51 +216,53 @@ class RetinaNet:
         scores_per_level = scores_per_level.flatten()
         keep_idxs = scores_per_level > score_thresh
         scores_per_level = scores_per_level[keep_idxs]
+        res.append(scores_per_level)
 
-        # keep topk
-        topk_idxs = np.where(keep_idxs)[0]
-        num_topk = min(len(topk_idxs), topk_candidates)
-        sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
-        topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
+      #   # keep topk
+      #   topk_idxs = np.where(keep_idxs)[0]
+      #   num_topk = min(len(topk_idxs), topk_candidates)
+      #   sort_idxs = scores_per_level.argsort()[-num_topk:][::-1]
+      #   topk_idxs, scores_per_level = topk_idxs[sort_idxs], scores_per_level[sort_idxs]
 
-        # bbox coords from offsets
-        anchor_idxs = topk_idxs // self.num_classes
-        labels_per_level = topk_idxs % self.num_classes
-        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+      #   # bbox coords from offsets
+      #   anchor_idxs = topk_idxs // self.num_classes
+      #   labels_per_level = topk_idxs % self.num_classes
+      #   boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
 
-        # clip to image size
-        clipped_x = boxes_per_level[:, 0::2].clip(0, w)
-        clipped_y = boxes_per_level[:, 1::2].clip(0, h)
-        boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
+      #   # clip to image size
+      #   clipped_x = boxes_per_level[:, 0::2].clip(0, w)
+      #   clipped_y = boxes_per_level[:, 1::2].clip(0, h)
+      #   boxes_per_level = np.stack([clipped_x, clipped_y], axis=2).reshape(-1, 4)
 
-        image_boxes.append(boxes_per_level)
-        image_scores.append(scores_per_level)
-        image_labels.append(labels_per_level)
+      #   image_boxes.append(boxes_per_level)
+      #   image_scores.append(scores_per_level)
+      #   image_labels.append(labels_per_level)
 
-      image_boxes = np.concatenate(image_boxes)
-      image_scores = np.concatenate(image_scores)
-      image_labels = np.concatenate(image_labels)
+      # image_boxes = np.concatenate(image_boxes)
+      # image_scores = np.concatenate(image_scores)
+      # image_labels = np.concatenate(image_labels)
 
-      # nms for each class
-      keep_mask = np.zeros_like(image_scores, dtype=bool)
-      for class_id in np.unique(image_labels):
-        curr_indices = np.where(image_labels == class_id)[0]
-        curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
-        keep_mask[curr_indices[curr_keep_indices]] = True
-      keep = np.where(keep_mask)[0]
-      keep = keep[image_scores[keep].argsort()[::-1]]
+      # # nms for each class
+      # keep_mask = np.zeros_like(image_scores, dtype=bool)
+      # for class_id in np.unique(image_labels):
+      #   curr_indices = np.where(image_labels == class_id)[0]
+      #   curr_keep_indices = nms(image_boxes[curr_indices], image_scores[curr_indices], nms_thresh)
+      #   keep_mask[curr_indices[curr_keep_indices]] = True
+      # keep = np.where(keep_mask)[0]
+      # keep = keep[image_scores[keep].argsort()[::-1]]
 
-      # resize bboxes back to original size
-      image_boxes = image_boxes[keep]
-      if orig_image_sizes is not None:
-        resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
-        resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
-        image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
+      # # resize bboxes back to original size
+      # image_boxes = image_boxes[keep]
+      # if orig_image_sizes is not None:
+      #   resized_x = image_boxes[:, 0::2] * orig_image_sizes[i][1] / w
+      #   resized_y = image_boxes[:, 1::2] * orig_image_sizes[i][0] / h
+      #   image_boxes = np.stack([resized_x, resized_y], axis=2).reshape(-1, 4)
 
-      # xywh format
-      image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
+      # # xywh format
+      # image_boxes = np.concatenate([image_boxes[:, :2], image_boxes[:, 2:] - image_boxes[:, :2]], axis=1)
 
-      detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+      # detections.append({"boxes":image_boxes, "scores":image_scores[keep], "labels":image_labels[keep]})
+      detections.extend(res)
     return detections
 
 class ClassificationHead:
