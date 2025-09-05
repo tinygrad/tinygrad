@@ -44,17 +44,9 @@ class Scheduler:
     return ret
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
-  @property
-  def termination(self):
-    terminators = [u for u in self.ast.parents if u.op in {Ops.REDUCE, Ops.STORE}]
-    termination = {}
-    for t in terminators:
-      # works without pm_flatten_range
-      for u in UOp.sink(*t.src[1 if t.op is Ops.REDUCE else 2:]).parents:
-        if u.op is Ops.RANGE: termination[u] = t
-    return termination
-
-  def copy(self): return Scheduler(self.get_optimized_ast(), self.opts)
+  def copy(self):
+    # TODO: this is spamming the many ns on the names
+    return Scheduler(self.get_optimized_ast(), self.opts)
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None):

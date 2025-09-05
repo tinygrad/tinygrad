@@ -19,11 +19,12 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
     # check same type
-    if r0.arg[1] == r1.arg[1]:
+    if r0.arg[-1] == r1.arg[-1]:
       s0, s1 = r0.src[0], r1.src[0]
       # do the merge
       new_range = r0.replace(src=(s0*s1,))
-      nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
+      nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+                           name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
       # check if it simplifies
       if count_divmod(nidx) <= count_divmod(u):
         u = nidx
