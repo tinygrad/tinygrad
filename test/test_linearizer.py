@@ -462,12 +462,10 @@ class TestLinearizer(unittest.TestCase):
     c4 = c3.load()
     c5 = c1.store(c4)
     ast = c5.sink()
-    opt = [
-        Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=16),
-        Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)
-    ]
-    k = helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])[-1]
-    out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
+    opt = [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=16),
+           Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)]
+    helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])
+    out = [u for u in get_program(ast, opts=opt).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype == dtypes.float.vec(4)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -484,8 +482,8 @@ class TestLinearizer(unittest.TestCase):
     opt = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=1, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
             Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
-    k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
-    out = [u for u in get_program(k.ast, k.opts, k.applied_opts).uops if u.op is Ops.STORE][0]
+    helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])
+    out = [u for u in get_program(ast).uops if u.op is Ops.STORE][0]
     assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
 # *** helpers ***
