@@ -18,18 +18,6 @@ from tinygrad.codegen import apply_rewrites, rewrites_for_views
 # TODO: remove this
 from tinygrad.codegen.opt.kernel import Kernel
 
-def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
-
-def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
-  if isinstance(r, Tensor): r = [r]
-  s = Tensor.schedule(*r)
-  run_schedule(s[:-1])  # run all kernels except the last one
-  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
-  # now all input buffers in s[-1] should be realized
-  # create fresh buffers for the outputs
-  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
-  return push_views(s[-1].ast), bufs
-
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
@@ -65,9 +53,8 @@ class TestLinearizer(unittest.TestCase):
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()
     b_t = Tensor.full(st.shape, 3).contiguous().realize()
-    lin = helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])[0]
-    uops = get_program(lin.get_optimized_ast(), lin.opts).uops
-
+    helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])
+    uops = get_program(sink, opts=[]).uops
     stores = [u for u in uops if u.op is Ops.STORE]
     mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
@@ -489,11 +476,23 @@ class TestLinearizer(unittest.TestCase):
 
 # *** helpers ***
 
+def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
+
+def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
+  if isinstance(r, Tensor): r = [r]
+  s = Tensor.schedule(*r)
+  run_schedule(s[:-1])  # run all kernels except the last one
+  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
+  # now all input buffers in s[-1] should be realized
+  # create fresh buffers for the outputs
+  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
+  return push_views(s[-1].ast), bufs
+
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
   inbufs = [x.uop.base.buffer for x in inputs]
   outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, out.src[1].dtype).allocate() for out in ast.src]
-  return _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
+  _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
