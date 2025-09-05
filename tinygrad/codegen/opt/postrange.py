@@ -1,6 +1,7 @@
+from __future__ import annotations
 import math, itertools
 from collections import defaultdict
-from typing import cast, Final
+from typing import cast, Final, Sequence
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.device import Buffer
@@ -144,6 +145,10 @@ class Scheduler:
       check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
     except IndexError as e: raise KernelOptError from e
+
+  def apply_opts(self, opts:Sequence[Opt]) -> Scheduler:
+    for opt in opts: self.apply_opt(opt)
+    return self
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
