@@ -198,7 +198,7 @@ async function renderProfiler() {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("border-top-width", i === 0 ? "0px" : "1px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("border-top-width", "1px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop;
     const shapes = [];
