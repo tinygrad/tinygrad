@@ -545,7 +545,7 @@ x86_lowerer = PatternMatcher([
   # binary, immediates first
   ((UPat.var("a", dtypes.ints) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpX86.idiv(ctx[x], ctx[a], ctx[b], a.dtype in dtypes.sints)),
   ((UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64) * UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpX86.R_RM_I("imul", 0x69, ctx[x], ctx[a], Immediate(c.arg, min(c.dtype.itemsize, 4)))), # noqa: E501
-  ((UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64) * UPat.var("b")).named("x"),  lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("imul", 0x0FAF, ctx[x], ctx[b])]), # noqa: E501
+  ((UPat.var("a", dtypes.ints16+dtypes.ints32+dtypes.ints64) * UPat.var("b")).named("x"), lambda ctx,a,b,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.R_RM("imul", 0x0FAF, ctx[x], ctx[b])]), # noqa: E501
   ((UPat.var("a", dtypes.ints8) << UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shl", 0xC0, 4, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
   ((UPat.var("a", dtypes.ints) << UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shl", 0xC1, 4, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
   ((UPat.var("a", dtypes.uint8) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: [MUOpX86.assign(ctx[x], ctx[a]), MUOpX86.RM_I("shr", 0xC0, 5, ctx[x], Immediate(c.arg, 1))]), # noqa: E501
