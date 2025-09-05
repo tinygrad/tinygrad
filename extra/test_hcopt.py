@@ -21,8 +21,10 @@ if __name__ == "__main__":
 
     if opt1 != opt2:
       print(f"******* {i:6d}")
-      print("Kernel:    ", lin.colored_shape(), opt1)
-      print("Scheduler: ", sch.colored_shape(), opt2)
+      print("Kernel:    ", lin.colored_shape(), "->", lin.apply_opts(opt1).colored_shape())
+      print("Scheduler: ", sch.colored_shape(), "->", sch.apply_opts(opt2).colored_shape())
+      print(opt1)
+      print(opt2)
     else:
       good += 1
       print(f"******* {i:6d} MATCH {good/(i+1)*100:.2f}%")

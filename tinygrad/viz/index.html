@@ -245,15 +245,15 @@
     z-index: 4;
     background-color: #1e2029;
     padding: 4px 8px;
+    max-width: 164px;
     border-radius: 4px;
     pointer-events: none;
     display: none;
     font-size: 10px;
-    white-space: pre;
   }
   #device-list > div {
     min-height: 24px;
-    max-width: 132px;
+    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     padding: 4px;
@@ -265,6 +265,9 @@
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  #device-list {
+    height: fit-content;
   }
   .raw-text {
     padding: 0 8px;
@@ -368,7 +371,7 @@
     </div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
-  <div id="tooltip"></div>
+  <div id="tooltip" class="wrap"></div>
   <script src="/js/index.js"></script>
 </body>
 </html>
