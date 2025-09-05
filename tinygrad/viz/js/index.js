@@ -396,7 +396,7 @@ async function renderProfiler() {
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   resize();
-  window.addEventListener("resize", resize);
+  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
     const { top, left, width, height } = rect(canvas);
