@@ -159,10 +159,19 @@ const rescaleTrack = (source, tid, k) => {
 
 const drawLine = (ctx, x, y, opts) => {
   ctx.beginPath();
-  ctx.moveTo(x[0], y[0]);
-  ctx.lineTo(x[1], y[1]);
+  const px = 0.5;
+  ctx.moveTo(x[0]+px, y[0]+px);
+  ctx.lineTo(x[1]+px, y[1]+px);
   ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
   ctx.stroke();
+}
+
+const clmp = (p) => {
+  return Math.floor(p);
+}
+
+const cap = (p) => {
+  return Math.max(1, clmp(p));
 }
 
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -356,49 +365,49 @@ async function renderProfiler() {
         ctx.textBaseline = "middle";
         ctx.fillText(d.text, d.x, d.y);
       } else if (d.width != null) {
-        ctx.fillRect(d.x, d.y, d.width, d.height)
+        ctx.fillRect(clmp(d.x), clmp(d.y), cap(d.width), cap(d.height))
       } else {
         ctx.beginPath();
-        ctx.moveTo(d.x[0], d.y0[0]);
-        for (let i=1; i<d.x.length; i++) ctx.lineTo(d.x[i], d.y0[i]);
-        for (let i=d.x.length-1; i>=0; i--) ctx.lineTo(d.x[i], d.y1[i]);
+        ctx.moveTo(clmp(d.x[0]), clmp(d.y0[0]));
+        for (let i=1; i<d.x.length; i++) ctx.lineTo(clmp(d.x[i]), clmp(d.y0[i]));
+        for (let i=d.x.length-1; i>=0; i--) ctx.lineTo(clmp(d.x[i]), clmp(d.y1[i]));
         ctx.closePath();
         ctx.fill();
       }
     }
     // draw axes
     drawLine(ctx, xscale.range(), [0, 0]);
+    const px = 0.5;
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
       if (x !== 0) drawLine(ctx, [x, x], [0, tickSize*2])
       // tick label
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2+px, tickSize+px);
     }
     if (yscale != null) {
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
         ctx.textBaseline = "middle";
-        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+px, y+px);
       }
     }
     // draw markers
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
-      ctx.fillText(m.name, x+2, 1);
+      ctx.fillText(m.name, x+2+px, 1+px);
     }
     // draw gridlines
-    for (const [_, { offsetY }] of data.tracks) drawLine(ctx, xscale.range(), [y=offsetY+0.5, y], { color:"#4a4b56" });
+    for (const [_, { offsetY }] of data.tracks) drawLine(ctx, xscale.range(), [offsetY, offsetY], { color:"#4a4b56" });
   }
 
   function resize() {
     const profiler = document.querySelector(".profiler");
     const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width), height = Math.round(sideRect.height);
-    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
+    const width = profiler.clientWidth-(sideRect.width), height = profiler.scrollHeight;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
