@@ -6,8 +6,9 @@ class Register:
   name: str
   index: int
   size: int = field(hash=False, compare=False)
+  subnames: dict[int, str] = field(default_factory=dict, hash=False, compare=False)
 
-  def __str__(self): return self.name
+  def __str__(self): return self.name if self.subnames.get(self.size) is None else self.subnames[self.size]
 
 @dataclass(frozen=True)
 class Immediate:
@@ -77,8 +78,6 @@ def assemble(src:list[MUOp]) -> bytes:
   return bytes(binary)
 
 # *** X86 ***
-GPR = tuple(Register(nm, i, 8) for i,nm in enumerate(["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"] + ["r"+str(i) for i in range(8,16)]))
-VEC = tuple(Register("xmm"+str(i), i, 16) for i in range(16))
 #https://wiki.osdev.org/X86-64_Instruction_Encoding
 @dataclass(frozen=True)
 class MUOpX86(MUOp):
@@ -97,83 +96,94 @@ class MUOpX86(MUOp):
   w: int = 0
   # Immediate field
   imm: Immediate|Register|None = None
+  # registers
+  RAX = Register("rax", 0, 8, {4:"eax", 2:"ax", 1:"al"})
+  RCX = Register("rcx", 1, 8, {4:"ecx", 2:"cx", 1:"cl"})
+  RDX = Register("rdx", 2, 8, {4:"edx", 2:"dx", 1:"dl"})
+  RBX = Register("rbx", 3, 8, {4:"ebx", 2:"bx", 1:"bl"})
+  RSP = Register("rsp", 4, 8, {4:"esp", 2:"sp", 1:"spl"})
+  RBP = Register("rbp", 5, 8, {4:"ebp", 2:"bp", 1:"bpl"})
+  RSI = Register("rsi", 6, 8, {4:"esi", 2:"si", 1:"sil"})
+  RDI = Register("rdi", 7, 8, {4:"edi", 2:"di", 1:"dil"})
+  GPR = (RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI) + tuple(Register(f"r{i}", i, 8, {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"}) for i in range(8, 16))
+  VEC = tuple(Register(f"ymm{i}", i, 32, {l:f"xmm{i}" for l in (16,8,4,2)}) for i in range(16))
   # REX methods
   @staticmethod
   def prefix_w(reg: Register): return {"prefix": 0x66 if reg.size == 2 else 0, "w": 1 if reg.size == 8 else 0}
   @staticmethod
-  def RM(opstr:str, opcode:int, rm:Register): return MUOpX86(opstr, opcode, rm, out_con=GPR, rm=rm, **MUOpX86.prefix_w(rm))
+  def RM(opstr:str, opcode:int, rm:Register): return MUOpX86(opstr, opcode, rm, out_con=MUOpX86.GPR, rm=rm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def _RM(opstr:str, opcode:int, reg:int, rm:Register, in_cons=GPR):
+  def _RM(opstr:str, opcode:int, reg:int, rm:Register, in_cons=None):
+    in_cons = MUOpX86.GPR if in_cons is None else in_cons
     return MUOpX86(opstr, opcode, None, (rm,), (), (in_cons,), reg, rm, **MUOpX86.prefix_w(rm))
   @staticmethod
   def R_RM(opstr:str, opcode:int, reg:Register, rm:Register|Memory):
-    return MUOpX86(opstr, opcode, reg, (rm,), GPR, (GPR,), reg, rm, **MUOpX86.prefix_w(reg))
+    return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.GPR, (MUOpX86.GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
   def _R_RM(opstr:str, opcode:int, reg:Register, rm:Register):
-    return MUOpX86(opstr, opcode, None, (reg, rm), (), (GPR, GPR), reg, rm, **MUOpX86.prefix_w(reg))
+    return MUOpX86(opstr, opcode, None, (reg, rm), (), (MUOpX86.GPR, MUOpX86.GPR), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
   def RM_R(opstr:str, opcode:int, rm:Memory, reg:Register):
-    return MUOpX86(opstr, opcode, rm, (reg,), GPR, (GPR,), reg, rm, **MUOpX86.prefix_w(reg))
+    return MUOpX86(opstr, opcode, rm, (reg,), MUOpX86.GPR, (MUOpX86.GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
   def R_I(opstr:str, opcode:int, reg:Register, imm:Immediate):
-    return MUOpX86(opstr, opcode, reg, (imm,), GPR, ((),), reg, imm=imm, **MUOpX86.prefix_w(reg))
+    return MUOpX86(opstr, opcode, reg, (imm,), MUOpX86.GPR, ((),), reg, imm=imm, **MUOpX86.prefix_w(reg))
   @staticmethod
   def RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
-    return MUOpX86(opstr, opcode, rm, (imm,), GPR, ((),), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    return MUOpX86(opstr, opcode, rm, (imm,), MUOpX86.GPR, ((),), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   @staticmethod
   def _RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
-    return MUOpX86(opstr, opcode, None, (rm, imm), (), (GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    return MUOpX86(opstr, opcode, None, (rm, imm), (), (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   @staticmethod
   def R_RM_I(opstr:str, opcode:int, reg:Register, rm:Register, imm:Immediate):
-    return MUOpX86(opstr, opcode, reg, (rm, imm), GPR, (GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.GPR, (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   # VEX methods
   @staticmethod
-  def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, ((),), reg, rm, pp, sel, w, l)
+  def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.VEC, ((),), reg, rm, pp, sel, w, l)
   @staticmethod
-  def M_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), (), (VEC,), reg, rm, pp, sel, w, l)
+  def M_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), (), (MUOpX86.VEC,), reg, rm, pp, sel, w, l)
   @staticmethod
-  def V_VM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, (VEC,), reg, rm, pp, sel, w, l)
+  def V_VM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.VEC, (MUOpX86.VEC,), reg, rm, pp, sel, w, l)
   @staticmethod
-  def VM_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), VEC, (VEC,), reg, rm, pp, sel, w, l)
+  def VM_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), MUOpX86.VEC, (MUOpX86.VEC,), reg, rm, pp, sel, w, l)
   @staticmethod
-  def V_RM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), VEC, (GPR,), reg, rm, pp, sel, w, l)
+  def V_RM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.VEC, (MUOpX86.GPR,), reg, rm, pp, sel, w, l)
   @staticmethod
-  def RM_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), GPR, (VEC,), reg, rm, pp, sel, w, l)
+  def RM_V(opstr, opcode, rm, reg, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, rm, (reg,), MUOpX86.GPR, (MUOpX86.VEC,), reg, rm, pp, sel, w, l)
   @staticmethod
-  def R_VM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), GPR, (VEC,), reg, rm, pp, sel, w, l)
+  def R_VM(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.GPR, (MUOpX86.VEC,), reg, rm, pp, sel, w, l)
   @staticmethod
   def V_V_V(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC), reg, rm, pp, sel, w, l, vvvv)
   @staticmethod
   def V_V_VM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, VEC), reg, rm, pp, sel, w, l, vvvv)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC), reg, rm, pp, sel, w, l, vvvv)
   @staticmethod
   def V_V_RM(opstr, opcode, reg, vvvv, rm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm), VEC, (VEC, GPR), reg, rm, pp, sel, w, l, vvvv)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR), reg, rm, pp, sel, w, l, vvvv)
   @staticmethod
   def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (rm, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, rm, (reg, imm), VEC, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, rm, (reg, imm), GPR, (VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.GPR, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, MUOpX86.VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def V_V_RM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), VEC, (VEC, VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
-    rax = Register("rax", 0, 8)
-    rdx = Register("rdx", 2, 8)
-    in_cons = tuple(r for r in GPR if r not in (rax, rdx))
-    move = MUOpX86("mov", 0x8B, x, (a,), (rax,), (GPR,), x, a, w=1)
+    rax, rdx = MUOpX86.RAX, MUOpX86.RDX
+    in_cons = tuple(r for r in MUOpX86.GPR if r not in (rax, rdx))
+    move = MUOpX86("mov", 0x8B, x, (a,), (rax,), (MUOpX86.GPR,), x, a, w=1)
     push = MUOpX86._RM("push", 0xFF, 6, rdx)
     if x.size == 1:
       extend = MUOpX86("cbw", 0x98, prefix=0x66) if is_signed else MUOpX86.R_RM("movzx", 0x0FB6, x, x)

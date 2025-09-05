@@ -2,7 +2,7 @@ import struct, sys
 from typing import cast
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
-from tinygrad.muop import Register, Memory, Immediate, Label, Operand, MUOp, MUOpX86, GPR, VEC
+from tinygrad.muop import Register, Memory, Immediate, Label, Operand, MUOp, MUOpX86
 from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher
 from tinygrad.uop.spec import x86_spec
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu, load_store_folding
@@ -77,7 +77,7 @@ class ISARenderer(Renderer):
       if is_range(mu.out): ranges.pop()
 
     # allocate registers
-    reg_pool: list[Register] = [reg for reg in GPR + VEC if reg.name not in ("rbp", "rsp")]
+    reg_pool: list[Register] = [r for r in MUOpX86.GPR + MUOpX86.VEC if r not in (MUOpX86.RSP, MUOpX86.RBP)]
     callee_saved: list[Register] = []
     live: dict[Register, Register] = {}
     mem: dict[Register, Memory] = {}
@@ -93,7 +93,7 @@ class ISARenderer(Renderer):
       if spilled not in mem:
         offset = self.stack_size + (spilled.size - self.stack_size % spilled.size) % spilled.size
         self.stack_size = offset + spilled.size
-        mem[spilled] = Memory(spilled.size, Register("rbp", 5, 8), disp=Immediate(-self.stack_size, 4))
+        mem[spilled] = Memory(spilled.size, MUOpX86.RBP, disp=Immediate(-self.stack_size, 4))
         # TODO: hoist store
         if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.store(mem[spilled], live[spilled]))
         else: final_muops.append(self.store(mem[spilled], live[spilled]))
@@ -101,12 +101,12 @@ class ISARenderer(Renderer):
 
     def rewrite(x:Operand, cons:tuple[Register, ...]) -> Operand:
       if isinstance(x, Register):
-        if x in GPR: # real register, if already alocated spill it
+        if x in MUOpX86.GPR: # real register, if already alocated spill it
           if x in live.values(): reg_pool.insert(0, alloc((x,)))
           return x
         if x in live and live[x] not in cons:
           reg = alloc(cons)
-          reg = Register(reg.name, reg.index, x.size)
+          reg = Register(reg.name, reg.index, x.size, reg.subnames)
           final_muops.append(self.assign(reg, live[x]))
           reg_pool.insert(0, live.pop(x))
           live[x] = reg
@@ -115,16 +115,16 @@ class ISARenderer(Renderer):
           # if last use of x and it can be memory don't load, if x is in another field it needs to be loaded anyway
           #if mu is not None and live_range[x][-1] == i and x in mem and x is mu.rm and x not in (mu.reg, mu.vvvv, mu.imm): return mem[x]
           reg = alloc(cons)
-          live[x] = Register(reg.name, reg.index, x.size)
+          live[x] = Register(reg.name, reg.index, x.size, reg.subnames)
           if x in mem: final_muops.append(self.load(live[x], mem[x]))
-        elif x in live: live[x] = Register(live[x].name, live[x].index, x.size)
+        elif x in live: live[x] = Register(live[x].name, live[x].index, x.size, live[x].subnames)
         return live[x]
       if isinstance(x, Memory):
         for v in (v for v in [x.base, x.index] if v is not None and v not in live):
-          if v in GPR: return x #HACK
+          if v in MUOpX86.GPR: return x #HACK
           assert v in mem, v
-          reg = alloc(GPR)
-          live[v] = Register(reg.name, reg.index, v.size)
+          reg = alloc(MUOpX86.GPR)
+          live[v] = Register(reg.name, reg.index, v.size, reg.subnames)
           # HACK: can't load inside branch, this happens in conditional load
           if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.load(live[v], mem[v]))
           else: final_muops.append(self.load(live[v], mem[v]))
@@ -472,10 +472,10 @@ x86_vec_lowerer = PatternMatcher([
 def x86_abi(ctx, x:UOp):
   i = ctx.arg_pos
   if sys.platform == "win32":
-    if i < 4: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[1,2,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-3)*8+40, 4)))
-  if i < 6: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), GPR, ((GPR[[7,6,2,1,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, Register("rbp", 5, 8), disp=Immediate((i-5)*8+8, 4)))
+    if i < 4: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), MUOpX86.GPR, ((MUOpX86.GPR[[1,2,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
+    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=Immediate((i-3)*8+40, 4)))
+  if i < 6: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), MUOpX86.GPR, ((MUOpX86.GPR[[7,6,2,1,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
+  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=Immediate((i-5)*8+8, 4)))
 def is_vec(x:UOp) -> bool: return x.dtype.count > 1 or x.dtype in dtypes.floats + dtypes.masks
 
 x86_lowerer = PatternMatcher([
@@ -497,10 +497,11 @@ x86_lowerer = PatternMatcher([
                                                                                                                    MUOpX86("", -1, Label(f".IF_{ctx.uops.index(x)}:"))]), # noqa: E501
   (UPat.var("a").load(UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpX86.load(ctx[x], Memory(ctx[x].size, ctx[a], disp=disp(c,a)), is_vec(x))), # noqa: E501
   (UPat.var("a").store(UPat.var("b"), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,c,b: MUOpX86.store(Memory(ctx[b].size, ctx[a], disp=disp(c,a)), ctx[b], is_vec(b))), # noqa: E501
+  # vector dtypes have their own matcher
   (UPat(GroupOp.All, name="x"), lambda ctx,x: x86_vec_lowerer.rewrite(x, ctx) if x.dtype.count > 1 else None),
   # defines, define global is modeled as a move from real to vitual
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), name="x"), x86_abi),
-  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], Register("rbp", 5, 8)), MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4))]), # noqa: E501
+  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], MUOpX86.RBP), MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4))]), # noqa: E501
   # immediate loads
   (UPat.cvar("c", dtypes.ints8+(dtypes.bool,)).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC6, 0, ctx[x], Immediate(c.arg, 1))),
   (UPat.cvar("c", dtypes.ints16).load(name="x"), lambda ctx,c,x: MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(c.arg, 2))),
@@ -651,11 +652,11 @@ class X86Renderer(ISARenderer):
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
 
-  def load(self, dest:Register, src:Memory): return MUOpX86.load(dest, src, dest in VEC)
-  def store(self, dest:Memory, src:Register): return MUOpX86.store(dest, src, src in VEC)
-  def assign(self, dest:Register, src:Register): return MUOpX86.assign(dest, src, dest in VEC)
+  def load(self, dest:Register, src:Memory): return MUOpX86.load(dest, src, dest in MUOpX86.VEC)
+  def store(self, dest:Memory, src:Register): return MUOpX86.store(dest, src, src in MUOpX86.VEC)
+  def assign(self, dest:Register, src:Register): return MUOpX86.assign(dest, src, dest in MUOpX86.VEC)
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
-    rbp, rsp = Register("rbp", 5, 8), Register("rsp", 4, 8)
+    rbp, rsp = MUOpX86.RBP, MUOpX86.RSP
     prologue = [MUOpX86._RM("push", 0xFF, 6, rbp), MUOpX86.R_RM("mov", 0x8B, rbp, rsp)] + \
                [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
                [MUOpX86.RM_I("sub", 0x81, 5, rsp, Immediate(self.stack_size, 4))]
