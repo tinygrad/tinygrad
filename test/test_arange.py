@@ -102,7 +102,6 @@ class TestIndexing(unittest.TestCase):
       run_schedule(sched)
     self.assertEqual(out.item(), 1337)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_manual_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()
@@ -172,7 +171,6 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
@@ -191,7 +189,6 @@ class TestIndexing(unittest.TestCase):
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
-  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)

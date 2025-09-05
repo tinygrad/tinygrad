@@ -4,7 +4,7 @@ import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
-from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
 from extra.lr_scheduler import LRSchedulerGroup
@@ -1290,13 +1290,18 @@ def train_llama3():
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
 
   config = {}
+  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
+  SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
+  EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
 
   # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
@@ -1308,13 +1313,14 @@ def train_llama3():
 
   opt_gradient_clip_norm = 1.0
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
+  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = 8e-7
+  opt_end_learning_rate = getenv("END_LR", 8e-7)
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}
+  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  params = params | {"vocab_size": 32000} if not SMALL else params
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
@@ -1350,6 +1356,15 @@ def train_llama3():
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
+  if resume_ckpt := getenv("RESUME_CKPT"):
+    fn = f"./ckpts/llama3_{resume_ckpt}.safe"
+    print(f"loading initial checkpoint from {fn}")
+    load_state_dict(model, safe_load(fn), realize=False)
+
+    fn = f"./ckpts/llama3_{resume_ckpt}_optim.safe"
+    print(f"loading optim checkpoint from {fn}")
+    load_state_dict(scheduler, safe_load(fn), realize=False)
+
   @TinyJit
   @Tensor.train()
   def train_step(model, tokens:Tensor, grad_acc:int):
@@ -1375,7 +1390,7 @@ def train_llama3():
         total_norm += p.grad.float().square().sum()
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
-        p.grad = p.grad * opt_gradient_clip_norm / (total_norm + 1e-6)
+        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
 
     optim.step()
     scheduler.step()
@@ -1384,33 +1399,93 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  if getenv("FAKEDATA", 0):
-    def fake_data():
-      for _ in range(SAMPLES // GBS):
-        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
-    iter = fake_data()
-  else:
-    from examples.mlperf.dataloader import batch_load_llama3
-    iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+  @TinyJit
+  @Tensor.train(False)
+  def eval_step(model, tokens:Tensor):
+    if (DP := getenv("DP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+      tokens = tokens.shard(device, 0)
+    if (MP := getenv("MP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+      tokens = tokens.shard(device)
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten().float()
 
-  i = 0
+  # ** data iters **
+  def fake_data(bs, samples):
+    for _ in range(samples // bs):
+      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+
+  def get_train_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(GBS, SAMPLES)
+    else:
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+
+  def get_eval_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(EVAL_BS, 5760)
+    else:
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+
+  iter = get_train_iter()
+  i, sequences_seen = resume_ckpt, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens, grad_acc)
     loss = loss.float().item()
-    # above as tqdm.write f-string
+
+    i += 1
+    sequences_seen += tokens.shape[0]
+
     tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
         f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
-    if getenv("CKPT") and (i % 200 == 0 or i == 10):
+    if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-      fn = f"{ckpt_dir}/{i}.safe"
+      fn = f"{ckpt_dir}/llama3_{i}.safe"
       safe_save(get_state_dict(model), fn)
-    i += 1
+
+      tqdm.write("saving optim checkpoint")
+      fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
+      safe_save(get_state_dict(scheduler), fn)
+
+    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
+      tqdm.write(f"evaluating after {sequences_seen} sequences")
+
+      # run eval
+      eval_losses = []
+      eval_iter = get_eval_iter()
+      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+
+      for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
+        eval_losses += eval_step(model, tokens).tolist()
+      log_perplexity = Tensor(eval_losses).mean().float().item()
+
+      tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
+
+      if log_perplexity < EVAL_TARGET:
+        tqdm.write(f"target achieved after {sequences_seen} sequences")
+        if getenv("CKPT"):
+          if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/llama3.safe"
+          safe_save(get_state_dict(model), fn)
+        break
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')

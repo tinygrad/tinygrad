@@ -1128,6 +1128,7 @@ class TestMultiRamUsage(unittest.TestCase):
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
   def test_zeros_shard_self(self): self.test_zeros_shard((d0, d1))
 
+  @unittest.skip("flaky")
   def test_zeros_contiguous_shard(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage

@@ -5,7 +5,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
-TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
+TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
 def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
@@ -32,14 +32,14 @@ def pow2if(q:UOp, float_dtype:DType):
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.vcount))
   # -1 <= ilog2bk(d) <= 128
   return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES and e.dtype.scalar() in TRANSCENDENTAL_DTYPES
   dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype.scalar()].vec(d.dtype.count)
   m1 = d.bitcast(dtype)
   m2 = shl(e.cast(dtype), mantissa_bits(d.dtype))
@@ -47,12 +47,12 @@ def ldexp3k(d:UOp, e:UOp) -> UOp:
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype.scalar() in (dtypes.int16, dtypes.int32, dtypes.int64)
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES and e.dtype.scalar() in (dtypes.int16, dtypes.int32, dtypes.int64)
   return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
 
 def frexp(v:UOp) -> tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent) assuming v != 0"""
-  assert v.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert v.dtype.scalar() in TRANSCENDENTAL_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype.scalar()]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype.scalar()]
@@ -72,7 +72,7 @@ def payne_hanek_reduction(d:UOp) -> tuple[UOp, UOp]:
   - `r`[d.dtype] is the reminder value corresponding to `round_to_nearest(x % pi/2)`.
   - `q`[int32] is an integer, and q % 4 is corresponding to the quadrant of the original angle `d`.
   """
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
   # https://stackoverflow.com/questions/30463616/payne-hanek-algorithm-implementation-in-c/30465751#30465751
   # 190 bits of 2/pi for Payne-Hanek style argument reduction
   two_over_pi_f = [0x00000000, 0x28be60db, 0x9391054a, 0x7f09d5f4, 0x7d4d3770, 0x36d8a566, 0x4f10e410]
@@ -174,7 +174,7 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   # x_sign = sign(x)
@@ -196,7 +196,7 @@ def xexp2(d:UOp) -> UOp:
   Implements a 1.0 ULP approximation for Ops.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
   # mask +=inf/nan as zero.
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   q = rintk(x)
@@ -222,7 +222,7 @@ def xlog2(d:UOp) -> UOp:
   Implements a 1.0 ULP approximation for Ops.LOG2
   Paper: https://arxiv.org/pdf/2001.09258 5.5
   """
-  assert d.dtype.scalar() in TRANSCENDENTAL_SUPPORTED_DTYPES
+  assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
   # TODO: float16 denormal need float32 to achieve precision
   if d.dtype.scalar() == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
   FLT_MIN = d.const_like(1e-6 if d.dtype.scalar() == dtypes.float16 else 1e-4)
@@ -280,7 +280,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
+def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
   assert d>0, "Sign should have been taken out of divisor"
@@ -288,6 +288,10 @@ def fast_idiv(device: str, x: UOp, d: int) -> UOp|None:
   m,s = magicgu(max(vmax, abs(vmin)), d)
   if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
+  # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
+  if (largest_factor_of_two_in_d := (d & -d)) > 1:
+    if (ret:=fast_idiv(device, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+  if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype][-1]) and is_dtype_supported(next_dtype, None if device=='' else device):
     if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
@@ -315,8 +319,12 @@ def threefry2x32(x: UOp, key: UOp):
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
-  pat: list[tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
-           ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
+  pat: list[tuple[UPat, Callable]] = []
+  for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
+    if op not in ops or force_transcendental:
+      pat += [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f),
+              (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
+                lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
@@ -325,6 +333,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
   if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
+  if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
+    lambda x,y: (x | y).logical_not())]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
@@ -350,4 +360,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
     ]
   if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
   if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
+  # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
+  if Ops.FDIV in ops:
+    pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
+    pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   return PatternMatcher(pat)
