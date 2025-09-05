@@ -12,8 +12,8 @@ from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.LOCAL: 1, AxisType.UPCAST: 2,
-               AxisType.GROUP_REDUCE: 1, AxisType.REDUCE: 3, AxisType.UNROLL: 4}
+axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
+               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 def flatten_range(r:UOp):
   off = 2 if r.op is Ops.STORE else 1
@@ -117,10 +117,10 @@ class Scheduler:
   def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
-  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False):
+  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
-    new_rng = UOp.range(amount, self.maxarg+1, new_type)
+    new_rng = UOp.range(amount, self.maxarg+1, new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
@@ -152,7 +152,7 @@ class Scheduler:
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
-      check(all(x not in {AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
+      check(all(x not in {AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
       if append_opt: self.applied_opts.append(opt)
       self.dont_use_locals = True
       return
@@ -173,7 +173,7 @@ class Scheduler:
       # copied from kernel.py. prevents METAL compiler hangs
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
                                         (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
-        upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+        upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
@@ -187,6 +187,7 @@ class Scheduler:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
+        check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
@@ -267,10 +268,18 @@ class Scheduler:
                 axes[i] = self.rngs[idx]
           except KernelOptError: continue
 
+          # we create the warp as a whole thing, in case some of these ranges are moved/removed later
+          warp = UOp.range(tc.threads, -1, AxisType.WARP)
           ne: list[UOp] = []
           for opt in tc.opts:
-            axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, {"u":AxisType.UPCAST, "l":AxisType.LOCAL}[opt[0]])
+            if opt[0] == "l":
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
+              warp //= 2
+            elif opt[0] == "u":
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
+            else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
             ne.append(new_range)
+
           for _, amt in tc.get_reduce_axes():
             axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
             ne.append(new_range)
@@ -342,7 +351,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
   elif ast.arg is not None and ast.arg.opts_to_apply is not None:
     if POSTOPT >= 2: k.simplify_merge_adjacent()
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  elif not NOOPT:
+  elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
