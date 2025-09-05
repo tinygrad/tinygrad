@@ -65,11 +65,13 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
-      run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+      run: METAL=1 python3.11 test/opt/test_tensor_cores.py
     - name: Test AMX tensor cores
       run: |
-        DEBUG=2 CPU=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
-        DEBUG=2 LLVM=1 AMX=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/opt/test_tensor_cores.py
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/opt/test_tensor_cores.py
+        DEBUG=2 CPU=1 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 LLVM=1 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
     - name: Run Tensor Core GEMM (float)
       run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Tensor Core GEMM (half)
@@ -194,8 +196,8 @@ jobs:
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
       run: |
-        NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
-        PTX=1 ALLOW_TF32=1 NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+        NV=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+        PTX=1 ALLOW_TF32=1 NV=1 python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
@@ -394,8 +396,8 @@ jobs:
       run: AMD=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
-        AMD=1 AMD_LLVM=0 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
-        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+        AMD=1 AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
+        AMD=1 AMD_LLVM=1 python3 test/opt/test_tensor_cores.py
         AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
@@ -679,8 +681,8 @@ jobs:
     # Fails on 9070
     # - name: Test tensor cores
     #   run: |
-    #     AMD=1 AMD_LLVM=0 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
-    #     AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded_amd TestLinearizer.test_tensor_cores_padded_uops
+    #     AMD=1 AMD_LLVM=0 python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+    #     AMD=1 AMD_LLVM=1 python3 test/test_linearizer.py test/opt/test_tensor_cores.py
     #     AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee am_matmul_amd.txt
@@ -746,7 +748,7 @@ jobs:
     - name: Test driver start time
       run: time DEBUG=3 NV=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test tensor cores
-      run: NV=1 ALLOW_TF32=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded TestLinearizer.test_tensor_cores_padded_uops
+      run: NV=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
     - name: Test DISK copy time
       run: NV=1 TESTFILE=/raid/downloads/llama3-8b-sfr/model-00001-of-00004.safetensors python3 test/external/external_benchmark_disk_raw.py
     - name: Test CPU copy time

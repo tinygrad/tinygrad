@@ -16,7 +16,7 @@ from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_ex
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.opt import pm_get_optimization, pm_do_optimize
+from tinygrad.codegen.opt.kernel import pm_get_optimization, pm_do_optimize
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
