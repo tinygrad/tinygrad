@@ -276,7 +276,7 @@ class MUOpX86(MUOp):
                                       for v in (self.reg, self.rm)):
         inst.append((0b0100 << 4) | (self.w << 3) | (r << 2) | (x << 1) | b)
     # *** OPCODE byte ***
-    inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8), 'big')
+    inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8, 'big'))
     # *** MODR/M byte ***
     if self.rm is not None:
       # reg field can be register or opcode extension
