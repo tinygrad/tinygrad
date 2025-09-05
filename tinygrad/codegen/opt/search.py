@@ -1,17 +1,14 @@
 from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
-from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import Variable, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
-from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
-
 from tinygrad.codegen.opt.postrange import Scheduler
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
@@ -93,24 +90,6 @@ def _init_worker():
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 
 # *** external API ***
-
-# get (scrap) buffers for timing the linearizer
-# NOTE: there's also bufs_from_ast in postrange
-def bufs_from_lin(lin:Scheduler, allocate:bool=True) -> list[Buffer]:
-  bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
-  for x in lin.bufs:
-    if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
-  # TODO: Nones are staying in here if buffers are optimized out!
-  # TODO: add a test for this
-  rawbufs: list[Buffer|None] = [None]*(max(bufsts)+1)
-  for k,lx in bufsts.items():
-    buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
-    assert isinstance(dtype, (PtrDType, ImageDType))
-    if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    buf_dtype = dtype if isinstance(dtype, ImageDType) else dtype.base
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, buf_dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, buf_dtype)
-  #assert all(r is not None for r in rawbufs)
-  return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
 def get_kernel_actions(lin:Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Scheduler]:
