@@ -1171,9 +1171,9 @@ class Tensor(MathTrait):
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     # NOTE: None adds a dim later
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
+    if num_indices > ndim: raise IndexError(f"too many {num_indices=} for {ndim=}")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (ndim - num_indices)
 
     indices_parsed, dim = [], 0
     for index in indices:
