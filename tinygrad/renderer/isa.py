@@ -175,7 +175,7 @@ class ISARenderer(Renderer):
 # **************** shared pattern matchers ****************
 
 def to_mask(dt:DType): return {1:dtypes.mask8, 2:dtypes.mask16, 4:dtypes.mask32, 8:dtypes.mask64}[dt.scalar().itemsize].vec(dt.count)
-def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize]
+def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize].vec(dt.count)
 # on x86/arm64 certain comparisons create masks instead of booleans
 mask_matcher = PatternMatcher([
   # TODO: shouldn't be here
@@ -217,7 +217,8 @@ mask_matcher = PatternMatcher([
   (UPat(Ops.VECTORIZE, dtypes.bool, (UPat.var("y", dtypes.masks),), allow_any_len=True, name="x"),
    lambda y,x: x.replace(dtype=y.dtype.vec(len(x.src)))),
   # mask is converted to bool in store
-  (UPat.var("a").store(UPat.var("b", dtypes.masks), allow_any_len=True), lambda a,b: a.store(b.bitcast(to_int(b.dtype)).ne(0))),
+  (UPat.var("a").store(UPat.var("b", dtypes.masks), allow_any_len=True),
+   lambda a,b: a.store(b.bitcast(to_int(b.dtype)).mul(-1).cast(dtypes.int8).bitcast(dtypes.bool.vec(b.dtype.count)))),
   # mask is converted to bool in index
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("m", dtypes.masks)), lambda buf,idx,m: buf.index(idx, m.bitcast(to_int(m.dtype)).ne(0))),
 ])
@@ -305,7 +306,7 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
   (UPat(dtype=dtypes.ints64).cast(dtypes.floats, name="alu"), no_vectorized_alu),
   (UPat(dtype=dtypes.floats).cast(dtypes.ints64, name="alu"), no_vectorized_alu),
   # TODO: use shuffle for these casts instead of devectorizing
-  (UPat(dtype=dtypes.ints32+(dtypes.mask32,)).cast(dtypes.ints16+(dtypes.mask16,), name="alu"), no_vectorized_alu),
+  (UPat(dtype=dtypes.ints32+(dtypes.mask32,)).cast(dtypes.ints8+dtypes.ints16+(dtypes.mask8,dtypes.mask16), name="alu"), no_vectorized_alu),
   (UPat(dtype=dtypes.ints16+(dtypes.mask16,)).cast(dtypes.ints8+(dtypes.mask8,), name="alu"), no_vectorized_alu),
   (UPat(Ops.MUL, dtypes.ints64, name="alu"), no_vectorized_alu),
   (UPat(Ops.IDIV, name="alu"), no_vectorized_alu),
@@ -459,6 +460,7 @@ x86_vec_lowerer = PatternMatcher([
   (UPat(Ops.VECTORIZE, dtypes.ints16, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 1) for i,s in enumerate(x.src)]), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints64, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrq", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.float64, name="x"), lambda ctx,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[1]], Immediate(shuf_imm(x), 1), 1, 1)), # noqa: E501
   # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
   (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
    MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
@@ -618,12 +620,13 @@ x86_lowerer = PatternMatcher([
   (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: MUOpX86.V_V_VM_V("vblendvpd", 0x4B, ctx[x], ctx[b], ctx[a], ctx[m], 1, 3)), # noqa: E501
   (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213ss", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2)]), # noqa: E501
   (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpX86.assign(ctx[x], ctx[x.src[0]], True), MUOpX86.V_V_VM("vfmadd213sd", 0xA9, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 1, 2, 1)]), # noqa: E501
-  # extract TODO: add float64
+  # extract
   (UPat.var("y", dtypes.ints8+(dtypes.bool,)).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrb", 0x14, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)), # noqa: E501
   (UPat.var("y", dtypes.ints16).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrw", 0x15, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
   (UPat.var("y", dtypes.ints32).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrd", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3)),
   (UPat.var("y", dtypes.ints64).gep(name="x"), lambda ctx,y,x: MUOpX86.RM_V_I("vpextrq", 0x16, ctx[x], ctx[y], Immediate(x.arg[0], 1), 1, 3, 1)),
   (UPat.var("y", dtypes.float32).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[y], Immediate(gep_imm(x.arg[0],0), 1), 1, 3)), # noqa: E501
+  (UPat.var("y", dtypes.float64).gep(name="x"), lambda ctx,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[0]], Immediate(shuf_imm(x), 1), 1, 1)), # noqa: E501
   # range / endrange
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], Immediate(0, 4)), MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], Immediate(1, 4)), # noqa: E501
