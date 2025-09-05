@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_r
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, POSTOPT, prod
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
@@ -347,16 +347,14 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
+  k.simplify_merge_adjacent()
   if BEAM >= 1:
-    k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   elif ast.arg is not None and ast.arg.opts_to_apply is not None:
-    if POSTOPT >= 2: k.simplify_merge_adjacent()
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
-    k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if all(len(u.src) == 1 for u in ast.parents if u.op is Ops.LOAD):
