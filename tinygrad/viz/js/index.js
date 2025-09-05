@@ -380,8 +380,8 @@ async function renderProfiler() {
 
   function resize() {
     const profiler = document.querySelector(".profiler");
-    const { height, width:sideWidth } = rect("#device-list");
-    const width = profiler.clientWidth-(sideWidth+padding);
+    let { height, width:sideWidth } = rect("#device-list");
+    width = profiler.clientWidth-(sideWidth+padding), height = Math.round(height);
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
