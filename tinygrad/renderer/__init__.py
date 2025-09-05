@@ -84,7 +84,7 @@ class ProgramSpec:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
-          if special_size is not None: special_size[int(u.arg[-1])] = u.src[0].ssimplify()
+          if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self.ins = sorted(dedup(self.ins))
