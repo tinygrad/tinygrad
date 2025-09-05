@@ -1,6 +1,6 @@
 import unittest
-
-from tinygrad.codegen.opt.kernel import Opt, OptOps, Kernel
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.search import bufs_from_lin, actions, beam_search
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, GlobalCounters
@@ -41,7 +41,7 @@ class TestBEAM(unittest.TestCase):
       Opt(op=OptOps.GROUP, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=3),
       Opt(op=OptOps.GROUPTOP, axis=0, arg=0), Opt(op=OptOps.GROUPTOP, axis=0, arg=3),
     ]
-    lins = get_kernel_actions(Kernel(realized_ast), include_0=False, candidates=candidates).values()
+    lins = get_kernel_actions(Scheduler(realized_ast), include_0=False, candidates=candidates).values()
 
     # ensure amt=0 are not duplicated
     assert all(len(x.applied_opts) == 1 for x in lins)
@@ -59,7 +59,7 @@ class TestBEAM(unittest.TestCase):
     b = Tensor.rand(16, 16)
     realized_ast, _ = helper_realized_ast(a @ b)
     actions_before = actions.copy()
-    get_kernel_actions(Kernel(realized_ast))
+    get_kernel_actions(Scheduler(realized_ast))
     actions_after = actions.copy()
     assert actions_after == actions_before, "actions state was not preserved"
 
@@ -68,12 +68,12 @@ class TestBEAM(unittest.TestCase):
     a = Tensor.rand(100)
     b = Tensor.rand(100)
     si = (a+b).schedule()[-1]
-    lin = Kernel(push_views(si.ast))
+    lin = Scheduler(push_views(si.ast))
     bufs = bufs_from_lin(lin)
     # TODO: beam should have better instrumentation so we don't have to check this indirect thing
-    kcount = len(Kernel.kernel_cnt)
+    kcount = len(Scheduler.kernel_cnt)
     beam_search(lin, bufs, 3, disable_cache=True)
-    self.assertEqual(kcount, len(Kernel.kernel_cnt))
+    self.assertEqual(kcount, len(Scheduler.kernel_cnt))
 
 if __name__ == '__main__':
   unittest.main()

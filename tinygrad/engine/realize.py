@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.opt.kernel import Opt
+from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
 

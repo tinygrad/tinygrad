@@ -12,8 +12,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
 
-# both versions
-from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.codegen.opt.postrange import Scheduler
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
@@ -63,7 +61,7 @@ def timeout_handler(signum, frame):
   if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
   raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
+def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
@@ -98,7 +96,7 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 
 # get (scrap) buffers for timing the linearizer
 # NOTE: there's also bufs_from_ast in postrange
-def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
+def bufs_from_lin(lin:Scheduler, allocate:bool=True) -> list[Buffer]:
   bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
   for x in lin.bufs:
     if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
@@ -115,7 +113,7 @@ def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
   return cast(list[Buffer], rawbufs)
 
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel|Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel|Scheduler]:
+def get_kernel_actions(lin:Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Scheduler]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = (actions if candidates is None else candidates).copy()
 
@@ -139,7 +137,7 @@ def get_kernel_actions(lin:Kernel|Scheduler, include_0=True, candidates:list[Opt
   return acted_lins
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
+def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
@@ -147,7 +145,7 @@ def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
-  beam: list[tuple[Kernel|Scheduler, float]] = [(lin, float("inf"))]
+  beam: list[tuple[Scheduler, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
@@ -168,8 +166,8 @@ def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
-      acted_lins: list[Kernel|Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
-      timed_lins: list[tuple[Kernel|Scheduler, float]] = []
+      acted_lins: list[Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
+      timed_lins: list[tuple[Scheduler, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
