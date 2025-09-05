@@ -48,6 +48,17 @@ class TestSetitem(unittest.TestCase):
         t[1] = v
         self.assertEqual(t.dtype, dt)
 
+  def test_setitem_1d_negative_index(self):
+    t = Tensor.zeros(5).contiguous()
+    t[-1] = 7
+    self.assertListEqual(t.tolist(), [0, 0, 0, 0, 7])
+
+  def test_setitem_1d_dtype_preserved(self):
+    t = Tensor.ones(6, dtype=dtypes.int).contiguous()
+    t[1] = 3.5  # value casted to int dtype
+    self.assertEqual(t.dtype, dtypes.int)
+    self.assertListEqual(t.tolist(), [1, 3, 1, 1, 1, 1])
+
   def test_setitem_into_noncontiguous(self):
     t = Tensor.ones(4)
     self.assertFalse(t.uop.st.contiguous)
