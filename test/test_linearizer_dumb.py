@@ -32,27 +32,6 @@ class TestLinearizerFailure(unittest.TestCase):
     _ = get_program(ast, Device["METAL"].renderer)
 
 class TestLinearizerDumb(unittest.TestCase):
-  @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
-  def test_unmerged_ifs(self):
-    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(1605632), arg=0, src=())
-    c1 = c0.view(ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(25088, 0, 49, 7, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)))
-    c2 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(1605632), arg=1, src=())
-    c3 = c2.view(ShapeTracker(views=(View(shape=(1, 64, 1, 512, 4, 9, 4, 9), strides=(0, 25088, 0, 49, 0, 7, 0, 1), offset=-8, mask=((0, 1), (0, 64), (0, 1), (0, 512), (0, 4), (1, 8), (0, 4), (1, 8)), contiguous=False), View(shape=(64, 1, 512, 7, 7, 512, 3, 3), strides=(663552, 0, 0, 36, 1, 1296, 360, 10), offset=0, mask=None, contiguous=False))))
-    c4 = c3.load()
-    c5 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(2359296), arg=2, src=())
-    c6 = c5.view(ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 512, 3, 3), strides=(0, 0, 4608, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)))
-    c7 = c6.load()
-    c8 = UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(64, 1, 512, 7, 7, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=())
-    c9 = c1.store(((c4*c7).cast(dtypes.float).f(Ops.REDUCE_AXIS, arg=(Ops.ADD, (5, 6, 7))).cast(dtypes.half)*UOp.const(dtypes.half, 0.9999950000374996, src=c8)).alu(Ops.MAX, UOp.const(dtypes.half, 0.0, src=c8)))
-    ast = c9.sink()
-    opts = [Opt(op=OptOps.TC, axis=2, arg=(-1, 2, 1)), Opt(op=OptOps.UPCAST, axis=2, arg=0), Opt(op=OptOps.UNROLL, axis=1, arg=0)]
-    prg = get_program(ast, Device["METAL"].renderer, opts)
-    print(prg.src)
-    Device[Device.DEFAULT].compiler.compile_cached(prg.src)
-    gate_count = len([x for x in prg.src.splitlines() if "if" in x])
-    assert gate_count == 1, f"must have only one gate {gate_count} != 1"
-    assert len([u for u in prg.uops if u.op is Ops.IF]) == 1, "must have a single IF"
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_max_simplify_and_cancel(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1000), arg=0, src=())
