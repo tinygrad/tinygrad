@@ -45,8 +45,10 @@ class Scheduler:
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
   def copy(self):
-    # TODO: this is spamming the many ns on the names
-    return Scheduler(self.get_optimized_ast(), self.opts)
+    ret = Scheduler(self.ast, self.opts)
+    ret.dont_use_locals = self.dont_use_locals
+    ret.applied_opts = self.applied_opts[:]
+    return ret
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None):
