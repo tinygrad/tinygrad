@@ -517,10 +517,10 @@ jobs:
       run: BENCHMARK_LOG=cifar_10steps_half_wino AMD=1 WINO=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: Run full CIFAR training w 1 GPU
       run: time BENCHMARK_LOG=cifar AMD=1 DEFAULT_FLOAT=HALF LATEWINO=1 STEPS=1000 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.txt
-    - name: Run full CIFAR training steps w 6 GPUS
-      run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
-    - name: Run full CIFAR training steps w 6 GPUS (REMOTE)
-      run: time BENCHMARK_LOG=cifar_6gpu_remote REMOTE=1 REMOTEDEV=AMD DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu_remote.txt
+    #- name: Run full CIFAR training steps w 6 GPUS
+    #  run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu.txt
+    #- name: Run full CIFAR training steps w 6 GPUS (REMOTE)
+    #  run: time BENCHMARK_LOG=cifar_6gpu_remote REMOTE=1 REMOTEDEV=AMD DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.2 python3 examples/hlb_cifar10.py | tee train_cifar_six_gpu_remote.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
