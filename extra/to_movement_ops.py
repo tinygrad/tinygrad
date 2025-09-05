@@ -2,7 +2,6 @@ import itertools
 from enum import Enum, auto
 from collections import defaultdict
 from typing import List, Tuple, DefaultDict
-from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.helpers import prod, tqdm
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,6 +146,7 @@ def test_rebuild_bufferop_st(ast:UOp):
   for src in ast.src: test_rebuild_bufferop_st(src)
 
 if __name__ == "__main__":
+  from extra.optimization.helpers import load_worlds, ast_str_to_ast
   ast_strs = load_worlds(False, False, True)[:2000]
   for ast_str in tqdm(ast_strs):
     test_rebuild_bufferop_st(ast_str_to_ast(ast_str))
