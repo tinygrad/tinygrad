@@ -27,7 +27,8 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
     1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
     2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
   """
-  if USE_TC > 0:
+  # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
+  if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
     try: # check TC first and apply hand-coded opts if successful
       tk = k.copy()
       rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
@@ -46,7 +47,10 @@ def hand_coded_optimizations(k:Kernel|Scheduler) -> list[Opt]:
         for tc_dim in [1,0]: # attempt to upcast M and N
           if axes[tc_dim] is None: continue
           szs = [sz for sz in [5,4,3,2] if tk.full_shape[axes[tc_dim]] % sz == 0]
-          if szs: tk.apply_opt(Opt(OptOps.UPCAST, axes[tc_dim], szs[0]))
+          if szs:
+            axis = axes[tc_dim]
+            if tk.full_shape[axis] == szs[0]: axes[tc_dim] = None
+            tk.apply_opt(Opt(OptOps.UPCAST, axis, szs[0]))
         if axes[0] is not None and (szs := [sz for sz in [4,2] if tk.full_shape[axes[0]] % sz == 0]): # attempt to local N
           tk.apply_opt(Opt(OptOps.LOCAL, axes[0], szs[0]))
       return tk.applied_opts
