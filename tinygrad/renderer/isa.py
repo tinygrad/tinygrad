@@ -12,7 +12,7 @@ from tinygrad.helpers import DEBUG
 
 class ISARenderer(Renderer):
   lowerer = PatternMatcher([])
-  callee_saved: tuple[Register, ...] = ()
+  callee_saved: tuple[str, ...] = ()
 
   def load(self, dest:Register, src:Memory): raise NotImplementedError("arch specific")
   def store(self, dest:Memory, src:Register): raise NotImplementedError("arch specific")
@@ -49,8 +49,8 @@ class ISARenderer(Renderer):
 
   def regalloc(self, muops: list[MUOp]) -> tuple[list[MUOp], list[Register]]:
     # live ranges
-    def is_range(x:Operand) -> bool: return isinstance(x, Label) and x.name.startswith(".LOOP")
-    def virtuals(n:tuple[Operand, ...]) -> list[Register]:
+    def is_range(x:Operand|None) -> bool: return isinstance(x, Label) and x.name.startswith(".LOOP")
+    def virtuals(n:tuple[Operand|None, ...]) -> list[Register]:
       l = []
       for x in n:
         if isinstance(x, Register): l.append(x)
@@ -152,10 +152,10 @@ class ISARenderer(Renderer):
             final_muops.append(self.store(mem[chosen[0]], live[chosen[0]]))
             patch.append(chosen)
           rset -= in_degrees
-          for v,r in in_degrees: rewrite(v, [r])
+          for v,r in in_degrees: rewrite(v, (r,))
         for v,r in patch:
           assert v not in live
-          rewrite(v, [r])
+          rewrite(v, (r,))
       # free dead registers
       for v in [v for v in live if live_range[v][-1] < i]: reg_pool.insert(0, live.pop(v))
       # rewrite sources

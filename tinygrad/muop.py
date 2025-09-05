@@ -279,8 +279,8 @@ class MUOpX86(MUOp):
     if self.rm is not None:
       # reg field can be register or opcode extension
       # r/m field can be register, base register in memory or signal a sib byte is required
-      reg, rm = self.reg, 0b000
-      if isinstance(self.reg, Register): reg = self.reg.index & 0b111
+      reg = self.reg.index & 0b111 if isinstance(self.reg, Register) else self.reg
+      rm = 0b000
       if isinstance(self.rm, Register): rm = self.rm.index & 0b111
       elif isinstance(self.rm, Memory): rm = self.rm.base.index & 0b111 if self.rm.index is None else 0b100
       # specifies operand types
