@@ -248,8 +248,8 @@ class MUOpX86(MUOp):
     # 64bit imm load has a unique encoding
     if self.opcode == 0xB8:
       out, imm = cast(Register, self.out), cast(Immediate, self.imm)
-      return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(out.index > 7) & 0b1)).to_bytes() + \
-        int(self.opcode + (out.index % 8)).to_bytes() + imm.value.to_bytes(imm.size, 'little', signed=imm.value < 0)
+      return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(out.index > 7) & 0b1)).to_bytes(1, 'big') + \
+        int(self.opcode + (out.index % 8)).to_bytes(1, 'big') + imm.value.to_bytes(imm.size, 'little', signed=imm.value < 0)
     # extends reg field
     r = int(isinstance(self.reg, Register) and self.reg.index > 7)
     # extends reg for index
@@ -276,7 +276,7 @@ class MUOpX86(MUOp):
                                       for v in (self.reg, self.rm)):
         inst.append((0b0100 << 4) | (self.w << 3) | (r << 2) | (x << 1) | b)
     # *** OPCODE byte ***
-    inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8))
+    inst.extend(self.opcode.to_bytes((self.opcode.bit_length() + 7) // 8), 'big')
     # *** MODR/M byte ***
     if self.rm is not None:
       # reg field can be register or opcode extension

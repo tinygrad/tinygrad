@@ -161,8 +161,8 @@ class ISARenderer(Renderer):
       # rewrite sources
       ins_rewrite = tuple(rewrite(v, con) for v,con in zip(mu.ins, mu.ins_con))
       # free registers before rewriting destination to coalesce
-      for v in mu.ins:
-        if isinstance(v, Register) and live_range[v][-1] == i and v in live and isinstance(mu.out, Register): reg_pool.insert(0, live.pop(v))
+      for r in mu.ins:
+        if isinstance(r, Register) and live_range[v][-1] == i and r in live and isinstance(mu.out, Register): reg_pool.insert(0, live.pop(r))
       # rewrite MUOp with real operands
       final_muops.append(mu.replace(rewrite(mu.out, mu.out_con) if mu.out is not None else None, ins_rewrite))
     # align stack to 16 bytes, required on windows
