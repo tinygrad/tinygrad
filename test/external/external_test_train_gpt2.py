@@ -10,7 +10,7 @@ from tinygrad.codegen.opt.kernel import Kernel
 
 from test.external.fuzz_linearizer import run_linearizer
 
-class TestTrainGpt2Kernel(unittest.TestCase):
+class TestTrainGpt2(unittest.TestCase):
   def test_1(self):
     # kernel 244
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
