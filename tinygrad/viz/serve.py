@@ -12,6 +12,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import axis_colors
+from tinygrad.muop import MUOp
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -232,7 +233,8 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
 
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=traces[int(ctx[0])][0].ret, ProgramSpec): return
-  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
+  compiler = Device[prg.device].compiler
+  lib = compiler.compile(prg.src) if isinstance(prg.src, str) else MUOp.assemble(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
   from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
