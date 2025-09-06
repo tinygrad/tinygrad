@@ -7,6 +7,7 @@ from tinygrad.engine.realize import get_program
 from tinygrad.helpers import AMX
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
+@unittest.skipIf(Device.DEFAULT == "X86", "these tests assume unaligned loads aren't vectorized which doesn't hold for x86 backend")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):
