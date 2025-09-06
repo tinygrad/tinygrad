@@ -50,11 +50,11 @@ class CPUWorker(threading.Thread):
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, thread_id, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), thread_id)
-  def _signal(self, thread_id, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, thread_id, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, thread_id, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
+  def _exec(self, tid, prg, bufs, *args):
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), tid)
+  def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
+  def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args, threads=1):
     self.q(cmd, threads, len(args), *args)
     return self
