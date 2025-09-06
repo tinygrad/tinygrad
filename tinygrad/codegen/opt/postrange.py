@@ -171,6 +171,7 @@ class Scheduler:
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
+      check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
         check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
