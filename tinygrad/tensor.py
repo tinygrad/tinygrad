@@ -297,7 +297,7 @@ class Tensor(MathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    self.uop = self.uop.store(x.uop, dtype=self.uop.dtype)
+    self.uop = self.uop.store(x.uop)
     return self
 
   def detach(self) -> Tensor:

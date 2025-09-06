@@ -339,14 +339,14 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if x.src[0].op is Ops.STORE and not isinstance(x.dtype, PtrDType):
     store_target, store_src = x.src[0].src
     assert store_target.op is Ops.INDEX
-    return store_target.replace(dtype=sdtype).store(store_src, *rngs, dtype=sdtype)
+    return store_target.replace(dtype=sdtype).store(store_src, *rngs)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg, size, x.dtype)
   else:
     if not locals_allowed: return None
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -421,7 +421,7 @@ def split_store(x:UOp):
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
-  return (b:=x.as_buf()).store(kernel, dtype=b.dtype)
+  return x.as_buf().store(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
