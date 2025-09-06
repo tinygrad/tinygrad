@@ -465,7 +465,8 @@ x86_vec_lowerer = PatternMatcher([
   # TODO: float16 is a headache. might need temporary register to insert elements individually. can't use vpextrw/vpinsrw cause its in a gpr
   #(UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda ctx,x:
   # [MUOpX86.V_VM_I("vshuflw", 0x70, ctx[x], ctx[x.src[0]], Immediate(shuf_imm(x.src[:4]), 1), 3, 1)] + \
-  #([MUOpX86.V_VM_I("vshufhw", 0x70, ctx[x], ctx[x.src[4]], Immediate(shuf_imm(x.src[4:]), 1), 2, 1)] if len(x.src) > 4 else []) if all(s.src == x.src[0].src for s in x.src) else \
+  #([MUOpX86.V_VM_I("vshufhw", 0x70, ctx[x], ctx[x.src[4]], Immediate(shuf_imm(x.src[4:]), 1), 2, 1)] if len(x.src) > 4 else []) \
+  # if all(s.src == x.src[0].src for s in x.src) else \
   # [MUOpX86.V_VM_I("vshuflw", 0x70, ctx[x], ctx[s], Immediate((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i), 1), 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
   # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
   (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:

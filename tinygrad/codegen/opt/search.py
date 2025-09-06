@@ -9,11 +9,8 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
-from tinygrad.muop import assemble
-
-# both versions
-from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.muop import assemble
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
