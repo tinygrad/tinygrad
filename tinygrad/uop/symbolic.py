@@ -285,9 +285,7 @@ cast_folding = PatternMatcher([
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  # right now this also works for int to canonicalize shapes
-  (UPat(GroupOp.Commutative, dtype=(dtypes.index,dtypes.int), name='x'), lambda x:
-    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
