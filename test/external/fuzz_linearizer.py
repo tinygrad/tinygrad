@@ -22,7 +22,7 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.opt.kernel import Kernel
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
@@ -90,7 +90,7 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
 
 def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.vars}
+  if var_vals is None: var_vals = {v.expr: v.min for v in lin.vars}
 
   # TODO: images needs required_optimization
   try:
@@ -129,7 +129,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
+    var_vals = {v.expr: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)
