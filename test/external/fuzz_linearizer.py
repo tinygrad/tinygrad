@@ -4,6 +4,8 @@ import numpy as np
 from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_lin
 from tinygrad.engine.realize import get_program
+from tinygrad.codegen.opt.postrange import Scheduler
+
 
 # We need to insert ioctl before opening devices.
 if os.getenv("VALIDATE_HCQ", 0) != 0:
@@ -23,7 +25,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.codegen.opt.search import get_kernel_actions, bufs_from_lin
+from tinygrad.codegen.opt.search import get_kernel_actions
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.uop.ops import UOp, Ops
@@ -88,7 +90,7 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
       rawbuf.copyin(mv)
   return rawbuf
 
-def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
+def run_linearizer(lin: Scheduler, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
   if var_vals is None: var_vals = {v.expr: v.min for v in lin.vars}
 
