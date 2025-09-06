@@ -2,7 +2,7 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 import tempfile
 from pathlib import Path
-import argparse
+import argparse, time
 from collections import namedtuple
 from typing import Dict, Any
 
@@ -266,17 +266,23 @@ if __name__ == "__main__":
   def run(model, *x): return model(*x).realize()
 
   # this is diffusion
+  step_times = []
   with Context(BEAM=getenv("LATEBEAM")):
     for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
       GlobalCounters.reset()
+      st = time.perf_counter_ns()
       t.set_description("%3d %3d" % (index, timestep))
       with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         with WallTimeEvent(BenchEvent.STEP):
           tid = Tensor([index])
           latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
           if args.timing: Device[Device.DEFAULT].synchronize()
+      t.append((time.perf_counter_ns() - st)*1e-6)
     del run
 
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   # upsample latent space to image with autoencoder
   x = model.decode(latent)
   print(x.shape)
