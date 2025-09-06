@@ -90,8 +90,9 @@ class CompiledRunner(Runner):
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
+    has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
