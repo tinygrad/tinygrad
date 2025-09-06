@@ -8,7 +8,6 @@
 #
 import ctypes, ctypes.util, os
 
-# Example change :) 
 
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
