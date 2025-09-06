@@ -141,11 +141,11 @@ class Tensor(MathTrait):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = index_to_concrete_int(data)
-      if data.op is Ops.BIND:
-        var, val = data.unbind()
+      if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
+        var, val = data.unbind()  # type: ignore
         # give the bound constant a device
         const = UOp.const(var.dtype, val, device, ())
-        data = data.replace(src=(var.replace(src=const.src), const))
+        data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
     elif data is None: data = UOp.const(dtype or dtypes.default_float, 0, device, ())
     elif isinstance(data, get_args(ConstType)): data = UOp.const(dtype or dtypes.from_py(data), data, device, ())
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
