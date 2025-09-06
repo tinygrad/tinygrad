@@ -5,7 +5,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 
-def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
+def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
@@ -43,7 +43,7 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
             rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
         if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
           tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
-      return tk.applied_opts
+      return tk
 
   # make a copy so it does not mutate the input
   k = k.copy()
@@ -63,7 +63,7 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
           if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
           if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
           if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-          return k.applied_opts
+          return k
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
@@ -85,7 +85,7 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
           k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # no more opt if we are grouping
-  if k.group_for_reduces: return k.applied_opts
+  if k.group_for_reduces: return k
 
   # **** below this line need to be optional and benchmarked ****
 
@@ -171,4 +171,4 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
 
-  return k.applied_opts
+  return k

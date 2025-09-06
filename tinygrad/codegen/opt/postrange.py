@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from collections import defaultdict
-from typing import cast, Final, Sequence
+from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
@@ -107,10 +107,6 @@ class Scheduler:
       check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
     except IndexError as e: raise KernelOptError from e
-
-  def apply_opts(self, opts:Sequence[Opt]) -> Scheduler:
-    for opt in opts: self.apply_opt(opt)
-    return self
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
@@ -316,10 +312,10 @@ def apply_opts(ctx:Renderer, ast:UOp):
   elif ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
-    from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-    # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if all(len(u.src) == 1 for u in ast.parents if u.op is Ops.LOAD):
-      for opt in hand_coded_optimizations(k): k.apply_opt(opt)
+      # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 pm_postrange_opt = PatternMatcher([
