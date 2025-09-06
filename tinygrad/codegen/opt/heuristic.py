@@ -171,4 +171,16 @@ def hand_coded_optimizations(k:Scheduler) -> list[Opt]:
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
 
+  # **** threading ****
+
+  if k.opts.has_threads and k.opts.global_max is not None:
+    for threads in [32,16,12,8,6,5,4,3,2]:
+      # Skip is too many threads. Heuristic: use about 128K ops per thread
+      if threads > k.opts.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
+      for axis in k.axes_of(AxisType.LOOP):
+        if k.full_shape[axis] % threads == 0:
+          k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          break
+      if k.applied_opts and k.applied_opts[-1].op is OptOps.THREAD: break
+
   return k.applied_opts

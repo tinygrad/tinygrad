@@ -12,7 +12,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
+axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 class Scheduler:
@@ -127,7 +127,7 @@ class Scheduler:
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
       OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
-      OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
+      OptOps.GROUPTOP: AxisType.GROUP_REDUCE, OptOps.THREAD: AxisType.THREAD}
 
     ret = None
     if opt.op in opt_to_at:
@@ -149,11 +149,16 @@ class Scheduler:
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
+      if opt.op is OptOps.THREAD:
+        check(self.opts is not None and self.opts.has_threads, "target does not support threads")
+        check(self.opts is not None and self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
+        check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
+        check(rng in self._globalizable_rngs(), "can't apply range to this dim")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
-      ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
+      ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
@@ -166,6 +171,7 @@ class Scheduler:
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
+      check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
         check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")

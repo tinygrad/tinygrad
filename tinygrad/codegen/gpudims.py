@@ -59,7 +59,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] is AxisType.GLOBAL]))
+  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)]))
   local_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]))
   if not global_dims and not local_dims: return None
 
