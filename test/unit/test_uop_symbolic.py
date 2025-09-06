@@ -386,8 +386,7 @@ class TestSymbolic(unittest.TestCase):
 
   @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_div_cancel(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
 
   def test_div_cancel_correct(self):
     with Context(CORRECT_DIVMOD_FOLDING=1):
@@ -395,8 +394,7 @@ class TestSymbolic(unittest.TestCase):
 
   @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_mod_cancel(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
 
   def test_mod_cancel_correct(self):
     with Context(CORRECT_DIVMOD_FOLDING=1):
