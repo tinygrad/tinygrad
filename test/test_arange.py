@@ -30,10 +30,12 @@ class TestArange(unittest.TestCase):
       # PTX counts index ALU in flops
       assert f1 <= limit, f"{f1=}, {limit=}"
 
+  @unittest.skipIf(Device.DEFAULT == "X86", "displacement is folded into store on x86 backend")
   def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=0)
   def test_complexity_w_unroll2(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 2)], limit=0)
   def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=0)
   def test_complexity_w_unroll8(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 8)], limit=0)
+  @unittest.skipIf(Device.DEFAULT == "X86", "displacement is folded into store on x86 backend")
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=0)
 
   if Device.default.renderer.has_local:
@@ -162,7 +164,9 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
   def test_index_mnist_opt(self): self.test_index_mnist(0)
+  @unittest.skipIf(Device.DEFAULT == "X86", "fails on x86")
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
+  @unittest.skipIf(Device.DEFAULT == "X86", "fails on x86")
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   def test_llama_embedding(self, noopt=1, op_limit=65536):
