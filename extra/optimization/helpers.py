@@ -1,6 +1,6 @@
 # stuff needed to unpack a kernel
 from tinygrad import Variable
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
