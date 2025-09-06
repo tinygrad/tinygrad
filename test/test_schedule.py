@@ -80,6 +80,14 @@ class TestSchedule(unittest.TestCase):
     torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
     np.testing.assert_allclose(t.numpy(), torch_out)
 
+  def test_setitem_loop_arange_fuses(self):
+    N = 10
+    t = Tensor.empty(N)
+    for i in range(N): t[i] = i
+    # fusion: the looped 1D int setitem should be one kernel
+    run_schedule(check_schedule(t, 1))
+    self.assertListEqual(t.tolist(), list(range(N)))
+
   def test_arange_avgpool2d_fused_noopt(self):
     with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
