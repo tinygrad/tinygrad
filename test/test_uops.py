@@ -20,13 +20,9 @@ def to_uops_list(u:list[UOp], opts=Renderer(), skip_check=False) -> list[UOp]: r
 
 def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
-  muops = None
-  if Device.DEFAULT in ("X86",):
-    muops = Device[Device.DEFAULT].renderer.to_muops(uops)
-    src = "\n".join(str(mu) for mu in muops)
-  else: src = Device[Device.DEFAULT].renderer.render(uops)
+  src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops, muops=muops,
+  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
