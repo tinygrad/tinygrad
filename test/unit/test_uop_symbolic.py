@@ -694,7 +694,6 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
-  @track_rewrites()
   def test_where_cast(self):
     s = Variable("s", 0, 3, dtypes.int)
     cond = s < 2
