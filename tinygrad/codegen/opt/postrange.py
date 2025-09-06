@@ -1,33 +1,19 @@
 from __future__ import annotations
 import math, itertools
 from collections import defaultdict
-from typing import cast, Final, Sequence
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, _substitute, AxisType, ssimplify, can_pad
-from tinygrad.uop.symbolic import symbolic_flat
+from typing import cast, Final
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad
 from tinygrad.device import Buffer
-from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, POSTOPT, prod
+from tinygrad.dtype import AddrSpace, dtypes, ImageDType
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
+from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 from tinygrad.schedule.rangeify import remove_tags
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
 axis_to_pos = {AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
-
-def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
-  rngs = r.src[off:]
-  if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
-
-pm_flatten_range = PatternMatcher([
-  # real ranges only
-  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
-])
-
-def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 
 class Scheduler:
   def __init__(self, ast:UOp, opts:Renderer):
@@ -58,17 +44,11 @@ class Scheduler:
     return ret
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
-  @property
-  def termination(self):
-    terminators = [u for u in self.ast.parents if u.op in {Ops.REDUCE, Ops.STORE}]
-    termination = {}
-    for t in terminators:
-      # works without pm_flatten_range
-      for u in UOp.sink(*t.src[1 if t.op is Ops.REDUCE else 2:]).parents:
-        if u.op is Ops.RANGE: termination[u] = t
-    return termination
-
-  def copy(self): return Scheduler(self.get_optimized_ast(), self.opts)
+  def copy(self):
+    ret = Scheduler(self.ast, self.opts)
+    ret.dont_use_locals = self.dont_use_locals
+    ret.applied_opts = self.applied_opts[:]
+    return ret
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None):
@@ -95,24 +75,6 @@ class Scheduler:
     rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
-
-  def simplify_merge_adjacent(self):
-    i = 0
-    while i < len(self.rngs)-1:
-      r0, r1 = self.rngs[i], self.rngs[i+1]
-      # same axistype and same termination
-      termination = self.termination
-      if r0.arg[1] == r1.arg[1] and r0 in termination and r1 in termination and termination[r0] == termination[r1]:
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        oidx = self.ast.simplify()
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(oidx, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1}, name=f"check_merge_{i}_{i+1}")
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(oidx):
-          self.ast = nidx
-          continue
-      i += 1
 
   def colors(self) -> list[str]: return [axis_colors[x] if not self.dont_use_locals or not x == AxisType.GLOBAL else "BLUE" for x in self.axis_types]
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -146,10 +108,6 @@ class Scheduler:
       return axis
     except IndexError as e: raise KernelOptError from e
 
-  def apply_opts(self, opts:Sequence[Opt]) -> Scheduler:
-    for opt in opts: self.apply_opt(opt)
-    return self
-
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
       check(all(x not in {AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
@@ -167,6 +125,7 @@ class Scheduler:
       OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
       OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
 
+    ret = None
     if opt.op in opt_to_at:
       amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
 
@@ -182,7 +141,7 @@ class Scheduler:
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
         check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, "upcast is for GLOBAL/LOCAL/LOOP")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
@@ -190,7 +149,7 @@ class Scheduler:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
-      self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
+      ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op==OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
@@ -200,8 +159,6 @@ class Scheduler:
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
       ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
       check(ret is not None, "no tensor core available")
-      if append_opt: self.applied_opts.append(opt)
-      return ret
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
@@ -231,6 +188,7 @@ class Scheduler:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
     if append_opt: self.applied_opts.append(opt)
+    return ret
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
@@ -247,9 +205,9 @@ class Scheduler:
       for tc in tensor_cores:
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
-          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0])
-          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0])
-          red_ranges = sorted(reduceop.src[1:], key=lambda x: x.arg[0])
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: -x.arg[0])
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: -x.arg[0])
+          red_ranges = sorted(reduceop.src[1:], key=lambda x: -x.arg[0])
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
@@ -341,26 +299,23 @@ class Scheduler:
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.parents if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
-  return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
+  return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
 
 def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
   if BEAM >= 1:
-    k.simplify_merge_adjacent()
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   elif ast.arg is not None and ast.arg.opts_to_apply is not None:
-    if POSTOPT >= 2: k.simplify_merge_adjacent()
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
-    k.simplify_merge_adjacent()
-    from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-    # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if all(len(u.src) == 1 for u in ast.parents if u.op is Ops.LOAD):
-      for opt in hand_coded_optimizations(k): k.apply_opt(opt)
+      # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 pm_postrange_opt = PatternMatcher([
