@@ -27,6 +27,7 @@ if __name__ == "__main__":
 
   # NOTE: the inputs to a JIT must be first level arguments
   run_onnx_jit = TinyJit(lambda **kwargs: run_onnx(kwargs), prune=True)
+  step_times = []
   for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
@@ -35,7 +36,12 @@ if __name__ == "__main__":
       inputs = {**{k:v for k,v in new_inputs_junk.items() if 'img' in k},
                 **{k:Tensor(v) for k,v in new_inputs_junk_numpy.items() if 'img' not in k}}
       ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
-    print(f"jitted:  {(time.perf_counter_ns() - st)*1e-6:7.4f} ms")
+      step_times.append(t:=(time.perf_counter_ns() - st)*1e-6)
+    print(f"jitted:  {t:7.4f} ms")
+
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility

@@ -181,6 +181,7 @@ class GPT2:
     self.tokenizer = tokenizer
 
   def generate(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
+    step_times = []
     prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     toks = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
@@ -197,8 +198,13 @@ class GPT2:
           else:
             tokens = Tensor([x[start_pos:] for x in toks])
           tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT-1).bind(start_pos), temperature).tolist()
+      step_times.append((GlobalCounters.time_sum_s-st)*1e3)
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
+
+    if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+      min_time = min(step_times)
+      assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
     return [self.tokenizer.decode(x) for x in toks]
 
 # **** main code ****
