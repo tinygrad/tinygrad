@@ -345,9 +345,10 @@ class TestKernelOpts(unittest.TestCase):
     r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
     helper_linearizer_opt(r, [
       [Opt(OptOps.THREAD, 0, 2)],
-      [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
-      [Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
-    ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []])
+      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
+    ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
+      + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
 
 if __name__ == '__main__':
   unittest.main()

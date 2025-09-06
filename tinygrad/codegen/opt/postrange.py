@@ -62,8 +62,7 @@ class Scheduler:
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
-  def convert_loop_to_global(self):
-    if not self.opts.has_local: return None
+  def _globalizable_rngs(self) -> list[Uop]:
     store_rngs = self.ast.src[0].src[2:]
 
     # filter any not in local stores
@@ -71,8 +70,13 @@ class Scheduler:
                         or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
-    store_rng = [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE] if store_rngs else []
-    rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x.arg[1] == AxisType.LOOP and x in store_rng else x for x in self.rngs]
+    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.LOOP] if store_rngs else []
+
+  def convert_loop_to_global(self):
+    if not self.opts.has_local: return None
+
+    globalizible_rngs = self._globalizable_rngs()
+    rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x in globalizible_rngs else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
@@ -148,7 +152,7 @@ class Scheduler:
       if opt.op is OptOps.THREAD:
         check(self.opts is not None and self.opts.has_threads, "target does not support threads")
         check(self.opts is not None and self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
-        check(rng.arg[-1] is AxisType.LOOP, "thread is for LOOP")
+        check(rng in self._globalizable_rngs(), "can't apply range to this dim")
         check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
