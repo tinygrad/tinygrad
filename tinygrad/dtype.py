@@ -96,6 +96,8 @@ class dtypes:
   @staticmethod
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
+  def is_mask(x: DType) -> bool: return x.scalar() in dtypes.masks
+  @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
     if x.__class__ is int: return dtypes.default_int
@@ -144,6 +146,11 @@ class dtypes:
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
+  # used in x86/a64 backends
+  mask8: Final[DType] = DType.new(15, 1, "mask8", None)
+  mask16: Final[DType] = DType.new(16, 2, "mask16", None)
+  mask32: Final[DType] = DType.new(17, 4, "mask32", None)
+  mask64: Final[DType] = DType.new(18, 8, "mask64", None)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -159,6 +166,7 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
+  masks = (mask8, mask16, mask32, mask64)
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
@@ -189,8 +197,10 @@ def least_upper_dtype(*ds:DType) -> DType:
   return min(set.intersection(*[_get_recursive_parents(d) for d in ds])) if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void"}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "mask"))}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()},
+                       **{v.name:k for k,v in dtypes.__dict__.items() if isinstance(v, DType) and k.startswith("mask")},
+                       "void": "void"}
 
 @functools.cache
 def can_safe_cast(dt0:DType, dt1:DType) -> bool:
