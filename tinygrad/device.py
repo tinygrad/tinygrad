@@ -7,6 +7,7 @@ from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put,
                              Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
+from tinygrad.muop import MUOp
 
 # **************** Device ****************
 
@@ -264,7 +265,7 @@ class CompileError(Exception): pass
 class Compiler:
   def __init__(self, cachekey:str|None=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
-  def compile_cached(self, src:str) -> bytes:
+  def compile_cached(self, src:str|list[MUOp]) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
       assert not getenv("ASSERT_COMPILE"), f"tried to compile with ASSERT_COMPILE set\n{src}"
       lib = self.compile(src)

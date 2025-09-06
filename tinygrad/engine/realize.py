@@ -9,7 +9,6 @@ from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.opt import Opt
-from tinygrad.muop import MUOp
 
 # **************** Program Creation ****************
 
@@ -84,7 +83,7 @@ class CompiledRunner(Runner):
     if precompiled is not None: self.lib = precompiled
     else:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src) if isinstance(p.src, str) else MUOp.assemble(p.src)
+        self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
