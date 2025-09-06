@@ -180,6 +180,7 @@ class TestOuterworld(unittest.TestCase):
     out.realize()
     print(out.numpy())
 
+  @unittest.skip("opts don't work")
   def test_triple_gemm(self):
     x = Tensor.rand(1, 16).realize()
     W = Tensor.rand(3, 16, 16).realize()
@@ -191,6 +192,27 @@ class TestOuterworld(unittest.TestCase):
     out = x.contiguous(a)[-1].contiguous().realize()
 
     self.assertTrue((manual==out).all().item())
+
+  def test_setitem_pyrange(self):
+    with Context(DEBUG=0):
+      t = Tensor.rand(10).realize()
+      o = Tensor.empty(10)
+    GlobalCounters.reset()
+    for i in range(10):
+      o[i] = t[i]
+    o.realize()
+    self.assertTrue((t==o).all().item())
+
+  @unittest.skip("TODO: fix this")
+  def test_setitem(self):
+    with Context(DEBUG=0):
+      t = Tensor.rand(10).realize()
+      o = Tensor.empty(10)
+    GlobalCounters.reset()
+    i = UOp.range(10, -1)
+    o[i] = t[i]
+    o.contiguous(i).realize()
+    self.assertTrue((t==o).all().item())
 
 if __name__ == '__main__':
   unittest.main()

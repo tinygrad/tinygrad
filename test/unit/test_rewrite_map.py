@@ -46,8 +46,8 @@ class TestRewriteMap(unittest.TestCase):
 
   def test_add_zero(self):
     # Build a small graph: add(0, add(const=0, const=5))
-    zero_node = UOp.const(dtypes.int, 0)
-    five_node = UOp.const(dtypes.int, 5)
+    zero_node = UOp.const(dtypes.index, 0)
+    five_node = UOp.const(dtypes.index, 5)
     inner_add = zero_node + five_node
     root_add = zero_node + inner_add
 
@@ -67,7 +67,7 @@ class TestRewriteMap(unittest.TestCase):
     Test rewriting neg(neg(5)) => 5 using symbolic.
     """
     # In some versions of TinyGrad, you might do: (-(-five_node))
-    five_node = UOp.const(dtypes.int, 5)
+    five_node = UOp.const(dtypes.index, 5)
     # If your code allows UOp(...), do that; else you might do something like:
     # double_neg_five = -(-five_node)
     # But let's be explicit:
@@ -85,8 +85,8 @@ class TestRewriteMap(unittest.TestCase):
     """
     Combine both rewrites: add(0, neg(neg(5))) => add(0, 5) => 5
     """
-    zero_node = UOp.const(dtypes.int, 0)
-    five_node = UOp.const(dtypes.int, 5)
+    zero_node = UOp.const(dtypes.index, 0)
+    five_node = UOp.const(dtypes.index, 5)
     neg_five = -five_node
     double_neg_five = -neg_five
     root_add = zero_node + double_neg_five
@@ -103,7 +103,7 @@ class TestRewriteMap(unittest.TestCase):
   def test_multi_var_rewrites(self):
     x_var = UOp.variable('x', 0, 10)
     y_var = UOp.variable('y', -5, 5)
-    zero_node = UOp.const(dtypes.int, 0)
+    zero_node = UOp.const(dtypes.index, 0)
 
     sum_with_zero = y_var + zero_node    # (y + 0)
     combined = x_var + sum_with_zero     # x + (y + 0)
@@ -155,8 +155,8 @@ class TestRewriteMap(unittest.TestCase):
     x_var = UOp.variable('x', 1, 10)
     y_var = UOp.variable('y', -5, 5)
     z_var = UOp.variable('z', 0, 5)
-    zero_node = UOp.const(dtypes.int, 0)
-    one_node = UOp.const(dtypes.int, 1)
+    zero_node = UOp.const(dtypes.index, 0)
+    one_node = UOp.const(dtypes.index, 1)
 
     # Build sub-expressions
     yz_sum = y_var + z_var              # (y + z)

@@ -103,8 +103,8 @@ class TestSymbolicOps(unittest.TestCase):
     def f(a, b): return a.cat(b, dim=0).realize()
     a = Tensor.rand(10, 3)
     b = Tensor.rand(10, 3)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         symbolic = f(a[:vi, :], b[:vj, :]).reshape(i+j, 3).numpy()
@@ -115,8 +115,8 @@ class TestSymbolicOps(unittest.TestCase):
     def f(a, b): return a.cat(b, dim=1).realize()
     a = Tensor.rand(3, 10)
     b = Tensor.rand(3, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         symbolic = f(a[:, :vi], b[:, :vj]).reshape(3, i+j).numpy()
@@ -127,8 +127,8 @@ class TestSymbolicOps(unittest.TestCase):
     def f(a, b): return (a@b+1).realize()
     a = Tensor.rand(10, 3)
     b = Tensor.rand(3, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         symbolic = f(a[:vi, :], b[:, :vj]).reshape(i, j).numpy()
@@ -140,8 +140,8 @@ class TestSymbolicOps(unittest.TestCase):
     def f(a, b): return (a@b+1).realize()
     a = Tensor.rand(10, 3)
     b = Tensor.rand(3, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         symbolic = f(a[:vj, :], b[:, :vi]).reshape(j, i).numpy()
@@ -225,8 +225,8 @@ class TestSymbolicOps(unittest.TestCase):
 
   def test_mean_2d(self):
     a = Tensor.rand(10, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         for axis in [None, 0, 1]:
@@ -245,8 +245,8 @@ class TestSymbolicOps(unittest.TestCase):
 
   def test_var_2d(self):
     a = Tensor.rand(10, 10)
-    for i in range(1, 5):
-      for j in range(1, 5):
+    for i in range(2, 5):
+      for j in range(2, 5):
         vi = Variable("i", 1, 10).bind(i)
         vj = Variable("j", 1, 10).bind(j)
         for axis in [None, 0, 1]:

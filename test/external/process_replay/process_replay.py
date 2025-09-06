@@ -12,7 +12,7 @@ try:
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
-  from tinygrad.codegen.opt.kernel import Opt
+  from tinygrad.codegen.opt import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
   from tinygrad.device import Device
 except ImportError as e:

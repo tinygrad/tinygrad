@@ -88,7 +88,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     return ret
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals = {k:(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+  var_vals = {k.expr:(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
 

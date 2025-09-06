@@ -1,5 +1,4 @@
 # this converts a lowerer program into a vectorized program
-
 import functools, itertools, operator
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition
@@ -152,7 +151,7 @@ def fix_group_for_reduce(x:UOp):
 pm_pre_expander = PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+   lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),

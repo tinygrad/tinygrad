@@ -2,7 +2,6 @@ import itertools
 from enum import Enum, auto
 from collections import defaultdict
 from typing import List, Tuple, DefaultDict
-from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.helpers import prod, tqdm
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -121,7 +120,7 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
     if i > 1000:
       print("WARNING: did not search all possible combinations")
       break
-    var_vals = {k:v for k,v in zip(vs, ranges)}
+    var_vals = {k.expr:v for k,v in zip(vs, ranges)}
     r1 = sym_infer(idx1, var_vals) if sym_infer(valid1, var_vals) else 0
     r2 = sym_infer(idx2, var_vals) if sym_infer(valid2, var_vals) else 0
     if r1 != r2: return False
@@ -147,6 +146,7 @@ def test_rebuild_bufferop_st(ast:UOp):
   for src in ast.src: test_rebuild_bufferop_st(src)
 
 if __name__ == "__main__":
+  from extra.optimization.helpers import load_worlds, ast_str_to_ast
   ast_strs = load_worlds(False, False, True)[:2000]
   for ast_str in tqdm(ast_strs):
     test_rebuild_bufferop_st(ast_str_to_ast(ast_str))

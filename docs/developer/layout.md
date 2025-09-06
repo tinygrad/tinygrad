@@ -22,12 +22,6 @@ Group UOps into kernels.
 
 Transforms the ast into an optimized ast. This is where BEAM search and heuristics live.
 
-::: tinygrad.codegen.opt.get_optimized_ast
-    options:
-        members: false
-        show_labels: false
-        show_source: false
-
 ---
 
 ## tinygrad/codegen

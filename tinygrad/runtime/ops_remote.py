@@ -100,7 +100,7 @@ class GraphComputeItem:
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
-  fixedvars: dict[Variable, int]
+  fixedvars: dict[str, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -111,7 +111,7 @@ class GraphAlloc(RemoteRequest):
   graph_num: int
   jit_cache: tuple[GraphComputeItem|Transfer, ...]
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
 
 @dataclass(frozen=True)
 class GraphFree(RemoteRequest):
@@ -121,7 +121,7 @@ class GraphFree(RemoteRequest):
 class GraphExec(RemoteRequest):
   graph_num: int
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
   wait: bool
 
 # for safe deserialization

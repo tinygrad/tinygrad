@@ -21,6 +21,10 @@ class TestEqStrDType(unittest.TestCase):
   def test_ptr_eq(self):
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
+  def test_ptr_nbytes(self):
+    assert dtypes.float16.ptr(32).nbytes() == 32 * dtypes.float16.itemsize
+  def test_ptr_nbytes_unlimited(self):
+    self.assertRaises(RuntimeError, lambda: dtypes.float32.ptr().nbytes())
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
