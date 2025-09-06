@@ -791,7 +791,7 @@ class TestJitGraphSplit(unittest.TestCase):
       hcqgraph=[self.ji_graph(5)])
 
   def test_jit_multidev_xfer(self):
-    if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
+    if Device.DEFAULT in {"CPU", "LLVM", "X86"}: raise unittest.SkipTest("CPU/LLVM/X86 is not a valid default device for this test (zero-copies)")
     if Device.DEFAULT == "METAL" or REAL_DEV == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
 
     try: Device[f"{Device.DEFAULT}:1"]
@@ -816,7 +816,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
   @unittest.skipIf(getenv("MOCKGPU"), "MockGPU does not support parallel copies")
   def test_jit_multidev_copy(self):
-    if Device.DEFAULT in {"CPU", "LLVM"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
+    if Device.DEFAULT in {"CPU", "LLVM", "X86"}: raise unittest.SkipTest("CPU/LLVM/X86 is not a valid default device for this test (zero-copies)")
 
     @TinyJit
     def f(inp):
