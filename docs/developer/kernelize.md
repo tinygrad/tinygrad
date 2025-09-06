@@ -2,7 +2,7 @@
 
 Tinygrad lazily builds up a graph of Tensor operations. The Tensor graph includes a mix of:
 
-- Buffer and Assignment Ops: `BUFFER`, `BUFFER_VIEW`, `COPY`, `ASSIGN`
+- Buffer and Assignment Ops: `BUFFER`, `BUFFER_VIEW`, `COPY`, `STORE`
 - Movement Ops: `RESHAPE`, `EXPAND`, `PERMUTE`, `PAD`, `SHRINK`, `FLIP`
 - Compute Ops: `ADD`, `MUL`, `REDUCE_AXIS`, ...
 
@@ -28,10 +28,10 @@ print(out) # <Tensor <UOp METAL (1,) int (<Ops.ADD: 52>, None)> on METAL with gr
 out.kernelize()
 
 print(mul) # <Tensor <UOp METAL (1,) int (<Ops.MUL: 48>, None)> on METAL with grad None>
-print(out) # <Tensor <UOp METAL (1,) int (<Ops.ASSIGN: 66>, None)> on METAL with grad None>
+print(out) # <Tensor <UOp METAL (1,) int (<Ops.STORE: 58>, None)> on METAL with grad None>
 ```
 
-The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes a new ASSIGN UOp:
+The multiply Tensor stays the same because it is fused. The output Tensor's UOp becomes a new STORE UOp:
 
 ```py
 print(out.uop)
@@ -77,7 +77,7 @@ print(child.uop.src[1].arg.ast)
 
 ```
 UOp(Ops.SINK, dtypes.void, arg=None, src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+  UOp(Ops.STORE, dtypes.int.ptr(1), arg=None, src=(
     UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), arg=0, src=()),
     x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True),)), src=()),
     UOp(Ops.ADD, dtypes.int, arg=None, src=(
@@ -102,7 +102,7 @@ print(out.item()) # 5
 
 - The large Tensor graph is built from a mix of data, compute and movement Ops.
 
-- `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with ASSIGN.
+- `Tensor.kernelize` splits the Tensor graph into data (BUFFER), compute (KERNEL) and links dependencies with STORE.
 
 - `Tensor.realize` executes KERNELs on device and replaces the Tensor graph with just a BUFFER.
 
