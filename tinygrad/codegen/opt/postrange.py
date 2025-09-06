@@ -85,7 +85,7 @@ class Scheduler:
     new_rng = UOp.range(amount, self.maxarg+1, new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount}")
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
