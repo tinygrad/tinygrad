@@ -24,7 +24,7 @@ print("******* PART 1 *******")
 from tinygrad import Device
 print(Device.DEFAULT)  # on Mac, you can see this prints METAL
 
-# now, lets create a Tensor
+# now, let's create a Tensor
 from tinygrad import Tensor, dtypes
 t = Tensor([1,2,3,4])
 
@@ -135,7 +135,7 @@ assert (t_log_grad.item() - 1/3) < 1e-6
 # %% ********
 print("******* PART 2 *******")
 
-# we redefine the same t here so this cell can run on it's own
+# we redefine the same t here so this cell can run on its own
 from tinygrad import Tensor
 t = Tensor([1,2,3,4])
 
