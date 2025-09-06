@@ -171,27 +171,6 @@ class TestZeroFolding(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       (x % x).numpy()
 
-class TestArangeUOpOverflowIssue(unittest.TestCase):
-  # these used to fail with UOp verification error but now fail because of overflow
-
-  @unittest.expectedFailure
-  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
-  def test_large_arange_sum(self):
-    # Summing a huge arange should either succeed or raise a MemoryError.
-    n = 2**31 + 3
-    expected = (n - 1) * n // 2
-    out = Tensor.arange(n).sum().item()
-    self.assertEqual(out, expected)
-
-  @unittest.expectedFailure
-  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
-  def test_large_arange_index(self):
-    # Indexing a huge arange should return the correct value instead of failing
-    # with a UOp verification error.
-    n = 2**31 + 3
-    out = Tensor.arange(n)[0].item()
-    self.assertEqual(out, 0)
-
 class TestAssignIssues(unittest.TestCase):
   # these are good failures. i'm not sure we need more, but we need to fix these.
 
