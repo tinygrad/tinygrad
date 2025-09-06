@@ -882,7 +882,7 @@ class TestIdxUpcast(unittest.TestCase):
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer
         uops = full_rewrite(s.ast, renderer)
-        renderer.render(uops) if s.bufs[0].device not in ("X86",) else renderer.to_muops(uops)
+        renderer.render(uops)
         return uops
 
   def _assert(self, dtype: DType, a: Tensor):

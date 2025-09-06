@@ -170,7 +170,7 @@ class ISARenderer(Renderer):
     return (final_muops, callee_saved)
 
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]: raise NotImplementedError("arch specific")
-  def to_muops(self, uops: list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
+  def render(self, uops:list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
 
 # **************** shared pattern matchers ****************
 

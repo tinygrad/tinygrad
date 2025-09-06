@@ -10,7 +10,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.opt.postrange import Scheduler
-from tinygrad.muop import assemble
+from tinygrad.muop import MUOp
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
@@ -72,7 +72,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> 
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     st = time.perf_counter()
-    prog = compiler.compile(p.src) if p.muops is None else assemble(p.muops)
+    prog = compiler.compile(p.src) if isinstance(p.src, str) else MUOp.assemble(p.src)
     et = time.perf_counter() - st
     ret = (p, prog, et)
   except RuntimeError:

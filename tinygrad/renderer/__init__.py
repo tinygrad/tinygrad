@@ -59,11 +59,10 @@ class Estimates:
 @dataclass
 class ProgramSpec:
   name:str
-  src:str
+  src:str|list[MUOp]
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
-  muops:list[MUOp]|None=None
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
@@ -127,6 +126,4 @@ class Renderer:
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
-  # TODO: shouldn't really be here
-  def to_muops(self, uops:list[UOp]) -> list[MUOp]: raise NotImplementedError("needs a lowerer to muop")
+  def render(self, uops:list[UOp]) -> str|list[MUOp]: raise NotImplementedError("needs a renderer")

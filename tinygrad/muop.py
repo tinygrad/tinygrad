@@ -58,28 +58,28 @@ class MUOp:
   def assign(dest:Register, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
   def replace(self, out: Operand|None, ins: tuple[Operand, ...]): raise NotImplementedError("arch specific")
   def encode(self) -> bytes: raise NotImplementedError("arch specific")
-
-def assemble(src:list[MUOp]) -> bytes:
-  # TODO: don't hardcore jump size (6)
-  binary = bytearray()
-  targets: dict[Label, int] = {}
-  fixups: list[tuple[Label, int]] = []
-  for mu in src:
-    if isinstance(mu.out, Label):
-      targets[mu.out] = len(binary)
-      continue
-    if mu.ins and isinstance(v:=mu.ins[0], Label):
-      if v in targets:
-        mu = mu.replace(mu.out, (Immediate(targets[v] - (len(binary) + 6), 4),))
-      else:
-        fixups.append((v, len(binary) + 2))
-        mu = mu.replace(mu.out, (Immediate(0, 4),))
-    binary.extend(mu.encode())
-  # patch offsets for forward jumps
-  for label,loc in fixups:
-    offset = targets[label] - (loc + 4)
-    binary[loc:loc+4] = offset.to_bytes(4, "little", signed=True)
-  return bytes(binary)
+  @staticmethod
+  def assemble(muops:list[MUOp]) -> bytes:
+    # TODO: don't hardcore jump size (6)
+    binary = bytearray()
+    targets: dict[Label, int] = {}
+    fixups: list[tuple[Label, int]] = []
+    for mu in muops:
+      if isinstance(mu.out, Label):
+        targets[mu.out] = len(binary)
+        continue
+      if mu.ins and isinstance(v:=mu.ins[0], Label):
+        if v in targets:
+          mu = mu.replace(mu.out, (Immediate(targets[v] - (len(binary) + 6), 4),))
+        else:
+          fixups.append((v, len(binary) + 2))
+          mu = mu.replace(mu.out, (Immediate(0, 4),))
+      binary.extend(mu.encode())
+    # patch offsets for forward jumps
+    for label,loc in fixups:
+      offset = targets[label] - (loc + 4)
+      binary[loc:loc+4] = offset.to_bytes(4, "little", signed=True)
+    return bytes(binary)
 
 # *** X86 ***
 #https://wiki.osdev.org/X86-64_Instruction_Encoding
