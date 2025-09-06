@@ -277,7 +277,7 @@ if __name__ == "__main__":
           tid = Tensor([index])
           latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
           if args.timing: Device[Device.DEFAULT].synchronize()
-      t.append((time.perf_counter_ns() - st)*1e-6)
+      step_times.append((time.perf_counter_ns() - st)*1e-6)
     del run
 
   if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
