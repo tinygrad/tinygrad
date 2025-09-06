@@ -482,7 +482,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int) -> UOp:
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.index) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
     return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
@@ -1045,7 +1045,8 @@ pm_lower_index_dtype = PatternMatcher([
     dtype=(dt:=least_upper_dtype(*[x.dtype for x in u.src])).vec(u.dtype.count), src=tuple(x.cast(dt) for x in u.src))),
   (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=(dt:=(dtypes.long if any(v.overflows(dtypes.int) for v in u.src)
     else dtypes.long)).vec(u.dtype.count),src=tuple(x.cast(dt) for x in u.src))),
-  (UPat((Ops.SPECIAL), dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int)),
+  (UPat((Ops.SPECIAL,Ops.DEFINE_VAR), dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int)),
+  (UPat((Ops.BIND), dtypes.index, name="u"), lambda u: u.replace(dtype=u.src[0].dtype)),
 ])
 def index_to_concrete_int(u:UOp): return graph_rewrite(u, pm_lower_index_dtype)
 
