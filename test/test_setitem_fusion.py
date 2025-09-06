@@ -1,14 +1,7 @@
-import os
-import io
-import re
-import pytest
 import unittest
-from contextlib import redirect_stdout, redirect_stderr
-
-# Ensure DEBUG is set before tinygrad imports (some logging is configured at import time)
-os.environ.setdefault("DEBUG", "4")
 
 from tinygrad.tensor import Tensor
+from tinygrad import Context
 
 # Try tinygrad's internal counters if available; fall back to log parsing.
 def count_kernels(fn) -> int:
@@ -30,49 +23,20 @@ def count_kernels(fn) -> int:
       for k in ("kernel_count", "kernels", "global_kernels", "kernels_launched"):
         if k in stats:
           return int(stats[k])
-  except Exception:
-    pass
-
-  # 2) Fallback: capture stdout+stderr and count kernel-ish lines
-  old_debug = os.environ.get("DEBUG")
-  os.environ["DEBUG"] = "4"  # make sure it's loud during the run
-
-  buf = io.StringIO()
-  with redirect_stdout(buf), redirect_stderr(buf):
-    fn()
-  out = buf.getvalue()
-
-  # Count lines that look like compile/launch/codegen (backend-agnostic heuristic)
-  kernelish = [
-      l for l in out.splitlines()
-      if re.search(r"\b(launch|launched|compile|compiled|kernel|codegen|program)\b", l, re.I)
-  ]
-
-  if old_debug is None:
-    del os.environ["DEBUG"]
-  else:
-    os.environ["DEBUG"] = old_debug
-
-  print("\n--- captured debug (first 30 lines) ---")
-  for l in kernelish[:30]:
-    print(l)
-  print(f"--- total kernel-ish lines: {len(kernelish)} ---\n")
-  return len(kernelish)
+  except Exception as e:
+    print(f"GlobalCounters method failed: {e}")
+    raise e
 
 class TestSetitem(unittest.TestCase):
   def test_setitem_arange_single_kernel(self):
-    def workload():
-      # Make a realized contiguous buffer (avoid broadcasted zero w/ stride=0)
-      x = Tensor.empty(100).realize()
-      x *= 0   # zero without changing contiguity
-  
-      for i in range(10):
-        x[i*10:(i+1)*10] = Tensor.arange(10)
-  
-      _ = x.numpy()  # force execution
-      self.assertListEqual(x.tolist(), list(range(10))*10)
-  
-    kcount = count_kernels(workload)
-    print(f"Kernel count (pre-fix): {kcount}")
-    # Goal after the bounty: this becomes exactly 1
-    assert kcount == 1
+    with Context(DEBUG=4, RANGEIFY=1, BEAM=2):
+      def workload():
+        N = 10
+        cmp = Tensor.empty(N)
+        for i in range(N): cmp[i] = i
+        self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+
+      kcount = count_kernels(workload)
+      print(f"Kernel count (pre-fix): {kcount}")
+      # Goal after the bounty: this becomes exactly 1
+      assert kcount == 1

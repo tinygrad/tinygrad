@@ -96,23 +96,11 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
-# --- case 1        self   : (10,20,30,40,50), x: (10,2,3,4,40,50)
-# ---               values : (10,2,3,4, 1, 1,40,50)
-# ---               mask   : (10,2,3,4,20,30,40,50)
-# ---  (last arg)   axes = (1,2,3)
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
-  print(f"_masked_setitem: {target.shape}, {values.shape}, {mask.shape}, {axes}")
   # reduce such that if mask contains repeated indices the last one remains
-  # --- (2,3,4) -> (1,1,1)
-  # --- x:acc, y:cur, acc[0],cur[0] is mask, acc[1],cur[1] is value
-  # --- So, if values have tensor indexed shape, the values are also reduced to the last one. What if mask and values have different shape?
-  # --- But values are always broadcasted to the sahpe of mask, so it's okay.
   for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
-  # --- mask: (10,1,1,1,20,30,40,50), values: (10,1,1,1, 1, 1,40,50)
   # remove extra dims from reduce
-  # --- What happens if squeeze on non-one dim?
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
-  # --- mask: (10,20,30,40,50), values: (10,1,1,40,50)
   # select from values for each True element in mask else select from target
   return mask.where(values, target)
 
@@ -1143,8 +1131,7 @@ class Tensor(MathTrait):
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
   # ***** movement high level ops *****
-
-  def _parse_indices(self, indices) -> list[dict]:
+  def _parse_indices(self, indices) -> list[dict[str, sint|Tensor|UOp|None]]:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     indices = list(indices)
@@ -1154,13 +1141,11 @@ class Tensor(MathTrait):
     # NOTE: None adds a dim later
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
-    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices) # --- What if t[0, None] for 5d tensor? -> [0, None, :, :, :, :]
+    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
-    # --- Until here, I read
 
     indices_parsed, dim = [], 0
     for index in indices:
-      # --- None is assumed to be last? Maybe not
       size = 1 if index is None else self.shape[dim]
       boundary, stride = [0, size], 1  # defaults
       match index:
@@ -1198,19 +1183,12 @@ class Tensor(MathTrait):
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     x = self
-    # --- [{index:..., size:..., boundary:..., stride:...}]
-    print(f"{indices=}")
     indices_parsed = self._parse_indices(indices)
-    print(f"{indices_parsed=}")
 
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
-      # --- shrinks = (i['boundary'] for i in mops)
-      # --- strides = (i['stride'] for i in mops)
       shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
-      # --- shrink shrinks the dims that are indexed by int/slice/tensor
-      # --- flip makes the dims in reverse order if stride is negative, so that we can use positive stride only
       x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
       strides = tuple(map(abs, strides))
       # apply stride
@@ -1222,131 +1200,39 @@ class Tensor(MathTrait):
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    # --- if index is integer, it extracts a single element and removes that dim, so we can filter out those dims
-    # --- but why we only filter out sint only?
-    # --- x.shape : case 1 (10,20,30)
-    print(f"Before reshape {x.shape=}")
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
-    print(f"After reshape {x.shape=}")
 
     # tensor indexing
-    # --- Q. What's the usage of tensor indexing?
-    # --- A. samples = Tensor.randint(1000, size=(100,)); batch = X_train[samples];
-    # --- sint is symbolic int. What happens if index is sint?
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
       pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
-      print("Tensor indexing")
-      print(f"{x.shape=}, {dims=}, {big_shape=}, {pre_reduce_shape=}")
-      # --- By reading numpy indexing document, I understood the rule above
-      # --- https://numpy.org/devdocs//user/basics.indexing.html#combining-advanced-and-basic-indexing
 
       # create index masks
-      # --- e.g. x.shape: (10, 20, 30, 40, 50), idx1: (2,1,4), idx2: (3,1) -> big_shape: (2,3,4)
-      # ---      case 1, x[:, idx1, idx2]  -> (10,2,3,4,40,50)
-      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
-      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
-      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
-      # ---              mask               = (10,2,3,4,20,30,40,50)
-      # ---      case 2, x[:, idx1, :, idx2]  -> (2,3,4,10,30,50)
-      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
-      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
-      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
-      # ---              mask               = (10,2,3,4,20,30,40,50)
-      # ---              sumed              = (10,2,3,4,30,50)
-      # ---              permute(1,2,3,0,4) = (2,3,4,10,30,50)
       for dim, tensor in zip(dims, tensors):
         try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
-        print(f"{dim=}, {tensor.shape=}, {i.shape=}")
-        print(f"{i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)).shape=}")
         masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
 
       # reduce masks to 1 mask
       mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
-      print(f"mask: {mask.shape=}, {mask.sum().item()=}, {mask.dtype=}")
 
       # inject 1's for the extra dims added in create masks
-      # --- reshape_arg : (10,1,1,1,20,30,40,50)
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
       # sum reduce the extra dims introduced in create masks
-      # --- Why sum is OK? Because mask is one-hot, so only one value is kept, others are zeroed out
-      # --- case 1       maked_x (10,2,3,4,*20,*30,40,50)
-      # ---              sum_axis = (1+3, 2+3) = (4, 5)
-      # ---              sumed    = (10,2,3,4,40,50)
-      # --- case 2       maked_x (10,2,3,4,*20,30,*40,50)
-      # ---              sum_axis = (1+3, 3+3) = (4, 6)
-      # ---              sumed    = (10,2,3,4,30,50)
       x = (mask.where(x.reshape(reshape_arg), 0)).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
 
       # special permute case
-      # --- case 2       dims = [1,3], range(1, 1+3) = (1,2,3)
-      # ---              permute(*(range(1,4)), *range(0,1), *range(4,5))
-      # ---              permute(1,2,3,0,4) -> (2,3,4,10,30,50)
       if dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1)):
         x = x.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), x.ndim))
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
-        print(f"for Advanced setitem: {x.shape=}, {self.shape=}, {mask.shape=}, {sum_axis=}, {dims=}, {big_shape=}")
-        # --- What if v and x are broadcasted to even bigger shape?
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
         # add back reduced dims from sum
-        # --- This does not consider the special permute case above?
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
-        # --- case 1        self: (10,20,30,40,50), x: (10,2,3,4,40,50)
-        # ---                 vb: (10,2,3,4,40,50)
-        # ---      vb.unsqueezed: (10,2,3,4, 1, 1,40,50)
-        # ---               mask: (10,2,3,4,20,30,40,50)
-        # ---  (last arg)   axes = (1,2,3)
         x = _masked_setitem(self, vb, mask, tuple(range(dims[0], dims[0] + len(big_shape))))
-    else:
-        """
-    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
-      # unload the tensor object into actual tensors
-      dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
-      pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
-      print(f"{x.shape=}, {dims=}, {big_shape=}, {pre_reduce_shape=}")
-      # --- By reading numpy indexing document, I understood the rule above
-      # --- https://numpy.org/devdocs//user/basics.indexing.html#combining-advanced-and-basic-indexing
-
-      # create index masks
-      # --- e.g. x.shape: (10, 20, 30, 40, 50), idx1: (2,1,4), idx2: (3,1) -> big_shape: (2,3,4)
-      # ---      case 1, x[:, idx1, idx2]  -> (10,2,3,4,40,50)
-      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
-      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
-      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
-      # ---              mask               = (10,2,3,4,20,30,40,50)
-      # ---      case 2, x[:, idx1, :, idx2]  -> (2,3,4,10,30,50)
-      # ---              pre_reduce_shape   = (10,2,3,4,20,30,40,50)
-      # ---              idx1.reshape(...)  =    (2,1,4, 1, 1, 1, 1)
-      # ---              idx2.reshape(...)  =      (3,1, 1, 1, 1, 1)
-      # ---              mask               = (10,2,3,4,20,30,40,50)
-      # ---              sumed              = (10,2,3,4,30,50)
-      # ---              permute(1,2,3,0,4) = (2,3,4,10,30,50)
-      for dim, tensor in zip(dims, tensors):
-        try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
-        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
-        masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
-
-      # reduce masks to 1 mask
-      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
-
-      # --- e.g. x.shape: (10, 20, 30, 40, 50), slice1(None), idx1: 0, slice2(2, 4, 1)
-      # ---      case 3, x[:, 0, 2:4]
-      #                  x     : (10, 2, 40, 50)
-      # ---              slice1: basically no mask
-      # ---              idx1  : mask with shape (1,) -> (1, (1,1,1)) -> (10, 20, 30, 40, 50)
-      # ---              slice2: mask with shape (2,) -> 
-        """
-        print(f"----no tensor indexing----")
-        print(f"{x.shape=}, {self.shape=}")
-        if v is not None:
-            print(f"{x.shape=}, {self.shape=}, no tensor indexing")
-            #vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
-            #x = _masked_setitem(self, vb, Tensor.ones_like(x, dtype=dtypes.bool), ())
 
     return x
 
@@ -1390,19 +1276,6 @@ class Tensor(MathTrait):
     """
     return self._getitem(indices)
 
-  def _mask_for_setitem(self, indices) -> Tensor:
-    """
-    e.g.
-        case1. res = x[:, idx1, :, idx2]
-
-        x      : (10,20,30,40,50)
-        idx1   : int(2)
-        idx2   : slice(3, 10, 2) = [3,5,7,9]
-        res    : (10,1,30,4,50)
-        mask1  : (1,20,1,1,1) -> (10,20,30,40,50)
-        mask2  : (1,1,1,40,1) -> (10,20,30,40,50)
-
-    """
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
@@ -1413,116 +1286,116 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    # --- Why do we need realize() before _getitem?
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    if all(isinstance(i, (int, sint, slice)) for i in indices if i is not None):
-        res = Tensor._setitem(self, indices, v)
-        self.assign(res)
+    indices = list(indices)
+    if all(isinstance(i, (int, sint, slice)) or i is Ellipsis for i in indices if i is not None):
+        # New setitem that supports slices and int only
+      res = self.setitem(indices, v)
+      self.assign(res)
     else:
-        res = self.realize()._getitem(indices, v)
-        #res = self._getitem(indices, v)
-        # if shapes match and data is not shared it's a copy and we assign to self
-        if res.shape == self.shape and res.uop is not self.uop:
-          print(f"setitem is a full copy, assigning to self")
-          # --- I think this realize() is not needed
-          # self.assign(res)
-          self.assign(res)
-        else: # no copy, basic setitem
-          print(f"setitem is a partial copy, assigning to result of getitem")
-          print(f"{self.shape=}, {res.shape=}, {v.shape=}")
-          v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-          #print(f"{v.shape=}, {v.uop=}")
-          res.assign(v)
+      # Legacy advanced indexing setitem that supports Tensor indices
+      res = self.realize()._getitem(indices, v)
+      # if shapes match and data is not shared it's a copy and we assign to self
+      if res.shape == self.shape and res.uop is not self.uop:
+        self.assign(res).realize()
+      else: # no copy, basic setitem
+        v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+        res.assign(v).realize()
 
-  @staticmethod
-  def gen_mask(shape: tuple[int,...], indices):
-      masks = []
-      ndim = len(shape)
-      for dim,(dim_size, idx) in enumerate(zip(shape, indices)):
-          if isinstance(idx, int):
-              # e.g. dim=1, idx=3, shape=(10,20,30,40,50)
-              #              () -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
-              mask = Tensor(idx).one_hot(dim_size).reshape((1,)*dim + (dim_size,) + (1,)*(ndim-dim-1)).expand(shape)
-          elif isinstance(idx, slice):
-              # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
-              #              () -> (4,) -> (4,20) -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
-              # TODO: handle negative start/stop/step
-              # TODO: handle None start/stop/step
-              start = idx.start or 0
-              stop = idx.stop or dim_size
-              step = idx.step or 1
-              mask = Tensor.arange(start, stop, step).one_hot(dim_size).sum(0).reshape((1,)*dim + (dim_size,) + (1,)*(ndim-dim-1)).expand(shape)
-          elif idx is None:
-              continue
-          else:
-              raise IndexError(f"Indexing with {type(idx)} not supported")
-          masks.append(mask)
-      return functools.reduce(lambda x,y: x.mul(y), masks)
-  
+  def gen_mask(self, indices):
+    masks = []
+    dim = 0
+    for idx in indices:
+      if isinstance(idx, int):
+        # e.g. dim=1, idx=3, shape=(10,20,30,40,50)
+        #              () -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
+        dim_size = self.shape[dim]
+        mask = Tensor(idx)._one_hot_along_dim(dim_size).reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1)).expand(self.shape)
+      elif isinstance(idx, slice):
+        # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
+        #              () -> (4,) -> (4,20) -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
+        # TODO: Negative start/stop/step, but mask should be correct
+        # Negative start/stop is handled by slice.indices, but negative step could be tricky
+        dim_size = self.shape[dim]
+        start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
+        mask = Tensor.arange(start, stop, step).unsqueeze(-1)._one_hot_along_dim(dim_size).sum(0)
+        mask = mask.reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1)).expand(self.shape)
+      elif idx is None:
+        continue
+      else:
+        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
+      masks.append(mask)
+      dim += 1
+    return functools.reduce(lambda x,y: x.mul(y), masks)
+
   """
   e.g.
   x : (10,20,30,40,50)
   v : (10, 1, 30, 4, 50) or broadcastable to this shape
   x[:, 3, ..., 1:12:3] = v
   """
-  @staticmethod
-  def gen_index_shape(shape: tuple[int,...], indices):
-      masks = []
-      ndim = len(shape)
-      indices = list(indices) + [None]*(ndim - len(indices))
-      res_shape = []
-      for (dim_size, idx) in zip(shape, indices):
-          if isinstance(idx, int):
-              res_shape.append(1)
-          elif isinstance(idx, slice):
-              start = idx.start or 0
-              stop = idx.stop or dim_size
-              step = idx.step or 1
-              res_shape.append((stop - start + step - 1) // step)
-          elif idx is None:
-              res_shape.append(dim_size)
-          else:
-              raise NotImplementedError(f"Indexing with {type(idx)} not supported")
-      return tuple(res_shape)
-  
-  @staticmethod
-  def pad_values(v: Tensor, shape: tuple[int,...], indices):
-      vshape = Tensor.gen_index_shape(shape, indices)
-      print(f"{vshape=}")
-      ndim = len(shape)
-      # e.g.
-      # v.shape = (1, 1, 4, 1) -> (10, 1, 30, 4, 50)
-      vb = v._broadcast_to(vshape)
-      padding = []
-      for dim,(dim_size, idx) in enumerate(zip(shape, indices)):
-          print(f"dim={dim}, idx={idx}, dim_size={dim_size}")
-          if isinstance(idx, int):
-              pass
-          elif isinstance(idx, slice):
-              start = idx.start or 0
-              stop = idx.stop or dim_size
-              step = idx.step or 1
-              if step > 1:
-                  # (10,1,30,4,50) -> (10,1,30,12,50) -> (10,1,30,(1+12+17),50)
-                  vb = vb.repeat_interleave(step, dim=dim)
-                  # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
-              # pads = (None, None, (1, 17), 0, None)
-              pad = (start, dim_size - (start + vshape[dim]*step ))
-              pads = (None,) * dim + (pad, ) + (None,) * (ndim - dim - 1)
-              print(f"{pads=}")
-              vb = vb.pad(pads)
-          elif idx is None:
-              pass
-          else:
-              raise NotImplementedError(f"Indexing with {type(idx)} not supported")
-      return vb
-  
-  @staticmethod
-  def _setitem(x: Tensor, indices, v: Tensor):
-      shape = x.shape
-      mask = Tensor.gen_mask(shape, indices)
-      vb = Tensor.pad_values(v, shape, indices)
-      return mask.where(vb, x)
+  def gen_index_shape(self, indices):
+    indices = list(indices) + [slice(None)]*(self.ndim - len([i for i in indices if i is not None]))
+    res_shape = []
+    dim = 0
+    for idx in indices:
+      if isinstance(idx, int):
+        res_shape.append(1)
+      elif isinstance(idx, slice):
+        dim_size = self.shape[dim]
+        start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
+        size = (abs(stop - start) + abs(step) - 1) // abs(step)
+        res_shape.append(size)
+      elif idx is None:
+        res_shape.append(1)
+      else:
+        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
+      if idx is not None: dim += 1
+    return tuple(res_shape)
+
+  def pad_values(self, v: Tensor, indices):
+    vshape = self.gen_index_shape(indices)
+    # e.g.
+    # v.shape = (1, 1, 4, 1) -> (10, 1, 30, 4, 50)
+    vb = v._broadcast_to(vshape)
+    dim = 0
+    for idx in indices:
+      if isinstance(idx, int):
+        pass
+      elif isinstance(idx, slice):
+        dim_size = self.shape[dim]
+        start, _, step = idx.indices(cast(SupportsIndex, dim_size))
+        if step < 0:
+          vb = vb.flip(dim)
+        if abs(step) > 1:
+          # (10,1,30,4,50) -> (10,1,30,12,50) -> (10,1,30,(1+12+17),50)
+          vb = vb.repeat_interleave(abs(step), dim=dim)
+          # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
+        # pads = (None, None, (1, 17), 0, None)
+        if step > 0:
+          pad = (start, dim_size - (start + vshape[dim]*step ))
+        else:
+          right_pad = dim_size - start - 1
+          left_pad = dim_size - vb.shape[dim] - right_pad
+          pad = (left_pad, right_pad)
+        pads = (None,) * dim + (pad, ) + (None,) * (vb.ndim - dim - 1)
+        vb = vb.pad(pads)
+      elif idx is None:
+        vb = vb.squeeze(dim)
+      else:
+        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
+      if idx is not None: dim += 1
+    return vb
+
+  def setitem(self: Tensor, indices, v: Tensor):
+    if Ellipsis in indices:
+      ellipsis_pos = indices.index(Ellipsis)
+      num_specified = len([i for i in indices if i is not Ellipsis and i is not None])
+      num_ellipsis_dims = self.ndim - num_specified
+      indices = list(indices[:ellipsis_pos]) + [slice(None)]*num_ellipsis_dims + list(indices[ellipsis_pos+1:])
+    mask = self.gen_mask(indices)
+    vb = self.pad_values(v, indices)
+    return mask.where(vb, self)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
