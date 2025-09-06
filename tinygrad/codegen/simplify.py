@@ -14,7 +14,7 @@ pm_flatten_range = PatternMatcher([
 ])
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
-def simplify_merge_adjacent(u:UOp) -> UOp|None:
+def simplify_merge_adjacent(ctx:UOp, u:UOp) -> UOp|None:
   i = 2 if u.op is Ops.STORE else 1
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
