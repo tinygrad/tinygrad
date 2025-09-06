@@ -236,8 +236,6 @@ async function renderProfiler() {
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
-      const height = heightScale(peak);
-      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
       const timestamps = [];
@@ -268,6 +266,8 @@ async function renderProfiler() {
         v.y.push(v.y.at(-1));
       }
       timestamps.push(dur);
+      const height = heightScale(peak);
+      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
@@ -301,7 +301,6 @@ async function renderProfiler() {
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     xscale.domain(visibleX);
-    const yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
     // draw shapes
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
@@ -319,7 +318,7 @@ async function renderProfiler() {
           p.closePath();
           ctx.fill(p);
           // NOTE: y coordinates are in reverse order
-          for (let i = 0; i < x.length - 1; i++) {
+          for (let i = 0; i<x.length-1; i++) {
             rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
           }
           continue;
@@ -357,8 +356,9 @@ async function renderProfiler() {
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
-    if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
+    if (data.axes.y != null) {
+      drawLine(ctx, [0, 0], data.axes.y.range);
+      const yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
