@@ -147,10 +147,8 @@ class View:
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # simplify as we go
-    if isinstance(offset, UOp): offset = cast(sint, offset.cast(dtypes.index).ssimplify())
-    shape = tuple(cast(sint, x.cast(dtypes.index).ssimplify()) if isinstance(x, UOp) else x for x in shape)
-    strides = tuple(cast(sint, x.cast(dtypes.index)) if isinstance(x, UOp) else x for x in strides)
-    if mask: mask = tuple((s.cast(dtypes.index) if isinstance(s, UOp) else s, e.cast(dtypes.index) if isinstance(e, UOp) else e) for s,e in mask)
+    if isinstance(offset, UOp): offset = cast(sint, offset.ssimplify())
+    shape = tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in shape)
     # TODO: enabling stride simplification breaks symbolic jit
     """
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
