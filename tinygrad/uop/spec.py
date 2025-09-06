@@ -5,6 +5,8 @@ from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
+  # older versions of z3 dont have some operators like & overloaded
+  if z3.get_version() < (4, 12, 4, 0): raise ImportError
 
   # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
@@ -127,7 +129,7 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
 
-  if not z3_imported: raise ImportError("z3 is required for bounds checking, try IGNORE_OOB=0 or \"pip install z3-solver\"")
+  if not z3_imported: raise ImportError("z3 >= 4.12.4 is required for bounds checking, try IGNORE_OOB=0 or \"pip install 'z3-solver>=4.12.4\"")
   solver = z3.Solver(ctx=z3.Context())
   z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
   solver.add(z3_mask)
