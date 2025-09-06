@@ -272,8 +272,6 @@ gep_pushing = PatternMatcher([
 ])
 
 cast_folding = PatternMatcher([
-  # (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.ints), UPat.var("y", dtypes.ints)), name="b").cast(dtypes.index),
-  #   lambda b,x,y: x.cast(dtypes.index).alu(b.op, y.cast(dtypes.index))),
   (UPat.var('x', dtypes.ints+(dtypes.index,)).cast(dtypes.ints+(dtypes.index,), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # try to do math in int instead of long
