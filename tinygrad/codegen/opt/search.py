@@ -1,7 +1,7 @@
 from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import Variable, sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
@@ -34,7 +34,7 @@ def get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, input_size / prod(test_global_size)
 
-def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:float|None=None,
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
   if allow_test_size and p.global_size is not None and max_global_size is not None:
@@ -141,7 +141,7 @@ def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=Tr
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:

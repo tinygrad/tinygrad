@@ -37,7 +37,7 @@ def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
 def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: UOp|int, var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -486,7 +486,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
     return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
-  def expr(self):
+  def expr(self) -> str:
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
   def bind(self, val:int|UOp):
@@ -584,9 +584,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
-  def sym_infer(self, var_vals:dict[UOp, int]):
+  def sym_infer(self, var_vals:dict[str, int]):
     fxn, varnames = self._sym_fxn
-    return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
+    return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     with Context(TRACK_MATCH_STATS=0):
