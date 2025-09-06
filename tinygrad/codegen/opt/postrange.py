@@ -62,7 +62,7 @@ class Scheduler:
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
-  def _globalizable_rngs(self) -> list[Uop]:
+  def _globalizable_rngs(self) -> list[UOp]:
     store_rngs = self.ast.src[0].src[2:]
 
     # filter any not in local stores
