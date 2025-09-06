@@ -38,19 +38,17 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=No
     return graph_rewrite(UOp.sink(idx, valid), symbolic_flat+pm_upcast, name="indexing sym @ 2").src
 
 @functools.cache
-def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:
-  # NOTE: if a stride is not always valid, it will be None
+def views_to_real_strides(views: tuple[View, ...]) -> tuple[sint|None, ...]:
+  # strides does not consider valid
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[sint|None] = [None] * len(views[-1].shape)
-  idx, valid = views_to_indexed_uops(views)
+  idx, _ = views_to_indexed_uops(views)
   for c in idx.split_uop(Ops.ADD):
     if c.op is Ops.RANGE: ret[c.arg[0]] = 1
     if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
     if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
   used_ranges = [x.arg[0] for x in idx.toposort() if x.op is Ops.RANGE]
   ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
-  if not ignore_valid:
-    for masked_axis in [x.arg[0] for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
   return tuple(ret)
 
 @dataclass(frozen=True, order=True)
@@ -105,9 +103,9 @@ class ShapeTracker:
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
   def substitute(self, dvars:dict[UOp, UOp]): return ShapeTracker(tuple(x.substitute(dvars) for x in self.views))
 
-  def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
-    with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
-  def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
+  def real_strides(self) -> tuple[sint|None, ...]:
+    with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views)
+  def unit_stride_axes(self) -> list[int]: return [i for i,st in enumerate(self.real_strides()) if st == 1]
 
   def axis_is_masked(self, axis:int) -> bool:
     with Context(TRACK_MATCH_STATS=0):

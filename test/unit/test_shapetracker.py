@@ -118,7 +118,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((2048,), (1,), 0, ((0, 512),)),
       View.create((16, 32, 4), (128, 4, 1), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (None, 4, 1))
+    self.assertEqual(st.real_strides(), (128, 4, 1))
 
   def test_2(self):
     # test/test_ops.py::TestOps::test_simple_padding_conv1d
@@ -154,7 +154,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
       View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (132, None, None, None, None))
+    self.assertEqual(st.real_strides(), (132, 12, None, 0, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):

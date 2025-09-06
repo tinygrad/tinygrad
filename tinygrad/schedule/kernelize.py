@@ -35,7 +35,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
-  real_strides = unwrap(x.st).real_strides(ignore_valid=True)
+  real_strides = unwrap(x.st).real_strides()
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and real_strides[i]!=0]): return None
   dim_to_split, divisor = split_candidates[0]
