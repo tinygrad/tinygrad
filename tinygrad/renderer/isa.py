@@ -180,7 +180,7 @@ def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:d
 mask_matcher = PatternMatcher([
   # TODO: shouldn't be here
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
    tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
@@ -308,6 +308,7 @@ x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding
   # TODO: use shuffle for these casts instead of devectorizing
   (UPat(dtype=dtypes.ints32+(dtypes.mask32,)).cast(dtypes.ints8+dtypes.ints16+(dtypes.mask8,dtypes.mask16), name="alu"), no_vectorized_alu),
   (UPat(dtype=dtypes.ints16+(dtypes.mask16,)).cast(dtypes.ints8+(dtypes.mask8,), name="alu"), no_vectorized_alu),
+  (UPat(Ops.SHR, dtypes.int64, name="alu"), no_vectorized_alu),
   (UPat(Ops.MUL, dtypes.ints64, name="alu"), no_vectorized_alu),
   (UPat(Ops.IDIV, name="alu"), no_vectorized_alu),
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN), name="alu"), split_vectorized_alu),
@@ -352,7 +353,7 @@ x86_matcher = base_matcher + PatternMatcher([
    lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
   # a gep in a 32bit vectorize is a noop and its arg is part of the imm of the instruction
-  (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, name="x"),
+  (UPat(Ops.VECTORIZE, (dtypes.float32, dtypes.mask32)+dtypes.ints32, name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
   # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
   (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
@@ -363,14 +364,14 @@ x86_matcher = base_matcher + PatternMatcher([
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU | {Ops.VECTORIZE}, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
    tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
 ]) + mask_matcher
 
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
-def shuf_imm(x:UOp) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(x.src))
+def shuf_imm(src:tuple[UOp, ...]) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(src))
 def disp(c:UOp, a:UOp): return Immediate(c.arg * a.dtype.base.scalar().itemsize, 4)
 
 #https://www.felixcloutier.com/x86/
@@ -460,11 +461,16 @@ x86_vec_lowerer = PatternMatcher([
   (UPat(Ops.VECTORIZE, dtypes.ints16, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrw", 0xC4, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 1) for i,s in enumerate(x.src)]), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints32, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrd", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3) for i,s in enumerate(x.src)] if not (isinstance(x.src[0].arg, tuple) and x.src[0].op in (Ops.NOOP, Ops.GEP)) else None), # noqa: E501
   (UPat(Ops.VECTORIZE, dtypes.ints64, name="x"), lambda ctx,x: [MUOpX86.V_V_RM_I("vpinsrq", 0x22, ctx[x], ctx[x], ctx[s], Immediate(i, 1), 1, 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.float64, name="x"), lambda ctx,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[1]], Immediate(shuf_imm(x), 1), 1, 1)), # noqa: E501
+  (UPat(Ops.VECTORIZE, dtypes.float64, name="x"), lambda ctx,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[1]], Immediate(shuf_imm(x.src), 1), 1, 1)), # noqa: E501
+  # TODO: float16 is a headache. might need temporary register to insert elements individually. can't use vpextrw/vpinsrw cause its in a gpr
+  #(UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda ctx,x:
+  # [MUOpX86.V_VM_I("vshuflw", 0x70, ctx[x], ctx[x.src[0]], Immediate(shuf_imm(x.src[:4]), 1), 3, 1)] + \
+  #([MUOpX86.V_VM_I("vshufhw", 0x70, ctx[x], ctx[x.src[4]], Immediate(shuf_imm(x.src[4:]), 1), 2, 1)] if len(x.src) > 4 else []) if all(s.src == x.src[0].src for s in x.src) else \
+  # [MUOpX86.V_VM_I("vshuflw", 0x70, ctx[x], ctx[s], Immediate((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i), 1), 3, 1) for i,s in enumerate(x.src)]), # noqa: E501
   # 32bit shuffles, if all elements share same src it's a single instruction otherwise they are inserted individually
   (UPat(Ops.VECTORIZE, (dtypes.float32,)+(dtypes.mask32,)+dtypes.ints32, (UPat.var(name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
-   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
-   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[2]], Immediate(shuf_imm(x), 1), 0, 1) if len(x.src) == 4 and x.src[0].src == x.src[1].src and x.src[2].src == x.src[3].src else \
+   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[y], ctx[y], Immediate(shuf_imm(x.src), 1), 0, 1) if all(s.src == y.src for s in x.src) else \
+   MUOpX86.V_V_VM_I("vshufps", 0xC6, ctx[x], ctx[x.src[0]], ctx[x.src[2]], Immediate(shuf_imm(x.src), 1), 0, 1) if len(x.src) == 4 and x.src[0].src == x.src[1].src and x.src[2].src == x.src[3].src else \
    [MUOpX86.V_V_VM_I("vinsertps", 0x21, ctx[x], ctx[x], ctx[s], Immediate(gep_imm(s.arg[0] if s.op is Ops.NOOP and isinstance(s.arg, tuple) else 0,i), 1), 1, 3) for i,s in enumerate(x.src)]), # noqa: E501
 ])
 
