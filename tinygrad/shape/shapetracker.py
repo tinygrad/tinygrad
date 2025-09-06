@@ -20,7 +20,7 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=No
     # simplify
     if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
     if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
-    # symbolic again, upcast if needed
+    # symbolic again
     return graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 2").src
 
 @functools.cache
