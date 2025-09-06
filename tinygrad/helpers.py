@@ -142,6 +142,7 @@ CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), Co
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0), ContextVar("AMD_LLVM", 1)
 RANGEIFY, FUSE_ATTENTION = ContextVar("RANGEIFY", 0), ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // 4))
 
 @dataclass(frozen=True)
 class Metadata:
