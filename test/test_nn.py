@@ -447,7 +447,7 @@ class TestNN(unittest.TestCase):
   def test_embedding_one_kernel_fused(self):
     with Context(FUSE_ARANGE=1, NOOPT=0):
       self.test_embedding_one_kernel(ops=612_000, kcount=2)
-  
+
   @unittest.skipIf(Device.DEFAULT == "X86", "loads can load consts on x86")
   def test_embedding_one_kernel_fused_noopt(self):
     with Context(FUSE_ARANGE=1, NOOPT=1):
