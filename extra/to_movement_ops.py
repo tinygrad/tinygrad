@@ -120,7 +120,7 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
     if i > 1000:
       print("WARNING: did not search all possible combinations")
       break
-    var_vals = {k:v for k,v in zip(vs, ranges)}
+    var_vals = {k.expr:v for k,v in zip(vs, ranges)}
     r1 = sym_infer(idx1, var_vals) if sym_infer(valid1, var_vals) else 0
     r2 = sym_infer(idx2, var_vals) if sym_infer(valid2, var_vals) else 0
     if r1 != r2: return False

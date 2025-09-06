@@ -142,7 +142,7 @@ class TestViz(BaseTestViz):
 
   def test_const_node_visibility(self):
     a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.int, 0)
+    z = UOp.const(dtypes.index, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()

@@ -142,6 +142,7 @@ CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), Co
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0), ContextVar("AMD_LLVM", 1)
 RANGEIFY, FUSE_ATTENTION = ContextVar("RANGEIFY", 0), ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // 4))
 
 @dataclass(frozen=True)
 class Metadata:
@@ -227,7 +228,7 @@ def profile_marker(name:str, color="gray") -> None:
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 23
+VERSION = 22
 _db_connection = None
 def db_connection():
   global _db_connection
