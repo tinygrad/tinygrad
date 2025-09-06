@@ -139,7 +139,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  BUFFER:["#36558F",],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -157,10 +157,19 @@ const rescaleTrack = (source, tid, k) => {
   return change;
 }
 
+const clmp = (p) => {
+  return Math.floor(p);
+}
+
+const cap = (p) => {
+  return Math.max(1, clmp(p));
+}
+
 const drawLine = (ctx, x, y, opts) => {
   ctx.beginPath();
-  ctx.moveTo(x[0], y[0]);
-  ctx.lineTo(x[1], y[1]);
+  const px = 0.5;
+  ctx.moveTo(clmp(x[0])+px, clmp(y[0])+px);
+  ctx.lineTo(clmp(x[1])+px, clmp(y[1])+px);
   ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
   ctx.stroke();
 }
@@ -184,8 +193,8 @@ async function renderProfiler() {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
+  const tickSize = 10;
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*2+"px").style("border-right", "1px solid #4a4b56");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -193,19 +202,19 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
-  data = {tracks:new Map(), axes:{}};
+  data = {tracks:new Map(), axes:{x:[0, dur], y:null}};
   const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("border-top-width", "1px");
     const { y:baseY, height:baseHeight } = rect(div.node());
-    const offsetY = baseY-canvasTop+padding/2;
+    const offsetY = baseY-canvasTop;
     const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
-      const levelHeight = baseHeight-padding;
+      const levelHeight = baseHeight;
       const levels = [];
       data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
@@ -220,7 +229,7 @@ async function renderProfiler() {
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size));
-        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
+        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth*0.8).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
         else if (ref != null) {
@@ -233,7 +242,7 @@ async function renderProfiler() {
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
-      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
+      div.style("height", levelHeight*levels.length+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
       const height = heightScale(peak);
@@ -274,7 +283,7 @@ async function renderProfiler() {
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
-      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+      div.style("height", height+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
@@ -302,22 +311,22 @@ async function renderProfiler() {
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     xscale.domain(visibleX);
     const yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
-    // draw shapes
+    // rescale / merge shapes
+    const draw = [];
     for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
         if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
         else { start = e.x; end = e.x+e.width; }
         if (start>visibleX[1] || end<visibleX[0]) continue;
-        ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
+          const y0 = [], y1 = [];
+          for (let i=0; i<x.length; i++) {
+            y0.push(offsetY+e.y0[i]);
+            y1.push(offsetY+e.y1[i]);
+          }
+          draw.push({ x, y0, y1, fillColor:e.fillColor });
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i < x.length - 1; i++) {
             let tooltipText = e.arg.tooltipText;
@@ -329,26 +338,41 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        const x = xscale(start);
+        const x = xscale(start), y = offsetY+e.y;
         const width = xscale(end)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        draw.push({ x, y, width, height:e.height, fillColor:e.fillColor });
+        rectLst.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
         let [labelX, labelWidth] = [x+2, 0];
         const labelY = offsetY+e.y+e.height/2;
         for (const [i,l] of e.label.entries()) {
           if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-            if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
+            if (labelWidth !== 0) draw.push({ text:"...", x:labelX, y:labelY });
             break;
           }
-          ctx.fillStyle = l.color;
-          ctx.fillText(l.st, labelX, labelY);
+          draw.push({ text:l.st, x:labelX, y:labelY, fillColor:l.color });
           labelWidth += l.width;
           labelX += l.width;
         }
+      }
+    }
+    // draw shapes
+    for (const d of draw) {
+      ctx.fillStyle = d.fillColor;
+      if (d.text != null) {
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(d.text, clmp(d.x), clmp(d.y));
+      } else if (d.width != null) {
+        ctx.fillRect(clmp(d.x), clmp(d.y), cap(d.width), d.height);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(clmp(d.x[0]), clmp(d.y0[0]));
+        for (let i=1; i<d.x.length; i++) ctx.lineTo(clmp(d.x[i]), clmp(d.y0[i]));
+        for (let i=d.x.length-1; i>=0; i--) ctx.lineTo(clmp(d.x[i]), clmp(d.y1[i]));
+        ctx.closePath();
+        ctx.fill();
       }
     }
     // draw axes
@@ -356,33 +380,33 @@ async function renderProfiler() {
     for (const tick of xscale.ticks()) {
       // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize])
+      if (x !== 0) drawLine(ctx, [x, x], [0, tickSize*2])
       // tick label
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(formatTime(tick, dur), clmp(x+ctx.lineWidth+2), tickSize);
     }
     if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
         ctx.textBaseline = "middle";
-        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
+        ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize, clmp(y));
       }
     }
     // draw markers
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
-      ctx.fillText(m.name, x+2, 1);
+      ctx.fillText(m.name, clmp(x+2), 1);
     }
+    // draw gridlines
+    for (const [_, { offsetY }] of data.tracks) drawLine(ctx, xscale.range(), [offsetY, offsetY], { color:"#4a4b56" });
   }
 
   function resize() {
     const profiler = document.querySelector(".profiler");
     const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
-    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
+    const width = profiler.clientWidth-(sideRect.width), height = profiler.scrollHeight;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -567,7 +591,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
