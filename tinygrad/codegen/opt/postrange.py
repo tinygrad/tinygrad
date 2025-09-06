@@ -152,8 +152,8 @@ class Scheduler:
       if opt.op is OptOps.THREAD:
         check(self.opts is not None and self.opts.has_threads, "target does not support threads")
         check(self.opts is not None and self.opts.global_max is not None and amt <= self.opts.global_max[0], "too many threads")
-        check(rng in self._globalizable_rngs(), "can't apply range to this dim")
         check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
+        check(rng in self._globalizable_rngs(), "can't apply range to this dim")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(not self.dont_use_locals, "can't use locals")
