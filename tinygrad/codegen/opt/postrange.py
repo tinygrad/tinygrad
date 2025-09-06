@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from collections import defaultdict
-from typing import cast, Final, Sequence
+from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
@@ -45,8 +45,10 @@ class Scheduler:
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
   def copy(self):
-    # TODO: this is spamming the many ns on the names
-    return Scheduler(self.get_optimized_ast(), self.opts)
+    ret = Scheduler(self.ast, self.opts)
+    ret.dont_use_locals = self.dont_use_locals
+    ret.applied_opts = self.applied_opts[:]
+    return ret
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None):
@@ -105,10 +107,6 @@ class Scheduler:
       check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
     except IndexError as e: raise KernelOptError from e
-
-  def apply_opts(self, opts:Sequence[Opt]) -> Scheduler:
-    for opt in opts: self.apply_opt(opt)
-    return self
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     if opt.op is OptOps.NOLOCALS:
