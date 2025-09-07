@@ -711,7 +711,7 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-    uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
+    uops = full_rewrite(glbl.index(UOp.const(dtypes.int, 0)).store(expr).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))

@@ -8,7 +8,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 
 ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+  UOp(Ops.STORE, dtypes.half.ptr(), arg=None, src=(
     UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0, src=()),
     UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 1, 1280, 8, 8, 1, 1, 1), strides=(81920, 0, 64, 8, 1, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
     UOp(Ops.ADD, dtypes.half, arg=None, src=(

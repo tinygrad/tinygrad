@@ -47,7 +47,7 @@ class TestRendererFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, gate_alu), UOp.const(dtypes.int, 1)))
+    gated_alu_store = a.index(lidx0, gate_alu).store(UOp.const(dtypes.int, 1))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
@@ -58,7 +58,7 @@ class TestRendererFailures(unittest.TestCase):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0+lidx1*4, gate_alu_0&gate_alu_1), UOp.const(dtypes.int, 1)))
+    gated_alu_store = a.index(lidx0+lidx1*4, gate_alu_0&gate_alu_1).store(UOp.const(dtypes.int, 1))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
     ret = _test_uop_result([], uops, local_size=[4, 2, 1])[0]
@@ -104,7 +104,7 @@ class TestPTXFailures(unittest.TestCase):
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
+    gated_alu_store = a.index(lidx0, if_uop).store(val)
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]

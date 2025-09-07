@@ -31,14 +31,14 @@ class TestUOpSpec(unittest.TestCase):
     buf_2 = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 2)
     a = UOp(Ops.LOAD, dtype, (buf_1.view(ShapeTracker.from_shape((32, 1))),))
     b = UOp(Ops.LOAD, dtype, (buf_2.view(ShapeTracker.from_shape((32, 1))),))
-    store = UOp(Ops.STORE, dtypes.void, (buf_0.view(ShapeTracker.from_shape((32, 1))), a+b))
+    store = UOp(Ops.STORE, (bv0:=buf_0.view(ShapeTracker.from_shape((32, 1)))).dtype, (bv0, a+b))
     helper_test_verify_ast(store)
 
   def test_no_implicit_broadcasting(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1].view(ShapeTracker.from_shape((4, 32))),))
     b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.MAX, (1,)))
-    st = UOp(Ops.STORE, dtypes.void, (bufs[0].view(ShapeTracker.from_shape((4, 32))), b))
+    st = UOp(Ops.STORE, (bv0:=bufs[0].view(ShapeTracker.from_shape((4, 32)))).dtype, (bv0, b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_shrink_ok(self):

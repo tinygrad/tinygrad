@@ -37,7 +37,8 @@ def _test_single_value(vals, op, dts):
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -49,10 +50,11 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
-  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
+  buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(1), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -64,7 +66,8 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
+  idx = buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+  out = uop(uops, Ops.STORE, idx.dtype, (idx, res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -275,7 +278,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gate = gidx0<UOp.const(dtypes.int, 1)
     idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2), gate))
     val = UOp.const(dtypes.float, 42.0)
-    store = UOp(Ops.STORE, dtypes.void, (idx, val))
+    store = UOp(Ops.STORE, idx.dtype, (idx, val))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render(uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
@@ -331,7 +334,8 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
-    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    idx = smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+    st = uop(uops, Ops.STORE, idx.dtype, (idx, uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
@@ -341,9 +345,10 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_packed(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
-    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
+    idx = smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+    st = uop(uops, Ops.STORE, idx.dtype, (idx, uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.uint8, (idx, barr))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   # NOTE: webgpu specific, since only webgpu performs bitpacking
@@ -364,10 +369,12 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
-    st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
-    st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
+    idx1 = smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1))
+    idx2 = smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2))
+    st1 = uop(uops, Ops.STORE, idx1.dtype, (idx1, uop(uops, Ops.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, Ops.STORE, idx2.dtype, (idx2, uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
-    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), barr))
+    ofs = uop(uops, Ops.LOAD, dtypes.int32, (idx1, barr))
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
