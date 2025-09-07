@@ -43,7 +43,7 @@ class FileIOInterface:
     if x == 0xffffffffffffffff: raise OSError(f"Failed to mmap {sz} bytes at {hex(start)}: {os.strerror(ctypes.get_errno())}")
     return x
   @staticmethod
-  def anon_mmap(start, sz, prot, flags, offset): return FileIOInterface._do_mmap(start, sz, prot, flags, -1, offset)
+  def anon_mmap(start, sz, prot, flags, offset): return FileIOInterface.mmap(start, sz, prot, flags, -1, offset)
   @staticmethod
   def munmap(buf, sz): return libc.munmap(buf, sz)
   @staticmethod
