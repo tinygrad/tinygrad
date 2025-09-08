@@ -1,19 +1,14 @@
 from typing import cast
 import functools, math, time, multiprocessing, traceback, signal, atexit
-from collections import defaultdict
 from dataclasses import replace
-from tinygrad.uop.ops import UOp, Ops, Variable, sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
-from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
-
-# both versions
-from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.codegen.opt.postrange import Scheduler
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
@@ -27,6 +22,7 @@ actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0, getenv("TC", 1)))]
 # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2), getenv("TC", 1))) for axis in range(9)]
 actions += [Opt(op=OptOps.SWAP, axis=axis_0, arg=axis_1) for axis_0 in range(5) for axis_1 in range(axis_0+1, 5)]
+actions += [Opt(op=OptOps.THREAD, axis=axis, arg=amt) for amt in [2,3,4,5,8,12,16,24,32,64] for axis in range(3)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 def get_test_global_size(global_size, max_global_size, var_vals):
@@ -39,7 +35,7 @@ def get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, input_size / prod(test_global_size)
 
-def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[Variable, int], rawbufs:list[Buffer], early_stop:float|None=None,
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
   if allow_test_size and p.global_size is not None and max_global_size is not None:
@@ -63,7 +59,7 @@ def timeout_handler(signum, frame):
   if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
   raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:tuple[int,Kernel], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
+def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
@@ -96,26 +92,8 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 
 # *** external API ***
 
-# get (scrap) buffers for timing the linearizer
-# NOTE: there's also bufs_from_ast in postrange
-def bufs_from_lin(lin:Kernel, allocate:bool=True) -> list[Buffer]:
-  bufsts: defaultdict[int, list[UOp]] = defaultdict(list)
-  for x in lin.bufs:
-    if x.src[0].base.op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].base.arg].append(x)
-  # TODO: Nones are staying in here if buffers are optimized out!
-  # TODO: add a test for this
-  rawbufs: list[Buffer|None] = [None]*(max(bufsts)+1)
-  for k,lx in bufsts.items():
-    buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
-    assert isinstance(dtype, (PtrDType, ImageDType))
-    if buf_size == 0: buf_size = 1  # create a size 1 buffer if no cell is accessed in kernel. # TODO: remove from kernel input in this case.
-    buf_dtype = dtype if isinstance(dtype, ImageDType) else dtype.base
-    rawbufs[k] = Buffer(lin.opts.device, buf_size, buf_dtype).allocate() if allocate else Buffer(lin.opts.device, buf_size, buf_dtype)
-  #assert all(r is not None for r in rawbufs)
-  return cast(list[Buffer], rawbufs)
-
 # get dictionary of all possible actions
-def get_kernel_actions(lin:Kernel|Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Kernel|Scheduler]:
+def get_kernel_actions(lin:Scheduler, include_0=True, candidates:list[Opt]|None=None) -> dict[int, Scheduler]:
   acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256), getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = (actions if candidates is None else candidates).copy()
 
@@ -139,7 +117,7 @@ def get_kernel_actions(lin:Kernel|Scheduler, include_0=True, candidates:list[Opt
   return acted_lins
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
+def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device, "suffix": lin.opts.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
@@ -147,7 +125,7 @@ def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
-  beam: list[tuple[Kernel|Scheduler, float]] = [(lin, float("inf"))]
+  beam: list[tuple[Scheduler, float]] = [(lin, float("inf"))]
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
@@ -164,12 +142,12 @@ def beam_search(lin:Kernel|Scheduler, rawbufs:list[Buffer], amt:int, allow_test_
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[lin.opts.device]
     while not exiting:
-      acted_lins: list[Kernel|Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
-      timed_lins: list[tuple[Kernel|Scheduler, float]] = []
+      acted_lins: list[Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
+      timed_lins: list[tuple[Scheduler, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
