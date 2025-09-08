@@ -124,7 +124,7 @@ class View:
     return iexpr, vexpr
 
   def to_valid_uop(self, idxs:Sequence[UOp]|None=None):
-    if idxs is None: idxs = [UOp.range(dtypes.int, s, i) for i,s in enumerate(self.shape)]
+    if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     where = UOp.const(dtypes.bool, True)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
