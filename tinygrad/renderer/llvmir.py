@@ -72,11 +72,8 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("mask"))).or_casted("idx"), UPat.var("alt")), name="x"),
    lambda ctx,x,idx,alt,mask:
-   f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
-   f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
-   f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
+   f"  {ctx[x]}_ld = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
+   f"  {ctx[x]} = select {ldt(mask.dtype)} {ctx[mask]}, {ldt(x.dtype)} {ctx[x]}_ld, {ldt(alt.dtype)} {ctx[alt]}"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), allow_any_len=True, name="x"),
    lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
