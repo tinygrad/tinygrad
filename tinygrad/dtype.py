@@ -6,9 +6,9 @@ from tinygrad.helpers import getenv, prod
 from enum import Enum, auto
 
 class InvalidType:
-    def __eq__(self, other): return self is other
-    def __hash__(self): return id(self)
-    def __repr__(self): return "Invalid"
+  def __eq__(self, other): return self is other
+  def __hash__(self): return id(self)
+  def __repr__(self): return "Invalid"
 Invalid = InvalidType()
 
 ConstType = float|int|bool
