@@ -12,23 +12,16 @@ class Register:
   def __str__(self): return self.name if self.subnames.get(self.size) is None else self.subnames[self.size]
 
 @dataclass(frozen=True)
-class Immediate:
-  value: int
-  size: int
-
-  def __str__(self): return str(self.value)
-
-@dataclass(frozen=True)
 class Memory:
   size: int
   base: Register
   index: Register|None = None
   scale: int = 1
-  disp: Immediate = Immediate(0, 4)
+  disp: int = 0
 
   def __str__(self):
     si = f" + {self.index}*{self.scale}" if self.index is not None else ""
-    disp = f" + {self.disp}" if self.disp.value != 0 else ""
+    disp = f" + {self.disp}" if self.disp != 0 else ""
     return f"[{self.base}{si}{disp}]"
 
 @dataclass(frozen=True)
@@ -37,7 +30,7 @@ class Label:
 
   def __str__(self): return self.name
 
-Operand = Register|Memory|Immediate|Label
+Operand = Register|Memory|Label|int
 
 @dataclass(frozen=True)
 class MUOp:
@@ -70,10 +63,11 @@ class MUOp:
         continue
       if mu.ins and isinstance(v:=mu.ins[0], Label):
         if v in targets:
-          mu = mu.replace(mu.out, (Immediate(targets[v] - (len(binary) + 6), 4),))
+          imm = (targets[v] - (len(binary) + 6)).to_bytes(4, 'little', signed=True)
+          mu = mu.replace(mu.out, (imm,))
         else:
           fixups.append((v, len(binary) + 2))
-          mu = mu.replace(mu.out, (Immediate(0, 4),))
+          mu = mu.replace(mu.out, (int(0).to_bytes(4, 'little', signed=True),))
       binary.extend(mu.encode())
     # patch offsets for forward jumps
     for label,loc in fixups:
@@ -99,7 +93,7 @@ class MUOpX86(MUOp):
   prefix: int = 0
   w: int = 0
   # Immediate field
-  imm: Immediate|Register|Label|None = None
+  imm: bytes|Register|Label|None = None
   # registers
   RAX = Register("rax", 0, 8, {4:"eax", 2:"ax", 1:"al"})
   RCX = Register("rcx", 1, 8, {4:"ecx", 2:"cx", 1:"cl"})
@@ -133,20 +127,20 @@ class MUOpX86(MUOp):
     return MUOpX86(opstr, opcode, rm, (reg,), MUOpX86.GPR, (MUOpX86.GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
   def R_I(opstr:str, opcode:int, reg:Register, imm:int, sz:int|None=None):
-    imm = Immediate(imm, sz if sz is not None else min(reg.size, 4))
-    return MUOpX86(opstr, opcode, reg, (imm,), MUOpX86.GPR, ((),), reg, imm=imm, **MUOpX86.prefix_w(reg))
+    enc = imm.to_bytes(sz if sz is not None else min(reg.size, 4), 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, reg, (imm,), MUOpX86.GPR, ((),), reg, imm=enc, **MUOpX86.prefix_w(reg))
   @staticmethod
   def RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:int, sz:int|None=None):
-    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
-    return MUOpX86(opstr, opcode, rm, (imm,), MUOpX86.GPR, ((),), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    enc = imm.to_bytes(sz if sz is not None else min(rm.size, 4), 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, rm, (imm,), MUOpX86.GPR, ((),), reg, rm, imm=enc, **MUOpX86.prefix_w(rm))
   @staticmethod
   def _RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:int, sz:int|None=None):
-    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
-    return MUOpX86(opstr, opcode, None, (rm, imm), (), (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    enc = imm.to_bytes(sz if sz is not None else min(rm.size, 4), 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, None, (rm, imm), (), (MUOpX86.GPR, ()), reg, rm, imm=enc, **MUOpX86.prefix_w(rm))
   @staticmethod
   def R_RM_I(opstr:str, opcode:int, reg:Register, rm:Register, imm:int, sz:int|None=None):
-    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
-    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.GPR, (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
+    enc = imm.to_bytes(sz if sz is not None else min(rm.size, 4), 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.GPR, (MUOpX86.GPR, ()), reg, rm, imm=enc, **MUOpX86.prefix_w(rm))
   # VEX methods
   @staticmethod
   def V_M(opstr, opcode, reg, rm, pp, sel, w=0, l=0): return MUOpX86(opstr, opcode, reg, (rm,), MUOpX86.VEC, ((),), reg, rm, pp, sel, w, l)
@@ -173,27 +167,27 @@ class MUOpX86(MUOp):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR), reg, rm, pp, sel, w, l, vvvv)
   @staticmethod
   def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0):
-    imm = Immediate(imm, 1)
-    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    enc = imm.to_bytes(1, 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=enc)
   @staticmethod
   def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
-    imm = Immediate(imm, 1)
-    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    enc = imm.to_bytes(1, 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=enc)
   @staticmethod
   def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
-    imm = Immediate(imm, 1)
-    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.GPR, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
+    enc = imm.to_bytes(1, 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.GPR, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=enc)
   @staticmethod
   def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, MUOpX86.VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def V_V_RM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
-    imm = Immediate(imm, 1)
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+    enc = imm.to_bytes(1, 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=enc)
   @staticmethod
   def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
-    imm = Immediate(imm, 1)
-    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
+    enc = imm.to_bytes(1, 'little', signed=imm < 0)
+    return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=enc)
   @staticmethod
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
     rax, rdx = MUOpX86.RAX, MUOpX86.RDX
@@ -256,9 +250,9 @@ class MUOpX86(MUOp):
     if self.opstr == "": return b'' # fake MUOp
     # 64bit imm load has a unique encoding
     if self.opcode == 0xB8:
-      out, imm = cast(Register, self.out), cast(Immediate, self.imm)
+      out, imm = cast(Register, self.out), cast(bytes, self.imm)
       return ((0b0100 << 4) | (self.w << 3) | (0b00 << 2) | (int(out.index > 7) & 0b1)).to_bytes(1, 'big') + \
-        int(self.opcode + (out.index % 8)).to_bytes(1, 'big') + imm.value.to_bytes(imm.size, 'little', signed=imm.value < 0)
+        int(self.opcode + (out.index % 8)).to_bytes(1, 'big') + imm
     # extends reg field
     r = int(isinstance(self.reg, Register) and self.reg.index > 7)
     # extends reg for index
@@ -297,9 +291,9 @@ class MUOpX86(MUOp):
       # specifies operand types
       mod = 0b11
       # TODO: support 8 bit displacement
-      #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp.value == 0 else 0b01 if -128 <= self.rm.disp.value < 128 else 0b10
+      #if isinstance(self.rm, Memory): mod = 0b00 if self.rm.disp == 0 else 0b01 if -128 <= self.rm.disp < 128 else 0b10
       if isinstance(self.rm, Memory):
-        if self.rm.disp.value == 0: mod = 0b10 if self.rm.base.name == "r13" else 0b00
+        if self.rm.disp == 0: mod = 0b10 if self.rm.base.name == "r13" else 0b00
         else: mod = 0b10
       inst.append((mod << 6) | (reg << 3) | rm)
     # *** SIB byte ***
@@ -308,9 +302,9 @@ class MUOpX86(MUOp):
       scale = {1: 0b00, 2: 0b01, 4: 0b10, 8: 0b11}[self.rm.scale]
       inst.append((scale << 6) | (index << 3) | (self.rm.base.index & 0b111))
     # *** DISPLACEMENT bytes ***
-    if isinstance(self.rm, Memory) and (self.rm.disp.value or self.rm.base.name == "r13"):
-      inst.extend(self.rm.disp.value.to_bytes(self.rm.disp.size, 'little', signed=True))
+    if isinstance(self.rm, Memory) and (self.rm.disp or self.rm.base.name == "r13"):
+      inst.extend(self.rm.disp.to_bytes(4, 'little', signed=True))
     # *** IMMEDIATE bytes *** the fourth register is in the upper 4 bits of an 8 bit immediate
     if isinstance(self.imm, Register): inst.append((self.imm.index & 0b1111) << 4 | 0b0000)
-    elif isinstance(self.imm, Immediate): inst.extend(self.imm.value.to_bytes(self.imm.size, 'little', signed=self.imm.value < 0))
+    elif isinstance(self.imm, bytes): inst.extend(self.imm)
     return bytes(inst)

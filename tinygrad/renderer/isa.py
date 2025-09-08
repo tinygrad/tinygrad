@@ -2,7 +2,7 @@ import struct, sys
 from typing import cast
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
-from tinygrad.muop import Register, Memory, Immediate, Label, Operand, MUOp, MUOpX86
+from tinygrad.muop import Register, Memory, Label, Operand, MUOp, MUOpX86
 from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher
 from tinygrad.uop.spec import x86_spec
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu, load_store_folding
@@ -93,7 +93,7 @@ class ISARenderer(Renderer):
       if spilled not in mem:
         offset = self.stack_size + (spilled.size - self.stack_size % spilled.size) % spilled.size
         self.stack_size = offset + spilled.size
-        mem[spilled] = Memory(spilled.size, MUOpX86.RBP, disp=Immediate(-self.stack_size, 4))
+        mem[spilled] = Memory(spilled.size, MUOpX86.RBP, disp=-self.stack_size)
         # TODO: hoist store
         if final_muops[-1].opcode == 0x0F84: final_muops.insert(-1, self.store(mem[spilled], live[spilled]))
         else: final_muops.append(self.store(mem[spilled], live[spilled]))
@@ -372,7 +372,7 @@ x86_matcher = base_matcher + PatternMatcher([
 
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
 def shuf_imm(src:tuple[UOp, ...]) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(src))
-def disp(c:UOp, a:UOp): return Immediate(c.arg * a.dtype.base.scalar().itemsize, 4)
+def disp(c:UOp, a:UOp): return c.arg * a.dtype.base.scalar().itemsize
 
 #https://www.felixcloutier.com/x86/
 # NOTE: LEGACY prefix == VEX prefix
@@ -479,9 +479,9 @@ def x86_abi(ctx, x:UOp):
   i = ctx.arg_pos
   if sys.platform == "win32":
     if i < 4: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), MUOpX86.GPR, ((MUOpX86.GPR[[1,2,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=Immediate((i-3)*8+40, 4)))
+    return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=(i-3)*8+40))
   if i < 6: return MUOpX86("mov", 0x8B, ctx[x], (ctx[x],), MUOpX86.GPR, ((MUOpX86.GPR[[7,6,2,1,8,9][i]],),), reg=ctx[x], rm=ctx[x], w=1)
-  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=Immediate((i-5)*8+8, 4)))
+  return MUOpX86.R_RM("mov", 0x8B, ctx[x], Memory(8, MUOpX86.RBP, disp=(i-5)*8+8))
 def is_vec(x:UOp) -> bool: return x.dtype.count > 1 or x.dtype in dtypes.floats + dtypes.masks
 
 x86_lowerer = PatternMatcher([
