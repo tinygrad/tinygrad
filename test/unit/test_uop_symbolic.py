@@ -714,7 +714,6 @@ class TestSymbolic(unittest.TestCase):
     expr = cond1.where(cond2.where(a, b), b)
     self.helper_test_variable(expr, 0, 3, "(a if ((s<6)&(2<s)) else b)")
 
-  @unittest.expectedFailure  # needs simplify_valid which is not in render anymore
   def test_where_merge_branches2(self):
     cond1 = Variable("s", 0, 10) < 5
     cond2 = Variable("s", 0, 10) < 6
