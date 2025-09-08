@@ -267,11 +267,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
-    return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count) if count == 1 else self
+    return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count) if count != 1 else self
   def cast(self, dtype:DType):
     # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
     if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)
-    return UOp(Ops.CAST, dtype, (self,)) if self.dtype == dtype else self
+    return UOp(Ops.CAST, dtype, (self,)) if self.dtype != dtype else self
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:tuple[int, ...]|int):
     if isinstance(i, tuple) and len(i) == 1: return self.gep(i[0])
