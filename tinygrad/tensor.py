@@ -1297,101 +1297,117 @@ class Tensor(MathTrait):
         v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
         res.assign(v).realize()
 
-  def _generate_setitem_mask(self, indices):
-    masks = []
-    dim = 0
-    for idx in indices:
-      if isinstance(idx, int):
-        # e.g. dim=1, idx=3, shape=(10,20,30,40,50)
-        #              () -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
-        dim_size = self.shape[dim]
-        if idx < 0: idx += dim_size
-        mask = Tensor(idx)._one_hot_along_dim(dim_size).reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1)).expand(self.shape)
-      elif isinstance(idx, slice):
-        # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
-        #              () -> (4,) -> (4,20) -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
-        dim_size = self.shape[dim]
-        start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
-        mask = Tensor.arange(start, stop, step).unsqueeze(-1)._one_hot_along_dim(dim_size).sum(0)
-        mask = mask.reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1)).expand(self.shape)
-      elif idx is None:
-        continue
-      else:
-        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
-      masks.append(mask)
-      dim += 1
-    return functools.reduce(lambda x,y: x.mul(y), masks)
+  def _new_setitem(self, indices, v: Tensor) -> None:
+    """New setitem implementation using mask-based assignment.
 
-  """
-  e.g.
-  x : (10,20,30,40,50)
-  v : (10, 1, 30, 4, 50) or broadcastable to this shape
-  x[:, 3, ..., 1:12:3] = v
-  """
-  def gen_index_shape(self, indices):
-    res_shape = []
-    dim = 0
-    for idx in indices:
-      if isinstance(idx, int):
-        res_shape.append(1)
-      elif isinstance(idx, slice):
-        dim_size = self.shape[dim]
-        start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
-        if (stop - start) * step < 0: size = 0
-        else: size = (abs(stop - start) + abs(step) - 1) // abs(step)
-        res_shape.append(size)
-      elif idx is None:
-        res_shape.append(1)
-      else:
-        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
-      if idx is not None: dim += 1
-    return tuple(res_shape)
+    Handles advanced indexing by generating boolean masks and padding values
+    to match tensor dimensions, similar to how _getitem handles complex indexing.
+    """
+    # wrap single index into a list
+    indices = list(indices) if isinstance(indices, (tuple, list)) else [indices]
 
-  def _generate_setitem_padded_value(self, v: Tensor, indices):
-    vshape = self.gen_index_shape(indices)
-    # e.g.
-    # v.shape = (1, 1, 4, 1) -> (10, 1, 30, 4, 50)
-    vb = v.squeeze()._broadcast_to(tuple(sh for sh in vshape if sh != 1)).reshape(vshape)
-    dim = 0
-    for idx in indices:
-      if isinstance(idx, int):
-        pass
-      elif isinstance(idx, slice):
-        dim_size = self.shape[dim]
-        start, _, step = idx.indices(cast(SupportsIndex, dim_size))
-        if step < 0:
-          vb = vb.flip(dim)
-        if abs(step) > 1:
-          # (10,1,30,4,50) -> (10,1,30,12,50) -> (10,1,30,(1+12+17),50)
-          vb = vb.repeat_interleave(abs(step), dim=dim)
-          # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
-        # pads = (None, None, (1, 17), 0, None)
-        if step > 0:
-          left_pad = start
-          right_pad = dim_size - vb.shape[dim] - left_pad
-        else:
-          right_pad = dim_size - start - 1
-          left_pad = dim_size - vb.shape[dim] - right_pad
-        pad = (left_pad, right_pad)
-        pads = (None,) * dim + (pad, ) + (None,) * (vb.ndim - dim - 1)
-        vb = vb.pad(pads)
-      elif idx is None:
-        vb = vb.squeeze(dim)
-      else:
-        raise NotImplementedError(f"Indexing with {type(idx)} not supported")
-      if idx is not None: dim += 1
-    return vb
-
-  def _new_setitem(self: Tensor, indices, v: Tensor):
+    # expand ellipsis (...) to explicit slice(None) objects
     if Ellipsis in indices:
       ellipsis_pos = indices.index(Ellipsis)
       num_specified = len([i for i in indices if i is not Ellipsis and i is not None])
       num_ellipsis_dims = self.ndim - num_specified
-      indices = list(indices[:ellipsis_pos]) + [slice(None)]*num_ellipsis_dims + list(indices[ellipsis_pos+1:])
-    indices = list(indices) + [slice(None)]*(self.ndim - len([i for i in indices if i is not None]))
-    mask = self._generate_setitem_mask(indices)
-    vb = self._generate_setitem_padded_value(v, indices)
-    self.assign(mask.where(vb, self))
+      indices = (indices[:ellipsis_pos] +
+                [slice(None)] * num_ellipsis_dims +
+                indices[ellipsis_pos + 1:])
+
+    # pad indices to match tensor ndim
+    non_none_count = len([i for i in indices if i is not None])
+    indices = indices + [slice(None)] * (self.ndim - non_none_count)
+
+    # shape calculation and mask generation
+    target_shape = []
+    masks = []
+    dim = 0
+
+    for idx in indices:
+      if isinstance(idx, int):
+        # shape calculation
+        target_shape.append(1)
+        # mask generation for integer indexing
+        dim_size = self.shape[dim]
+        if idx < 0:
+          idx += dim_size
+        if idx < 0 or idx >= dim_size:
+          raise IndexError(f"index {idx} is out of bounds for dimension {dim} with size {dim_size}")
+        mask = (Tensor(idx)._one_hot_along_dim(dim_size)
+                .reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1))
+                .expand(self.shape))
+        masks.append(mask)
+
+      elif isinstance(idx, slice):
+        # shape calculation (slice size)
+        dim_size = self.shape[dim]
+        start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
+        if (stop - start) * step < 0:
+          slice_size = 0
+        else:
+          slice_size = (abs(stop - start) + abs(step) - 1) // abs(step)
+        target_shape.append(slice_size)
+
+        # mask generation for slice indexing
+        mask = (Tensor.arange(start, stop, step).unsqueeze(-1)
+                ._one_hot_along_dim(dim_size).sum(0))
+        mask = mask.reshape((1,)*dim + (dim_size,) + (1,)*(self.ndim-dim-1)).expand(self.shape)
+        masks.append(mask)
+
+      elif idx is None:
+        target_shape.append(1)
+        continue  # no mask needed for None
+      else:
+        raise NotImplementedError(f"unsupported index type {type(idx).__name__} at dimension {dim}")
+
+      dim += 1
+
+    # combine all masks
+    combined_mask = functools.reduce(lambda x,y: x.mul(y), masks) if masks else Tensor.ones(self.shape, device=self.device, dtype=dtypes.bool)
+
+    # value padding - broadcast value to target shape
+    value_broadcast = v.squeeze()._broadcast_to(tuple(sh for sh in target_shape if sh != 1)).reshape(target_shape)
+
+    # pad value tensor to match self dimensions
+    dim = 0
+    for idx in indices:
+      if isinstance(idx, int):
+        pass  # no padding needed for int indexing
+
+      elif isinstance(idx, slice):
+        # process slice for padding
+        dim_size = self.shape[dim]
+        start, _, step = idx.indices(cast(SupportsIndex, dim_size))
+
+        if step < 0:
+          value_broadcast = value_broadcast.flip(dim)
+
+        if abs(step) > 1:
+          value_broadcast = value_broadcast.repeat_interleave(abs(step), dim=dim)
+
+        # calculate padding
+        if step > 0:
+          left_pad = start
+          right_pad = dim_size - value_broadcast.shape[dim] - left_pad
+        else:
+          right_pad = dim_size - start - 1
+          left_pad = dim_size - value_broadcast.shape[dim] - right_pad
+
+        # apply padding
+        pad_spec = (None,) * dim + ((left_pad, right_pad),) + (None,) * (value_broadcast.ndim - dim - 1)
+        value_broadcast = value_broadcast.pad(pad_spec)
+
+      elif idx is None:
+        value_broadcast = value_broadcast.squeeze(dim)
+      else:
+        raise NotImplementedError(f"unsupported index type {type(idx).__name__} at dimension {dim}")
+
+      if idx is not None:
+        dim += 1
+
+    # final assignment
+    self.assign(combined_mask.where(value_broadcast, self))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
