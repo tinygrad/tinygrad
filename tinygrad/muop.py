@@ -132,16 +132,20 @@ class MUOpX86(MUOp):
   def RM_R(opstr:str, opcode:int, rm:Memory, reg:Register):
     return MUOpX86(opstr, opcode, rm, (reg,), MUOpX86.GPR, (MUOpX86.GPR,), reg, rm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def R_I(opstr:str, opcode:int, reg:Register, imm:Immediate):
+  def R_I(opstr:str, opcode:int, reg:Register, imm:int, sz:int|None=None):
+    imm = Immediate(imm, sz if sz is not None else min(reg.size, 4))
     return MUOpX86(opstr, opcode, reg, (imm,), MUOpX86.GPR, ((),), reg, imm=imm, **MUOpX86.prefix_w(reg))
   @staticmethod
-  def RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
+  def RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:int, sz:int|None=None):
+    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
     return MUOpX86(opstr, opcode, rm, (imm,), MUOpX86.GPR, ((),), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def _RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:Immediate):
+  def _RM_I(opstr:str, opcode:int, reg:int, rm:Register, imm:int, sz:int|None=None):
+    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
     return MUOpX86(opstr, opcode, None, (rm, imm), (), (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   @staticmethod
-  def R_RM_I(opstr:str, opcode:int, reg:Register, rm:Register, imm:Immediate):
+  def R_RM_I(opstr:str, opcode:int, reg:Register, rm:Register, imm:int, sz:int|None=None):
+    imm = Immediate(imm, sz if sz is not None else min(rm.size, 4))
     return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.GPR, (MUOpX86.GPR, ()), reg, rm, imm=imm, **MUOpX86.prefix_w(rm))
   # VEX methods
   @staticmethod
