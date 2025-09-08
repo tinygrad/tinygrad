@@ -536,7 +536,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
     cc = NAKCompiler(self) if NIR else ((PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler))(self.arch)
-    rr = PTXRenderer(self.arch, device="NV") if PTX else (NIRRenderer(self.arch) if NIR else NVRenderer(self.arch))
+    rr = PTXRenderer(self.arch, device="NV") if PTX else (NIRRenderer(self) if NIR else NVRenderer(self.arch))
     super().__init__(device, NVAllocator(self), rr, cc, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()

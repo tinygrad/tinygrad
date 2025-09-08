@@ -244,11 +244,11 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(nir.nir_pop_if(ctx[0], ctx[1][x.src[0]])))
   ])
 
-  def __init__(self, arch:str, device="NV"): self.device, self.arch = device, arch
+  def __init__(self, dev, device="NV"): self.device, self.dev = device, dev
 
   def render(self, uops:list[UOp]) -> str:
-    b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, nak.nir_options, None)
-    # FIXME: this is wrong? wg_sz should be local size?
+    b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
+    # FIXME: this is wrong? wg_sz should be global size?
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l"]: b.shader.contents.info.workgroup_size[int(u.arg[0][-1])] = u.arg[1]
     r: dict[UOp,nir.nir_def] = {}
     ranges: list[Tuple[nir.nir_loop, nir.nir_phi_instr]] = []
