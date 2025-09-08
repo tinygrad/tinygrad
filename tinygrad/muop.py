@@ -169,21 +169,26 @@ class MUOpX86(MUOp):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR), reg, rm, pp, sel, w, l, vvvv)
   @staticmethod
   def V_VM_I(opstr, opcode, reg, rm, imm, pp, sel, w=0, l=0):
+    imm = Immediate(imm, 1)
     return MUOpX86(opstr, opcode, reg, (rm, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def VM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
+    imm = Immediate(imm, 1)
     return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.VEC, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def RM_V_I(opstr, opcode, rm, reg, imm, pp, sel, w=0, l=0):
+    imm = Immediate(imm, 1)
     return MUOpX86(opstr, opcode, rm, (reg, imm), MUOpX86.GPR, (MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, imm=imm)
   @staticmethod
   def V_V_VM_V(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, MUOpX86.VEC), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def V_V_RM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
+    imm = Immediate(imm, 1)
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.GPR, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def V_V_VM_I(opstr, opcode, reg, vvvv, rm, imm, pp, sel, w=0, l=0):
+    imm = Immediate(imm, 1)
     return MUOpX86(opstr, opcode, reg, (vvvv, rm, imm), MUOpX86.VEC, (MUOpX86.VEC, MUOpX86.VEC, ()), reg, rm, pp, sel, w, l, vvvv, imm=imm)
   @staticmethod
   def idiv(x:Register, a:Register, b:Register, is_signed:bool) -> list[MUOp]:
@@ -210,7 +215,7 @@ class MUOpX86(MUOp):
     if not vec:
       if dest.size == 1: return MUOpX86.R_RM("mov", 0x8A, dest, src)
       if dest.size in (2, 4, 8): return MUOpX86.R_RM("mov", 0x8B, dest, src)
-    if dest.size == 2: return MUOpX86.V_V_RM_I("vpinsrw", 0xC4, dest, dest, src, Immediate(0, 1), 1, 1)
+    if dest.size == 2: return MUOpX86.V_V_RM_I("vpinsrw", 0xC4, dest, dest, src, 0, 1, 1)
     if dest.size == 4: return MUOpX86.V_M("vmovss", 0x10, dest, src, 2, 1)
     if dest.size == 8: return MUOpX86.V_M("vmovsd", 0x10, dest, src, 3, 1)
     if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
@@ -220,7 +225,7 @@ class MUOpX86(MUOp):
     if not vec:
       if src.size == 1: return MUOpX86.RM_R("mov", 0x88, dest, src)
       if src.size in (2, 4, 8): return MUOpX86.RM_R("mov", 0x89, dest, src)
-    if src.size == 2: return MUOpX86.RM_V_I("vpextrw", 0x15, dest, src, Immediate(0, 1), 1, 3)
+    if src.size == 2: return MUOpX86.RM_V_I("vpextrw", 0x15, dest, src, 0, 1, 3)
     if src.size == 4: return MUOpX86.M_V("vmovss", 0x11, dest, src, 2, 1)
     if src.size == 8: return MUOpX86.M_V("vmovsd", 0x11, dest, src, 3, 1)
     if src.size == 16: return MUOpX86.VM_V("vmovups", 0x11, dest, src, 0, 1)
