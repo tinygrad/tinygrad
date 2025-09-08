@@ -735,12 +735,77 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CPU','GPU'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Run pytest (not cuda)
+      - name: Run pytest (${{ matrix.backend }})
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  amdremote:
+    name: Linux (remote)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      REMOTE: 1
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: linux-remote
+          deps: testing_minimal
+          amd: 'true'
+          llvm: 'true'
+          opencl: 'true'
+      - name: Start remote server
+        run: |
+          start_server() {
+            systemd-run --user \
+              --unit="$1" \
+              --setenv=REMOTEDEV="$2" \
+              --setenv=MOCKGPU=1 \
+              --setenv=PYTHONPATH=. \
+              --setenv=PORT="$3" \
+              --working-directory="$(pwd)" \
+              python tinygrad/runtime/ops_remote.py
+          }
+
+          start_server "remote-server-amd-1" "AMD" 6667
+          start_server "remote-server-amd-2" "AMD" 6668
+          start_server "remote-server-gpu" "GPU" 7667
+          start_server "remote-server-cpu" "CPU" 8667
+      - name: Check Device.DEFAULT and print some source
+        env:
+          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'AMD', Device.default.properties.real_device"
+          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run REMOTE=1 Test (AMD)
+        env:
+          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py --durations 20
+      - name: Run REMOTE=1 Test (GPU)
+        env:
+          HOST: 127.0.0.1:7667*6
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py --durations 20
+          IMAGE=2 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
+      - name: Run REMOTE=1 Test (CPU)
+        env:
+          HOST: 127.0.0.1:8667*6
+        run: |
+          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py --durations 20
+      - name: Show remote server logs
+        if: always()
+        run: |
+          journalctl --user -u remote-server-amd-1 --no-pager
+          journalctl --user -u remote-server-amd-2 --no-pager
+          journalctl --user -u remote-server-gpu --no-pager
+          journalctl --user -u remote-server-cpu --no-pager
 
 # ****** OSX Tests ******
 
@@ -867,71 +932,6 @@ jobs:
      - name: Run REMOTE=1 Test
        run: |
          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
-
-  amdremote:
-    name: Linux (remote)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    env:
-      REMOTE: 1
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: linux-remote
-          deps: testing_minimal
-          amd: 'true'
-          llvm: 'true'
-          opencl: 'true'
-      - name: Start remote server
-        run: |
-          start_server() {
-            systemd-run --user \
-              --unit="$1" \
-              --setenv=REMOTEDEV="$2" \
-              --setenv=MOCKGPU=1 \
-              --setenv=PYTHONPATH=. \
-              --setenv=PORT="$3" \
-              --working-directory="$(pwd)" \
-              python tinygrad/runtime/ops_remote.py
-          }
-
-          start_server "remote-server-amd-1" "AMD" 6667
-          start_server "remote-server-amd-2" "AMD" 6668
-          start_server "remote-server-gpu" "GPU" 7667
-          start_server "remote-server-cpu" "CPU" 8667
-      - name: Check Device.DEFAULT and print some source
-        env:
-          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
-          python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'AMD', Device.default.properties.real_device"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run REMOTE=1 Test (AMD)
-        env:
-          HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
-        run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py --durations 20
-      - name: Run REMOTE=1 Test (GPU)
-        env:
-          HOST: 127.0.0.1:7667*6
-        run: |
-          python3 -m pytest test/test_tiny.py test/test_image_dtype.py test/test_jit.py --durations 20
-          IMAGE=2 python3 -m pytest test/test_tiny.py test/test_image_dtype.py
-      - name: Run REMOTE=1 Test (CPU)
-        env:
-          HOST: 127.0.0.1:8667*6
-        run: |
-          python3 -m pytest test/test_tiny.py test/test_jit.py test/test_multitensor.py --durations 20
-      - name: Show remote server logs
-        if: always()
-        run: |
-          journalctl --user -u remote-server-amd-1 --no-pager
-          journalctl --user -u remote-server-amd-2 --no-pager
-          journalctl --user -u remote-server-gpu --no-pager
-          journalctl --user -u remote-server-cpu --no-pager
 
   osxtests:
     strategy:
