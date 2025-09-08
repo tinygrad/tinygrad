@@ -1286,8 +1286,7 @@ class Tensor(MathTrait):
     indices = list(indices)
     if all(isinstance(i, (int, sint, slice)) or i is Ellipsis for i in indices if i is not None):
         # New setitem that supports slices and int only
-      res = self.setitem(indices, v)
-      self.assign(res)
+      self._new_setitem(indices, v)
     else:
       # Legacy advanced indexing setitem that supports Tensor indices
       res = self.realize()._getitem(indices, v)
@@ -1298,7 +1297,7 @@ class Tensor(MathTrait):
         v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
         res.assign(v).realize()
 
-  def gen_mask(self, indices):
+  def _generate_setitem_mask(self, indices):
     masks = []
     dim = 0
     for idx in indices:
@@ -1311,8 +1310,6 @@ class Tensor(MathTrait):
       elif isinstance(idx, slice):
         # e.g. dim=3, idx=slice(1,12,3) = [1,4,7,10], shape=(10,20,30,40,50)
         #              () -> (4,) -> (4,20) -> (20,) -> (1,20,1,1,1) -> (10,20,30,40,50)
-        # TODO: Negative start/stop/step, but mask should be correct
-        # Negative start/stop is handled by slice.indices, but negative step could be tricky
         dim_size = self.shape[dim]
         start, stop, step = idx.indices(cast(SupportsIndex, dim_size))
         mask = Tensor.arange(start, stop, step).unsqueeze(-1)._one_hot_along_dim(dim_size).sum(0)
@@ -1350,7 +1347,7 @@ class Tensor(MathTrait):
       if idx is not None: dim += 1
     return tuple(res_shape)
 
-  def pad_values(self, v: Tensor, indices):
+  def _generate_setitem_padded_value(self, v: Tensor, indices):
     vshape = self.gen_index_shape(indices)
     # e.g.
     # v.shape = (1, 1, 4, 1) -> (10, 1, 30, 4, 50)
@@ -1385,16 +1382,16 @@ class Tensor(MathTrait):
       if idx is not None: dim += 1
     return vb
 
-  def setitem(self: Tensor, indices, v: Tensor):
+  def _new_setitem(self: Tensor, indices, v: Tensor):
     if Ellipsis in indices:
       ellipsis_pos = indices.index(Ellipsis)
       num_specified = len([i for i in indices if i is not Ellipsis and i is not None])
       num_ellipsis_dims = self.ndim - num_specified
       indices = list(indices[:ellipsis_pos]) + [slice(None)]*num_ellipsis_dims + list(indices[ellipsis_pos+1:])
     indices = list(indices) + [slice(None)]*(self.ndim - len([i for i in indices if i is not None]))
-    mask = self.gen_mask(indices)
-    vb = self.pad_values(v, indices)
-    return mask.where(vb, self)
+    mask = self._generate_setitem_mask(indices)
+    vb = self._generate_setitem_padded_value(v, indices)
+    self.assign(mask.where(vb, self))
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
