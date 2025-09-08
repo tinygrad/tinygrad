@@ -38,8 +38,8 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
   #assert x.src[1].shape == x.src[0].shape, f"shape mismatch on store {x.src[1].shape} != {x.src[0].shape}"
 
   new_idxs = shape_to_idx(x.src[0].shape, ctx.axis_types, ctx.start)
-  idx, valid = x.st_arg.to_indexed_uops(new_idxs)
-  used_idxs = [x for x in UOp.sink(idx, valid).toposort() if x in new_idxs]
+  idx = x.st_arg.to_valid_uop(new_idxs)
+  used_idxs = [x for x in idx.toposort() if x in new_idxs]
   real_new_idxs = []
   for i in range(len(x.src[0].shape)):
     if new_idxs[i] in used_idxs or len(ctx.idxs) <= i: real_new_idxs.append(new_idxs[i])
@@ -47,7 +47,7 @@ def lower_store(ctx: IndexContext, x: UOp, buf: UOp):
 
   stored = subblock(ctx, real_new_idxs, x.src[1])
   used_ranges = [x for x in used_idxs if x.op is Ops.RANGE]
-  return buf.index(idx, valid).store(stored, *used_ranges)
+  return buf.index(idx).store(stored, *used_ranges)
 
 def fixup_wmma(ctx:IndexContext, x:UOp):
   if x.tag is not None: return None
@@ -73,7 +73,7 @@ pm_lowerer = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),), name="view"),
    lambda ctx,view,c: c if all(x.mask is None for x in view.arg.views) else view.arg.to_indexed_uops(ctx.idxs)[1].where(c, c.const_like(0))),
   (UPat(Ops.LOAD, src=(UPat.var("buf").view(),), allow_any_len=True, name="x"),
-   lambda ctx,buf,x: UOp(Ops.LOAD, x.dtype, (buf.index(*x.st_arg.to_indexed_uops(ctx.idxs)),)+x.src[1:])),
+   lambda ctx,buf,x: UOp(Ops.LOAD, x.dtype, (buf.index(x.st_arg.to_valid_uop(ctx.idxs)),)+x.src[1:])),
 
   # reduce/view_const
   (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),

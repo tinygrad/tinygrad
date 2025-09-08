@@ -136,11 +136,9 @@ def map_pad(idx:UOp, r:UOp):
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
-    # this is safe but dumb
-    # TODO (S-Lykles): switch to mixed index/valid
-    ret[i] = (ret[i] - s).maximum(0).minimum(r.src[0].shape[i]-1)
+    ret[i] = where.where((ret[i] - s), UOp.invalid())
   # PAD is with 0
-  return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
+  return bigwhere.where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
 
 def map_expand(r:UOp, idx:UOp):
   new_rngs = []
