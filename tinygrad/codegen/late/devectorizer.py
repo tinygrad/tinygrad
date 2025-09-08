@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, simplify_valid, sym, symbolic_flat, cast_folding
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, cast_folding
 from tinygrad.helpers import getenv, flatten, AMX, prod, partition
 from tinygrad.renderer import Renderer
 
@@ -51,8 +51,6 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
 load_store_indexing = PatternMatcher([
-  # simplify valid
-  (UPat(Ops.AND, name="valid"), simplify_valid),
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
   # index True is just Index
