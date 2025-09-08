@@ -87,6 +87,7 @@ setup(name='tinygrad',
             "tiktoken",
             "blobfile",
             "librosa",
+            "numba>=0.55",  # librosa needs numba but only numba>=0.55 works with python>=3.10
             "networkx",
             "nibabel",
             "bottle",
