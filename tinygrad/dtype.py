@@ -95,7 +95,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints + (dtypes.index,) or isinstance(x, PtrDType)
+  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints + (dtypes.index,)
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
