@@ -476,6 +476,7 @@ generate_nak() {
     $MESA_SRC/src/compiler/nir/nir_builder.h \
     $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
     $MESA_SRC/gen/nir_intrinsics.h \
+    $MESA_SRC/src/compiler/glsl_types.h \
     --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
     -o $BASE/nir.py
 

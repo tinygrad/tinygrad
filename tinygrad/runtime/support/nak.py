@@ -1,5 +1,6 @@
 from typing import cast, Tuple
 from tinygrad.device import Compiler
+from tinygrad.helpers import round_up
 from base64 import b64decode
 from gzip import decompress
 import tinygrad.runtime.autogen.nak as nak
@@ -26,7 +27,7 @@ class NAKCompiler(Compiler):
 
 def parse_nak_shader(shader:bytes) -> Tuple[memoryview, int, int, int]:
   sb = nak.struct_nak_shader_bin.from_buffer(shader)
-  return (memoryview(bytearray(ctypes.string_at(sb.code, sb.code_size))), sb.info.num_gprs, sb.info.cs.smem_size, sb.info.slm_size)
+  return (memoryview(bytearray(ctypes.string_at(sb.code, sb.code_size))), sb.info.num_gprs, round_up(sb.info.cs.smem_size, 0x80), sb.info.slm_size)
 
 # TODO: just call nak_nir_options
 nir_options = nir.nir_shader_compiler_options.from_buffer_copy(
