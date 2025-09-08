@@ -49,12 +49,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   k = k.copy()
 
   try:
-    if isinstance(k, Kernel) and k.opts.device == "LLVM" and k.reduceop is not None:
+    if k.opts.device == "LLVM" and k.reduceop is not None:
       reduce_axes = k.axes_of(AxisType.REDUCE)
       if reduce_axes:
-        in_st_idx = len(k.bufs) + 1  # see Kernel.__init__: for each reduce, append reduce.st and reduce.src[0].st
-        if 0 <= in_st_idx < len(k.sts):
-          strides = k.sts[in_st_idx].real_strides()
+        bufs = [x for x in k.ast.parents if x.op is Ops.DEFINE_GLOBAL]
+        if bufs:
+          strides = bufs[0].st_arg.real_strides()
           unit_stride_axes = [ax for ax in reduce_axes if resolve(strides[ax] == 1)]
           if unit_stride_axes:
             ax = unit_stride_axes[-1]
@@ -64,8 +64,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             try:
               global_axes = k.axes_of(AxisType.GLOBAL, AxisType.LOOP)
               if global_axes:
-                g_strides = k.sts[in_st_idx].real_strides()
-                g_unit = [g for g in global_axes if resolve(g_strides[g] == 1)]
+                g_unit = [g for g in global_axes if resolve(strides[g] == 1)]
                 if g_unit:
                   target = global_axes[-1]
                   want = g_unit[-1]
