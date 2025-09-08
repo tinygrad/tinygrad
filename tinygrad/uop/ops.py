@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
 if TYPE_CHECKING:
@@ -13,7 +13,8 @@ if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
 class AxisType(Enum):
-  GLOBAL = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto()  # noqa: E702
+  GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
+  THREAD = auto()
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -37,7 +38,7 @@ def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
 def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: UOp|int, var_vals: dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -307,7 +308,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(end:sint, *arg):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtypes.int, src=(sint_to_uop(end),), arg=arg)
+    return UOp(Ops.RANGE, dtype=dtypes.index, src=(sint_to_uop(end),), arg=arg)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     if len(axis) == 0: return self
@@ -482,11 +483,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int) -> UOp:
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.index) -> UOp:
     assert not isinstance(min_val, UOp) and not isinstance(max_val, UOp), f"can't create Variable {name} with {min_val}/{max_val}"
     return UOp(Ops.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
-  def expr(self):
+  def expr(self) -> str:
     assert self.op is Ops.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
     return self.arg[0]
   def bind(self, val:int|UOp):
@@ -573,7 +574,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
     if self.op is Ops.GEP: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
-    if self.op is Ops.CAST and self.dtype in (dtypes.floats+dtypes.sints):
+    if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.index,):
       return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
@@ -584,9 +585,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
-  def sym_infer(self, var_vals:dict[UOp, int]):
+  def sym_infer(self, var_vals:dict[str, int]):
     fxn, varnames = self._sym_fxn
-    return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
+    return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     with Context(TRACK_MATCH_STATS=0):
@@ -647,13 +648,11 @@ def get_location() -> tuple[str, int]:
 
 @functools.cache
 def lines(fn) -> list[str]:
-  try:
-    with open(fn) as f: return f.readlines()
-  except FileNotFoundError: return []
+  with open(fn) as f: return f.readlines()
 
 def printable(loc:tuple[str, int]) -> str:
   try: return lines(loc[0])[loc[1]-1].strip()
-  except IndexError: return "<missing>"
+  except FileNotFoundError: return "<missing>"
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
@@ -1027,7 +1026,30 @@ def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, na
     for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
   return new_map
 
-def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x
+def sint_to_uop(x:sint) -> UOp: return UOp.const(dtypes.index, x) if isinstance(x, int) else x.cast(dtypes.index)
+
+def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+pm_lower_index_dtype = PatternMatcher([
+  # There are no Unary ops at this point in symbolic, those are introduced later
+  (UPat(GroupOp.Binary, dtypes.index, name="u", src=(UPat.var("x"), UPat.var("y"))), lambda u,x,y:
+    x.cast(dt:=least_upper_dtype(select_dtype(u), x.dtype, y.dtype)).alu(u.op, y.cast(dt))),
+  # comparison ops might now have different dtypes in their sources
+  (UPat(GroupOp.Comparison, name="u", src=(UPat.var("x",dtypes.ints), UPat.var("y", dtypes.ints))), lambda u,x,y:
+    x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)).alu(u.op, y.cast(dt)) if x.dtype!=y.dtype else None),
+  (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lambda cond,u,x,y:
+    cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt))),
+  (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u))),
+  (UPat((Ops.RANGE,), dtype=dtypes.index, src=(UPat.var("end")), name="r"), lambda ctx,r,end:
+    r.replace(dtype=(dt:=select_dtype(r)), src=(end.cast(dt),))),
+  (UPat(Ops.CAST, dtype=dtypes.index, src=(UPat.var("x", dtypes.ints),), name="u"), lambda u,x: x),
+  (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(
+    dtype=(dt:=least_upper_dtype(*[x.dtype for x in u.src])).vec(u.dtype.count), src=tuple(x.cast(dt) for x in u.src))),
+  (UPat(Ops.VECTORIZE, dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=(dt:=(dtypes.long if any(v.overflows(dtypes.int) for v in u.src)
+    else dtypes.long)).vec(u.dtype.count),src=tuple(x.cast(dt) for x in u.src))),
+  (UPat((Ops.SPECIAL,Ops.DEFINE_VAR), dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int)),
+  (UPat((Ops.BIND), dtypes.index, name="u"), lambda u: u.replace(dtype=u.src[0].dtype)),
+])
+def index_to_concrete_int(u:UOp): return graph_rewrite(u, pm_lower_index_dtype)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 

@@ -36,8 +36,10 @@ dsp_string = PatternMatcher([
 class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
+  has_threads = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
+  extra_args = []
   pre_matcher = dsp_pm
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite

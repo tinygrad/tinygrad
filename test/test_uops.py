@@ -14,7 +14,7 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -476,7 +476,7 @@ class TestUOpMethod(unittest.TestCase):
     st_var = Tensor.empty((2, 10))[:, :a.bind(1)]
     _, var_vals = (uop_var+st_var).schedule_with_vars()
     self.assertEqual(len(var_vals), 1)
-    self.assertEqual(list(var_vals)[0], a)
+    self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')

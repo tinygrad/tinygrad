@@ -11,7 +11,7 @@ from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
-from tinygrad.codegen.opt.kernel import axis_colors
+from tinygrad.codegen.opt import axis_colors
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -188,19 +188,13 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if end_ts is None or et > end_ts: end_ts = et
     if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
-  # first sort all per-device events by timestamp
-  dev_starts:dict[str, list[tuple[str, int]]] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
-    dev_starts.setdefault(k.split(":")[0].split(" ")[0], []).append((k, v[0][0]))
-  sorted_devs = [s for k,v in dev_starts.items() for s,_ in sorted(v, key=lambda e:e[1])]
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k in sorted_devs:
-    v = dev_events[k]
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
