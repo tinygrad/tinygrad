@@ -48,30 +48,23 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
-  # LLVM reduction bias: prefer reduce-last contiguous
-  # Nudge BEAM to pick a contiguous inner loop without adding masked PADTO
   try:
     if isinstance(k, Kernel) and k.opts.device == "LLVM" and k.reduceop is not None:
-      # find reduce axes and the input shapetracker for the first reduce
       reduce_axes = k.axes_of(AxisType.REDUCE)
       if reduce_axes:
         in_st_idx = len(k.bufs) + 1  # see Kernel.__init__: for each reduce, append reduce.st and reduce.src[0].st
         if 0 <= in_st_idx < len(k.sts):
           strides = k.sts[in_st_idx].real_strides()
-          # pick a reduce axis with unit stride; prefer stride==1
           unit_stride_axes = [ax for ax in reduce_axes if resolve(strides[ax] == 1)]
           if unit_stride_axes:
             ax = unit_stride_axes[-1]
-            # small unroll on reduce axis when size is small-ish (<=32)
             if resolve(k.full_shape[ax] <= 32):
               try: k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(ax), 0))
               except (KernelOptError, ValueError): pass
-            # ensure the stride-1 global axis is the innermost among globals to encourage contiguous loads
             try:
               global_axes = k.axes_of(AxisType.GLOBAL, AxisType.LOOP)
               if global_axes:
                 g_strides = k.sts[in_st_idx].real_strides()
-                # choose the last stride==1 global axis, if any
                 g_unit = [g for g in global_axes if resolve(g_strides[g] == 1)]
                 if g_unit:
                   target = global_axes[-1]

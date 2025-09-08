@@ -316,20 +316,15 @@ def apply_opts(ctx:Renderer, ast:UOp):
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
   if BEAM >= 1:
-    # for LLVM backend, reorder reduce axes so the innermost reduce iterates the most contiguous axis
     if ctx.device == "LLVM":
-      # reorder reduce axes to prefer contiguous strides for better vectorization
       red_axes = [i for i, at in enumerate(k.axis_types) if at == AxisType.REDUCE]
       if len(red_axes) >= 2:
         try:
-          # find strides from the first buffer's shapetracker
           bufs = [x for x in ast.parents if x.op is Ops.DEFINE_GLOBAL]
           if bufs:
             st = bufs[0].st_arg
             strides = st.real_strides()
-            # prefer axis with stride==1 (contiguous)
             best_axis = min(red_axes, key=lambda ax: (1<<30) if strides[ax] == 0 else abs(int(strides[ax])))
-            # move best_axis to be first among reduce axes
             non_red = [i for i in range(len(k.axis_types)) if k.axis_types[i] != AxisType.REDUCE]
             red_order = [best_axis] + [i for i in red_axes if i != best_axis]
             new_order = non_red + red_order
@@ -337,7 +332,6 @@ def apply_opts(ctx:Renderer, ast:UOp):
               k.permute(new_order)
         except Exception:
           pass
-      # proactively pad the last reduce axis to 32 to avoid masked loads in hot loops
       red_axes = [i for i, at in enumerate(k.axis_types) if at == AxisType.REDUCE]
       if red_axes:
         try:
