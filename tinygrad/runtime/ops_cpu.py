@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile
+from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
@@ -102,8 +102,8 @@ class CPUProgram(HCQProgram):
 
     super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
 
+  @suppress_finalizing
   def __del__(self):
-    if getattr(sys, 'is_finalizing', lambda: True)(): return
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUAllocator(HCQAllocatorBase):
