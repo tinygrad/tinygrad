@@ -411,6 +411,7 @@ jobs:
       - name: Test openpilot compile4
         run: PYTHONPATH="." NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
       - name: Run process replay tests
+        if: always()
         uses: ./.github/actions/process-replay
 
   testonnxcpu:
