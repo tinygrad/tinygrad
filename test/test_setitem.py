@@ -14,6 +14,8 @@ class TestSetitem(unittest.TestCase):
       ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), Tensor(4)),
       ((4,4,4,4), (Ellipsis, slice(1,3)), 4),
       ((4,4,4,4), (2, slice(1,3), None, 1), 4),
+      ((4,4,4,4), (2, slice(1,3), None, 1, slice(0, 4, 1)), 4),
+      ((4,4,4,4), (2, slice(1,3), None, 1, slice(3, None, -1)), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(0,4,2)), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(None), slice(0,3)), 4),
       ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
@@ -34,6 +36,18 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_inplace_mul(self):
     t = Tensor.arange(10).realize()
     t[:3] *= 10
+    self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
+
+  def test_setitem_inplace_mul_ok(self):
+    t = Tensor.arange(10).realize()
+    t[:3] = t[:3] * 10
+    self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
+
+  def test_setitem_inplace_mul_internal(self):
+    t = Tensor.arange(10).realize()
+    s = t[:3]
+    s *= 10
+    t[:3] = s
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
   def test_setitem_into_unrealized(self):
@@ -164,6 +178,31 @@ class TestSetitem(unittest.TestCase):
     idx = Tensor.arange(0, idx_size)
     t[idx] = val
     self.assertEqual(t.tolist(), [val]*idx_size+[idx_size])
+
+  def test_setitem_broadcast_fewer_dims(self):
+    t = Tensor.zeros(2, 3).contiguous()
+    t[:, 1] = Tensor.ones(2)
+    np.testing.assert_allclose(t.numpy(), np.array([[0, 1, 0],[0, 1, 0]]))
+
+  def test_setitem_empty(self):
+    t = Tensor.zeros(3, 3, 3).contiguous()
+    t[-2:-5] = Tensor.ones(0, 3, 3)
+    np.testing.assert_allclose(t.numpy(), np.zeros((3,3,3)))
+
+  def test_setitem_slice_broadcast_minimal(self):
+    t = Tensor.zeros(6, 5, 4).contiguous()
+    t[:, 1, :] = Tensor.ones(6, 4)
+    n = np.zeros((6, 5, 4))
+    n[:, 1, :] = np.ones((6, 4))
+    np.testing.assert_allclose(t.numpy(), n)
+
+  def test_setitem_none(self):
+    t = Tensor.zeros(3, 3).contiguous()
+    t[1:2, None, -1] = Tensor.ones(1, 1)
+    n = np.zeros((3, 3))
+    n[1:2, None, -1] = np.ones((1, 1))
+    np.testing.assert_allclose(t.numpy(), n)
+
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
