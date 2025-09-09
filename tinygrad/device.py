@@ -298,6 +298,7 @@ class Compiled:
 
 # TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
+  if dtype == dtypes.index: return False
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
