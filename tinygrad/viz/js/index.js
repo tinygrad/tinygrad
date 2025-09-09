@@ -53,7 +53,7 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-async function renderDag(graph, additions, recenter=false) {
+function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
   if (worker != null) worker.terminate();
@@ -125,7 +125,6 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-
 }
 
 // ** profiler graph
@@ -654,7 +653,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
