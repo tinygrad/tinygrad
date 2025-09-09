@@ -1,11 +1,25 @@
-import ctypes, platform, functools, queue
+import ctypes, platform, sys, subprocess
 from tinygrad.device import Compiler
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQSignal
-from tinygrad.runtime.ops_cpu import CPUAllocator, CPUProgram, CPUComputeQueue, CPUWorker
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
-from tinygrad.renderer.llvmir import LLVMRenderer
-import tinygrad.runtime.autogen.llvm as llvm
 from tinygrad.runtime.support.elf import jit_loader
+try: import tinygrad.runtime.autogen.llvm as llvm
+except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
+
+class ClangJITCompiler(Compiler):
+  def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
+
+  def compile(self, src:str) -> bytes:
+    # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
+    # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
+    target = 'x86_64' if sys.platform == 'win32' else platform.machine()
+    # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
+    arch = '-march=native' if platform.machine() in ('x86_64', 'AMD64') else '-mcpu=native'
+    args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    arch_args = ['-ffixed-x18'] if target == 'arm64' else []
+    obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    return jit_loader(obj)
+
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
 
@@ -70,9 +84,3 @@ class HostLLVMCompiler(LLVMCompiler):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     super().__init__(cpu.decode(), feats.decode())
-
-class LLVMDevice(HCQCompiled):
-  def __init__(self, device:str=""):
-    self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self, self.tasks, thread_id=0).start()
-    super().__init__(device, CPUAllocator(self), LLVMRenderer(), HostLLVMCompiler(), functools.partial(CPUProgram, self), HCQSignal, CPUComputeQueue)

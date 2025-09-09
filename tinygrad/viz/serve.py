@@ -237,7 +237,7 @@ def get_disassembly(ctx:list[str]):
   lib = compiler.compile(prg.src) if isinstance(prg.src, str) else MUOp.assemble(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
-  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
+  from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
