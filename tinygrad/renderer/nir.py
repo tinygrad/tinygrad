@@ -38,7 +38,6 @@ def nir_swizzle(b:nir.nir_builder, src:nir.nir_def, swiz:list[int]) -> nir.nir_d
 
 def nchannel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def: return nir_swizzle(b, src, [c])
 
-# TODO: @functools.cache
 def nimm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
   assert dtype.fmt
   instr = nir.nir_load_const_instr_create(b.shader, 1, 1 if dtype == dtypes.bool else dtype.itemsize * 8)
@@ -121,12 +120,8 @@ def nv_param(b:nir.nir_builder, dtype:DType, idx:int) -> nir.nir_def:
   intrin.contents.num_components = 1
   nir.nir_def_init(intrin.contents.instr, d(intrin), 1, 64 if isinstance(dtype, PtrDType) else dtype.itemsize * 8)
   arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
-  # is this the right offset?
   arr[0], arr[1] = nir_src_for_ssa(nimm(b, 0, dtypes.int)), nir_src_for_ssa(nimm(b, 0x160 + idx * 8, dtypes.int))
-  # TODO: are these values correct?
-  nir_intrinsic_set(nir.NIR_INTRINSIC_ACCESS, intrin, 0)
   nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, d(intrin).bit_size // 8)
-  nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, intrin, 0)
   nir.nir_builder_instr_insert(b, intrin.contents.instr)
   return d(intrin)
 
@@ -144,10 +139,11 @@ def nreg_idx(b:nir.nir_builder, reg:nir.nir_variable, idx:nir.nir_def) -> nir.ni
 
 def nbarrier(b:nir.nir_builder):
   barrier = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_barrier)
+  # TODO: what are the right values here?
   nir_intrinsic_set(nir.NIR_INTRINSIC_EXECUTION_SCOPE, barrier, nir.SCOPE_WORKGROUP)
   nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_SCOPE, barrier, 0)
   nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_SEMANTICS, barrier, 0)
-  nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_MODES, barrier, 0) # TODO
+  nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_MODES, barrier, 0)
   nir.nir_builder_instr_insert(b, barrier.contents.instr)
 
 # alu ops, aop[<dtype>][<op>]
@@ -249,7 +245,6 @@ class NIRRenderer(Renderer):
 
   def render(self, uops:list[UOp]) -> str:
     b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
-    # FIXME: this is wrong? wg_sz should be global size?
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l"]: b.shader.contents.info.workgroup_size[int(u.arg[0][-1])] = u.arg[1]
     r: dict[UOp,nir.nir_def] = {}
     ranges: list[Tuple[nir.nir_loop, nir.nir_phi_instr]] = []
