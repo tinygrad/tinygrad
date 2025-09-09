@@ -197,7 +197,6 @@ class NVProgram(HCQProgram):
 
     if NIR:
       image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
-      self.lcmem_usage += 0x240
       self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
       cbuf0_size = 0x160 # ?
       self.prog_addr, self.prog_sz = self.lib_gpu.va_addr, image.nbytes

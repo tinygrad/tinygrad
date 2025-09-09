@@ -173,8 +173,10 @@ def nif(b:nir.nir_builder, cond:nir.nir_def, go:Callable):
 
 def njump(b:nir.nir_builder, t): nir.nir_builder_instr_insert(b, nir.nir_jump_instr_create(b.shader, t).contents.instr)
 
-def if_phi(b:nir.nir_builder, cond:nir.nir_def, then_def:nir.nir_def, else_def:nir.nir_def) -> nir.nir_def:
-  nir.nir_pop_if(b, nir.nir_push_if(b, cond))
+def if_phi(b:nir.nir_builder, cond:nir.nir_def, then_fn:Callable[[],nir.nir_def], else_def:nir.nir_def) -> nir.nir_def:
+  nif = nir.nir_push_if(b, cond)
+  then_def = then_fn()
+  nir.nir_pop_if(b, nif)
   return nir.nir_if_phi(b, then_def, else_def).contents
 
 # this is a ridiculous hack, but I can't find a better way to grab the glsl_type objects
