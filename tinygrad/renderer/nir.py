@@ -6,7 +6,6 @@ from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 import tinygrad.runtime.autogen.nir as nir
 import tinygrad.runtime.autogen.libc as libc
-import tinygrad.runtime.support.nak as nak
 import ctypes, struct
 
 # FIXME: this is because clang2py produces bad output?
@@ -14,17 +13,19 @@ nir_intrinsic_infos = nir.nir_intrinsic_infos.in_dll(nir._libraries['FIXME_STUB'
 assert libc._libraries['libc']
 stdout = ctypes.POINTER(nir.struct__IO_FILE).in_dll(libc._libraries['libc'], "stdout")
 s = nir.char_pointer_cast
+def g(s:str): return getattr(nir, s)
+def d(i) -> nir.nir_def: return getattr(i.contents, "def")
 
 def BITFIELD_BIT(b): return 1 << b
 def BITFIELD_MASK(b): return 0xFFFFFFFF if b == 32 else BITFIELD_BIT(b & 31) - 1
 
 def nir_mov_alu(b:nir.nir_builder, src:nir.nir_alu_src, num_components:int) -> nir.nir_def:
   mov = nir.nir_alu_instr_create(b.shader, nir.nir_op_mov)
-  nir.nir_def_init(mov.contents.instr, getattr(mov.contents, "def"), num_components, src.src.ssa.contents.bit_size)
+  nir.nir_def_init(mov.contents.instr, d(mov), num_components, src.src.ssa.contents.bit_size)
   mov.contents.exact, mov.contents.fp_fast_math = b.exact, b.fp_fast_math
   ctypes.cast(mov.contents.src, ctypes.POINTER(nir.nir_alu_src))[0] = src
   nir.nir_builder_instr_insert(b, mov.contents.instr)
-  return getattr(mov.contents, "def")
+  return d(mov)
 
 def nir_swizzle(b:nir.nir_builder, src:nir.nir_def, swiz:list[int]) -> nir.nir_def:
   alu_src, is_id = nir.nir_alu_src(), True
@@ -35,15 +36,15 @@ def nir_swizzle(b:nir.nir_builder, src:nir.nir_def, swiz:list[int]) -> nir.nir_d
   if len(swiz) == src.num_components and is_id: return src
   return nir_mov_alu(b, alu_src, len(swiz))
 
-def nir_channel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def: return nir_swizzle(b, src, [c])
+def nchannel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def: return nir_swizzle(b, src, [c])
 
 # TODO: @functools.cache
-def nir_imm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
+def nimm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
   assert dtype.fmt
   instr = nir.nir_load_const_instr_create(b.shader, 1, 1 if dtype == dtypes.bool else dtype.itemsize * 8)
   struct.pack_into(dtype.fmt, (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, x)
   nir.nir_builder_instr_insert(b, instr.contents.instr)
-  return getattr(instr.contents, "def")
+  return d(instr)
 
 def nir_src_for_ssa(d:nir.nir_def) -> nir.nir_src: return nir.nir_src(ssa=ctypes.pointer(d))
 def nir_intrinsic_set(typ, instr:nir.nir_intrinsic_instr, val:int):
@@ -51,18 +52,18 @@ def nir_intrinsic_set(typ, instr:nir.nir_intrinsic_instr, val:int):
   assert info.index_map[typ] > 0
   instr.contents.const_index[info.index_map[typ] - 1] = val
 
-def nir_build_alu(b:nir.nir_builder, op, *srcs:nir.nir_def) -> nir.nir_def:
+def nalu(b:nir.nir_builder, op, *srcs:nir.nir_def) -> nir.nir_def:
   if len(srcs) == 1: return nir.nir_build_alu1(b, op, srcs[0]).contents
   if len(srcs) == 2: return nir.nir_build_alu2(b, op, srcs[0], srcs[1]).contents
   if len(srcs) == 3: return nir.nir_build_alu3(b, op, srcs[0], srcs[1], srcs[2]).contents
   return nir.nir_build_alu4(b, op, srcs[0], srcs[1], srcs[2], srcs[3]).contents
 
-def nir_build_phi(b:nir.nir_builder, srcs:list[Tuple[nir.nir_block, nir.nir_def]]) -> Tuple[nir.nir_phi_instr, nir.nir_def]:
+def nphi(b:nir.nir_builder, srcs:list[Tuple[nir.nir_block, nir.nir_def]]) -> Tuple[nir.nir_phi_instr, nir.nir_def]:
   assert all_same([src[1].num_components for src in srcs]) and all_same([src[1].bit_size for src in srcs])
   phi = nir.nir_phi_instr_create(b.shader)
-  nir.nir_def_init(phi.contents.instr, getattr(phi.contents, "def"), srcs[0][1].num_components, srcs[0][1].bit_size)
+  nir.nir_def_init(phi.contents.instr, d(phi), srcs[0][1].num_components, srcs[0][1].bit_size)
   for (pred,src) in srcs: nir.nir_phi_instr_add_src(phi, pred, src)
-  return (phi.contents, getattr(phi.contents, "def"))
+  return (phi.contents, d(phi))
 
 T = TypeVar('T', bound=ctypes.Structure)
 def nir_cf_node_prev(n:nir.nir_cf_node, t:Type[T]) -> T: return ctypes.cast(n.node.prev, ctypes.POINTER(t)).contents
@@ -74,11 +75,11 @@ def nir_before_cf_list(l:nir.struct_exec_list) -> nir.nir_cursor:
   if (fn:=ctypes.cast(l.head_sentinel.next, ctypes.POINTER(nir.nir_cf_node))).contents.type == nir.nir_cf_node_block:
     return nir.nir_cursor(nir.nir_cursor_before_block, block=ctypes.cast(fn, ctypes.POINTER(nir.nir_block)))
   return nir.nir_cursor(nir.nir_cursor_after_block, block=nir_cf_node_next(fn.contents, nir.nir_block))
-def nir_cursor_current_block(c:nir.nir_cursor) -> nir.nir_block:
+def current_block(c:nir.nir_cursor) -> nir.nir_block:
   return c.instr.contents.block.contents if c.option == nir.nir_cursor_before_instr or c.option == nir.nir_cursor_after_instr else c.block.contents
 
-def nir_store(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, value:nir.nir_def, dtype:DType):
-  intrin = getattr(nir, f"nir_intrinsic_store_{'global' if space == AddrSpace.GLOBAL else ('shared' if space == AddrSpace.LOCAL else 'deref')}")
+def nstore(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, value:nir.nir_def, dtype:DType):
+  intrin = g(f"nir_intrinsic_store_{'global' if space == AddrSpace.GLOBAL else ('shared' if space == AddrSpace.LOCAL else 'deref')}")
   store = nir.nir_intrinsic_instr_create(b.shader, intrin)
   store.contents.num_components = value.num_components
   arr = ctypes.cast(store.contents.src, ctypes.POINTER(nir.nir_src))
@@ -91,64 +92,63 @@ def nir_store(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, value:nir.ni
   nir.nir_builder_instr_insert(b, store.contents.instr)
   return addr
 
-def nir_load(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, dtype:DType) -> nir.nir_def:
-  intrin = getattr(nir, f"nir_intrinsic_load_{'global' if space == AddrSpace.GLOBAL else ('shared' if space == AddrSpace.LOCAL else 'deref')}")
+def nload(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, dtype:DType) -> nir.nir_def:
+  intrin = g(f"nir_intrinsic_load_{'global' if space == AddrSpace.GLOBAL else ('shared' if space == AddrSpace.LOCAL else 'deref')}")
   load = nir.nir_intrinsic_instr_create(b.shader, intrin)
   load.contents.num_components = dtype.count
   ctypes.cast(load.contents.src, ctypes.POINTER(nir.nir_src))[0] = nir_src_for_ssa(addr)
   if space != AddrSpace.REG:
     nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, load, dtype.itemsize)
     nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, load, 0)
-  nir.nir_def_init(load.contents.instr, getattr(load.contents, "def"), dtype.count, dtype.itemsize * 8 // dtype.count)
+  nir.nir_def_init(load.contents.instr, d(load), dtype.count, dtype.itemsize * 8 // dtype.count)
   nir.nir_builder_instr_insert(b, load.contents.instr)
-  return getattr(load.contents, "def")
+  return d(load)
 
-def nir_gid(b:nir.nir_builder) -> nir.nir_def:
+def ngid(b:nir.nir_builder) -> nir.nir_def:
   intrin = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_load_workgroup_id)
-  nir.nir_def_init(intrin.contents.instr, getattr(intrin.contents, "def"), 3, 32)
+  nir.nir_def_init(intrin.contents.instr, d(intrin), 3, 32)
   nir.nir_builder_instr_insert(b, intrin.contents.instr)
-  return getattr(intrin.contents, "def")
+  return d(intrin)
 
-def nir_lid(b:nir.nir_builder) -> nir.nir_def:
+def nlid(b:nir.nir_builder) -> nir.nir_def:
   intrin = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_load_local_invocation_id)
-  nir.nir_def_init(intrin.contents.instr, getattr(intrin.contents, "def"), 3, 32)
+  nir.nir_def_init(intrin.contents.instr, d(intrin), 3, 32)
   nir.nir_builder_instr_insert(b, intrin.contents.instr)
-  return getattr(intrin.contents, "def")
+  return d(intrin)
 
 def nv_param(b:nir.nir_builder, dtype:DType, idx:int) -> nir.nir_def:
   intrin = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_ldc_nv)
   intrin.contents.num_components = 1
-  nir.nir_def_init(intrin.contents.instr, getattr(intrin.contents, "def"), 1, 64 if isinstance(dtype, PtrDType) else dtype.itemsize * 8)
+  nir.nir_def_init(intrin.contents.instr, d(intrin), 1, 64 if isinstance(dtype, PtrDType) else dtype.itemsize * 8)
   arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
   # is this the right offset?
-  arr[0], arr[1] = nir_src_for_ssa(nir_imm(b, 0, dtypes.int)), nir_src_for_ssa(nir_imm(b, 0x160 + idx * 8, dtypes.int))
+  arr[0], arr[1] = nir_src_for_ssa(nimm(b, 0, dtypes.int)), nir_src_for_ssa(nimm(b, 0x160 + idx * 8, dtypes.int))
   # TODO: are these values correct?
   nir_intrinsic_set(nir.NIR_INTRINSIC_ACCESS, intrin, 0)
-  nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, getattr(intrin.contents, "def").bit_size // 8)
+  nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, d(intrin).bit_size // 8)
   nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, intrin, 0)
   nir.nir_builder_instr_insert(b, intrin.contents.instr)
-  return getattr(intrin.contents, "def")
+  return d(intrin)
 
-def nir_reg_idx(b:nir.nir_builder, reg:nir.nir_variable, idx:nir.nir_def) -> nir.nir_def:
+def nreg_idx(b:nir.nir_builder, reg:nir.nir_variable, idx:nir.nir_def) -> nir.nir_def:
   parent = nir.nir_deref_instr_create(b.shader, nir.nir_deref_type_var)
   parent.contents.modes, parent.contents.type, parent.contents.var = reg.data.mode, reg.type, ctypes.pointer(reg)
-  nir.nir_def_init(parent.contents.instr, getattr(parent.contents, "def"), 1, 64)
+  nir.nir_def_init(parent.contents.instr, d(parent), 1, 64)
   nir.nir_builder_instr_insert(b, parent.contents.instr)
   deref = nir.nir_deref_instr_create(b.shader, nir.nir_deref_type_array)
   deref.contents.modes, deref.contents.type = reg.data.mode, nir.glsl_get_array_element(reg.type)
-  deref.contents.parent, deref.contents.arr.index = nir_src_for_ssa(getattr(parent.contents, "def")), nir_src_for_ssa(idx)
-  nir.nir_def_init(deref.contents.instr, getattr(deref.contents, "def"), 1, 64)
+  deref.contents.parent, deref.contents.arr.index = nir_src_for_ssa(d(parent)), nir_src_for_ssa(idx)
+  nir.nir_def_init(deref.contents.instr, d(deref), 1, 64)
   nir.nir_builder_instr_insert(b, deref.contents.instr)
-  return getattr(deref.contents, "def")
+  return d(deref)
 
-def nir_barrier(b:nir.nir_builder):
+def nbarrier(b:nir.nir_builder):
   barrier = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_barrier)
   nir_intrinsic_set(nir.NIR_INTRINSIC_EXECUTION_SCOPE, barrier, nir.SCOPE_WORKGROUP)
   nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_SCOPE, barrier, 0)
   nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_SEMANTICS, barrier, 0)
   nir_intrinsic_set(nir.NIR_INTRINSIC_MEMORY_MODES, barrier, 0) # TODO
   nir.nir_builder_instr_insert(b, barrier.contents.instr)
-  return nir.nir_def()
 
 # alu ops, aop[<dtype>][<op>]
 u_aop = { Ops.ADD: nir.nir_op_uadd_sat, Ops.MUL: nir.nir_op_imul, Ops.IDIV: nir.nir_op_udiv, Ops.MOD: nir.nir_op_umod, Ops.CMPLT: nir.nir_op_ult,
@@ -160,26 +160,26 @@ f_aop = { Ops.ADD: nir.nir_op_fadd, Ops.MUL: nir.nir_op_fmul, Ops.CMPLT: nir.nir
          Ops.EXP2: nir.nir_op_fexp2, Ops.LOG2: nir.nir_op_flog2}
 aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dtypes.sints}, **{x:f_aop for x in dtypes.floats}}
 
-def code(t:DType) -> str: return "i" if t in dtypes.ints else ("f" if t in dtypes.floats else "b")
+def c(t:DType, u:bool=True) -> str: return "u" if t in dtypes.uints and u else ("i" if t in dtypes.ints else ("f" if t in dtypes.floats else "b"))
 def ncast(b:nir.nir_builder, src:nir.nir_def, it:DType, ot:DType) -> nir.nir_def:
   if isinstance(it, PtrDType) and ot == dtypes.long: return src
-  if ot == dtypes.bool: return nir_build_alu(b, getattr(nir, f"nir_op_{code(it)}ne{'u' if code(it) == 'f' else ''}"), src, nir_imm(b, 0, it))
-  return nir_build_alu(b, getattr(nir, f"nir_op_{code(it)}2{code(ot)}{ot.itemsize * 8}"), src)
+  if ot == dtypes.bool: return nalu(b, g(f"nir_op_{c(it, False)}ne{'u' if c(it) == 'f' else ''}"), src, nimm(b, 0, it))
+  return nalu(b, g(f"nir_op_{c(it)}2{c(it) if it in dtypes.ints and ot in dtypes.ints else c(ot, ot == dtypes.bool)}{ot.itemsize*8}"), src)
 
 def nif(b:nir.nir_builder, cond:nir.nir_def, go:Callable):
   nif = nir.nir_push_if(b, cond)
   go()
   nir.nir_pop_if(b, nif)
 
-def nir_jump(b:nir.nir_builder, t:nir.nir_jump_type): nir.nir_builder_instr_insert(b, nir.nir_jump_instr_create(b.shader, t).contents.instr)
+def njump(b:nir.nir_builder, t): nir.nir_builder_instr_insert(b, nir.nir_jump_instr_create(b.shader, t).contents.instr)
 
 def if_phi(b:nir.nir_builder, cond:nir.nir_def, then_def:nir.nir_def, else_def:nir.nir_def) -> nir.nir_def:
   nir.nir_pop_if(b, nir.nir_push_if(b, cond))
   return nir.nir_if_phi(b, then_def, else_def).contents
 
 # this is a ridiculous hack, but I can't find a better way to grab the glsl_type objects
-glsl_base = {**{d:getattr(nir, f"GLSL_TYPE_{'U' if d in dtypes.uints else ''}INT{d.itemsize*8 if d.itemsize != 4 else ''}") for d in dtypes.ints},
-             **{getattr(dtypes,d):getattr(nir, f"GLSL_TYPE_{d.upper()}") for d in ['bool', 'double', 'float', 'float16', 'bfloat16']},
+glsl_base = {**{d:g(f"GLSL_TYPE_{'U' if d in dtypes.uints else ''}INT{d.itemsize*8 if d.itemsize != 4 else ''}") for d in dtypes.ints},
+             **{getattr(dtypes,d):g(f"GLSL_TYPE_{d.upper()}") for d in ['bool', 'double', 'float', 'float16', 'bfloat16']},
              dtypes.fp8e4m3: nir.GLSL_TYPE_FLOAT_E4M3FN, dtypes.fp8e5m2: nir.GLSL_TYPE_FLOAT_E5M2}
 def glsl_type(t:DType) -> nir.struct_glsl_type:
   if isinstance(t, PtrDType): return nir.glsl_array_type(glsl_type(t.base), t.size, 0).contents
@@ -220,26 +220,25 @@ class NIRRenderer(Renderer):
   ])
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.CONST, name="x"), lambda ctx,x: nir_imm(ctx[0], x.arg, x.dtype)),
+    (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx[0], x.arg, x.dtype)),
     (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: nv_param(ctx[0], x.dtype, x.arg)),
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nir_channel(ctx[0], nir_gid(ctx[0]) if x.arg[0][0] == 'g' else nir_lid(ctx[0]), int(x.arg[0][-1]))),
-    (UPat(Ops.STORE, src=(UPat.var("addr"), UPat.var("val")), allow_any_len=True, name="x"),
-     lambda ctx,x,addr,val: nir_store(ctx[0], AddrSpace(x.arg), ctx[1][addr], ctx[1][val], val.dtype)),
-    (UPat(Ops.LOAD, src=(UPat.var("addr"),), name="x"), lambda ctx,x,addr: nir_load(ctx[0], AddrSpace(x.arg), ctx[1][addr], x.dtype)),
-    (UPat(Ops.LOAD, name="x", src=(UPat.var('addr'), UPat(name='alt'), UPat(name="gate", op=GroupOp.ALU))),
-     lambda ctx,x,addr,alt,gate: if_phi(ctx[0], ctx[1][gate], nir_load(ctx[0], AddrSpace(x.arg), ctx[1][addr], x.dtype), ctx[1][alt])),
-    (UPat(Ops.LOAD, src=(UPat.var("addr"),), allow_any_len=True, name="x"),
-     lambda ctx,x,addr: nir_load(ctx[0], AddrSpace(x.arg), ctx[1][addr], x.dtype)),
-    (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: nir_build_alu(ctx[0], getattr(nir, f"nir_op_vec{x.dtype.count}"), *[ctx[1][src] for src in x.src])),
-    (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nir_build_alu(ctx[0], aop[x.src[0].dtype.scalar()][x.op], *[ctx[1][src] for src in x.src])),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx[0], ngid(ctx[0]) if x.arg[0][0] == 'g' else nlid(ctx[0]), int(x.arg[0][-1]))),
+    (UPat(Ops.STORE, src=(UPat.var("loc"), UPat.var("val")), allow_any_len=True, name="x"),
+     lambda ctx,x,loc,val: nstore(ctx[0], AddrSpace(x.arg), ctx[1][loc], ctx[1][val], val.dtype)),
+    (UPat(Ops.LOAD, src=(UPat.var("loc"),), name="x"), lambda ctx,x,loc: nload(ctx[0], AddrSpace(x.arg), ctx[1][loc], x.dtype)),
+    (UPat(Ops.LOAD, name="x", src=(UPat.var('loc'), UPat(name='alt'), UPat(name="gate", op=GroupOp.ALU))),
+     lambda ctx,x,loc,alt,gate: if_phi(ctx[0], ctx[1][gate], lambda: nload(ctx[0], AddrSpace(x.arg), ctx[1][loc], x.dtype), ctx[1][alt])),
+    (UPat(Ops.LOAD, src=(UPat.var("loc"),), allow_any_len=True, name="x"), lambda ctx,x,loc: nload(ctx[0], AddrSpace(x.arg), ctx[1][loc], x.dtype)),
+    (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: nalu(ctx[0], g(f"nir_op_vec{x.dtype.count}"), *[ctx[1][src] for src in x.src])),
+    (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx[0], aop[x.src[0].dtype.scalar()][x.op], *[ctx[1][src] for src in x.src])),
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx[0], ctx[1][x.src[0]], x.src[0].dtype, x.dtype)),
     (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx[1][a]),
-    (UPat(Ops.GEP, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: nir_channel(ctx[0], ctx[1][a], get_single_element(x.arg))),
+    (UPat(Ops.GEP, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: nchannel(ctx[0], ctx[1][a], get_single_element(x.arg))),
     (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:
      nir.nir_local_variable_create(ctx[0].impl, glsl_type(dtypes.uint8.ptr(x.dtype.size) if x.dtype.base == dtypes.bool else x.dtype),
                                    s(f"acc{x.arg[0]}")).contents),
-    (UPat(Ops.INDEX, src=(UPat.var("reg"), UPat.var("idx"))), lambda ctx,reg,idx: nir_reg_idx(ctx[0], ctx[1][reg], ctx[1][idx])),
-    (UPat(Ops.BARRIER), lambda ctx: nir_barrier(ctx[0])),
+    (UPat(Ops.INDEX, src=(UPat.var("reg"), UPat.var("idx"))), lambda ctx,reg,idx: nreg_idx(ctx[0], ctx[1][reg], ctx[1][idx])),
+    (UPat(Ops.BARRIER), lambda ctx: ensure(nbarrier(ctx[0]))),
     (UPat(Ops.IF, name="x"), lambda ctx,x: nir.nir_push_if(ctx[0], ctx[1][x.src[0]])),
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(nir.nir_pop_if(ctx[0], ctx[1][x.src[0]])))
   ])
@@ -264,18 +263,16 @@ class NIRRenderer(Renderer):
         # why do we care about setting this?
         if u.arg is not None: b.shader.contents.info.name = s(u.arg.function_name)
       elif u.op == Ops.DEFINE_LOCAL:
-        r[u] = nir_imm(b, b.shader.contents.info.shared_size, dtypes.long)
+        r[u] = nimm(b, b.shader.contents.info.shared_size, dtypes.long)
         b.shader.contents.info.shared_size += u.dtype.nbytes()
       elif u.op == Ops.RANGE:
-        zero = nir_imm(b, 0, u.dtype)
-        phi, r[u] = nir_build_phi(b, [(nir_cf_node_prev((loop:=nir.nir_push_loop(b)).contents.cf_node, nir.nir_block), zero)])
-        nif(b, nir_build_alu(b, nir.nir_op_inot, nir_build_alu(b, aop[u.dtype][Ops.CMPLT], r[u], r[u.src[0]])),
-            lambda: nir_jump(b, cast(ctypes.c_uint32, nir.nir_jump_break)))
+        zero = nimm(b, 0, u.dtype)
+        phi, r[u] = nphi(b, [(nir_cf_node_prev((loop:=nir.nir_push_loop(b)).contents.cf_node, nir.nir_block), zero)])
+        nif(b, nalu(b, nir.nir_op_inot, nalu(b, aop[u.dtype][Ops.CMPLT], r[u], r[u.src[0]])), lambda: njump(b, nir.nir_jump_break))
         ranges.append((loop, phi))
       elif u.op == Ops.ENDRANGE:
         loop, phi = ranges.pop()
-        nir.nir_phi_instr_add_src(phi, nir_cursor_current_block(b.cursor),
-                                  nir_build_alu(b, aop[u.src[0].dtype][Ops.ADD], r[u.src[0]], nir_imm(b, 1, u.src[0].dtype)))
+        nir.nir_phi_instr_add_src(phi, current_block(b.cursor), nalu(b, aop[u.src[0].dtype][Ops.ADD], r[u.src[0]], nimm(b, 1, u.src[0].dtype)))
         nir.nir_instr_insert(nir_before_cf_list(loop.contents.body), phi.instr)
         nir.nir_pop_loop(b, loop)
       else:
