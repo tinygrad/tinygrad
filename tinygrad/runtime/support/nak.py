@@ -16,10 +16,10 @@ class NAKCompiler(Compiler):
     return nak.nak_compile_shader(shader, False, self.cc, 0, None).contents
   def disassemble(self, lib: bytes):
     try:
-      fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+      fn = (pathlib.Path(tempfile.gettempdir()) / f"tinynir_{hashlib.md5(lib).hexdigest()}").as_posix()
       with open(fn, "wb") as f: f.write(parse_nak_shader(lib)[0])
       print(subprocess.check_output(['nvdisasm', "-b", f"SM{self.arch[3:]}", fn]).decode('utf-8'))
-    except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
+    except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
   @functools.cached_property
   def nir_options(self): return ctypes.cast(nak.nak_nir_options(self.cc), ctypes.POINTER(nir.nir_shader_compiler_options))
 
