@@ -378,7 +378,10 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
     # similar to jax but we don't use weak type
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
+    if is_dtype_supported(dtypes.fp8e4m3) and is_dtype_supported(dtypes.fp8e5m2):
+      assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.fp8e4m3
+    else:
+      assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
