@@ -44,7 +44,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     match ji.prg:
       case CompiledRunner(): ji_graph_dev = ji.prg.dev
       case BufferXfer(): ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
-      case BufferCopy(): ji_graph_dev = next((Device[unwrap(b).device] for b in ji.bufs if unwrap(b).device is not "CPU"), None)
+      case BufferCopy(): ji_graph_dev = next((Device[unwrap(b).device] for b in ji.bufs if unwrap(b).device != "CPU"), None)
       case ViewOp(): continue # ViewOps are just ignored
       case _: ji_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
 
