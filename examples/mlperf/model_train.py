@@ -252,6 +252,10 @@ def train_resnet():
         print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
         # if we are doing beam search, run the first eval too
+        if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+          min_time = min(step_times)
+          assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
+
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
     if MLLOGGER and RUNMLPERF:
@@ -343,6 +347,8 @@ def train_resnet():
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
+
+
 
 def train_retinanet():
   from contextlib import redirect_stdout
