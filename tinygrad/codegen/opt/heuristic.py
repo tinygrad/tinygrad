@@ -77,7 +77,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for buf_index,buf in enumerate(k.bufs):
     if isinstance(buf.src[0].dtype, ImageDType):
       # part of real_strides
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
+        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
       if len(unit_stride_axes_mul_4):
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
