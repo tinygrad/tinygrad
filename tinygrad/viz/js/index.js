@@ -20,11 +20,11 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ show }) => {
-  const msg = document.getElementById("progress-message");
+const updateProgress = ({ start }) => {
   clearTimeout(timeout);
+  const msg = document.getElementById("progress-message");
   msg.style.display = "none";
-  if (show) {
+  if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
   }
@@ -50,7 +50,7 @@ function addTags(root) {
 let [workerUrl, worker] = [null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ show:true });
+  updateProgress({ start:true });
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -62,7 +62,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    updateProgress({ show:false });
+    updateProgress({ start:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -171,7 +171,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
-  if (data != null) return updateProgress({ show:false });
+  if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
@@ -289,7 +289,7 @@ async function renderProfiler() {
       });
     }
   }
-  updateProgress({ "show":false });
+  updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
