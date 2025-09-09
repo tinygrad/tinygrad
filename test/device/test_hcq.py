@@ -137,7 +137,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
     assert val == 200.0, f"got val {val}"
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
   def test_exec_update(self):
     sint_global = (Variable("sint_global", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.global_size[1:])
     sint_local = (Variable("sint_local", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.local_size[1:])
@@ -155,7 +155,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
   def test_exec_update_fuzz(self):
     virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
     virt_local = [Variable(f"local_{i}", 0, 0xffffffff, dtypes.uint32) for i in range(3)]
@@ -336,7 +336,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"} else 100)
+    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
