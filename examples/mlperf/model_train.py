@@ -4,7 +4,7 @@ import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
-from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
 from extra.lr_scheduler import LRSchedulerGroup
@@ -1313,9 +1313,9 @@ def train_llama3():
 
   opt_gradient_clip_norm = 1.0
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
+  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = 8e-7
+  opt_end_learning_rate = getenv("END_LR", 8e-7)
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
@@ -1355,6 +1355,15 @@ def train_llama3():
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
+
+  if resume_ckpt := getenv("RESUME_CKPT"):
+    fn = f"./ckpts/llama3_{resume_ckpt}.safe"
+    print(f"loading initial checkpoint from {fn}")
+    load_state_dict(model, safe_load(fn), realize=False)
+
+    fn = f"./ckpts/llama3_{resume_ckpt}_optim.safe"
+    print(f"loading optim checkpoint from {fn}")
+    load_state_dict(scheduler, safe_load(fn), realize=False)
 
   @TinyJit
   @Tensor.train()
@@ -1431,26 +1440,30 @@ def train_llama3():
         return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
 
   iter = get_train_iter()
-  i, sequences_seen = 0, 0
+  i, sequences_seen = resume_ckpt, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens, grad_acc)
     loss = loss.float().item()
 
+    i += 1
+    sequences_seen += tokens.shape[0]
+
     tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
         f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
-    if getenv("CKPT") and (i % 200 == 0 or i == 10):
+    if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
       fn = f"{ckpt_dir}/llama3_{i}.safe"
       safe_save(get_state_dict(model), fn)
 
-    i += 1
-    sequences_seen += tokens.shape[0]
+      tqdm.write("saving optim checkpoint")
+      fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
+      safe_save(get_state_dict(scheduler), fn)
 
     if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
       tqdm.write(f"evaluating after {sequences_seen} sequences")

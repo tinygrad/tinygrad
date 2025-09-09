@@ -157,11 +157,11 @@ const rescaleTrack = (source, tid, k) => {
   return change;
 }
 
-const drawLine = (ctx, x, y) => {
+const drawLine = (ctx, x, y, opts) => {
   ctx.beginPath();
   ctx.moveTo(x[0], y[0]);
   ctx.lineTo(x[1], y[1]);
-  ctx.fillStyle = ctx.strokeStyle = "#f0f0f5";
+  ctx.fillStyle = ctx.strokeStyle = opts?.color || "#f0f0f5";
   ctx.stroke();
 }
 
@@ -182,7 +182,7 @@ async function renderProfiler() {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding] = [10, 8];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
@@ -207,7 +207,7 @@ async function renderProfiler() {
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, offsetY });
+      data.tracks.set(k, { shapes, visible:[], offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -228,15 +228,14 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
         }
-        const arg = { tooltipText:formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+        const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
+        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
-      const height = heightScale(peak);
-      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
       const timestamps = [];
@@ -267,12 +266,14 @@ async function renderProfiler() {
         v.y.push(v.y.at(-1));
       }
       timestamps.push(dur);
+      const height = heightScale(peak);
+      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -291,25 +292,20 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
-  const rectLst = [];
   function render(transform) {
     zoomLevel = transform;
-    rectLst.length = 0;
-    ctx.save();
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
-    xscale.domain(xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale));
-    const zoomDomain = transform != null ? xscale.domain() : null;
-    let yscale = null;
-    if (data.axes.y != null) {
-      yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
-    }
+    const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+      visible.length = 0;
       for (const e of shapes) {
-        const [start, end] = e.width != null ? [e.x, e.x+e.width] : [e.x[0], e.x[e.x.length-1]];
-        if (zoomDomain != null && (start>zoomDomain[1]|| end<zoomDomain[0])) continue;
+        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
+        else { start = e.x; end = e.x+e.width; }
+        if (start>visibleX[1] || end<visibleX[0]) continue;
         ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
@@ -321,12 +317,8 @@ async function renderProfiler() {
           p.closePath();
           ctx.fill(p);
           // NOTE: y coordinates are in reverse order
-          for (let i = 0; i < x.length - 1; i++) {
-            let tooltipText = e.arg.tooltipText;
-            if (yscale != null && ((yaxisVal=yscale.invert(offsetY+e.y1[i]))>0)) {
-              tooltipText += `\nTotal: ${formatUnit(yaxisVal, data.axes.y.fmt)}`;
-            }
-            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:{...e.arg, tooltipText} });
+          for (let i = 0; i<x.length-1; i++) {
+            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
           }
           continue;
         }
@@ -334,7 +326,7 @@ async function renderProfiler() {
         const x = xscale(start);
         const width = xscale(end)-x;
         ctx.fillRect(x, offsetY+e.y, width, e.height);
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -361,27 +353,31 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, tickSize])
       // tick label
       ctx.textBaseline = "top";
-      ctx.textAlign = "left";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
-    if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
+    if (data.axes.y != null) {
+      drawLine(ctx, [0, 0], data.axes.y.range);
+      const yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
-        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(formatUnit(tick, data.axes.y.fmt), tickSize+2, y);
       }
     }
-    ctx.restore();
+    // draw markers
+    for (const m of markers) {
+      const x = xscale(m.ts);
+      drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
+      ctx.fillText(m.name, x+2, 1);
+    }
   }
 
   function resize() {
     const profiler = document.querySelector(".profiler");
-    // NOTE: use clientWidth to account for the scrollbar
-    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
-    width -= rect("#device-list").width+padding;
+    const sideRect = rect("#device-list");
+    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -394,14 +390,19 @@ async function renderProfiler() {
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  resize();
-  window.addEventListener("resize", resize);
+  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
+    let tid = null;
+    for (const k of data.tracks.keys()) {
+      const r = rect(document.getElementById(k));
+      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+    }
+    if (tid == null) return;
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of rectLst) {
+    for (const r of data.tracks.get(tid).visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
@@ -419,7 +420,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.innerText = foundRect.tooltipText;
+      tooltip.innerHTML = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");

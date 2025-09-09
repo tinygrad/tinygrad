@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, subprocess, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, mv_address, wait_cond, cpu_profile
+from tinygrad.helpers import capstone_flatdump, getenv, from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing
 from tinygrad.device import Compiler, BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.elf import jit_loader
@@ -28,31 +28,40 @@ class ClangJITCompiler(Compiler):
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
 class CPUWorker(threading.Thread):
-  def __init__(self, dev):
+  def __init__(self, dev, tasks, thread_id):
     super().__init__()
-    self.dev, self.tasks, self.daemon = dev, dev.tasks, True
+    self.dev, self.tasks, self.thread_id, self.pool, self.daemon = dev, tasks, thread_id, [], True
+
+  def push_task(self, tid, cmd, args):
+    if len(self.pool) <= tid:
+      self.pool.append(queue.Queue())
+      CPUWorker(self, self.pool[tid], thread_id=tid+1).start()
+    self.pool[tid].put([cmd, 1, len(args)] + args)
 
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
       for cmd in cmd_iter:
-        args_cnt = next(cmd_iter)
-        cmd(*[next(cmd_iter) for _ in range(args_cnt)])
+        threads, args_cnt = next(cmd_iter), next(cmd_iter)
+        args = [next(cmd_iter) for _ in range(args_cnt)]
+        for th in range(threads - 1): self.push_task(th, cmd, args)
+        cmd(self.thread_id, *args)
+        for th in range(threads - 1): self.pool[th].join()
       self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
-  def _exec(self, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]))
-  def _signal(self, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
-  def _timestamp(self, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
-  def cmd(self, cmd, *args):
-    self.q(cmd, len(args), *args)
+  def _exec(self, tid, prg, bufs, *args):
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), tid)
+  def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
+  def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
+  def cmd(self, cmd, *args, threads=1):
+    self.q(cmd, threads, len(args), *args)
     return self
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals)
+    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
@@ -62,10 +71,10 @@ class CPUComputeQueue(HWQueue):
 MAP_JIT = 0x0800
 
 class CPUProgram(HCQProgram):
-  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or sys.platform == "win32" else 'libgcc_s.so.1')
+  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
 
   def __init__(self, dev, name:str, lib:bytes):
-    if sys.platform == "win32":
+    if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
       self.mem = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(lib)), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
@@ -93,14 +102,14 @@ class CPUProgram(HCQProgram):
 
     super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
 
+  @suppress_finalizing
   def __del__(self):
-    if getattr(sys, 'is_finalizing', lambda: True)(): return
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.external_ptr: addr, buf = options.external_ptr, None
-    elif sys.platform == "win32": addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
+    elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
@@ -121,5 +130,5 @@ class CPUAllocator(HCQAllocatorBase):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self).start()
+    CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), ClangRenderer(), ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
