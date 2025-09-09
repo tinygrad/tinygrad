@@ -634,7 +634,7 @@ x86_lowerer = PatternMatcher([
 ])
 
 class X86Renderer(ISARenderer):
-  device = "X86"
+  device = "CPU"
   max_vec_sz = 16
   has_local = False
   global_max = None

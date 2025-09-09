@@ -1,11 +1,12 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, CPU_LLVM, suppress_finalizing
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, CPU_LLVM, X86, suppress_finalizing
 from tinygrad.device import BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.runtime.support.compiler_cpu import HostLLVMCompiler, ClangJITCompiler
+from tinygrad.renderer.isa import X86Renderer
+from tinygrad.runtime.support.compiler_cpu import HostLLVMCompiler, ClangJITCompiler, X86Compiler
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
@@ -116,5 +117,6 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    super().__init__(device, CPUAllocator(self), LLVMRenderer() if CPU_LLVM else ClangRenderer(),
-      HostLLVMCompiler() if CPU_LLVM else ClangJITCompiler(), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    renderer = LLVMRenderer() if CPU_LLVM else X86Renderer() if X86 else ClangRenderer()
+    compiler = HostLLVMCompiler() if CPU_LLVM else X86Compiler() if X86 else ClangJITCompiler()
+    super().__init__(device, CPUAllocator(self), renderer, compiler, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
