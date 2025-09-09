@@ -59,7 +59,7 @@ async function renderDag(graph, additions, recenter=false) {
     worker.terminate();
     worker = new Worker(workerUrl);
   }
-  worker.postMessage({graph, additions, ctxs});
+  worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
     displayGraph("graph");
     updateProgress({ start:false });
