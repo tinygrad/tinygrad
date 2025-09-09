@@ -999,5 +999,5 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU', 'X86':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
