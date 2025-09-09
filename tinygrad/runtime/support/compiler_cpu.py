@@ -2,7 +2,8 @@ import ctypes, platform, sys, subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.runtime.support.elf import jit_loader
-import tinygrad.runtime.autogen.llvm as llvm
+try: import tinygrad.runtime.autogen.llvm as llvm
+except ImportError, FileNotFoundError: llvm = None
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
