@@ -378,7 +378,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
     # similar to jax but we don't use weak type
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.fp8e4m3
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
@@ -443,6 +443,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).sum().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).sum().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
@@ -475,6 +477,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).mean().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).mean().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).mean().dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).mean().dtype == dtypes.float32
@@ -490,6 +494,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).cumsum(0).dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).cumsum(0).dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
@@ -563,10 +569,10 @@ class TestAutoCastType(unittest.TestCase):
   def test_gradient_dtype(self):
     old_default_float = dtypes.default_float
 
-    for default_dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_dtype in dtypes.floats:
       if not is_dtype_supported(default_dtype): continue
       dtypes.default_float = default_dtype
-      for dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+      for dtype in  dtypes.floats:
         if not is_dtype_supported(dtype): continue
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
