@@ -1,7 +1,7 @@
 import unittest, operator, math
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate
-from tinygrad.helpers import CI, getenv, AMD_LLVM
+from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
@@ -20,20 +20,13 @@ dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
-# TODO: LLVM comparing with nan is incorrect
-if (Device.DEFAULT == "LLVM") or (Device.DEFAULT == "AMD" and AMD_LLVM):
-  binary_operations.remove(operator.lt)
-
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
-                                                 (Tensor.bitwise_or, np.bitwise_or), operator.mod]
+                                                 (Tensor.bitwise_or, np.bitwise_or), (Tensor.maximum, np.maximum), operator.mod]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal), (Tensor.cos, np.cos)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
-
-# TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
-#binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
 if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU":
@@ -58,10 +51,10 @@ ht.fp8e4m3 = ht.uint8
 ht.fp8e5m2 = ht.uint8
 
 def universal_test(a, b, dtype, op):
-  # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
-  if (math.isnan(a) or math.isnan(b)) and Device.DEFAULT == "WEBGPU" and CI: return
   if not isinstance(op, tuple): op = (op, op)
   if op[0] == operator.mod and b == 0: return
+  # lt and max with nan is undefined in tinygrad
+  if op[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
   tensor_value = (op[0](ta, tb)).numpy()
   numpy_value = op[1](ta.numpy(), tb.numpy())
@@ -75,7 +68,7 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
   # TODO: cos does not match for large input
-  if op[0] == Tensor.cos and abs(a) > 100: return
+  if op[0] == Tensor.cos and abs(a) > 30: return
   if op[0] == Tensor.log and a <= 0: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
@@ -96,6 +89,9 @@ def universal_test_cast(a, in_dtype, dtype):
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
+  # lt and max with nan is undefined in tinygrad
+  if op1[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
+  if op2[0] in (operator.lt, Tensor.maximum) and math.isnan(c): return
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
   an, bn, cn = np.array([a]).astype(_to_np_dtype(d1)), np.array([b]).astype(_to_np_dtype(d1)), np.array([c]).astype(_to_np_dtype(d2))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()

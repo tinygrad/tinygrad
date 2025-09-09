@@ -37,8 +37,8 @@ class TestBlockReorder(unittest.TestCase):
     a = UOp(Ops.DEFINE_GLOBAL, dtype=dtypes.float.ptr(), arg=0)
     b = UOp(Ops.DEFINE_GLOBAL, dtype=dtypes.float.ptr(), arg=1)
     c = UOp(Ops.DEFINE_GLOBAL, dtype=dtypes.float.ptr(), arg=2)
-    v1 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx0", 4))
-    v2 = UOp(Ops.SPECIAL, dtype=dtypes.int, arg=("gidx1", 4))
+    v1 = UOp(Ops.SPECIAL, dtype=dtypes.int, src=(UOp.const(dtypes.int, 4),), arg="gidx0")
+    v2 = UOp(Ops.SPECIAL, dtype=dtypes.int, src=(UOp.const(dtypes.int, 4),), arg="gidx1")
     v1 = v1*27
     v2 = v2*4
     loads = [
