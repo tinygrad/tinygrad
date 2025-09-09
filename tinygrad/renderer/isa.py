@@ -172,27 +172,49 @@ class ISARenderer(Renderer):
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]: raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
 
-# **************** shared pattern matchers ****************
+# **************** pattern matchers ****************
+
+x86_matcher = PatternMatcher([
+  # rewrite cast to bool to CMPNE 0
+  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
+  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
+  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
+  # can't cast from float16 to ints/float64 directly and vice versa
+  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  # can't cast from float to int8/16 directly and vice versa
+  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  # int/float casts only for signed int
+  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
+  # casting uint64 to float requires special handling if msb is 1
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
+   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
+                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # mulacc only available for floats
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+  # no int8 mul or cmove, cast to int16
+  (UPat.var("a", dtypes.ints8) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
+  (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
+  # float16 alus are done in float32
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
+   tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
+  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
+   lambda x,a,b: UOp(x.op, x.dtype, (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
+  # no cmpne for packed ints, y != x => !(y==x)
+  (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
+   lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
+])
 
 def to_mask(dt:DType): return {1:dtypes.mask8, 2:dtypes.mask16, 4:dtypes.mask32, 8:dtypes.mask64}[dt.scalar().itemsize].vec(dt.count)
 def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize].vec(dt.count)
 # on x86/arm64 certain comparisons create masks instead of booleans
 mask_matcher = PatternMatcher([
-  # TODO: shouldn't be here
-  # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
-   tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
-   lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
-  # rewrite cast to bool to CMPNE 0
-  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND, NOTE: cmp of masks is not valid for floats (true mask == nan)
   (UPat.var('x', (dtypes.bool,)+dtypes.masks).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', (dtypes.bool,)+dtypes.masks).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', (dtypes.bool,)+dtypes.masks)<UPat.var('y'), lambda x,y: (x^True)&y),
-  # no cmpne for packed ints, y != x => !(y==x)
-  (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
-   lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
   # cmp/bitwise of floats/masks/packed ints are masks
   (UPat(GroupOp.Binary, dtypes.bool, (UPat.var("a", dtypes.floats+dtypes.masks), UPat()), name="x"), lambda a,x: x.replace(dtype=to_mask(a.dtype))),
   (UPat(GroupOp.Binary, dtypes.bool, (UPat.var("a", dtypes.ints), UPat()), name="x"),
@@ -223,56 +245,6 @@ mask_matcher = PatternMatcher([
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("m", dtypes.masks)), lambda buf,idx,m: buf.index(idx, m.bitcast(to_int(m.dtype)).ne(0))),
 ])
 
-base_matcher = PatternMatcher([
-  # rewrite cast to bool to CMPNE 0
-  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
-  # *** NOOP ***
-  # cast to/from pointer is a noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  (UPat.var("y").cast(name="x"), lambda y,x: x.replace(op=Ops.NOOP) if isinstance(y.dtype, PtrDType) else None),
-  # cast to < scalar int is a noop
-  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
-  # zero extending scalar 32bit int is a noop
-  (UPat.var("y", dtypes.uint32).cast(dtypes.ints64, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
-  # cast between ints of same size is a noop
-  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
-  # bitcasts between scalar float/mask and scalar int are real, rest are noops
-  (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
-   (y.dtype in dtypes.ints and x.dtype in dtypes.floats+dtypes.masks) else x.replace(op=Ops.NOOP)),
-  # moving elements of a single register to another without shuffling is a noop
-  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
-   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
-  # *** INDEX/LOAD/STORE ***
-  # loading from register is a noop
-  #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
-  # rewrite index with gate to cmove
-  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
-  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
-  # move mask from INDEX to the load/store
-  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
-   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
-  (UPat.var("buf").index(UPat.var("idx"), UPat(dtype=dtypes.bool)).store(UPat.var("val"), UPat.var("gate"), allow_any_len=True),
-   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
-  # cast index to 64bit
-  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64))),
-  # TODO: if lea just adds disp it's a noop and disp goes to load/store
-  # fold displacement into load/store
-  (UPat(Ops.LOAD, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted()),), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,x: x.replace(src=(buf.index(idx), disp) + x.src[1:])),
-  (UPat(Ops.STORE, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted(),), UPat.var("a")), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx), a, disp) + x.src[2:])),
-  # displacement of 0 if there isn't any
-  (UPat(Ops.INDEX, name="idx").load(allow_any_len=True, name="x"),
-   lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or \
-    len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
-  (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
-   lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
-])
-
-# **************** X86 ****************
-
 powers_of_two = {2**i:i for i in range(64)}
 def split_vectorized_alu(ctx:Renderer, alu:UOp):
   dt = max([alu.src[-1].dtype, alu.dtype], key=lambda x: x.itemsize)
@@ -293,15 +265,11 @@ def split_vectorized_acc(ctx:Renderer, acc:UOp, c:UOp):
   new_acc = acc.replace(dtype=acc.dtype.base.scalar().vec(l).ptr(acc.dtype.count // l, cast(PtrDType, acc.dtype).addrspace))
   return UOp(Ops.PTRCAT, acc.dtype, tuple([new_acc.index(UOp.const(dtypes.int, i)) for i in range(0, acc.dtype.count, l)]))
 
-# the pre matcher legalizes vector dtypes
-# NOTE: we want gep pushing but not through alus
-# TODO: load_store_folding only because of ptrcat, move this to devectorizer?
-x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding + PatternMatcher([
-  # TODO: taken from x86_matcher
-  # no int8 mul or cmove, cast to int16
-  (UPat.var("a", dtypes.ints8) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
-  (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
-   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
+# patterns that change size (bool to mask, intermediate casts) need to run before vector splitting
+# patterns that cast cmp/where to different dtypes (float16 where is casted to float32) need to run before mask patterns
+# the mask matcher goes after cause splitting can result in a scalar tail and scalar int cmp is a bool not mask
+# we want gep pushing but not through alus
+x86_pre_matcher = PatternMatcher(gep_pushing.patterns[:-1]) + load_store_folding + x86_matcher + PatternMatcher([
   # TODO: try not to devectorize this
   (UPat(dtype=dtypes.ints64).cast(dtypes.floats, name="alu"), no_vectorized_alu),
   (UPat(dtype=dtypes.floats).cast(dtypes.ints64, name="alu"), no_vectorized_alu),
@@ -332,7 +300,8 @@ def x86_load_consts(x:UOp) -> UOp|None:
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
-x86_matcher = base_matcher + PatternMatcher([
+# const loads, displacement folding and noops go here
+x86_extra_matcher = PatternMatcher([
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
@@ -340,35 +309,52 @@ x86_matcher = base_matcher + PatternMatcher([
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
    lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
-  # can't cast from float16 to ints/float64 directly and vice versa
-  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  # can't cast from float to int8/16 directly and vice versa
-  (UPat.var("y", dtypes.floats).cast(dtypes.ints8+dtypes.ints16, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.bool,)+dtypes.ints8+dtypes.ints16).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  # int/float casts only for signed int
-  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
-  # casting uint64 to float requires special handling if msb is 1
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
-   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
-                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # cast to/from pointer is a noop
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+  (UPat.var("y").cast(name="x"), lambda y,x: x.replace(op=Ops.NOOP) if isinstance(y.dtype, PtrDType) else None),
+  # cast to < scalar int is a noop
+  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
+  # zero extending scalar 32bit int is a noop
+  (UPat.var("y", dtypes.uint32).cast(dtypes.ints64, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
+  # cast between ints of same size is a noop
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
+  # bitcasts between scalar float/mask and scalar int are real, rest are noops
+  (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
+   (y.dtype in dtypes.ints and x.dtype in dtypes.floats+dtypes.masks) else x.replace(op=Ops.NOOP)),
+  # moving elements of a single register to another without shuffling is a noop
+  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
+   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # a gep in a 32bit vectorize is a noop and its arg is part of the imm of the instruction
   (UPat(Ops.VECTORIZE, (dtypes.float32, dtypes.mask32)+dtypes.ints32, name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
-  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
-  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
-  # mulacc only available for floats
-  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
-  # no int8 mul or cmove, cast to int16
-  (UPat.var("a", dtypes.ints8) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
-  (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.ints8), UPat.var("b")),
-   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
-  # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
-   tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
-   lambda x,a,b: UOp(x.op, dtypes.mask32.vec(x.dtype.count), (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
-]) + mask_matcher
+  # cast index to 64bit
+  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64))),
+  # *** INDEX/LOAD/STORE ***
+  # loading from register is a noop
+  #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
+  # rewrite index with gate to cmove
+  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
+  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
+  # move mask from INDEX to the load/store
+  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
+   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
+  (UPat.var("buf").index(UPat.var("idx"), UPat(dtype=dtypes.bool)).store(UPat.var("val"), UPat.var("gate"), allow_any_len=True),
+   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
+  # TODO: if lea just adds disp it's a noop and disp goes to load/store
+  # fold displacement into load/store
+  (UPat(Ops.LOAD, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted()),), allow_any_len=True, name="x"),
+   lambda buf,idx,disp,x: x.replace(src=(buf.index(idx), disp) + x.src[1:])),
+  (UPat(Ops.STORE, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted(),), UPat.var("a")), allow_any_len=True, name="x"),
+   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx), a, disp) + x.src[2:])),
+  # displacement of 0 if there isn't any
+  (UPat(Ops.INDEX, name="idx").load(allow_any_len=True, name="x"),
+   lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or \
+    len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
+  (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
+   lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
+])
 
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
 def shuf_imm(src:tuple[UOp, ...]) -> int: return sum((s.arg[0] if isinstance(s.arg, tuple) else 0) << (2 * i) for i,s in enumerate(src))
@@ -653,7 +639,7 @@ class X86Renderer(ISARenderer):
   has_local = False
   global_max = None
   pre_matcher = x86_pre_matcher
-  extra_matcher = x86_matcher
+  extra_matcher = x86_extra_matcher
   extra_spec = x86_spec
   lowerer = x86_lowerer
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
