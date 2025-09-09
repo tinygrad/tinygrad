@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, DEBUG, CI, AMD_LLVM
+from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import assume, given, settings, strategies as strat
@@ -297,7 +297,6 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
-@unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
@@ -428,7 +427,6 @@ class TestOpsBFloat16(unittest.TestCase):
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
-  @unittest.skipIf(Device.DEFAULT == "AMD" and AMD_LLVM, "AMD_LLVM failed on this")
   def test_no_approximation(self):
     data = [326.0, 339.0, 10603200512.0]
     expected = torch.tensor(data, dtype=torch.bfloat16).sqrt().float().numpy()

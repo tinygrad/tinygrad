@@ -93,7 +93,7 @@ class TestMergeDicts(unittest.TestCase):
     assert merge_dicts([a, b]) == {"a": 1, "b": 2, "c": 3}
     assert merge_dicts([a, c]) == a
     assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       merge_dicts([a, d])
 
 class TestStripParens(unittest.TestCase):

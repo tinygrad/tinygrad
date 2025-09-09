@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
-from tinygrad.uop.ops import track_rewrites, _substitute
+from tinygrad.uop.ops import track_rewrites, _substitute, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
@@ -8,6 +8,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
 from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
+from tinygrad.codegen.opt import Opt
 
 # creation can recurse a lot
 import sys
@@ -154,6 +155,10 @@ def unbind_view(x:UOp):
   return None
 
 replace_buffers = PatternMatcher([
+  # sink on contig creates a KernelInfo
+  (UPat(Ops.CONTIGUOUS, name="c").sink(name="s"),
+   lambda s,c: s.replace(src=(c.replace(arg=None),), arg=KernelInfo(opts_to_apply=c.arg)) \
+     if s.arg is None and c.arg is not None and isinstance(c.arg[0], Opt) else None),
   # replace ASSIGN with the target BUFFER
   (UPat(Ops.ASSIGN, src=(UPat((Ops.BUFFER, Ops.LOAD)), UPat(Ops.KERNEL)), name="assign", allow_any_len=True), lambda assign: assign.src[0]),
   # HACK: select the 0 branch of MSTACK (the device is wrong after this, is that okay?)
