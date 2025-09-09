@@ -322,6 +322,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   @staticmethod
   def invalid(): return UOp(Ops.CONST, dtypes.index, src=(), arg=Invalid)
+  def get_idx_valid(self) -> tuple[UOp, UOp|None]:
+    assert self.dtype is dtypes.index, "Can only call get_idx_valid on index dtype"
+    return (self.src[1], self.src[0]) if self.op is Ops.WHERE and self.src[2].arg is Invalid else (self, UOp.const(dtypes.bool, True))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
