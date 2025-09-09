@@ -23,14 +23,13 @@ def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=No
     # symbolic again
     return graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 2").src
 
-@functools.cache
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
   idx = views[-1].to_valid_uop(_idxs)
   for view in reversed(views[0:-1]):
     view = view.minify()
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
-  # with Context(TRACK_MATCH_STATS=0):
-  return graph_rewrite(idx, symbolic_flat+pm_simplify_valid, name="indexing sym @ 1")
+  with Context(TRACK_MATCH_STATS=0):
+    return graph_rewrite(idx, symbolic_flat+pm_simplify_valid, name="indexing sym @ 1")
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:
