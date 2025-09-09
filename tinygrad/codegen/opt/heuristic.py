@@ -77,7 +77,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for buf_index,buf in enumerate(k.bufs):
     if isinstance(buf.src[0].dtype, ImageDType):
       # part of real_strides
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
       if len(unit_stride_axes_mul_4):
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
@@ -111,11 +111,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
-      if any(rng not in b.src[1].parents and all(r2 in b.src[1].parents for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
+      if any(rng not in b.src[1].get_idx().parents and all(r2 in b.src[1].get_idx().parents
+          for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
         num_strides, sum_strides = 0, 0
         for b in k.bufs:
-          if rng in b.src[1].parents: num_strides += 1
-          for c in b.src[1].split_uop(Ops.ADD):
+          idx = b.src[1].get_idx()
+          if rng in idx.parents: num_strides += 1
+          for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
             if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
             if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
@@ -157,7 +159,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local
-      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) \
+      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().parents for b in k.bufs), axis) \
                               for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
