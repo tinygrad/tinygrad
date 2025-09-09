@@ -48,17 +48,16 @@ function addTags(root) {
 }
 
 let [workerUrl, worker] = [null, null];
+async function initWorker() {
+  const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
+  workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+}
+
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
-  if (worker == null) {
-    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
-    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
-    worker = new Worker(workerUrl);
-  } else {
-    worker.terminate();
-    worker = new Worker(workerUrl);
-  }
+  if (worker != null) worker.terminate();
+  worker = new Worker(workerUrl);
   worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
     displayGraph("graph");
@@ -585,6 +584,7 @@ async function main() {
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
+  if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
