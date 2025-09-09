@@ -31,7 +31,7 @@ def helper_profile_filter_device(profile, device:str):
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
 # TODO: support in HCQCompiled
-is_cpu_hcq = Device.DEFAULT in {"CPU", "LLVM"}
+is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
 @unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):

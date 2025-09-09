@@ -20,13 +20,14 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ show=true }) => {
+const updateProgress = ({ start }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
-  if (show) {
+  msg.style.display = "none";
+  if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  } else msg.style.display = "none";
+  }
 }
 
 // ** UOp graph
@@ -47,21 +48,20 @@ function addTags(root) {
 }
 
 let [workerUrl, worker] = [null, null];
-async function renderDag(graph, additions, recenter=false) {
+async function initWorker() {
+  const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
+  workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+}
+
+function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ show:true });
-  if (worker == null) {
-    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
-    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
-    worker = new Worker(workerUrl);
-  } else {
-    worker.terminate();
-    worker = new Worker(workerUrl);
-  }
-  worker.postMessage({graph, additions, ctxs});
+  updateProgress({ start:true });
+  if (worker != null) worker.terminate();
+  worker = new Worker(workerUrl);
+  worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    updateProgress({ show:false });
+    updateProgress({ start:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -125,7 +125,6 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-
 }
 
 // ** profiler graph
@@ -170,7 +169,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
-  if (data != null) return;
+  if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
@@ -207,7 +206,7 @@ async function renderProfiler() {
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, offsetY });
+      data.tracks.set(k, { shapes, visible:[], offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -273,7 +272,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -288,21 +287,20 @@ async function renderProfiler() {
       });
     }
   }
-  updateProgress({ "show":false });
+  updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
-  const rectLst = [];
   function render(transform) {
     zoomLevel = transform;
-    rectLst.length = 0;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+      visible.length = 0;
       for (const e of shapes) {
         if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
         else { start = e.x; end = e.x+e.width; }
@@ -319,7 +317,7 @@ async function renderProfiler() {
           ctx.fill(p);
           // NOTE: y coordinates are in reverse order
           for (let i = 0; i<x.length-1; i++) {
-            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
+            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
           }
           continue;
         }
@@ -327,7 +325,7 @@ async function renderProfiler() {
         const x = xscale(start);
         const width = xscale(end)-x;
         ctx.fillRect(x, offsetY+e.y, width, e.height);
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -394,10 +392,16 @@ async function renderProfiler() {
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
+    let tid = null;
+    for (const k of data.tracks.keys()) {
+      const r = rect(document.getElementById(k));
+      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+    }
+    if (tid == null) return;
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of rectLst) {
+    for (const r of data.tracks.get(tid).visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
@@ -579,6 +583,7 @@ async function main() {
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
+  if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
@@ -648,7 +653,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
