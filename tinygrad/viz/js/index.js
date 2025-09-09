@@ -19,11 +19,15 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
-const updateProgress = () => {
-  const timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+let timeout = null;
+const updateProgress = ({ show }) => {
   const msg = document.getElementById("progress-message");
-  msg.innerText = "Rendering new graph...";
-  return () => { clearTimeout(timeout); msg.style.display = "none"; };
+  clearTimeout(timeout);
+  msg.style.display = "none";
+  if (show) {
+    msg.innerText = "Rendering new graph...";
+    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  }
 }
 
 // ** UOp graph
@@ -46,7 +50,7 @@ function addTags(root) {
 let [workerUrl, worker] = [null, null];
 async function renderDag(graph, additions, recenter=false) {
   // start calculating the new layout (non-blocking)
-  const complete = updateProgress();
+  updateProgress({ show:true });
   if (worker == null) {
     const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
     workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -58,7 +62,7 @@ async function renderDag(graph, additions, recenter=false) {
   worker.postMessage({graph, additions, ctxs});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    complete();
+    updateProgress({ show:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
@@ -166,9 +170,8 @@ var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
-  const complete = updateProgress();
   // layout once!
-  if (data != null) return complete();
+  if (data != null) return updateProgress({ show:false });
   const profiler = d3.select(".profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
@@ -286,7 +289,7 @@ async function renderProfiler() {
       });
     }
   }
-  complete();
+  updateProgress({ "show":false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
