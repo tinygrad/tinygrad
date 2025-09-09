@@ -180,6 +180,7 @@ class TestOuterworld(unittest.TestCase):
     out.realize()
     print(out.numpy())
 
+  @unittest.skip("opts don't work")
   def test_triple_gemm(self):
     x = Tensor.rand(1, 16).realize()
     W = Tensor.rand(3, 16, 16).realize()

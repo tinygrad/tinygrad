@@ -318,7 +318,7 @@ class TestDiskTensor(unittest.TestCase):
     with open(temp('dt_bf16_disk_write_read_bf16'), "wb") as f: f.write(adat)
 
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('dt_bf16_disk_write_read_bf16')}")
-    ct = t.llvm_bf16_cast(dtypes.float)
+    ct = t.to(Device.DEFAULT).cast(dtypes.float)
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
   def test_copy_from_disk(self):

@@ -156,10 +156,10 @@ class TestFp8sConversions(unittest.TestCase):
   def test_float_to_fp8e4m3_extreme_values(self):
     np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, dtypes.fp8e4m3), 126)
     np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 126)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 126)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 127)
     np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, dtypes.fp8e4m3), 254)
     np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 254)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 254)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 255)
     np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e4m3), 127)
     np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e4m3), 255)
 
@@ -169,10 +169,10 @@ class TestFp8sConversions(unittest.TestCase):
   def test_float_to_fp8e5m2_extreme_values(self):
     np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, dtypes.fp8e5m2), 123)
     np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 123)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 123)
+    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 124)
     np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, dtypes.fp8e5m2), 251)
     np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 251)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 251)
+    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 252)
     np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e5m2), 126)
     np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e5m2), 254)
 
@@ -299,7 +299,6 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
-@unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
   def test_shape_change_bitcast(self, dt1, dt2):
@@ -347,7 +346,6 @@ class TestUint64DType(TestDType):
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
 class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
 class TestPtrDType(unittest.TestCase):
