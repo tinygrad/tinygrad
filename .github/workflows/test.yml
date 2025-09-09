@@ -955,7 +955,7 @@ jobs:
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
@@ -997,5 +997,5 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == '${{ matrix.backend }}'.upper(), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
