@@ -131,6 +131,11 @@ class dtypes:
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   index: Final[DType] = DType.new(-1,100, "index", None)
+  # mask dtypes are used in x86/arm64 backends
+  mask8: Final[DType] = DType.new(-1, 1, "mask8", None)
+  mask16: Final[DType] = DType.new(-1, 2, "mask16", None)
+  mask32: Final[DType] = DType.new(-1, 4, "mask32", None)
+  mask64: Final[DType] = DType.new(-1, 8, "mask64", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
@@ -147,11 +152,6 @@ class dtypes:
   bfloat16: Final[DType] = DType.new(12, 2, "__bf16", None)
   float32: Final[DType] = DType.new(13, 4, "float", 'f')
   float64: Final[DType] = DType.new(14, 8, "double", 'd')
-  # mask dtypes, used in x86/arm64 backends
-  mask8: Final[DType] = DType.new(15, 1, "mask8", None)
-  mask16: Final[DType] = DType.new(16, 2, "mask16", None)
-  mask32: Final[DType] = DType.new(17, 4, "mask32", None)
-  mask64: Final[DType] = DType.new(18, 8, "mask64", None)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
