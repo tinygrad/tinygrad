@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, CPU_LLVM, AMD_LLVM
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, CPU_LLVM, AMD_LLVM, X86
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -1304,8 +1304,8 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "GPU", "CUDA"] or (Device.DEFAULT == "CPU" and CPU_LLVM) or IMAGE
-  or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
+  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "GPU", "CUDA"] or (Device.DEFAULT == "CPU" and (CPU_LLVM or (X86 and getenv("DEVECTORIZE")==0)))
+  or IMAGE or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
@@ -2471,7 +2471,7 @@ class TestOps(unittest.TestCase):
       vals=[[[[[1,2]*3]*6]]], forward_only=True)  # Tensor([1,2,1,2,1,2]).expand(1,1,6,6)
 
   @slow_test
-  @unittest.skipIf(Device.DEFAULT == "X86" and getenv("DEVECTORIZE") == 0, "fails on x86 devectorize, precision error?")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86 and getenv("DEVECTORIZE") == 0, "fails on x86 vectorize, precision error?")
   def test_max_unpool2d(self):
     args = {"kernel_size":(5,5), "stride":(6,5)}
     helper_test_op([(8,3,50,50)],

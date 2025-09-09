@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _METADATA
-from tinygrad.helpers import getenv, temp, mv_address
+from tinygrad.helpers import getenv, temp, mv_address, X86
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -909,16 +909,16 @@ class TestIdxUpcast(unittest.TestCase):
   def test_overflow_sym(self):
     self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
-  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "X86 always converts idx in Ops.INDEX to int64")
   def test_regular(self):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
-  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "X86 always converts idx in Ops.INDEX to int64")
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
   @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
-  @unittest.skipIf(Device.DEFAULT == "X86", "X86 always converts idx in Ops.INDEX to int64")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "X86 always converts idx in Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)

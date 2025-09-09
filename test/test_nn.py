@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import GlobalCounters, CI, Context
+from tinygrad.helpers import GlobalCounters, CI, Context, X86
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
@@ -448,7 +448,7 @@ class TestNN(unittest.TestCase):
     with Context(FUSE_ARANGE=1, NOOPT=0):
       self.test_embedding_one_kernel(ops=612_000, kcount=2)
 
-  @unittest.skipIf(Device.DEFAULT == "X86", "loads can load consts on x86")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "loads can load consts on x86")
   def test_embedding_one_kernel_fused_noopt(self):
     with Context(FUSE_ARANGE=1, NOOPT=1):
       self.test_embedding_one_kernel(ops=0, kcount=2)

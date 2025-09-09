@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
-from tinygrad.helpers import getenv, CI
+from tinygrad.helpers import getenv, CI, X86
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
@@ -99,7 +99,7 @@ class TestRandomness(unittest.TestCase):
     np.testing.assert_allclose(jr, r)
 
   @unittest.skipIf(getenv("PTX"), "fails with PTX")
-  @unittest.skipIf(Device.DEFAULT == "X86", "indexing uses long in x86")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "indexing uses long in x86")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):

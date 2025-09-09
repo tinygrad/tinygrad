@@ -4,10 +4,10 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX
+from tinygrad.helpers import AMX, X86
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
-@unittest.skipIf(Device.DEFAULT == "X86", "these tests assume unaligned loads aren't vectorized which doesn't hold for x86 backend")
+@unittest.skipIf(Device.DEFAULT == "CPU" and X86, "these tests assume unaligned loads aren't vectorized which doesn't hold for x86 backend")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):

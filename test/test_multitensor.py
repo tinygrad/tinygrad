@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import CI, getenv, prod, Context
+from tinygrad.helpers import CI, getenv, prod, Context, X86
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -1205,7 +1205,7 @@ class TestMultiAssign(unittest.TestCase):
     self.assertListEqual(out.tolist(), [[0,1,2,3,4,0]]*4)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
-@unittest.skipIf(Device.DEFAULT == "X86", "seg faults, not sure why")
+@unittest.skipIf(Device.DEFAULT == "CPU" and X86, "seg faults, not sure why")
 class TestMultiTransformer(unittest.TestCase):
   def test_transformer(self):
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
