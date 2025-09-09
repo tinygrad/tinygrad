@@ -67,7 +67,7 @@ def universal_test(a, b, dtype, op):
   numpy_value = op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.fp8s: numpy_value = truncate[dtype](numpy_value)
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2: (1.0, 5e-1)}.get(dtype, (1e-10, 1e-7))
+    atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype, (1e-10, 1e-7))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
