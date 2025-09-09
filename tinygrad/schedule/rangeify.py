@@ -226,7 +226,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     end_ranges = []
     idx_ranges = []
     for i,valid_rngs in enumerate(all_rngs):
-      rngs, valids = zip(*[r.get_idx_valid() for r in valid_rngs])
+      rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
       # we compare the ranges without their valids
       if all_same(rngs):
         # the new valid is the OR of all the children valids
