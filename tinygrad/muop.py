@@ -49,7 +49,7 @@ class MUOp:
   def store(dest:Memory, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
   @staticmethod
   def assign(dest:Register, src:Register, vec:bool) -> MUOp: raise NotImplementedError("arch specific")
-  def replace(self, out: Operand|None, ins: tuple[Operand|bytes, ...]): raise NotImplementedError("arch specific")
+  def replace(self, out, ins) -> MUOp: raise NotImplementedError("arch specific")
   def encode(self) -> bytes: raise NotImplementedError("arch specific")
   @staticmethod
   def assemble(muops:list[MUOp]) -> bytes:
@@ -237,7 +237,7 @@ class MUOpX86(MUOp):
     if dest.size == 8: return MUOpX86.V_V_V("vmovsd", 0x10, dest, src, src, 3, 1)
     if dest.size == 16: return MUOpX86.V_VM("vmovups", 0x10, dest, src, 0, 1)
     raise RuntimeError("invalid assign size")
-  def replace(self, out: Operand|None, ins: tuple[Operand|bytes, ...]) -> MUOp:
+  def replace(self, out, ins) -> MUOp:
     def _sub(x):
       for old,new in zip((self.out,)+self.ins, (out,)+ins):
         if x is old: return new
