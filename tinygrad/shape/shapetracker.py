@@ -95,11 +95,6 @@ class ShapeTracker:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
   def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def axis_is_masked(self, axis:int) -> bool:
-    with Context(TRACK_MATCH_STATS=0):
-      _, valid = self.to_indexed_uops()
-      return axis in [x.arg[0] for x in graph_rewrite(valid, symbolic_flat).toposort() if x.op is Ops.RANGE]
-
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()

@@ -619,20 +619,6 @@ class TestMaskedShapeTracker(unittest.TestCase):
     st3.reshape((4, 3, 6, 5))
     st3.assert_same()
 
-  def test_axis_is_masked(self):
-    st = ShapeTracker.from_shape((100, 100, 100, 100)).pad(((0,1),(0,0),(2,0), (0,0)))
-    assert st.axis_is_masked(0)
-    assert not st.axis_is_masked(1)
-    assert st.axis_is_masked(2)
-    assert not st.axis_is_masked(3)
-
-  def test_axis_is_masked_rw1(self):
-    st = ShapeTracker(views=(View(shape=(1, 2, 1, 4, 4, 13, 4, 13), strides=(0, 324, 0, 81, 0, 9, 0, 1), offset=-20,
-                                  mask=((0, 1), (0, 2), (0, 1), (0, 4), (0, 4), (2, 11), (0, 4), (2, 11)), contiguous=False),
-                             View(shape=(2, 4, 11, 11, 4, 3, 3), strides=(10816, 0, 52, 1, 2704, 728, 14), offset=0,
-                                  mask=None, contiguous=False)))
-    assert not st.axis_is_masked(0)
-
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
