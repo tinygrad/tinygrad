@@ -9,6 +9,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
 from test.helpers import not_support_multi_device
+from tinygrad.renderer.ptx import PTXRenderer
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -98,7 +99,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(getenv("PTX"), "fails with PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
   @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "indexing uses long in x86")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):

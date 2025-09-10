@@ -9,7 +9,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
@@ -917,7 +917,7 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
-  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX always convert Ops.INDEX to int64")
   @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "X86 always converts idx in Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
