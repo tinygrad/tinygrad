@@ -69,10 +69,10 @@ export RUN_EVAL=1
 export EVAL_ONLY=1
 #export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original"
 export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original_v"
-export KEEP_EVAL_CACHE=1
+#export KEEP_EVAL_CACHE=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
-#export LIMIT_EVAL_SAMPLES=600
+#export LIMIT_EVAL_SAMPLES=1200
 
 # mi300x
 export DATADIR="/raid/datasets/stable_diffusion"
@@ -86,5 +86,5 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 #export PARALLEL=4
 export PARALLEL=0
 
-#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/reports/train_run_09022307/ckpt_dirs/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
