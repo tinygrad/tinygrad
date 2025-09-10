@@ -37,15 +37,15 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
-      subprocess.run([f'DEV=CPU CPU_LLVM=1 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+      subprocess.run([f'DEV=CPU CPU_LLVM=1 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=CPU CPU_LLVM=0 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
+      subprocess.run([f'DEV=CPU CPU_LLVM=0 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=CPU CPU_CLANGJIT=0 CPU_LLVM=0 python3 -c "{imports}; {expect_failure}"'],
+      subprocess.run([f'DEV=CPU CPU_CLANGJIT=0 CPU_LLVM=0 python -c "{imports}; {expect_failure}"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=CPU CPU_CLANGJIT=0 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+      subprocess.run([f'DEV=CPU CPU_CLANGJIT=0 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=CPU CPU_CLANGJIT=1 CPU_LLVM=1 python3 -c "{imports}; {expect_failure}"'],
+      subprocess.run([f'DEV=CPU CPU_CLANGJIT=1 CPU_LLVM=1 python -c "{imports}; {expect_failure}"'],
                         shell=True, check=True)
     elif Device.DEFAULT == "AMD":
       from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
@@ -53,13 +53,13 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler"
-      subprocess.run([f'DEV=AMD AMD_LLVM=1 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
+      subprocess.run([f'DEV=AMD AMD_LLVM=1 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=AMD AMD_LLVM=0 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
+      subprocess.run([f'DEV=AMD AMD_LLVM=0 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=AMD AMD_HIP=1 python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
+      subprocess.run([f'DEV=AMD AMD_HIP=1 python -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
                         shell=True, check=True)
-      subprocess.run([f'DEV=AMD AMD_HIP=1 AMD_LLVM=1 python3 -c "{imports}; {expect_failure}"'],
+      subprocess.run([f'DEV=AMD AMD_HIP=1 AMD_LLVM=1 python -c "{imports}; {expect_failure}"'],
                         shell=True, check=True)
     else: self.skipTest("only run on CPU/AMD")
 
