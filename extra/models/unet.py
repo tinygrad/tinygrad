@@ -1,7 +1,7 @@
 from tinygrad import Tensor, dtypes
 from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
-#from tinygrad.device import is_dtype_supported
-def is_dtype_supported(dtype): return False
+from tinygrad.device import is_dtype_supported
+#def is_dtype_supported(dtype): return False
 from tinygrad.dtype import DTypeLike
 from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf

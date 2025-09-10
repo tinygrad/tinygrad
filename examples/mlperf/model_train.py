@@ -1399,10 +1399,7 @@ def train_stable_diffusion():
   BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
   BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
   lr = BS * BASE_LR
-  GRAD_ACC_STEPS     = config["GRAD_ACC_STEPS"]         = getenv("GRAD_ACC_STEPS", 1)
-  assert BS % GRAD_ACC_STEPS == 0
-  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}, GRAD_ACC_STEPS={GRAD_ACC_STEPS}")
-  print(f"BS = {BS}")
+  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
 
   CONTEXT_BS          = config["CONTEXT_BS"]            = getenv("CONTEXT_BS", 1 * len(GPUS))
   DENOISE_BS          = config["DENOISE_BS"]            = getenv("DENOISE_BS", 1 * len(GPUS))
@@ -1460,8 +1457,8 @@ def train_stable_diffusion():
     #if v.dtype is dtypes.float32:
       #weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
   load_state_dict(model, weights)
-  #unet_module.linear = unet_module.AutocastLinear
-  #unet_module.conv2d = unet_module.AutocastConv2d
+  unet_module.linear = unet_module.AutocastLinear
+  unet_module.conv2d = unet_module.AutocastConv2d
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
   unet:UNetModel = model.model.diffusion_model
 
@@ -1516,8 +1513,10 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def acc_grads(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_acc_steps:int) -> Tensor:
-    timestep = Tensor.randint(BS // grad_acc_steps, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+    optimizer.zero_grad()
+
+    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
     latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
     noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
@@ -1535,24 +1534,16 @@ def train_stable_diffusion():
     context = model.cond_stage_model.embed_tokens(tokens)
 
     out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
-    loss = ((out - v_true) ** 2).mean() / float(grad_acc_steps)
+    loss = ((out - v_true) ** 2).mean()
     del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     del out, v_true, context, latent_randn, tokens, timestep
     loss.backward()
 
-    loss = loss.detach().to("CPU")
-    Tensor.realize(*[p.grad for p in optimizer.params] + [loss])
-    return loss
-
-  @TinyJit
-  def apply_grads(optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.step()
     lr_scheduler.step()
-    for p in optimizer.params:
-      p.grad.assign(Tensor.zeros_like(p.grad))
-    out_lr = optimizer.lr.to("CPU")
-    Tensor.realize(*[p.grad for p in optimizer.params] + [out_lr])
-    return out_lr
+    loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
+    Tensor.realize(loss, out_lr)
+    return loss, out_lr
 
   if getenv("RUN_EVAL", ""):
     if not getenv("EVAL_OVERFIT_SET", ""):
@@ -1769,7 +1760,6 @@ def train_stable_diffusion():
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
-  MINI_BS = BS // GRAD_ACC_STEPS
 
   if not getenv("EVAL_ONLY", ""):
     # training loop
@@ -1787,32 +1777,20 @@ def train_stable_diffusion():
       seen_keys += batch["__key__"]
 
       mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+      mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
       tokens = []
       for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+      tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
       t1 = time.perf_counter()
-      mini_losses, mini_prep_times, mini_step_times = [], [], []
-      for j in range(GRAD_ACC_STEPS):
-        t1b = time.perf_counter()
-        start, end = j * MINI_BS, (j + 1) * MINI_BS
-        mini_mean = Tensor(mean[start: end], dtype=dtypes.float32, device="CPU")
-        mini_logvar = Tensor(logvar[start: end], dtype=dtypes.float32, device="CPU")
-        mini_tokens = Tensor(tokens[start*77: end*77], dtype=dtypes.int32, device="CPU").reshape(-1,77)
-        t1c = time.perf_counter()
-        mini_losses.append((acc_grads(mini_mean, mini_logvar, mini_tokens, unet, optimizer, GRAD_ACC_STEPS) * GRAD_ACC_STEPS).item())
-        mini_step_times.append(time.perf_counter() - t1c)
-        mini_prep_times.append(t1c - t1b)
-
-      loss_item = sum(mini_losses) / GRAD_ACC_STEPS
-
-      t1d = time.perf_counter()
-      lr_item = apply_grads(optimizer, lr_scheduler).item()
+      loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+      loss_item, lr_item = loss.item(), lr.item()
       t2 = time.perf_counter()
 
       if WANDB:
         wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
                      "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
-                     "train/train_step_time": t2-t1, "grad_acc_time": t1d-t1, "apply_grad_time": t2-t1d}
+                     "train/train_step_time": t2-t1}
 
         if i == 1 and wandb_run is not None:
           with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
@@ -1850,8 +1828,7 @@ def train_stable_diffusion():
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
         if i % EVAL_INTERVAL == 0:
           # prevent OOM
-          acc_grads.reset()
-          apply_grads.reset()
+          train_step.reset()
           Tensor.realize(*[t.to_("CPU") for t in train_only_tensors])
 
           clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
@@ -1865,12 +1842,10 @@ def train_stable_diffusion():
       if WANDB: wandb.log(wandb_log)
       #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
       t5 = time.perf_counter()
-      print(f"""step {i}: loss: {loss_item:.3f}, lr: {lr_item:.3e}, {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS,
-  mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB, loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f},
-  train_step_time: {t2-t1:.2f}, t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, mini_prep_times: {[round(d,4) for d in mini_prep_times]},
-  mini_step_times: {[round(d,3) for d in mini_step_times]}, mini_losses: {[round(l,4) for l in mini_losses]},
-  grad_acc_time: {t1d-t1:.2f}, apply_grad_time: {t2-t1d:.2f}
-""")
+      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
+    t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
+    """)
       #print("rocm-smi output:\n" + rocm_out + "\n")
 
       t6 = time.perf_counter()

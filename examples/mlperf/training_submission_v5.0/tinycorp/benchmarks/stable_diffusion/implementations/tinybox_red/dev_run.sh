@@ -35,23 +35,23 @@ export MODEL="stable_diffusion"
 
 #export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307"
 #export RESUME_ITR=1524
-#export BACKUP_INTERVAL=2065
-#export BACKUP_INTERVAL=413
-#export BACKUP_INTERVAL=640
-export BACKUP_INTERVAL=500
 
 # mi300x
 # use separate BS for the various jits in eval to maximize throughput
 #export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
 
 export AMD_LLVM=0 # bf16 seems to require this
-export GPUS=8 BS=512
-export GRAD_ACC_STEPS=4
+export GPUS=8 BS=336
+export BACKUP_INTERVAL=762
+#export GRAD_ACC_STEPS=4
 export CONTEXT_BS=816
 export DENOISE_BS=600
 export DECODE_BS=384
 export INCEPTION_BS=560
 export CLIP_BS=240
+
+#for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
+#sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 450
 
 # tinybox red
 #export GPUS=6 BS=12
@@ -65,10 +65,10 @@ export CLIP_BS=240
 
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-export RUN_EVAL=1
-export EVAL_ONLY=1
+#export RUN_EVAL=1
+#export EVAL_ONLY=1
 #export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original"
-export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original_v"
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original_v"
 #export KEEP_EVAL_CACHE=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
@@ -82,9 +82,10 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 #export DATADIR="/home/hooved/stable_diffusion/datasets"
 #export CKPTDIR="/home/hooved/stable_diffusion/checkpoints"
 
-#export WANDB=1
+export WANDB=1
 #export PARALLEL=4
 export PARALLEL=0
 
-#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/reports/train_run_09022307/ckpt_dirs/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#KEEP_EVAL_CACHE=1 EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09072300/run_eval_6000" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09072300/run_eval_1000" RUNMLPERF=1 python3 examples/mlperf/model_train.py
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
