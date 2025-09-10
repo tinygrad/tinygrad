@@ -945,7 +945,8 @@ class TestInvalidIndex(unittest.TestCase):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())<3
     self.assertIs(idx.simplify(), (ridx<3), "comparison of index should drop the invalid")
-    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0), "comparison of index should drop the invalid")
+    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0),
+      "comparison of index should drop the invalid")
 
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
@@ -957,7 +958,8 @@ class TestInvalidIndex(unittest.TestCase):
     ridx1 = Variable("ridx1", 0, 10)
     idx0 = (ridx0<5).where(ridx0, UOp.invalid())
     idx1 = (ridx1<5).where(idx0//2, UOp.invalid())
-    self.assertIs(idx1.simplify(), ((ridx1<5)&(ridx0<5)).where(ridx0//2, UOp.invalid()), "valid inside a valid should make a single valid and & the conditions")
+    self.assertIs(idx1.simplify(), ((ridx1<5)&(ridx0<5)).where(ridx0//2, UOp.invalid()),
+      "valid inside a valid should make a single valid and & the conditions")
 
   def test_alu_invalid(self):
     self.assertIs((UOp.invalid()*2).simplify(), UOp.invalid())
