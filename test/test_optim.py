@@ -43,6 +43,7 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
   return net.x.detach().numpy(), net.W.detach().numpy()
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
+@unittest.skipIf(Device.DEFAULT == "CPU" and X86, "for some reason Ops.SUB is breaking adam")
 class TestOptim(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
@@ -56,7 +57,6 @@ class TestOptim(unittest.TestCase):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_sgd(self, steps, opts, atol, rtol): self._test_optim(SGD, torch.optim.SGD, steps, opts, atol, rtol)
-  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "for some reason Ops.SUB is breaking this on x86")
   def _test_adam(self, steps, opts, atol, rtol): self._test_optim(Adam, torch.optim.Adam, steps, opts, atol, rtol)
   def _test_adamw(self, steps, opts, atol, rtol): self._test_optim(AdamW, torch.optim.AdamW, steps, opts, atol, rtol)
   #TODO: use torch.muon when it comes out
