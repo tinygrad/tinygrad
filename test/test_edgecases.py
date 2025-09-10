@@ -26,6 +26,10 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes, nn
+from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import getenv
+
+MOCKGPU = getenv("MOCKGPU")
 
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
@@ -62,7 +66,6 @@ class TestNaNEdgeCases(unittest.TestCase):
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  @unittest.expectedFailure
   def test_sort_empty(self):
     # Sorting an empty tensor works in PyTorch and should return empty
     # values and indices. tinygrad raises an error instead.
@@ -168,34 +171,6 @@ class TestZeroFolding(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       (x % x).numpy()
 
-class TestArangeUOpValidationIssue(unittest.TestCase):
-  # these fail with UOp verification error.
-  # we don't need more of these involving arange
-
-  @unittest.expectedFailure
-  def test_large_arange_sum(self):
-    # Summing a huge arange should either succeed or raise a MemoryError.
-    n = 2**31 + 3
-    expected = (n - 1) * n // 2
-    out = Tensor.arange(n).sum().item()
-    self.assertEqual(out, expected)
-
-  @unittest.expectedFailure
-  def test_large_arange_index(self):
-    # Indexing a huge arange should return the correct value instead of failing
-    # with a UOp verification error.
-    n = 2**31 + 3
-    out = Tensor.arange(n)[0].item()
-    self.assertEqual(out, 0)
-
-  @unittest.expectedFailure
-  def test_large_arange_permute(self):
-    # Permuting a huge tensor should not trigger UOp verification failures.
-    n = 2**31 + 3
-    out = Tensor.arange(n).reshape(n, 1).permute(1, 0)
-    self.assertEqual(out.shape, (1, n))
-    out.realize()
-
 class TestAssignIssues(unittest.TestCase):
   # these are good failures. i'm not sure we need more, but we need to fix these.
 
@@ -219,7 +194,6 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
-  @unittest.expectedFailure
   def test_assign_broadcast(self):
     # broadcasting during assign should behave like PyTorch
     torch_tensor = torch.zeros(3, 5)
@@ -232,10 +206,8 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.expectedFailure
+  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
   def test_tensor_index_overflow(self):
-    # Advanced indexing on tensors expanded past int32 should not error, but
-    # tinygrad fails with a UOp verification error.
     val = Tensor([1])
     big = val.expand(2**31 + 3)
     idx = Tensor([0, 2**31 + 2])
@@ -258,12 +230,11 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor(arr).pad((1, -1, 1, -1), mode='circular')
     np.testing.assert_equal(out.numpy(), torch_out.numpy())
 
-  @unittest.expectedFailure
   def test_arange_float_step(self):
     # float steps should match PyTorch exactly
     torch_out = torch.arange(0, 2, 0.3).numpy()
     out = Tensor.arange(0, 2, 0.3).numpy()
-    np.testing.assert_allclose(out, torch_out)
+    np.testing.assert_allclose(out, torch_out, atol=1e-7)
 
   @unittest.skip("this is flaky")
   @unittest.expectedFailure

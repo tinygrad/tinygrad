@@ -1,11 +1,10 @@
 import unittest, itertools, math
-from typing import Any
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
-import numpy as np
 from tinygrad.device import is_dtype_supported
+import numpy as np
 from test.helpers import not_support_multi_device
 
 def _check_ast_count(desired_count:int, t:Tensor):
@@ -25,7 +24,7 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
-  @unittest.expectedFailure  # no two level fold at lazybuffer
+  @unittest.expectedFailure  # no two level fold
   def test_neg_folding(self):
     _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
     _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
@@ -104,7 +103,7 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
 
 class TestBitcastConstFolding(unittest.TestCase):
   def test_scalar_bitcast(self):
-    def t(cases: dict[DType, Any]):
+    def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
           r = full_rewrite_to_sink(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
@@ -139,18 +138,16 @@ class TestBitcastConstFolding(unittest.TestCase):
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
-    # TODO: fold these
-    _check_ast_count(2, t[:,:,Tensor(1),:])
-    _check_ast_count(2, t[:,:,Tensor(1)+2,:])
-    _check_ast_count(2, t[:,:,Tensor(1),Tensor(0)])
+    _check_ast_count(1, t[:,:,Tensor(1),:])
+    _check_ast_count(1, t[:,:,Tensor(1)+2,:])
+    _check_ast_count(1, t[:,:,Tensor(1),Tensor(0)])
 
-  @unittest.expectedFailure
   def test_const_tensor_index(self):
-    # TODO: implement const tensor folded indexing
+    # TODO: these can be 0, implement const tensor folded indexing
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
-    _check_ast_count(0, t[:,:,Tensor.ones(2,1),:])
-    _check_ast_count(0, t[:,:,Tensor.ones(1,2)+2,:])
-    _check_ast_count(0, t[:,:,Tensor.ones(1,1),Tensor.zeros(2,1,2)])
+    _check_ast_count(1, t[:,:,Tensor.ones(2,1,dtype=dtypes.int),:])
+    _check_ast_count(1, t[:,:,Tensor.ones(1,2,dtype=dtypes.int)+2,:])
+    _check_ast_count(1, t[:,:,Tensor.ones(1,1,dtype=dtypes.int),Tensor.zeros(2,1,2,dtype=dtypes.int)])
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
@@ -167,7 +164,6 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_cast_padded(self):
-    # NOTE: this is folded due to CAST_BEFORE_VIEW
     if is_dtype_supported(dtypes.int16):
       _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
@@ -291,17 +287,12 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t + zero).numpy(), np.arange(16))
     np.testing.assert_equal((t * zero).numpy(), [0] * 16)
     np.testing.assert_equal((t * one).numpy(), np.arange(16))
-
-  def test_multi_todo_pow(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
-    zero = Tensor.zeros(16).to(ds).realize()
-    one = Tensor.ones(16).to(ds).realize()
-
-    # TODO: fix pow folding
     _check_ast_count(0, t ** zero)
     _check_ast_count(0, t ** one)
     _check_ast_count(0, one ** t)
+    np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
+    np.testing.assert_equal((t ** one).numpy(), np.arange(16))
+    np.testing.assert_equal((one ** t).numpy(), [1] * 16)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang

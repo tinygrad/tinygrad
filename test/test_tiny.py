@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import IMAGE, CI
+from tinygrad.helpers import IMAGE, CI, getenv
 
 class TestTiny(unittest.TestCase):
 
@@ -27,10 +27,21 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(256).contiguous().sum()
     self.assertEqual(out.item(), 256)
 
-  def test_gemm(self, N=64, out_dtype=dtypes.float):
+  def test_gemm(self, N=getenv("GEMM_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
-    self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
+    lst = (out:=a@b).tolist()
+    for y in range(N):
+      for x in range(N):
+        self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
+    if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
+
+  def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
+    a = Tensor.ones(1,N).contiguous()
+    b = Tensor.eye(N).contiguous()
+    lst = (out:=a@b).tolist()
+    for x in range(N):
+      self.assertEqual(lst[0][x], 1.0, msg=f"mismatch at {x}")
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***
@@ -73,22 +84,22 @@ class TestTiny(unittest.TestCase):
 
   def test_symbolic(self):
     i = Variable('i', 1, 10)
-    with Context(IGNORE_OOB=1):
-      for s in [2,5]:
-        ret = Tensor.ones(s).contiguous().reshape(i.bind(s)) + 1
-        self.assertListEqual(ret.reshape(s).tolist(), [2.0]*s)
+    ones = Tensor.ones(10).contiguous()
+    for s in [2,5]:
+      ret = ones[:i.bind(s)] + 1
+      self.assertListEqual(ret.contiguous().reshape(s).tolist(), [2.0]*s)
 
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)
-    with Context(IGNORE_OOB=1):
-      for s in [2,5]:
-        ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
-        self.assertEqual(ret.item(), s)
+    ones = Tensor.ones(10).contiguous()
+    for s in [2,5]:
+      ret = ones[:i.bind(s)].sum()
+      self.assertEqual(ret.item(), s)
 
   # *** a model ***
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(IMAGE>0 or (CI and Device.DEFAULT == "DSP"), "failing because of make things that can't be images not images")
+  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
@@ -105,6 +116,24 @@ class TestTiny(unittest.TestCase):
     # run model inference
     probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
+
+  # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
+  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
+  def test_mnist_backward(self):
+    # NOTE: we don't have the whole model here for speed
+    layers = [
+      nn.Conv2d(1, 32, 5), Tensor.relu,
+      nn.Conv2d(32, 32, 5), Tensor.relu]
+
+    # replace random weights with ones
+    # TODO: there's a bug here where it's tying two of the biases together. we need UNIQUE const
+    #Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
+    for p in nn.state.get_parameters(layers): p.replace(Tensor.empty(p.shape))
+
+    # realize gradients
+    for x in nn.state.get_parameters(layers): x.requires_grad_()
+    Tensor.empty(4, 1, 28, 28).sequential(layers).sum().backward()
+    Tensor.realize(*[x.grad for x in nn.state.get_parameters(layers) if x.grad is not None])
 
   # *** image ***
 

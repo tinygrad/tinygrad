@@ -1,20 +1,19 @@
-from typing import cast, Generator
-import time, pprint
+from typing import cast, Generator, Callable
+import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, Variable, sym_infer, graph_rewrite, print_uops, track_rewrites
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
-from tinygrad.opt import get_optimized_ast
 from tinygrad.codegen import full_rewrite
-from tinygrad.uop.spec import type_verify
+from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
 
-@track_rewrites(name=lambda _ast,_renderer,ret: TracingKey(ret.name, (ret.function_name, ret.ast), ret.src, ret=ret))
-def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
+def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
@@ -27,16 +26,19 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  modified_ast = get_optimized_ast(ast, renderer) if ast.arg is None or ast.arg.opts_to_apply is not None else ast
-  if __debug__: type_verify(list(modified_ast.toposort()))
+  if DEBUG >= 5: print('\n'.join(pyrender(ast)))
 
   # linearize
+  if renderer is None: renderer = Device.default.renderer
+  if opts is not None:
+    assert ast.arg is None, "can't apply opts if sink has an arg"
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   try:
-    uops = full_rewrite(modified_ast, renderer)
-  except RuntimeError:
+    uops = full_rewrite(ast, renderer)
+  except RuntimeError as e:
     print("***** LINEARIZE FAILURE *****")
-    print(f"ast = {ast}")
-    print(f"opts = {modified_ast.arg.applied_opts}")
+    print(e)
+    print('\n'.join(pyrender(ast)))
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
@@ -44,8 +46,9 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   if DEBUG >= 6: print_uops(uops)
   src = renderer.render(uops)
 
-  return ProgramSpec(uops[-1].arg.name, src, renderer.device, ast, uops,
-                     global_size=[1,1,1] if renderer.has_local else None, local_size=[1,1,1] if renderer.has_local else None)
+  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
+                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
+                     local_size=[1,1,1] if renderer.has_local else None)
 
 # **************** Runners ****************
 
@@ -54,27 +57,43 @@ class Runner:
     self.first_run, self.display_name, self.device, self.estimates = True, display_name, device, estimates
   @property
   def dev(self): return Device[self.device]
-  def exec(self, rawbufs:list[Buffer], var_vals:dict[Variable, int]|None=None) -> float|None:
+  def exec(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None) -> float|None:
     return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
+
+def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
+  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+  MAX_WORKGROUP = 1024
+  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+  def try_exec(local_size):
+    try:
+      return _prg(*[x._buf for x in test_rawbuffers],global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)],
+                  local_size=local_size, wait=True)
+    except Exception: return float('inf')
+  ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
+  assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
+  return ret[1]
 
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
-    self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
+    if precompiled is not None: self.lib = precompiled
+    else:
+      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
+        self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False) -> float|None:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
+    has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
-      # TODO: this is copied from get_program
-      from tinygrad.opt.search import optimize_local_size
+    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
@@ -85,23 +104,11 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
-    try:
-      return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
-    except Exception as e:
-      print(f"exception when running kernel: {str(e)}")
-      print("\nself.p.src:")
-      print(self.p.src)
-      print("\nrawbufs:")
-      print(rawbufs)
-      print("\nlra:")
-      print(lra)
-      print("\nself.p.vars:")
-      print(self.p.vars)
-      raise e
+    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
 
 class BufferCopy(Runner):
@@ -111,7 +118,7 @@ class BufferCopy(Runner):
     super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
-      getattr(src.allocator.dev, 'fd', None) is not None
+      getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
@@ -119,7 +126,7 @@ class BufferCopy(Runner):
       src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[Variable, int], wait=False):
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
@@ -154,10 +161,11 @@ class ExecItem:
   prg: Runner
   bufs: list[Buffer|None]
   metadata: tuple[Metadata, ...]|None = None
-  fixedvars: dict[Variable, int] = field(default_factory=dict)
-  def run(self, _var_vals:dict[Variable, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
+  fixedvars: dict[str, int] = field(default_factory=dict)
+  def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
+    if PROFILE: cpu_events.append(ProfilePointEvent(self.prg.device, "exec", self.prg.display_name, {"metadata":self.metadata, "var_vals":var_vals}))
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
@@ -167,10 +175,15 @@ class ExecItem:
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
+        header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(41-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
-              (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
-               f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
+        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
+        flops_str = f"{flops*1e-9:9.2f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:9.2f} TFLOPS", 'green')
+        mem_str = f"{membw*1e-9:6.1f}|{ldsbw*1e-9:<7.1f} GB/s" if membw < 1e13 else colored(f"{membw*1e-12:6.1f}|{ldsbw*1e-12:<7.1f} TB/s", 'green')
+        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
+          f" {self.prg.display_name+' '*(44-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB"+
+          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
+          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
       self.prg.first_run = False
     return et
 
@@ -200,7 +213,7 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem,
 
 capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:list[ScheduleItem], var_vals:dict[Variable, int]|None=None, do_update_stats=True):
+def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   for si, ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
@@ -213,9 +226,8 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:dict[Variable, int]|None=
       ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata, si.fixedvars)).run(var_vals, do_update_stats=do_update_stats)
+      with Context(BEAM=0): lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata, si.fixedvars)).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
       np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)
-

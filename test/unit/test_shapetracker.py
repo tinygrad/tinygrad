@@ -6,7 +6,7 @@ from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
-from tinygrad.codegen.devectorizer import sym
+from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
@@ -619,20 +619,6 @@ class TestMaskedShapeTracker(unittest.TestCase):
     st3.reshape((4, 3, 6, 5))
     st3.assert_same()
 
-  def test_axis_is_masked(self):
-    st = ShapeTracker.from_shape((100, 100, 100, 100)).pad(((0,1),(0,0),(2,0), (0,0)))
-    assert st.axis_is_masked(0)
-    assert not st.axis_is_masked(1)
-    assert st.axis_is_masked(2)
-    assert not st.axis_is_masked(3)
-
-  def test_axis_is_masked_rw1(self):
-    st = ShapeTracker(views=(View(shape=(1, 2, 1, 4, 4, 13, 4, 13), strides=(0, 324, 0, 81, 0, 9, 0, 1), offset=-20,
-                                  mask=((0, 1), (0, 2), (0, 1), (0, 4), (0, 4), (2, 11), (0, 4), (2, 11)), contiguous=False),
-                             View(shape=(2, 4, 11, 11, 4, 3, 3), strides=(10816, 0, 52, 1, 2704, 728, 14), offset=0,
-                                  mask=None, contiguous=False)))
-    assert not st.axis_is_masked(0)
-
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -839,25 +825,22 @@ class TestRender(unittest.TestCase):
     self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
     self.assertEqual(valid.render(), "(ridx0<2)")
 
-class TestVariableReshape(unittest.TestCase):
-  def test_reshape(self):
-    st = ShapeTracker.from_shape((3,))
-    st = st.reshape((Variable("i", 1, 10),))
+class TestVariableShrink(unittest.TestCase):
+  def test_shrink(self):
+    st = ShapeTracker.from_shape((10,))
+    st = st.shrink(((0, Variable("i", 1, 10)),))
     assert len(st.views) == 1
 
-  def test_reshape_stride_0(self):
-    st = ShapeTracker.from_shape((3,), (0,))
-    st = st.reshape((Variable("i", 1, 10).bind(3),))
-    assert len(st.views) == 1, f"multiview {st}"
-
-  def test_reshape_bound(self):
-    st = ShapeTracker.from_shape((3,))
-    st = st.reshape((Variable("i", 1, 10).bind(3),))
+  def test_shrink_bound(self):
+    st = ShapeTracker.from_shape((10,))
+    st = st.shrink(((0, Variable("i", 1, 10).bind(3)),))
     assert len(st.views) == 1
 
-  def test_add(self):
-    st1 = ShapeTracker.from_shape((3,))
-    st2 = ShapeTracker.from_shape((Variable("i", 1, 10),))
+class TestVariableMerge(unittest.TestCase):
+  def test_add_reshape(self):
+    vi = Variable("i", 1, 10)
+    st1 = ShapeTracker.from_shape((vi,))
+    st2 = ShapeTracker.from_shape((1, vi,))
     st = st1+st2
     assert len(st.views) == 1
 
@@ -867,15 +850,17 @@ class TestVariableReshape(unittest.TestCase):
     st = st1+st2
     assert len(st.views) == 1, f"multiview {st}"
 
-  def test_add_bound(self):
-    st1 = ShapeTracker.from_shape((3,))
-    st2 = ShapeTracker.from_shape((Variable("i", 1, 10).bind(3),))
+  def test_add_reshape_bound(self):
+    vi = Variable("i", 1, 10).bind(3)
+    st1 = ShapeTracker.from_shape((vi,))
+    st2 = ShapeTracker.from_shape((1, vi,))
     st = st1+st2
     assert len(st.views) == 1
 
   def test_simplify(self):
-    st1 = ShapeTracker.from_shape((3,))
-    st2 = ShapeTracker.from_shape((Variable("i", 1, 10).bind(3),))
+    vi = Variable("i", 1, 10).bind(3)
+    st1 = ShapeTracker.from_shape((vi,))
+    st2 = ShapeTracker.from_shape((1, vi,))
     st = ShapeTracker((st1.views[0], st2.views[0]))
     st = st.simplify()
     assert len(st.views) == 1

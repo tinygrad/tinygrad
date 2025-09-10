@@ -99,7 +99,9 @@ class FeedForward:
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
   def __call__(self, x:Tensor) -> Tensor:
-    return self.w2(self.w1(x).silu() * self.w3(x)) # SwiGLU [arxiv/2002.05202, eq (5)]
+    w1 = self.w1(x).silu()
+    w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
+    return self.w2(w1 * w3)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
@@ -111,7 +113,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
@@ -179,13 +181,11 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
-
-    self.freqs_cis = self.freqs_cis.cast(h.dtype).contiguous()
-    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen, :, :, :]
+    freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h)).float()
+    logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
     return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
@@ -249,8 +249,5 @@ def convert_from_gguf(weights:dict[str, Tensor], n_layers:int):
   return sd
 
 def fix_bf16(weights:dict[Any, Tensor]):
-  if getenv("SUPPORT_BF16", 1):
-    # TODO: without casting to float16, 70B llama OOM on tinybox.
-    return {k:v.cast(dtypes.float32).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
-  # TODO: check if device supports bf16
-  return {k:v.llvm_bf16_cast(dtypes.half).to(v.device) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  # TODO: without casting to float16, 70B llama OOM on tinybox.
+  return {k:v.cast(dtypes.float32).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}

@@ -1,6 +1,6 @@
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from dataclasses import replace
 
@@ -29,7 +29,7 @@ if __name__ == "__main__":
       Opt(op=OptOps.LOCAL, axis=0, amt=2),
     ]
   k.apply_opts(opts)
-  prg = get_program(k.get_optimized_ast(), k.opts)
+  prg = get_program(k.ast, k.opts, k.applied_opts)
   new_src = prg.src
   # can mod source here
   prg = replace(prg, src=new_src)

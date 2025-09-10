@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass
 from typing import cast, Sequence
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop, Ops, ssimplify
+from tinygrad.uop.ops import resolve, UOp, Variable, sint, smax, smin, sint_to_uop, Ops, ssimplify
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
@@ -114,7 +114,7 @@ class View:
 
   def to_indexed_uops(self:View, idxs:Sequence[UOp]|None=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
     """(idx, valid)"""
-    if idxs is None: idxs = [UOp.range(dtypes.int, s, i) for i,s in enumerate(self.shape)]
+    if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
@@ -204,15 +204,15 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
+    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1, dtypes.index) for i,s in enumerate(vm1.shape)]
+    merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
     extents: list[tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
       merged_size *= s
       if resolve(merged_term < merged_size, False) and resolve(0 <= merged_term, False):
         extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
+        merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       if (reshaped_vm2 := vm2.reshape(vm2_shape)) is None: return None
@@ -311,24 +311,16 @@ class View:
 
     if not all(x >= 0 for x in new_shape): raise ValueError(f"shape can't contain negative numbers {new_shape}")
     # check for the same size
-    if (self_all_int := all_int(self.shape)):
-      assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if resolve(prod(self.shape) != prod(new_shape), False): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+    if all_int(self.shape):
+      # reshapes cannot introduce symbolic shape
+      assert all_int(new_shape), f"{self.shape=} -> {new_shape=} contains non int dims"
+      if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if 0 in self.shape: return View.create(new_shape)
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
-
-    # if it's not contiguous and new shape is symbolic, check if it's directly replaceable
-    if self_all_int and not all_int(new_shape):
-      if len(self.shape) != len(new_shape): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
-      for si, so in zip(self.shape, new_shape):
-        if not isinstance(so, int): so = sym_infer(so, dict([v.unbind() for v in so.vars()]))
-        if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
-      # all dimensions matched, return the new view directly
-      return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):

@@ -118,7 +118,7 @@ class SpeedyResNet:
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
 hyp = {
-  'seed' : 200,
+  'seed' : 201,
   'opt': {
     'bias_lr':            1.76 * bias_scaler/512,
     'non_bias_lr':        1.76 / 512,
@@ -355,7 +355,7 @@ def train_cifar():
 
   # https://www.anandtech.com/show/16727/nvidia-announces-geforce-rtx-3080-ti-3070-ti-upgraded-cards-coming-in-june
   # 136 TFLOPS is the theoretical max w float16 on 3080 Ti
-
+  step_times = []
   model_ema: Optional[modelEMA] = None
   projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
   i = 0
@@ -413,11 +413,16 @@ def train_cifar():
           model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
 
       cl = time.monotonic()
+      step_times.append((cl-st)*1000.0)
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
       #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
       print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
       st = cl
       i += 1
+
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
   # verify eval acc
   if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):

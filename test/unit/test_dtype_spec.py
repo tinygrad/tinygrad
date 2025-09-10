@@ -1,6 +1,6 @@
-import unittest, math, operator, subprocess
+import unittest, math, operator, subprocess, struct
 from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, truncate_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
+from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, CI, DEBUG
 from hypothesis import given, settings, strategies as strat
@@ -25,6 +25,9 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
     np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, tol_target_dtype))
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
+
+def u32_to_f32(u): return struct.unpack('f', struct.pack('I', u))[0]
+def f32_to_u32(f): return struct.unpack('I', struct.pack('f', f))[0]
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
@@ -97,33 +100,103 @@ class TestHelpers(unittest.TestCase):
         np.testing.assert_equal(dt.min, False)
         np.testing.assert_equal(dt.max, True)
 
+  def test_dtype_range_vec(self):
+    for dt in core_dtypes:
+      self.assertEqual(dt.min, dt.vec(4).min)
+      self.assertEqual(dt.max, dt.vec(4).max)
+
   def test_truncate_fp16(self):
     self.assertEqual(truncate_fp16(1), 1)
     self.assertEqual(truncate_fp16(65504), 65504)
     self.assertEqual(truncate_fp16(65519.999), 65504)
     self.assertEqual(truncate_fp16(65520), math.inf)
+    self.assertEqual(truncate_fp16(1e-8), 0.0)
+    self.assertEqual(truncate_fp16(-65504), -65504)
+    self.assertEqual(truncate_fp16(-65519.999), -65504)
+    self.assertEqual(truncate_fp16(-65520), -math.inf)
+    self.assertTrue(math.isnan(truncate_fp16(math.nan)))
 
-  def test_truncate_bf16(self):
-    self.assertEqual(truncate_bf16(1), 1)
-    self.assertAlmostEqual(truncate_bf16(1.1), 1.09375, places=7)
-    for a in [1234, 23456, -777.777]:
-      self.assertEqual(truncate_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
-    # TODO: torch bfloat 1.1 gives 1.1015625 instead of 1.09375
+  def test_float_to_bf16(self):
+    # TODO: fuzz this better
     max_bf16 = torch.finfo(torch.bfloat16).max
-    self.assertEqual(truncate_bf16(max_bf16), max_bf16)
-    self.assertEqual(truncate_bf16(min_bf16:=-max_bf16), min_bf16)
-    self.assertEqual(truncate_bf16(max_bf16 * 1.00001), math.inf)
-    self.assertEqual(truncate_bf16(min_bf16 * 1.00001), -math.inf)
+    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001, math.inf, -math.inf]:
+      self.assertEqual(float_to_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
+    self.assertTrue(math.isnan(float_to_bf16(math.nan)))
+
+  def test_float_to_bf16_nan(self):
+    # In f32, NaN = exp 0xFF and mantissa ≠ 0. Quiet-vs-signaling is bit 22 of the mantissa: 1 = qNaN, 0 = sNaN.
+    # qNaN(+/-), sNaN(+/-) overflow(+/-)
+    patterns = [0x7FC00001, 0xFFC00001, 0x7F800001, 0xFF800001, 0x7FFFFFFF, 0xFFFFFFFF]
+    for u in patterns:
+      x = u32_to_f32(u)
+      y = float_to_bf16(x)
+      t = torch.tensor([x], dtype=torch.bfloat16).item()
+      self.assertTrue(math.isnan(y))
+      self.assertTrue(math.isnan(t))
+
+  def test_float_to_bf16_round(self):
+    # round_to_nearest_even
+    uppers = [0x3f800000, 0x41230000, 0xC1460000] # 1.0, 10.1875, -12.375
+    for upper in uppers:
+      base = upper & 0xFFFF0000
+      base_f32 = u32_to_f32(base)
+      base_f32_round_up = u32_to_f32(base + 0x00010000)
+
+      # low < 0x8000(0.5ULP) -> round down
+      x = u32_to_f32(base | 0x00007000)
+      self.assertEqual(float_to_bf16(x), base_f32)
+      self.assertEqual(torch.tensor([x], dtype=torch.bfloat16).item(), base_f32)
+
+      # low > 0x8000(0.5ULP) -> round up
+      x = u32_to_f32(base | 0x0000C000)
+      self.assertEqual(float_to_bf16(x), base_f32_round_up)
+      self.assertEqual(torch.tensor([x], dtype=torch.bfloat16).item(), base_f32_round_up)
+
+      # low == 0x8000(0.5ULP) and LSB even -> round down
+      if ((upper >> 16) & 1) == 0:
+        x = u32_to_f32(base | 0x00008000)
+        self.assertEqual(float_to_bf16(x), base_f32)
+        self.assertEqual(torch.tensor([x], dtype=torch.bfloat16).item(), base_f32)
+      # low == 0x8000(0.5ULP) and LSB odd -> round up
+      else:
+        x = u32_to_f32(base | 0x00008000)
+        self.assertEqual(float_to_bf16(x), base_f32_round_up)
+        self.assertEqual(torch.tensor([x], dtype=torch.bfloat16).item(), base_f32_round_up)
+
+  def test_float_to_bf16_boundary(self):
+    # bf16 max finite: exp=0xFE, faction=0x7F => 0x7F7F0000(f32)
+    # bf16 inf(+/-):   exp=0xFF
+    base = 0x7F7F0000
+    inf_u32 = 0x7F800000
+
+    # low < 0.5ULP
+    x = u32_to_f32(base | 0x00007FFF)
+    self.assertEqual(f32_to_u32(float_to_bf16(x)), base)
+    self.assertEqual(f32_to_u32(torch.tensor([x], dtype=torch.bfloat16).item()), base)
+
+    # low > 0.5ULP -> overflows to +inf
+    x = u32_to_f32(base | 0x0000C000)
+    self.assertEqual(f32_to_u32(float_to_bf16(x)), inf_u32)
+    self.assertEqual(f32_to_u32(torch.tensor([x], dtype=torch.bfloat16).item()), inf_u32)
+
+    # low == 0.5ULP and LSB odd -> overflows to +inf
+    x = u32_to_f32(base | 0x00008000)
+    self.assertEqual(f32_to_u32(float_to_bf16(x)), inf_u32)
+    self.assertEqual(f32_to_u32(torch.tensor([x], dtype=torch.bfloat16).item()), inf_u32)
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
   def test_truncate_fp8e4m3(self, x):
-    if x > FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), FP8E4M3_MAX)
+    if math.isnan(x): np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), x)
+    elif math.isinf(x): np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), math.copysign(math.nan, x))
+    elif x > FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), FP8E4M3_MAX)
     elif x < -FP8E4M3_MAX: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), -FP8E4M3_MAX)
     else: np.testing.assert_equal(truncate[dtypes.fp8e4m3](x), ml_dtypes.float8_e4m3fn(x))
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=True, allow_infinity=True))
   def test_truncate_fp8e5m2(self, x):
-    if x > FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), FP8E5M2_MAX)
+    if math.isnan(x): np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), x)
+    elif math.isinf(x): np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), x)
+    elif x > FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), FP8E5M2_MAX)
     elif x < -FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), -FP8E5M2_MAX)
     else: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), ml_dtypes.float8_e5m2(x))
 
@@ -370,8 +443,10 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).sum().dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).sum().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).sum().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
-    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
 
@@ -402,8 +477,10 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).mean().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).mean().dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).mean().dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).mean().dtype == dtypes.float16
-    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).mean().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).mean().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).mean().dtype == dtypes.float64
 
@@ -417,8 +494,10 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.uint16)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
     assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.fp8e4m3)).cumsum(0).dtype == dtypes.fp8e4m3
+    assert (Tensor([0, 1], dtype=dtypes.fp8e5m2)).cumsum(0).dtype == dtypes.fp8e5m2
     assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
-    #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 

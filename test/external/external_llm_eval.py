@@ -10,7 +10,7 @@ if __name__ == "__main__":
 
   model, kv = Transformer.from_gguf(Tensor.from_url(models["1B"]), max_context=4096)
 
-  tok = SimpleTokenizer(kv["tokenizer.ggml.tokens"])
+  tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 

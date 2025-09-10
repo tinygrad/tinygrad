@@ -77,11 +77,10 @@ class TLSFAllocator:
       if self.lv1_entries[l1] == 0: continue
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
-          nsize = self.blocks[self.storage[l1][l2][0]][0]
-          assert nsize >= size, "block must be larger"
-
           # Block start address.
           start = self.storage[l1][l2][0]
+          nsize = self.blocks[start][0]
+          assert nsize >= size, "block must be larger"
 
           # If request contains alignment, split the block into two parts.
           if (new_start:=round_up(start, align)) != start:
@@ -118,7 +117,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
-    assert not pt.is_huge_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -145,7 +144,7 @@ class PageTableTraverseContext:
         assert paddr is not None, "paddr must be provided when allocating new page tables"
         while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_huge_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
