@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters, CI
+from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
 from tinygrad.uop.ops import UOp
 
 N = 256
