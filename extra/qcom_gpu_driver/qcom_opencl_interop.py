@@ -1,6 +1,6 @@
 import ctypes, array
 from hexdump import hexdump
-from tinygrad.runtime.ops_gpu import GPUDevice
+from tinygrad.runtime.ops_cl import CLDevice
 from tinygrad.helpers import getenv, to_mv, mv_address
 from tinygrad.dtype import dtypes
 from tinygrad import Tensor, TinyJit
@@ -8,7 +8,7 @@ from tinygrad.runtime.autogen import opencl as cl
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 # create raw opencl buffer.
-gdev = GPUDevice()
+gdev = CLDevice()
 cl_buf = cl.clCreateBuffer(gdev.context, cl.CL_MEM_READ_WRITE, 0x100, None, status := ctypes.c_int32())
 assert status.value == 0
 

@@ -13,7 +13,7 @@ class TestOpts(unittest.TestCase):
     out = (a+b).contiguous(arg=opts)
     s = out.schedule()
     self.assertEqual(s[-1].ast.arg.opts_to_apply, opts)
-    if Device.DEFAULT in {"CPU", "GPU", "METAL"} and not CPU_LLVM:
+    if Device.DEFAULT in {"CPU", "CL", "METAL"} and not CPU_LLVM:
       prg = get_program(s[-1].ast)
       self.assertIn('float4', prg.src)
 
