@@ -341,7 +341,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg, size, x.dtype)
