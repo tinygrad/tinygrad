@@ -77,7 +77,7 @@
     stroke: #B8860B;
   }
   g.port circle {
-    fill: #b3dcc2;
+    fill: color-mix(in oklch, var(--color), white 25%);
   }
   g.tag circle, #edge-labels circle {
     stroke-width: 0.8;
@@ -103,8 +103,10 @@
     stroke-width: 1.4px;
   }
   .highlight rect, .edgePath.highlight, g.port circle {
-    stroke: #89C9A2;
+    stroke: var(--color);
   }
+  .highlight { --color: #89C9A2; }
+  .highlight.child { --color: #C888B0; }
   #edge-labels g.port.highlight {
     display: block
   }
