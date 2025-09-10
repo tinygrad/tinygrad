@@ -164,6 +164,20 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
+class RangeMap {
+  constructor() {
+    this.ranges = [] // each = [start, end, { count, ...first }]
+  }
+  clear() { this.ranges.length = 0; }
+  add(start, end, value) {
+    this.ranges.push([start, end, { count:1, ...value }]);
+  }
+  // O(n)
+  query(x) {
+    for (let r of this.ranges) { if (x >= r[0] && x <= r[1]) return r; }
+  }
+}
+
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -206,7 +220,7 @@ async function renderProfiler() {
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible:[], offsetY });
+      data.tracks.set(k, { shapes, visible:new RangeMap(), offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -272,7 +286,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible:new RangeMap(), offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -297,11 +311,11 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-    const st = visibleX[0]; et = visibleX[1];
+    const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
-      visible.length = 0;
+    for (const [k, { offsetY, shapes, visible }] of data.tracks) {
+      visible.clear();
       for (const e of shapes) {
         // generic polygon
         if (e.width == null) {
@@ -311,7 +325,7 @@ async function renderProfiler() {
           ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg })
+            // visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg })
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
@@ -319,15 +333,14 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        // adjust time coordinates on the visible range
-        let t = e.x, w = e.width;
-        if (t>et || t+w<st) continue;
-        if (t<st) { w -= st-t; t = st; }
-        else if (t+w>et) { w = et-t; }
-        // rescale to canvas space
-        const x = xscale(t), width = xscale(t+w)-x;
+        if (e.x>et || e.x+e.width<st) continue;
+        const x = xscale(e.x);
+        const width = xscale(e.x+e.width)-x;
+        const exists = visible.query(x, x+width);
+        if (exists != null) { exists[2].count++; continue; }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        visible.add(x, x+width, e.arg);
+        // visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -403,9 +416,8 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
-      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
-    }
+    const found = data.tracks.get(tid).visible.query(X, X);
+    if (found) return found[2];
   }
 
   canvas.addEventListener("click", e => {
@@ -421,7 +433,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.innerHTML = foundRect.tooltipText;
+      tooltip.innerHTML = foundRect.tooltipText+(foundRect.count > 1 ? `\nand ${foundRect.count} other events` : '');
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -569,7 +581,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
