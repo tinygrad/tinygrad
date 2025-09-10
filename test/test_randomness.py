@@ -98,7 +98,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(getenv("PTX"), "fails with PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):

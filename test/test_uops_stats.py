@@ -158,7 +158,7 @@ class TestUOpsStats(unittest.TestCase):
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
 
 N = 64
-@unittest.skipIf(getenv("PTX"), "wrong in PTX") # maybe?
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "wrong in PTX") # maybe?
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
