@@ -96,7 +96,7 @@ class TestRangeify(unittest.TestCase):
   def test_conv_maxpool_contig(self): self.test_conv_maxpool(True)
   def test_conv_maxpool(self, contig=False):
     GlobalCounters.reset()
-    x = Tensor.empty(1, 16, 8, 8) if CI else Tensor.empty(512, 16, 64, 64)
+    x = Tensor.empty(32, 16, 64, 64)
     l1 = nn.Conv2d(16, 16, 3)
     for p in nn.state.get_parameters(l1): p.replace(Tensor.empty(p.shape))
     x = l1(x)
