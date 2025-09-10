@@ -279,6 +279,7 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, compilers:tuple[Renderer, Compiler]|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
     self.compiler, self.renderer = None, None
+    compilers = compilers or [(Renderer, Compiler)]
 
     devname = device.split(':')[0].upper()
     envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix("Compiler").removeprefix(devname).upper()}" for r,c in compilers]
