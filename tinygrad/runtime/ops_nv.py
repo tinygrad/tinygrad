@@ -10,7 +10,7 @@ from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
+from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
 from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
