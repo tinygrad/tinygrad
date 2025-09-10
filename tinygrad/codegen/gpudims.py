@@ -34,7 +34,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
   if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   # try to split up dims: (a,) -> (b, c)
   if limited == dims: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
+  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.index, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
@@ -59,7 +59,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] is AxisType.GLOBAL]))
+  global_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)]))
   local_dims = sorted(dedup([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]))
   if not global_dims and not local_dims: return None
 

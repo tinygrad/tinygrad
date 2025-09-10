@@ -18,7 +18,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int32, (UOp.const(dtypes.int, nmax),), expr)
+def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, nmax),), expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
@@ -359,7 +359,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "((gidx*3)+-1438)", "0")
 
   def test_simplify2(self):
-    # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
+    # from CL=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Special("lidx", 4)
     valid = (lidx<3) & (lidx<1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)

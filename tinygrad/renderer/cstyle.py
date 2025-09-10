@@ -3,7 +3,7 @@ import os, math, sys
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, sint_to_uop
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
@@ -192,9 +192,12 @@ class ClangRenderer(CStyleLanguage):
   float4_style = ('{', '}')
   gep_arr_threshold = 0
   has_local = False
-  global_max = None
+  has_threads = True
+  global_max = (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  code_for_workitem = {"g": lambda _: "core_id"}
+  extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
 
   # language options
@@ -239,7 +242,7 @@ class ClangRenderer(CStyleLanguage):
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
 class OpenCLRenderer(CStyleLanguage):
-  device = "GPU"
+  device = "CL"
 
   # language options
   kernel_typedef = "__kernel void"
@@ -268,7 +271,7 @@ class OpenCLRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class IntelRenderer(OpenCLRenderer):
-  device, suffix, kernel_typedef = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
+  device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
   tensor_cores = tc.intel
 
   string_rewrite = PatternMatcher([

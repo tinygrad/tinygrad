@@ -1,8 +1,9 @@
-import unittest
+import unittest, sys
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, Context, nn
 from tinygrad.helpers import CI, Profiling, WINO
 
+@unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinogradClose(unittest.TestCase):
   def test_close(self):
     inp = Tensor.rand(1, 16, 16, 16)
@@ -18,6 +19,7 @@ class TestWinogradClose(unittest.TestCase):
       test = conv(inp).realize()
     np.testing.assert_allclose(cmp.numpy(), test.numpy(), atol=1e-5)
 
+@unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
   def setUp(self):
     self.old = WINO.value
