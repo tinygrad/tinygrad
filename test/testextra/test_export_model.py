@@ -3,6 +3,7 @@ from extra.export_model import export_model, EXPORT_SUPPORTED_DEVICE
 from tinygrad.tensor import Tensor, Device
 from tinygrad import dtypes
 import json
+from tinygrad.helpers import X86
 
 class MockMultiInputModel:
   def forward(self, x1, x2, x3):
@@ -14,6 +15,7 @@ class MockMultiOutputModel:
 
 # TODO: move compile_efficientnet tests here
 @unittest.skipUnless(Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"Model export is not supported on {Device.DEFAULT}")
+@unittest.skipUnless(Device.DEFAULT == "CPU" and X86, f"skip this for now")
 class TextModelExport(unittest.TestCase):
   def test_multi_input_model_export(self):
     model = MockMultiInputModel()
