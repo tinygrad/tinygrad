@@ -13,11 +13,11 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, i
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
-  # non shape changing RESHAPE is NOOP
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
 ])
 
 earliest_rewrites = double_reshape+PatternMatcher([
+  # non shape changing RESHAPE is NOOP
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
   # reduce of size 0 is the identity element
@@ -312,14 +312,12 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert len(buf.src) == len(idx.src), "index on wrong bufferize"
   assert all(x.op is Ops.RANGE for x in buf.src[1:])
 
-  ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
-  #print("remove?", len(ran))
-  #for x in ran: print(x.op)
-
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
   # TODO: exclude fusion of user contiguous
-  if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
+  #ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
+  #if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
+  if src.op is not Ops.INDEX: return None
 
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
