@@ -709,7 +709,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, gpu]
+        backend: [llvm, cpu, cl]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
