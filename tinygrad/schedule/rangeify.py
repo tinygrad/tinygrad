@@ -317,6 +317,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # TODO: exclude fusion of user contiguous
   #ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
   #if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
+
+  # simple, matching old behavior
   if src.op is not Ops.INDEX: return None
 
   # this is the ranges replaced
