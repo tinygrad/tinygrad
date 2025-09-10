@@ -5,6 +5,7 @@ from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
+from tinygrad.renderer.ptx import PTXRenderer
 import numpy as np
 import pytest
 from hypothesis import given, strategies as strat, settings, HealthCheck
@@ -91,7 +92,7 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   an, bn, cn = np.array([a]).astype(_to_np_dtype(d1)), np.array([b]).astype(_to_np_dtype(d1)), np.array([c]).astype(_to_np_dtype(d2))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
   numpy_value = op2[1](op1[1](an, bn).astype(_to_np_dtype(d2)), cn)
-  np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if getenv("PTX") else 1e-7)
+  np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) else 1e-7)
 
 class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
