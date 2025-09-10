@@ -304,12 +304,22 @@ def cleanup_dead_axes(b:UOp):
 
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
-def remove_bufferize(b2:UOp, idx2:UOp):
-  # HACK
-  if len(b2.src) != len(idx2.src): return None
-  assert len(b2.src) == len(idx2.src)
-  assert all(x.op is Ops.RANGE for x in b2.src[1:])
-  return b2.src[0].substitute(dict(zip(b2.src[1:], idx2.src[1:])))
+def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
+  # see if we can't do it, should this ever hit?
+  if len(buf.src) != len(idx.src): return None
+  assert all(x.op is Ops.RANGE for x in buf.src[1:])
+
+  ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
+  #print("remove?", len(ran))
+  #for x in ran: print(x.op)
+
+  # here is where we compute the cost
+  # for now just no REDUCE, COPY, or ASSIGN
+  if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
+
+  # this is the ranges replaced
+  return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
+
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -317,8 +327,8 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
   # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
-  # remove reindexing
-  (UPat(Ops.INDEX).f(Ops.BUFFERIZE, allow_any_len=True, name="b2").f(Ops.INDEX, allow_any_len=True, name="idx2"), remove_bufferize),
+  # remove reindexing with cost function
+  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
   #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
 ])
