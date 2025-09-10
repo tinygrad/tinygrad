@@ -1458,8 +1458,8 @@ def train_stable_diffusion():
     #if v.dtype is dtypes.float32:
       #weights[k] = v.to(Device.DEFAULT).cast(dtypes.float16)
   load_state_dict(model, weights)
-  unet_module.linear = unet_module.AutocastLinear
-  unet_module.conv2d = unet_module.AutocastConv2d
+  #unet_module.linear = unet_module.AutocastLinear
+  #unet_module.conv2d = unet_module.AutocastConv2d
   model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
   unet:UNetModel = model.model.diffusion_model
 
@@ -1515,7 +1515,7 @@ def train_stable_diffusion():
 
   @TinyJit
   def acc_grads(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_acc_steps:int) -> Tensor:
-    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    timestep = Tensor.randint(BS // grad_acc_steps, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
     latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
     noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
@@ -1791,15 +1791,23 @@ def train_stable_diffusion():
       t1 = time.perf_counter()
       mini_losses, mini_prep_times, mini_step_times = [], [], []
       for j in range(GRAD_ACC_STEPS):
+        print(f"running step {j} of grad_acc")
         t1b = time.perf_counter()
         start, end = j * MINI_BS, (j + 1) * MINI_BS
         mini_mean = Tensor(mean[start: end], dtype=dtypes.float32, device="CPU")
         mini_logvar = Tensor(logvar[start: end], dtype=dtypes.float32, device="CPU")
-        mini_tokens = Tensor(tokens[start: end], dtype=dtypes.int32, device="CPU")
+        mini_tokens = Tensor(tokens[start*77: end*77], dtype=dtypes.int32, device="CPU").reshape(-1,77)
         t1c = time.perf_counter()
         mini_losses.append((acc_grads(mini_mean, mini_logvar, mini_tokens, unet, optimizer, GRAD_ACC_STEPS) * GRAD_ACC_STEPS).item())
         mini_step_times.append(time.perf_counter() - t1c)
         mini_prep_times.append(t1c - t1b)
+
+        if j == 1:
+          from tinygrad.opt.search import beam_export
+          import sys
+          with open(f"{UNET_CKPTDIR}/kernels_to_beam.pickle", "wb") as f: pickle.dump(beam_export, f)
+          sys.exit()
+
       loss_item = sum(mini_losses) / GRAD_ACC_STEPS
 
       t1d = time.perf_counter()

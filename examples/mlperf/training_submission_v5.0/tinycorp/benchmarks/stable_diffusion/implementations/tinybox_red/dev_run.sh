@@ -45,7 +45,8 @@ export BACKUP_INTERVAL=762
 #export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
 
 export AMD_LLVM=0 # bf16 seems to require this
-export GPUS=8 BS=336
+export GPUS=8 BS=512
+export GRAD_ACC_STEPS=4
 export CONTEXT_BS=816
 export DENOISE_BS=600
 export DECODE_BS=384
@@ -64,8 +65,8 @@ export CLIP_BS=240
 
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-export RUN_EVAL=1
-export EVAL_ONLY=1
+#export RUN_EVAL=1
+#export EVAL_ONLY=1
 #export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762"
 #export KEEP_EVAL_CACHE=1
 #export EVAL_OVERFIT_SET=1
@@ -80,8 +81,10 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 #export DATADIR="/home/hooved/stable_diffusion/datasets"
 #export CKPTDIR="/home/hooved/stable_diffusion/checkpoints"
 
-export WANDB=1
+#export WANDB=1
 #export PARALLEL=4
-export PARALLEL=0
+#export PARALLEL=0
+#export PARALLEL=4
 
-EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+RUNMLPERF=1 python3 examples/mlperf/model_train.py
