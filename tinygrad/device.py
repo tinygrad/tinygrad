@@ -282,7 +282,7 @@ class Compiled:
     compilers = compilers or [(Renderer, Compiler)]
 
     devname = device.split(':')[0].upper()
-    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix("Compiler").removeprefix(devname).upper()}" for r,c in compilers]
+    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}" for r,c in compilers]
 
     enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 1)
     disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 0)
