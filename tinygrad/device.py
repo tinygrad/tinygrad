@@ -289,7 +289,7 @@ class Compiled:
     elif len(add_comps) == 1: compilers = [x[1:] for x in add_comps]
 
     errs = []
-    for renderer, compiler in [(Renderer(), Compiler())] if compilers is None else compilers:
+    for renderer, compiler in [(Renderer, Compiler)] if compilers is None else compilers:
       try:
         self.renderer, self.compiler = renderer(), compiler()
         if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
