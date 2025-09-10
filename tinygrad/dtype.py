@@ -237,6 +237,10 @@ def float_to_bf16(x):
 # fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
 def float_to_fp8(x: float, dtype: DType) -> int:
   assert dtype in dtypes.fp8s, "Only for fp8s"
+  # e4m3 don't support inf, return 0x7f(+NaN) and 0xff(-NaN) to match jax
+  # NaN is unordered, can't compare with zero, use math.copysign to get sign
+  if dtype == dtypes.fp8e4m3 and not math.isfinite(x): return 0x7f if math.copysign(1, x) > 0 else 0xff
+  if dtype == dtypes.fp8e5m2 and math.isinf(x): return 0x7c if math.copysign(1, x) > 0 else 0xfc
   config = {
       dtypes.fp8e4m3: {"EXP_BIAS": 7, "SIGNIFICAND_BITS": 4, "MANTISSA_MASK": 0x7, "MINDENORM_O2": 0x3F50000000000000,
               "OVERFLOW_THRESHOLD": 0x407D000000000000, "MAXNORM": 0x7E, "MINNORM": 0x3F90000000000000, "INF_VALUE": 0x7F},

@@ -373,7 +373,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU", "AMD"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -409,7 +409,7 @@ class TestMultiTensor(unittest.TestCase):
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "LLVM", "CPU", "AMD"), "slow, and flaky on LLVM/CPU")
+  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     fake_image = Tensor.rand((2, 3, 224//16, 224//16))

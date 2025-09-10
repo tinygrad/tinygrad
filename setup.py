@@ -87,6 +87,7 @@ setup(name='tinygrad',
             "tiktoken",
             "blobfile",
             "librosa",
+            "numba>=0.55",  # librosa needs numba but uv ignores python upper bounds and some numba versions require <python3.10
             "networkx",
             "nibabel",
             "bottle",
