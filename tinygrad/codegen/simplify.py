@@ -1,5 +1,5 @@
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute
-from tinygrad.uop.symbolic import symbolic_flat, cast_folding, sym
+from tinygrad.uop.symbolic import symbolic_flat, sym
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
@@ -86,7 +86,7 @@ pm_reduce_collapse = PatternMatcher([
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
-])+sym+cast_folding
+])+sym
 
 def reduce_collapse(red:UOp):
   included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
