@@ -5,7 +5,7 @@ import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
-from tinygrad.uop.symbolic import symbolic_flat, pm_simplify_valid
+from tinygrad.uop.symbolic import sym
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
 
 @functools.cache
@@ -15,7 +15,7 @@ def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None)
     view = view.minify()
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
   with Context(TRACK_MATCH_STATS=0):
-    return graph_rewrite(idx, symbolic_flat+pm_simplify_valid, name="indexing sym @ 1")
+    return graph_rewrite(idx, sym, name="indexing sym @ 1")
 
 @functools.cache
 def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:

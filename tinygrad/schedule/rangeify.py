@@ -3,8 +3,8 @@ import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.uop.symbolic import uop_given_valid
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY
+from tinygrad.uop.symbolic import sym
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -137,9 +137,9 @@ def map_pad(idx:UOp, r:UOp):
     where = UOp.const(dtypes.bool, True)
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
-    bigwhere = bigwhere & (where:=where.simplify())
-    nr = uop_given_valid(where, ret[i]-s)
-    ret[i] = where.where(nr if nr is not None else ret[i]-s, UOp.invalid())
+    bigwhere = bigwhere & where
+    with Context(TRACK_MATCH_STATS=0):
+      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
   # PAD is with 0
   return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
 

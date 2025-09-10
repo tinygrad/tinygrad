@@ -471,12 +471,6 @@ def simplify_valid(valid:UOp) -> UOp|None:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
-pm_simplify_valid = PatternMatcher([
-  (UPat(Ops.AND, name="valid"), simplify_valid),
-  (UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), UPat.var("y")), lambda cond,x,y: cond.where(newx, y) if
-    (newx:=uop_given_valid(cond, x)) is not x else None)
-])
-
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
 def reduce_mul_chain(r:UOp):
@@ -496,6 +490,8 @@ REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
 sym = symbolic_flat+PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
+  (UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), lambda cond,x,i: cond.where(newx, i) if
+    (newx:=uop_given_valid(cond, x)) is not x else None),
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
   (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
