@@ -180,11 +180,10 @@ class Scheduler:
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
+      valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
-        if rng in b.src[1].sparents:
-          valid = replaced_rng < rng.vmax+1
-          if len(b.src) > 2: valid = b.src[2] & valid
-          replaces[b] = b.replace(src=b.src[0:2]+(valid,))
+        if rng in (i:=b.src[1].get_idx()).sparents:
+          replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
