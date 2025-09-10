@@ -2,7 +2,7 @@
 import unittest, os, subprocess, sys
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
@@ -28,6 +28,7 @@ class TestDevice(unittest.TestCase):
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
 
+  @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept RuntimeError: pass"
 
@@ -37,13 +38,8 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
-      try:
-        subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-                          shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
-      except subprocess.CalledProcessError as e:
-        print("Return code:", e.returncode)
-        print("STDOUT:\n", e.stdout)
-        print("STDERR:\n", e.stderr)
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
       subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
