@@ -6,7 +6,6 @@ import unittest
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
-from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.codegen.opt.search import Opt, OptOps
 from tinygrad.engine.realize import get_program
