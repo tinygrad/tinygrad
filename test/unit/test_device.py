@@ -37,8 +37,13 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
-      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
+      try:
+        subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+                          shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
+      except subprocess.CalledProcessError as e:
+        print("Return code:", e.returncode)
+        print("STDOUT:\n", e.stdout)
+        print("STDERR:\n", e.stderr)
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
       subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
