@@ -525,8 +525,8 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    compilers = [(functools.partial(NVRenderer, self.arch), CUDACompiler if MOCKGPU else NVCompiler),
-                 (functools.partial(PTXRenderer, self.arch, device="NV"), PTXCompiler if MOCKGPU else NVPTXCompiler)]
+    compilers = [(functools.partial(NVRenderer, self.arch), functools.partial(CUDACompiler if MOCKGPU else NVCompiler, self.arch)),
+                 (functools.partial(PTXRenderer, self.arch, device="NV"), functools.partial(PTXCompiler if MOCKGPU else NVPTXCompiler, self.arch))]
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
