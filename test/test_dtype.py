@@ -344,7 +344,6 @@ class TestUint64DType(TestDType):
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
 class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
 class TestPtrDType(unittest.TestCase):
