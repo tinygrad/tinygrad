@@ -280,23 +280,23 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
     self.compiler, self.renderer = None, None
 
-    add_comps = set()
-    for renderer, compiler in compilers if compilers is not None else []:
-      comp_name = unwrap_class_type(compiler).__name__.removesuffix("Compiler").removeprefix(dev_name:=device.split(':')[0].upper()).upper()
-      if getenv(f"{dev_name}_{comp_name}", -1) == 0: compilers.remove((renderer, compiler))
-      elif getenv(f"{dev_name}_{comp_name}", -1) == 1: add_comps.add((comp_name, renderer, compiler))
-    if len(add_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {[x[0] for x in add_comps]}")
-    elif len(add_comps) == 1: compilers = [x[1:] for x in add_comps]
+    devname = device.split(':')[0].upper()
+    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix("Compiler").removeprefix(devname).upper()}" for r,c in compilers]
 
-    errs = []
-    for renderer, compiler in [(Renderer, Compiler)] if compilers is None else compilers:
-      try:
-        self.renderer, self.compiler = renderer(), compiler()
-        if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
-        break
-      except Exception as e: errs.append(e)
+    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 1)
+    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 0)
 
-    if self.renderer is None or self.compiler is None: raise RuntimeError(f"{self.device}: couldn't find a renderer/compiler, errors: {errs}")
+    if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
+    for _, comp_pair in disable_comps: compilers.remove(comp_pair)
+
+    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else compilers))
+    except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
+
+    if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+
+  def _get_available_compilers(self, compilers):
+    for renderer, compiler in compilers:
+      with contextlib.suppress(Exception): yield renderer(), compiler()
 
   def synchronize(self):
     """
