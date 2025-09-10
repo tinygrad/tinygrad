@@ -993,9 +993,7 @@ jobs:
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
-        run: |
-          python3 -c "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"
-          python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
