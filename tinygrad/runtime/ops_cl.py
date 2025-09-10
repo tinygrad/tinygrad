@@ -114,5 +114,3 @@ class CLDevice(Compiled):
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
-
-GPUDevice = CLDevice # for legacy reasons
