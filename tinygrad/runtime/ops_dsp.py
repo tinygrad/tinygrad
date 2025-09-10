@@ -134,8 +134,8 @@ class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     if getenv("MOCKDSP"):
-      compilers = [(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"] + compiler_args, 'llvm-objdump'))]
-      super().__init__(device, CPUAllocator(self), compilers, MockDSPProgram)
+      mock_compilers = [(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"] + compiler_args, 'llvm-objdump'))]
+      super().__init__(device, CPUAllocator(self), mock_compilers, MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.

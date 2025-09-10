@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, getenv, mv_address, suppress_finalizing
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError
 

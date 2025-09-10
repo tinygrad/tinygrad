@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, CPU_LLVM, suppress_finalizing
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing
 from tinygrad.device import BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.renderer.cstyle import ClangRenderer

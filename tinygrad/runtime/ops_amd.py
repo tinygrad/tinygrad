@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, AMD_LLVM, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt

@@ -276,9 +276,8 @@ class Compiler:
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, compilers:tuple[Renderer, Compiler]|None, runtime, graph=None, group_id=None):
+  def __init__(self, device:str, allocator:Allocator, compilers:list|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
-    self.compiler, self.renderer = None, None
     compilers = compilers or [(Renderer, Compiler)]
 
     devname = device.split(':')[0].upper()
@@ -295,7 +294,7 @@ class Compiled:
 
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
 
-  def _get_available_compilers(self, compilers):
+  def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
     for renderer, compiler in compilers:
       with contextlib.suppress(Exception): yield renderer(), compiler()
 
