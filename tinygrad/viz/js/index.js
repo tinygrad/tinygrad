@@ -166,15 +166,17 @@ const drawLine = (ctx, x, y, opts) => {
 
 class RangeMap {
   constructor() {
-    this.ranges = [] // each = [start, end, { count, ...first }]
+    this.ranges = [] // each = [start, end, depth, { count, ...first }]
+    this.height = 24;
   }
   clear() { this.ranges.length = 0; }
-  add(start, end, value) {
-    this.ranges.push([start, end, { count:1, ...value }]);
+  add(start, end, depth, value) {
+    this.ranges.push([start, end, depth, { count:1, ...value }]);
   }
+  merge(e, n) { e[3].count++; }
   // O(n)
-  query(x) {
-    for (let r of this.ranges) { if (x >= r[0] && x <= r[1]) return r; }
+  query(x, y) {
+    for (let r of this.ranges) { if (x >= r[0] && x <= r[1] && y>=r[2] && y<=r[2]+this.height) return r; }
   }
 }
 
@@ -334,13 +336,13 @@ async function renderProfiler() {
         }
         // contiguous rect
         if (e.x>et || e.x+e.width<st) continue;
-        const x = xscale(e.x);
+        const x = xscale(e.x), y = offsetY+e.y;
         const width = Math.max(0.5, xscale(e.x+e.width)-x);
-        const exists = visible.query(x, x+width);
-        if (exists != null) { exists[2].count++; continue; }
-        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.add(x, x+width, e.arg);
-        // visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        // fill exactly one rect per pixel
+        const exists = visible.query(x, y, x+width);
+        if (exists != null) { visible.merge(exists, e); continue; }
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
+        visible.add(x, x+width, y, e.arg);
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -416,8 +418,8 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    const found = data.tracks.get(tid).visible.query(X, X);
-    if (found) return found[2];
+    const found = data.tracks.get(tid).visible.query(X, Y);
+    if (found != null) return found[3];
   }
 
   canvas.addEventListener("click", e => {
