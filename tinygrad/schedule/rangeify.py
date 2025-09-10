@@ -198,7 +198,10 @@ def map_contiguous(ctx:RangeifyContext, x:UOp):
   for s in x.shape[len(x.src)-1:]:
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
   ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device)
-  return ret.shrink(((0, prod(x.shape)),)).forced_reshape(x.shape)
+  # was there a shrink? move this before the bufferize?
+  # TODO: do we need this?
+  if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
+  return ret.forced_reshape(x.shape)
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
@@ -343,7 +346,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg, size, x.dtype)
@@ -435,12 +438,12 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="cleanup")
+  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="remove tags")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="cleanups")
+  tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="buffer cost")
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
 
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
