@@ -387,3 +387,8 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])+sym
+
+pm_reduce_simplify = PatternMatcher([
+  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
+])
