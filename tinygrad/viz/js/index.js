@@ -267,9 +267,9 @@ async function renderProfiler() {
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+      for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
