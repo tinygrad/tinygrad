@@ -99,7 +99,7 @@ class CLDevice(Compiled):
       if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
       CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))  # noqa: E501
 
-    self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
+    self.device_id = CLDevice.device_ids[min(0 if ":" not in device else int(device.split(":")[1]), len(CLDevice.device_ids)-1)]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256, buf := ctypes.create_string_buffer(256), None), buf.value.decode())[1]  # noqa: E501
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
