@@ -220,7 +220,7 @@ class NIRRenderer(Renderer):
   def_rewrite = PatternMatcher([
     (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx[0], x.arg, x.dtype)),
     (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: nv_param(ctx[0], x.dtype, x.arg)),
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx[0], ngid(ctx[0]) if x.arg[0][0] == 'g' else nlid(ctx[0]), int(x.arg[0][-1]))),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx[0], ngid(ctx[0]) if x.arg[0] == 'g' else nlid(ctx[0]), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat.var("loc"), UPat.var("val")), allow_any_len=True, name="x"),
      lambda ctx,x,loc,val: nstore(ctx[0], AddrSpace(x.arg), ctx[1][loc], ctx[1][val], val.dtype)),
     (UPat(Ops.LOAD, src=(UPat.var("loc"),), name="x"), lambda ctx,x,loc: nload(ctx[0], AddrSpace(x.arg), ctx[1][loc], x.dtype)),
@@ -245,7 +245,7 @@ class NIRRenderer(Renderer):
 
   def render(self, uops:list[UOp]) -> str:
     b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
-    for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == "l"]: b.shader.contents.info.workgroup_size[int(u.arg[0][-1])] = u.arg[1]
+    for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     r: dict[UOp,nir.nir_def] = {}
     ranges: list[Tuple[nir.nir_loop, nir.nir_phi_instr]] = []
 
@@ -277,5 +277,5 @@ class NIRRenderer(Renderer):
           nir.nir_print_shader(b.shader, stdout)
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         r[u] = cast(nir.nir_def, d)
-    nir.nir_print_shader(b.shader, stdout)
+    # nir.nir_print_shader(b.shader, stdout)
     return b.shader.contents
