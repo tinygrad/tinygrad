@@ -129,65 +129,6 @@ function renderDag(graph, additions, recenter) {
 
 // ** profiler graph
 
-const perfCounter = [];
-class RangeIndex {
-  constructor(name) {
-    this.data = [];
-    this.name = name;
-  }
-  push(e) {
-    this.data.push(e);
-  }
-
-  *query(start, end, timestamp) {
-    if (this.data[0]?.width == null) yield* this.queryPath(start, end, timestamp);
-    else yield* this.queryRect(start, end, timestamp);
-  }
-
-  *queryPath(start, end, timestamp) {
-    for (const e of this.data) {
-      const x = e.x;
-      if (!x?.length) continue;
-      if (x.at(-1) <= start || x[0] >= end) continue;       // reject
-      if (x[0] >= start && x.at(-1) <= end) { yield e; continue } // complete
-      const clipped = clipPath(e, start, end); if (clipped) yield clipped; // partial
-    }
-  }
-
-  *queryRect(start, end, timestamp) {
-    for (const e of this.data) {
-      // early reject
-      if (e.x + e.width <= start || e.x >= end) continue;
-      // partial range
-      else if (e.x < start) yield modRect(e, start, e.x+e.width-start);
-      else if (e.x+e.width > end) yield modRect(e, e.x, end-e.x);
-      else yield e; // complete range
-    }
-  }
-}
-
-const modRect = (e, x, width) => ({ x, width, y:e.y, height:e.height, arg:e.arg, label:e.label, fillColor:e.fillColor });
-
-const modPath = (e, X, Y0, Y1) => ({ x: X, y0: Y0, y1: Y1, arg: e.arg, fillColor: e.fillColor });
-
-const clipPath = (e, start, end) => {
-  const x = e.x, y0 = e.y0, y1 = e.y1;
-  let i0 = 0; while (i0 < x.length && x[i0] < start) i0++;
-  let i1 = x.length - 1; while (i1 >= 0 && x[i1] > end) i1--;
-
-  const X = [], Y0 = [], Y1 = [];
-  if (i0 > 0 && x[i0] > start) {
-    const j = i0 - 1, t = (start - x[j]) / (x[i0] - x[j]);
-    X.push(start); Y0.push(y0[j] + (y0[i0] - y0[j]) * t); Y1.push(y1[j] + (y1[i0] - y1[j]) * t);
-  }
-  for (let i = i0; i <= i1; i++) { X.push(x[i]); Y0.push(y0[i]); Y1.push(y1[i]) }
-  if (i1 < x.length - 1 && x[i1] < end) {
-    const j = i1 + 1, t = (end - x[i1]) / (x[j] - x[i1]);
-    X.push(end); Y0.push(y0[i1] + (y0[j] - y0[i1]) * t); Y1.push(y1[i1] + (y1[j] - y1[i1]) * t);
-  }
-  return X.length > 1 ? modPath(e, X, Y0, Y1) : null;
-};
-
 function formatTime(ts, dur=ts) {
   if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
@@ -202,7 +143,7 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
-  for (const e of source.shapes.data) {
+  for (const e of source.shapes) {
     for (let i=0; i<e.y0.length; i++) {
       e.y0[i] = e.y0[i]*k;
       e.y1[i] = e.y1[i]*k;
@@ -259,7 +200,7 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = new RangeIndex();
+    const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
@@ -329,7 +270,7 @@ async function renderProfiler() {
       for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
-        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.data.length) });
+        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
@@ -356,28 +297,37 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-    const start = visibleX[0], end = visibleX[1];
-    const step = (end-start) / (canvas.clientWidth*dpr);
+    const st = visibleX[0]; et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes }] of data.tracks) {
-      for (const e of shapes.query(start, end, step)) {
-        ctx.fillStyle = e.fillColor;
+    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+      visible.length = 0;
+      for (const e of shapes) {
         // generic polygon
         if (e.width == null) {
+          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
+          ctx.beginPath();
+          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) {
+            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg })
+          }
+          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
+          ctx.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill();
           continue;
         }
         // contiguous rect
-        const x = xscale(e.x);
-        const width = xscale(e.x+e.width)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
+        // adjust time coordinates on the visible range
+        let t = e.x, w = e.width;
+        if (t>et || t+w<st) continue;
+        if (t<st) { w -= st-t; t = st; }
+        else if (t+w>et) { w = et-t; }
+        // rescale to canvas space
+        const x = xscale(t), width = xscale(t+w)-x;
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
+        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -619,7 +569,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
