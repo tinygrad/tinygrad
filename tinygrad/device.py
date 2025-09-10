@@ -3,8 +3,9 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM, \
-                             Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
+from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import unwrap_class_type
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -275,9 +276,28 @@ class Compiler:
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Renderer|None, compiler:Compiler|None, runtime, graph=None, group_id=None):
-    self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
-    self.renderer, self.group_id = renderer or Renderer(), group_id
+  def __init__(self, device:str, allocator:Allocator, compilers:tuple[Renderer, Compiler]|None, runtime, graph=None, group_id=None):
+    self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
+    self.compiler, self.renderer = None, None
+
+    add_comps = set()
+    for renderer, compiler in compilers if compilers is not None else []:
+      comp_name = unwrap_class_type(compiler).__name__.removesuffix("Compiler").removeprefix(dev_name:=device.split(':')[0].upper()).upper()
+      if getenv(f"{dev_name}_{comp_name}", -1) == 0: compilers.remove((renderer, compiler))
+      elif getenv(f"{dev_name}_{comp_name}", -1) == 1: add_comps.add((comp_name, renderer, compiler))
+    if len(add_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {[x[0] for x in add_comps]}")
+    elif len(add_comps) == 1: compilers = [x[1:] for x in add_comps]
+
+    errs = []
+    for renderer, compiler in [(Renderer(), Compiler())] if compilers is None else compilers:
+      try:
+        self.renderer, self.compiler = renderer(), compiler()
+        if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+        break
+      except Exception as e: errs.append(e)
+
+    if self.renderer is None or self.compiler is None: raise RuntimeError(f"{self.device}: couldn't find a renderer/compiler, errors: {errs}")
+
   def synchronize(self):
     """
     Synchronize all pending operations on the device.

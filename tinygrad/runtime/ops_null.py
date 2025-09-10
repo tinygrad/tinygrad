@@ -29,5 +29,5 @@ class NullGraph(MultiGraphRunner):
   def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3
 
 class NullDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, NullAllocator(self), NullRenderer(), Compiler(), functools.partial(NullProgram, device),
+  def __init__(self, device:str): super().__init__(device, NullAllocator(self), [(NullRenderer, Compiler)], functools.partial(NullProgram, device),
                                                    NullGraph)
