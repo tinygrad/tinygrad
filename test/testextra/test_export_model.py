@@ -15,7 +15,7 @@ class MockMultiOutputModel:
 
 # TODO: move compile_efficientnet tests here
 @unittest.skipUnless(Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"Model export is not supported on {Device.DEFAULT}")
-@unittest.skipUnless(Device.DEFAULT == "CPU" and X86, f"skip this for now")
+@unittest.skipIf(Device.DEFAULT == "CPU" and X86, "skip this for now")
 class TextModelExport(unittest.TestCase):
   def test_multi_input_model_export(self):
     model = MockMultiInputModel()
