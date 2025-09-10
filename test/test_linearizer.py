@@ -13,6 +13,7 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import Context, getenv, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):

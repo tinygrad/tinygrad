@@ -5,6 +5,7 @@ from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
+from tinygrad.renderer.ptx import PTXRenderer
 import numpy as np
 import pytest
 from hypothesis import given, strategies as strat, settings, HealthCheck
