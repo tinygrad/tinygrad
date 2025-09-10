@@ -90,7 +90,7 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
 
 def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.vars}
+  if var_vals is None: var_vals = {v.expr: v.min for v in lin.vars}
 
   # TODO: images needs required_optimization
   try:
@@ -129,7 +129,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
+    var_vals = {v.expr: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)

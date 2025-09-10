@@ -52,12 +52,12 @@ class TestHCQ(unittest.TestCase):
       with self.subTest(name=str(queue_type)):
         q = queue_type().signal(virt_signal, virt_val)
 
-        var_vals = {virt_signal.base_buf.va_addr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val: TestHCQ.d0.timeline_value}
+        var_vals = {virt_signal.base_buf.va_addr.expr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val.expr: TestHCQ.d0.timeline_value}
         q.submit(TestHCQ.d0, var_vals)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-        var_vals = {virt_signal.base_buf.va_addr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val: TestHCQ.d0.timeline_value}
+        var_vals = {virt_signal.base_buf.va_addr.expr: TestHCQ.d0.timeline_signal.base_buf.va_addr, virt_val.expr: TestHCQ.d0.timeline_value}
         q.submit(TestHCQ.d0, var_vals)
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
@@ -75,7 +75,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"}, "Can't handle async update on MOCKGPU for now")
+  @unittest.skipIf(MOCKGPU or Device.DEFAULT in {"CPU"}, "Can't handle async update on MOCKGPU for now")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -106,7 +106,7 @@ class TestHCQ(unittest.TestCase):
 
         fake_signal.value = 0x30
 
-        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr: fake_signal.base_buf.va_addr, virt_val: fake_signal.value})
+        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr.expr: fake_signal.base_buf.va_addr, virt_val.expr: fake_signal.value})
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
@@ -131,13 +131,13 @@ class TestHCQ(unittest.TestCase):
      .signal(TestHCQ.d0.timeline_signal, virt_val)
 
     for _ in range(100):
-      q.submit(TestHCQ.d0, {virt_val: TestHCQ.d0.timeline_value})
+      q.submit(TestHCQ.d0, {virt_val.expr: TestHCQ.d0.timeline_value})
       TestHCQ.d0.timeline_value += 1
 
     val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
     assert val == 200.0, f"got val {val}"
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
   def test_exec_update(self):
     sint_global = (Variable("sint_global", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.global_size[1:])
     sint_local = (Variable("sint_local", 0, 0xffffffff, dtypes.uint32),) + tuple(TestHCQ.runner.p.local_size[1:])
@@ -146,7 +146,7 @@ class TestHCQ(unittest.TestCase):
     q.exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, sint_global, sint_local) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-    q.submit(TestHCQ.d0, {sint_global[0]: 1, sint_local[0]: 1})
+    q.submit(TestHCQ.d0, {sint_global[0].expr: 1, sint_local[0].expr: 1})
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
@@ -155,7 +155,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU", "LLVM"}, "No globals/locals on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
   def test_exec_update_fuzz(self):
     virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
     virt_local = [Variable(f"local_{i}", 0, 0xffffffff, dtypes.uint32) for i in range(3)]
@@ -181,7 +181,7 @@ class TestHCQ(unittest.TestCase):
         for z in range(1, 4):
           ctypes.memset(zt._buf.va_addr, 0, zb.nbytes)
 
-          q.submit(TestHCQ.d0, {virt_val: TestHCQ.d0.timeline_value, virt_local[0]: x, virt_local[1]: y, virt_local[2]: z})
+          q.submit(TestHCQ.d0, {virt_val.expr: TestHCQ.d0.timeline_value, virt_local[0].expr: x, virt_local[1].expr: y, virt_local[2].expr: z})
           TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
           TestHCQ.d0.timeline_value += 1
 
@@ -253,7 +253,7 @@ class TestHCQ(unittest.TestCase):
                                     .copy(virt_dest_addr, virt_src_addr, 8) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-    q.submit(TestHCQ.d0, {virt_src_addr: TestHCQ.a.uop.buffer._buf.va_addr, virt_dest_addr: TestHCQ.b.uop.buffer._buf.va_addr})
+    q.submit(TestHCQ.d0, {virt_src_addr.expr: TestHCQ.a.uop.buffer._buf.va_addr, virt_dest_addr.expr: TestHCQ.b.uop.buffer._buf.va_addr})
 
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
@@ -276,7 +276,7 @@ class TestHCQ(unittest.TestCase):
                                     .copy(virt_dest_addr, virt_src_addr, sz) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
-    q.submit(TestHCQ.d0, {virt_src_addr: buf2._buf.va_addr, virt_dest_addr: buf1._buf.va_addr})
+    q.submit(TestHCQ.d0, {virt_src_addr.expr: buf2._buf.va_addr, virt_dest_addr.expr: buf1._buf.va_addr})
 
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
@@ -299,7 +299,7 @@ class TestHCQ(unittest.TestCase):
 
         fake_signal.value = 0x30
 
-        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr: fake_signal.base_buf.va_addr, virt_val: fake_signal.value})
+        q.submit(TestHCQ.d0, {virt_signal.base_buf.va_addr.expr: fake_signal.base_buf.va_addr, virt_val.expr: fake_signal.value})
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
@@ -336,7 +336,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU", "LLVM"} else 100)
+    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
