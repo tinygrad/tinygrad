@@ -959,7 +959,11 @@ class Tensor(MathTrait):
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-      t.grad = g if t.grad is None else (t.grad + g)
+      #t.grad = g if t.grad is None else (t.grad + g)
+      if t.grad is None:
+        t.grad = g
+      else:
+        t.grad.assign(t.grad + g)
     return self
 
   # ***** movement low level ops *****
