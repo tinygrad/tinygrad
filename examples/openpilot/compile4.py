@@ -6,7 +6,7 @@ from tinygrad.schedule.kernelize import get_kernelize_map
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import run_schedule
 
-# NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 VIZ=1 DEBUG=2 python3 examples/openpilot/compile4.py
+# NOLOCALS=1 CL=1 IMAGE=2 FLOAT16=1 VIZ=1 DEBUG=2 python3 examples/openpilot/compile4.py
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"

@@ -198,7 +198,8 @@ def map_contiguous(ctx:RangeifyContext, x:UOp):
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
   ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device)
   # was there a shrink? move this before the bufferize?
-  if prod(x.shape) != prod(ret.shape): ret = ret.reshape(prod(ret.shape)).shrink(((0, prod(x.shape)),))
+  # TODO: do we need this?
+  if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
   return ret.forced_reshape(x.shape)
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
@@ -352,7 +353,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg, size, x.dtype)

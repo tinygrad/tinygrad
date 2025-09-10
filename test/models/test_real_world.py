@@ -114,7 +114,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 93)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "GPU"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))

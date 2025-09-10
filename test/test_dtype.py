@@ -424,7 +424,7 @@ class TestDtypeUsage(unittest.TestCase):
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
     # TODO: helper_test_op breaks in unrelated part
-    # TODO: wrong output with GPU=1 on mac
+    # TODO: wrong output with CL=1 on mac
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
