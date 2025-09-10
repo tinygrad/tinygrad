@@ -25,5 +25,6 @@ class NAKCompiler(Compiler):
 
 def parse_nak_shader(shader:bytes) -> Tuple[memoryview, int, int, int]:
   sb = nak.struct_nak_shader_bin.from_buffer(shader)
-  return (memoryview(bytearray(ctypes.string_at(sb.code, sb.code_size))), sb.info.num_gprs, round_up(sb.info.cs.smem_size, 0x80), sb.info.slm_size)
+  return (memoryview(ctypes.cast(sb.code, ctypes.POINTER(ctypes.c_char * sb.code_size)).contents), sb.info.num_gprs,
+          round_up(sb.info.cs.smem_size, 0x80), round_up(sb.info.slm_size, 0x10))
 

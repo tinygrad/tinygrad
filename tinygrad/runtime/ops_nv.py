@@ -199,8 +199,7 @@ class NVProgram(HCQProgram):
     if NIR:
       image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
       self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-      cbuf0_size = 0x160 # ?
-      self.prog_addr, self.prog_sz = self.lib_gpu.va_addr, image.nbytes
+      self.prog_addr, self.prog_sz, cbuf0_size = self.lib_gpu.va_addr, image.nbytes, 0x160
     else:
       if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
       else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
@@ -242,12 +241,13 @@ class NVProgram(HCQProgram):
       self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':self.regs_usage,
         'program_address_upper_shifted4':hi32(self.prog_addr>>4), 'program_address_lower_shifted4':lo32(self.prog_addr>>4),
-        'shared_memory_size_shifted7':self.shmem_usage>>7, 'shader_local_memory_high_size_shifted4':self.dev.slm_per_thread>>4}
+        'shared_memory_size_shifted7':self.shmem_usage>>7, 'shader_local_memory_high_size_shifted4':0 if NIR else self.dev.slm_per_thread>>4,
+        **({'shader_local_memory_high_size_shifted4':self.lcmem_usage>>4} if NIR else {})}
     else:
       self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
-      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shader_local_memory_high_size':self.dev.slm_per_thread,
+      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shader_local_memory_high_size':0 if NIR else self.dev.slm_per_thread,
         'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr), 'shared_memory_size':self.shmem_usage,
-        'register_count_v':self.regs_usage}
+        'register_count_v':self.regs_usage, **({'shader_local_memory_low_size':self.lcmem_usage} if NIR else {})}
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
