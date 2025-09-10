@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1481,7 +1480,6 @@ def train_stable_diffusion():
   safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
   load_state_dict(unet, safe_load(init_fn))
   if not getenv("KEEP_INIT_MODEL", ""): Path(init_fn).unlink()
-  load_state_dict(unet, gv.unet)
 
   alphas_cumprod = get_alphas_cumprod()
   sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
@@ -1516,11 +1514,10 @@ def train_stable_diffusion():
   #jit_context_step = TinyJit(model.cond_stage_model.embed_tokens, optimize=True)
 
   @TinyJit
-  def acc_grads(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep, latent_randn, noise, unet:UNetModel, optimizer:LAMB, grad_acc_steps:int) -> Tensor:
-  #def acc_grads(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_acc_steps:int) -> Tensor:
-    #timestep = Tensor.randint(BS // grad_acc_steps, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-    #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-    #noise = Tensor.randn(*mean.shape, device=GPUS[0])
+  def acc_grads(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, grad_acc_steps:int) -> Tensor:
+    timestep = Tensor.randint(BS // grad_acc_steps, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
       t.shard_(GPUS, axis=0)
 
@@ -1780,9 +1777,6 @@ def train_stable_diffusion():
     dl = batch_load_train_stable_diffusion(BS)
     t0 = t6 = time.perf_counter()
     for i, batch in enumerate(dl, start=1):
-      if i == 1:
-        lr_scheduler.step()
-        continue
       loop_time = time.perf_counter() - t0
       t0 = time.perf_counter()
       dl_time = t0 - t6
@@ -1790,44 +1784,22 @@ def train_stable_diffusion():
       GlobalCounters.reset()
       seen_keys += batch["__key__"]
 
-      #mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
-      mean_logvar = [gv.data["mean_logvar"][i-1:i].numpy()] * BS
-      mean, logvar = np.split(np.concatenate(mean_logvar, axis=0), 2, axis=1)
-      #tokens = []
-      #for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
-      tokens = model.cond_stage_model.tokenizer.encode(gv.prompts[i-1], pad_with_zeros=True) * BS
+      mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+      tokens = []
+      for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
 
       t1 = time.perf_counter()
       mini_losses, mini_prep_times, mini_step_times = [], [], []
       for j in range(GRAD_ACC_STEPS):
-        print(f"running step {j} of grad_acc")
         t1b = time.perf_counter()
         start, end = j * MINI_BS, (j + 1) * MINI_BS
         mini_mean = Tensor(mean[start: end], dtype=dtypes.float32, device="CPU")
         mini_logvar = Tensor(logvar[start: end], dtype=dtypes.float32, device="CPU")
         mini_tokens = Tensor(tokens[start*77: end*77], dtype=dtypes.int32, device="CPU").reshape(-1,77)
-
-        timestep = gv.data["timestep"][i-1:i]
-        timestep = Tensor.cat(*([timestep] * MINI_BS)).cast(dtypes.int).to(GPUS[0])
-
-        latent_randn = gv.data['latent_randn'][i-1:i]
-        latent_randn = Tensor.cat(*([latent_randn] * MINI_BS)).to(GPUS[0])
-
-        noise = gv.data["noise"][i-1:i]
-        noise = Tensor.cat(*([noise] * MINI_BS)).to(GPUS[0])
-
-        
         t1c = time.perf_counter()
-        #mini_losses.append((acc_grads(mini_mean, mini_logvar, mini_tokens, unet, optimizer, GRAD_ACC_STEPS) * GRAD_ACC_STEPS).item())
-        mini_losses.append((acc_grads(mini_mean, mini_logvar, mini_tokens, timestep, latent_randn, noise, unet, optimizer, GRAD_ACC_STEPS) * GRAD_ACC_STEPS).item())
+        mini_losses.append((acc_grads(mini_mean, mini_logvar, mini_tokens, unet, optimizer, GRAD_ACC_STEPS) * GRAD_ACC_STEPS).item())
         mini_step_times.append(time.perf_counter() - t1c)
         mini_prep_times.append(t1c - t1b)
-
-        #if j == 1:
-          #from tinygrad.opt.search import beam_export
-          #import sys
-          #with open(f"{UNET_CKPTDIR}/kernels_to_beam.pickle", "wb") as f: pickle.dump(beam_export, f)
-          #sys.exit()
 
       loss_item = sum(mini_losses) / GRAD_ACC_STEPS
 
@@ -1891,27 +1863,13 @@ def train_stable_diffusion():
       if WANDB: wandb.log(wandb_log)
       #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
       t5 = time.perf_counter()
-      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
-    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
-    t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, mini_prep_times: {[round(d,4) for d in mini_prep_times]},
-    mini_step_times: {[round(d,3) for d in mini_step_times]}, mini_losses: {[round(l,4) for l in mini_losses]},
-    grad_acc_time: {t1d-t1:.2f}, apply_grad_time: {t2-t1d:.2f}
-    """)
+      print(f"""step {i}: loss: {loss_item:.3f}, lr: {lr_item:.3e}, {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS,
+  mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB, loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f},
+  train_step_time: {t2-t1:.2f}, t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, mini_prep_times: {[round(d,4) for d in mini_prep_times]},
+  mini_step_times: {[round(d,3) for d in mini_step_times]}, mini_losses: {[round(l,4) for l in mini_losses]},
+  grad_acc_time: {t1d-t1:.2f}, apply_grad_time: {t2-t1d:.2f}
+""")
       #print("rocm-smi output:\n" + rocm_out + "\n")
-
-      if i == 20:
-        gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
-        # diff.abs().mean(): 3.2285435175999355e-12
-        # a.abs().mean(): 1.2747265465407054e-08
-        # diff.abs().max(): 2.586970637707964e-10
-
-        gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
-        # diff.abs().mean(): 5.735412145213559e-13
-        # a.abs().mean(): 1.6649142509095327e-08
-        # diff.abs().max(): 7.602807272633072e-13
-
-        import sys
-        sys.exit()
 
       t6 = time.perf_counter()
 

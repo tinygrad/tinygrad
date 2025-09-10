@@ -183,8 +183,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
       timed_lins: list[tuple[Kernel, float]] = []
       _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
       least_compute_ops = math.inf
-      for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
-      #for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap(_compile_fn, enumerate(acted_lins))):
+      #for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
+      for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         p, lib, compile_et = proc
         if lib in seen_libs: continue
@@ -193,8 +193,9 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         if least_compute_ops*1000 < this_compute_ops: continue
         seen_libs.add(lib)
 
-        #if current_round == 1 and i in (81,): continue
-        #elif current_round == 2 and i in (81,138): continue
+        #if current_round == 1 and i in (3,): continue
+        #if current_round == 5 and i in (42,): continue
+        #if current_round == 7 and i in (11,): continue
 
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
