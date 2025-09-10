@@ -93,7 +93,7 @@ class TestLinearizerDumb(unittest.TestCase):
 
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need float4")
-  @unittest.skipIf(getenv("PTX"), "this is somehow correct in PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "this is somehow correct in PTX")
   def test_upcasted_stores_out_of_order(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9360), arg=0, src=())
     c1 = c0.view(ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 1, 1, 4, 3, 3), strides=(2340, 468, 36, 0, 0, 0, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=True),)))
