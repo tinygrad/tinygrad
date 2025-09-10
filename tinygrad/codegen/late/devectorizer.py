@@ -377,13 +377,16 @@ def reduce_unparented(red:UOp):
   return ret
 
 pm_reduce = PatternMatcher([
-  # remove any ranges from a REDUCE that aren't referenced in the reduce source
-  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
-  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])+sym
+
+pm_reduce_simplify = PatternMatcher([
+  # remove any ranges from a REDUCE that aren't referenced in the reduce source
+  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
+])

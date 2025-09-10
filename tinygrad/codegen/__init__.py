@@ -14,7 +14,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, cast_foldin
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
-  ReduceContext, correct_load_store, pm_render
+  ReduceContext, correct_load_store, pm_render, pm_reduce_simplify
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
@@ -66,6 +66,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
+    ret.append(RewriteStep(pm_reduce_simplify, name="simplify reduces"))
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
