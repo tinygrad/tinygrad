@@ -154,7 +154,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
       View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (132, None, None, None, None))
+    self.assertEqual(st.real_strides(), (132, 12, None, None, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
