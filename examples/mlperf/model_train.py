@@ -1765,8 +1765,10 @@ def train_stable_diffusion():
   @TinyJit
   def ckpt_to_cpu():
     ckpt = get_training_state(unet, optimizer, lr_scheduler)
-    for k,v in ckpt.items():
-      ckpt[k] = v.cast(v.dtype.base).contiguous().to("CPU")
+    # move to CPU first so more GPU bufs aren't created (can trigger OOM)
+    for k,v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
+    Tensor.realize(*[v for v in ckpt.values()])
+    for k,v in ckpt.items(): ckpt[k] = v.cast(v.dtype.base).contiguous()
     Tensor.realize(*[v for v in ckpt.values()])
     return ckpt
 
