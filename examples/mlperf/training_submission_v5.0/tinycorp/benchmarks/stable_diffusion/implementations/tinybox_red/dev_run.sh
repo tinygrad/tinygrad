@@ -33,8 +33,8 @@ export HCQDEV_WAIT_TIMEOUT_MS=300000
 export PYTHONPATH="."
 export MODEL="stable_diffusion"
 
-export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09090228"
-export RESUME_ITR=5334
+#export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09090228"
+#export RESUME_ITR=5334
 
 # mi300x
 # use separate BS for the various jits in eval to maximize throughput
@@ -65,8 +65,8 @@ export CLIP_BS=240
 
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-#export RUN_EVAL=1
-#export EVAL_ONLY=1
+export RUN_EVAL=1
+export EVAL_ONLY=1
 #export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original"
 #export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original_v"
 #export KEEP_EVAL_CACHE=1
@@ -86,5 +86,5 @@ export WANDB=1
 #export PARALLEL=4
 export PARALLEL=0
 
-#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09090228/run_eval_1524" RUNMLPERF=1 python3 examples/mlperf/model_train.py
-RUNMLPERF=1 python3 examples/mlperf/model_train.py
+KEEP_EVAL_CACHE=1 EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09100305/run_eval_15240" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#RUNMLPERF=1 python3 examples/mlperf/model_train.py

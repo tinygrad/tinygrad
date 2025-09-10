@@ -1385,7 +1385,7 @@ def train_stable_diffusion():
   from collections import namedtuple
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state
-  import csv, PIL, pickle, subprocess
+  import csv, PIL, pickle
   import numpy as np
 
   config = {}
@@ -1760,7 +1760,6 @@ def train_stable_diffusion():
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
-  step_times:list[float] = []
 
   @TinyJit
   def ckpt_to_cpu():
@@ -1798,18 +1797,8 @@ def train_stable_diffusion():
       loss_item, lr_item = loss.item(), lr.item()
       t2 = time.perf_counter()
 
-      base_i = i - RESUME_ITR
-      if base_i == 5:
-        for _ in range(3): ckpt_to_cpu()
-      elif base_i >= 6 and base_i <= 10:
-        step_times.append(train_step_time:=t2-t1)
-      # try to bring gpus back in sync
-      elif base_i >= 10:
-        recent_avg_time = sum(step_times[-5:]) / 5
-        if train_step_time / recent_avg_time < 1.15:
-          step_times.append(train_step_time)
-        else:
-          ckpt_to_cpu()
+      if i - RESUME_ITR == 5:
+        for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
 
       if WANDB:
         wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
