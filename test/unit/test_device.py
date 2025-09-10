@@ -31,7 +31,7 @@ class TestDevice(unittest.TestCase):
   def test_env_overwrite_default_compiler(self):
     expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept RuntimeError: pass"
 
-    if Device.DEFAULT == "CPU" and not WIN:
+    if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
       try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
