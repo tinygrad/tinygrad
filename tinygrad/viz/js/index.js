@@ -70,14 +70,13 @@ function renderDag(graph, additions, recenter) {
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
-        if (parents == null) return;
-        const src = [...parents, d.id];
-        nodes.classed("highlight", n => src.includes(n.id));
-        d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
-          const [v, w] = nodes[i].id.split("-");
-          return src.includes(v) && w===d.id;
-        });
+        const children = g.successors(d.id);
+        if (parents == null && children == null) return;
+        const src = [...parents, ...children, d.id];
+        nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
+        d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
