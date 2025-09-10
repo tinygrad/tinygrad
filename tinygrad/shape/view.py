@@ -112,17 +112,6 @@ class View:
   mask:tuple[tuple[sint, sint], ...]|None
   contiguous:bool
 
-  def to_indexed_uops(self:View, idxs:Sequence[UOp]|None=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
-    """(idx, valid)"""
-    if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
-    iexpr = sint_to_uop(self.offset)
-    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
-      if m is not None:
-        if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
-        if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
-    return iexpr, vexpr
-
   def to_valid_uop(self, idxs:Sequence[UOp]|None=None) -> UOp:
     """valid.where(idx, INVALID)"""
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]

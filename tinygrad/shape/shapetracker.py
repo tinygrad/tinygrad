@@ -5,23 +5,8 @@ import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, unravel
-from tinygrad.uop.symbolic import symbolic_flat, uop_given_valid, simplify_valid, pm_simplify_valid
+from tinygrad.uop.symbolic import symbolic_flat, pm_simplify_valid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
-
-@functools.cache
-def views_to_indexed_uops(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
-  idx, valid = views[-1].to_indexed_uops(_idxs)
-  for view in reversed(views[0:-1]):
-    view = view.minify()
-    idx, valid = view.to_indexed_uops([sint_to_uop(i) for i in unravel(view.shape, idx)], valid)
-  with Context(TRACK_MATCH_STATS=0):
-    # symbolic
-    idx, valid = graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 1").src
-    # simplify
-    if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
-    if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
-    # symbolic again
-    return graph_rewrite(UOp.sink(idx, valid), symbolic_flat, name="indexing sym @ 2").src
 
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
   idx = views[-1].to_valid_uop(_idxs)
@@ -36,7 +21,7 @@ def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[
   # NOTE: if a stride is not always valid, it will be None
   if len(views) == 1 and views[-1].mask is None: return views[-1].strides
   ret: list[sint|None] = [None] * len(views[-1].shape)
-  idx, valid = views_to_indexed_uops(views)
+  idx, valid = (vidx:=views_to_valid_uop(views)).get_idx(), vidx.get_valid()
   for c in idx.split_uop(Ops.ADD):
     if c.op is Ops.RANGE: ret[c.arg[0]] = 1
     if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
@@ -77,9 +62,6 @@ class ShapeTracker:
 
   def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
 
-  def to_indexed_uops(self, _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> tuple[UOp, UOp]:
-    return views_to_indexed_uops(self.views, tuple(_idxs) if _idxs is not None else None)
-
   def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
     return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
@@ -87,7 +69,7 @@ class ShapeTracker:
   def real_size(self) -> int:
     if 0 in self.shape: return 0
     view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
-    idx, _ = views_to_indexed_uops((view,))
+    idx = views_to_valid_uop((view,)).get_idx()
     assert idx.vmax < 1e12, f"real_size broken for {self}"
     return int(idx.vmax + 1)
 
