@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, DMAFdRef, BufferSpec
+from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -785,8 +785,8 @@ class AMDDevice(HCQCompiled):
     max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
-    compilers = [(functools.partial(AMDLLVMRenderer, self.arch), functools.partial(AMDLLVMCompiler, self.arch)),
-                 (functools.partial(AMDRenderer, self.arch), functools.partial(HIPCompiler, self.arch))]
+    compilers:list[CompilerPairT] = [(functools.partial(AMDLLVMRenderer, self.arch), functools.partial(AMDLLVMCompiler, self.arch)),
+                                     (functools.partial(AMDRenderer, self.arch), functools.partial(HIPCompiler, self.arch))]
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator
+from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
@@ -273,12 +273,13 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
+CompilerPairT = tuple[functools.partial|type[Renderer], functools.partial|type[Compiler]]
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, compilers:list|None, runtime, graph=None, group_id=None):
+  def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
-    compilers = compilers or [(Renderer, Compiler)]
+    compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
 
     devname = device.split(':')[0].upper()
     envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}" for r,c in compilers]
