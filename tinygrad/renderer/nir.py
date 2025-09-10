@@ -208,20 +208,21 @@ class NIRRenderer(Renderer):
      lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
   ])
 
-  def nv_param(self, dtype:DType) -> nir.nir_def:
+  def nv_param(self, dtype:DType, sz:int) -> nir.nir_def:
     intrin = nir.nir_intrinsic_instr_create(self.b.shader, nir.nir_intrinsic_ldc_nv)
     intrin.contents.num_components = 1
-    nir.nir_def_init(intrin.contents.instr, d(intrin), 1, 64 if isinstance(dtype, PtrDType) else dtype.itemsize * 8)
+    nir.nir_def_init(intrin.contents.instr, d(intrin), 1, sz * 8)
     arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
-    arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, 0x160 + self.param_idx * 8, dtypes.int))
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, d(intrin).bit_size // 8)
+    arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, self.param_idx, dtypes.int))
+    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, sz)
     nir.nir_builder_instr_insert(self.b, intrin.contents.instr)
-    self.param_idx += 1
+    self.param_idx += sz
     return d(intrin)
 
   def_rewrite = PatternMatcher([
     (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
-    (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: ctx.nv_param(x.dtype)),
+    (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: ctx.nv_param(x.dtype, 8)),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.nv_param(x.dtype, 4)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, ngid(ctx.b) if x.arg[0] == 'g' else nlid(ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat.var("loc"), UPat.var("val")), allow_any_len=True, name="x"),
      lambda ctx,x,loc,val: nstore(ctx.b, AddrSpace(x.arg), ctx.r[loc], ctx.r[val], val.dtype)),

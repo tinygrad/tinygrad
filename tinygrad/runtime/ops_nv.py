@@ -199,7 +199,7 @@ class NVProgram(HCQProgram):
     if NIR:
       image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
       self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-      self.prog_addr, self.prog_sz, cbuf0_size = self.lib_gpu.va_addr, image.nbytes, 0x160
+      self.prog_addr, self.prog_sz, self.constbuffer_0 = self.lib_gpu.va_addr, image.nbytes, None
     else:
       if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
       else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
@@ -230,21 +230,23 @@ class NVProgram(HCQProgram):
         elif typ == 0x39: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) >> 32)
         else: raise RuntimeError(f"unknown NV reloc {typ}")
 
+      self.constbuffer_0 = [0] * (cbuf0_size // 4)
+
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
 
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
-    self.constbuffer_0 = [0] * (cbuf0_size // 4)
-
     if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
-      self.constbuffer_0[188:192], self.constbuffer_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
+      if not NIR:
+        self.constbuffer_0[188:192] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)]
+        self.constbuffer_0[223] = 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':self.regs_usage,
         'program_address_upper_shifted4':hi32(self.prog_addr>>4), 'program_address_lower_shifted4':lo32(self.prog_addr>>4),
         'shared_memory_size_shifted7':self.shmem_usage>>7, 'shader_local_memory_high_size_shifted4':0 if NIR else self.dev.slm_per_thread>>4,
         **({'shader_local_memory_high_size_shifted4':self.lcmem_usage>>4} if NIR else {})}
     else:
-      self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
+      if not NIR: self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shader_local_memory_high_size':0 if NIR else self.dev.slm_per_thread,
         'program_address_upper':hi32(self.prog_addr), 'program_address_lower':lo32(self.prog_addr), 'shared_memory_size':self.shmem_usage,
         'register_count_v':self.regs_usage, **({'shader_local_memory_low_size':self.lcmem_usage} if NIR else {})}
