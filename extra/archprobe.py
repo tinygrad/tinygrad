@@ -1,7 +1,7 @@
 # copying the kernels from https://github.com/microsoft/ArchProbe into Python
 import numpy as np
 import pickle
-from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer
+from tinygrad.runtime.ops_cl import CLProgram, CLBuffer
 from tinygrad import dtypes
 from tqdm import trange, tqdm
 from matplotlib import pyplot as plt

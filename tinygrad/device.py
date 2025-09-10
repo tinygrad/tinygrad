@@ -1,16 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator
+from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM, \
-                             Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
+from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import unwrap_class_type
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -272,12 +273,32 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
+CompilerPairT = tuple[functools.partial|type[Renderer], functools.partial|type[Compiler]]
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Renderer|None, compiler:Compiler|None, runtime, graph=None, group_id=None):
-    self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
-    self.renderer, self.group_id = renderer or Renderer(), group_id
+  def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
+    self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
+    compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
+
+    devname = device.split(':')[0].upper()
+    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}" for r,c in compilers]
+
+    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 1)
+    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 0)
+
+    if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
+    for _, comp_pair in disable_comps: compilers.remove(comp_pair)
+
+    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else compilers))
+    except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
+
+    if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+
+  def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
+    for renderer, compiler in compilers:
+      with contextlib.suppress(Exception): yield renderer(), compiler()
+
   def synchronize(self):
     """
     Synchronize all pending operations on the device.
@@ -302,7 +323,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
-    if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
+    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX")
     if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
     return device in {"AMD", "PYTHON"}
   if dtype in dtypes.fp8s:
@@ -315,11 +336,11 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
-    if device == "GPU": return not CI and not OSX
+    if device == "CL": return not CI and not OSX
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "CL")
   return True
 
 if PROFILE:

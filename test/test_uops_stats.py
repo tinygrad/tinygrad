@@ -8,6 +8,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
+from tinygrad.renderer.ptx import PTXRenderer
 
 def flops_mem(uops, ignore_indexing=False):
   est = Estimates.from_uops(uops, ignore_indexing)
@@ -158,7 +159,7 @@ class TestUOpsStats(unittest.TestCase):
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
 
 N = 64
-@unittest.skipIf(getenv("PTX"), "wrong in PTX") # maybe?
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "wrong in PTX") # maybe?
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):

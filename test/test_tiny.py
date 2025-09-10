@@ -137,7 +137,7 @@ class TestTiny(unittest.TestCase):
 
   # *** image ***
 
-  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image(self):
     with Context(IMAGE=2): self.test_gemm(N=4, out_dtype=dtypes.imagef((4, 1, 4)))
 
