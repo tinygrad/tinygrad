@@ -5,6 +5,7 @@ from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -25,7 +26,7 @@ class TestArange(unittest.TestCase):
     print(f"{f1=}, {f2=}")
     # add 1 to avoid divide by 0. arange is 0 flops now!
     assert (f1 < 6000 and f2 < 6000) or ((f2+1) / (f1+1) < 16), f"bad complexity, flops {(f2+1) / (f1+1):.1f}X while inputs 10X"
-    if limit is not None and not getenv("PTX"):
+    if limit is not None and not isinstance(Device[Device.DEFAULT].renderer, PTXRenderer):
       # PTX counts index ALU in flops
       assert f1 <= limit, f"{f1=}, {limit=}"
 
