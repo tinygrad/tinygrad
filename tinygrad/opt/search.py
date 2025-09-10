@@ -194,8 +194,8 @@ def beam_search(lin:Kernel, rawbufs:list[Buffer], amt:int, allow_test_size=True,
         seen_libs.add(lib)
 
         #if current_round == 1 and i in (3,): continue
-        #if current_round == 5 and i in (42,): continue
-        #if current_round == 7 and i in (11,): continue
+        #if current_round == 6 and i in (5,): continue
+        #if current_round == 7 and i in (10,): continue
 
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))

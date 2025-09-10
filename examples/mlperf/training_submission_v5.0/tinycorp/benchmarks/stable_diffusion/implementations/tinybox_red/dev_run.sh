@@ -65,10 +65,11 @@ export CLIP_BS=240
 
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-#export RUN_EVAL=1
-#export EVAL_ONLY=1
-#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762"
-#export KEEP_EVAL_CACHE=1
+export RUN_EVAL=1
+export EVAL_ONLY=1
+#export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original"
+export EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/run_eval_original_v"
+export KEEP_EVAL_CACHE=1
 #export EVAL_OVERFIT_SET=1
 #export EVAL_INTERVAL=2065
 #export LIMIT_EVAL_SAMPLES=600
@@ -84,7 +85,6 @@ export CKPTDIR="/raid/weights/stable_diffusion"
 #export WANDB=1
 #export PARALLEL=4
 export PARALLEL=0
-#export PARALLEL=4
 
 #EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09022307/run_eval_762" RUNMLPERF=1 python3 examples/mlperf/model_train.py
 RUNMLPERF=1 python3 examples/mlperf/model_train.py

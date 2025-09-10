@@ -5,10 +5,11 @@ from tinygrad.opt.search import beam_search
 
 def main():
   #with open("/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09041314/kernels_to_beam.pickle", "rb") as f:
-  with open("/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050339/kernels_to_beam.pickle", "rb") as f:
+  #with open("/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050339/kernels_to_beam.pickle", "rb") as f:
+  with open("/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09050413/kernels_to_beam.pickle", "rb") as f:
     args_tuples = pickle.load(f)
 
-  last_complete = -1
+  last_complete = 195
 
   for i, args in enumerate(args_tuples):
     if i <= last_complete: continue
