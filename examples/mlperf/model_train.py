@@ -1761,6 +1761,14 @@ def train_stable_diffusion():
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
 
+  @TinyJit
+  def ckpt_to_cpu():
+    ckpt = get_training_state(unet, optimizer, lr_scheduler)
+    for k,v in ckpt.items():
+      ckpt[k] = v.cast(v.dtype.base).contiguous().to("CPU")
+    Tensor.realize(*[v for v in ckpt.values()])
+    return ckpt
+
   if not getenv("EVAL_ONLY", ""):
     # training loop
     if RESUME_CKPTDIR:
@@ -1807,7 +1815,7 @@ def train_stable_diffusion():
         prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
         fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
         print(f"saving training state backup at {fn}")
-        safe_save(get_training_state(unet, optimizer, lr_scheduler), fn)
+        safe_save(ckpt_to_cpu(), fn)
         with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
           pickle.dump(seen_keys, f)
 
@@ -1822,7 +1830,7 @@ def train_stable_diffusion():
         # "evaluation is done offline, the time is not counted towards the submission time."
         fn = f"{UNET_CKPTDIR}/{i}.safetensors"
         print(f"saving unet checkpoint at {fn}")
-        safe_save(get_state_dict(unet), fn)
+        safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
 
       if RUN_EVAL:
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
