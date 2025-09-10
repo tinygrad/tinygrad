@@ -335,7 +335,7 @@ async function renderProfiler() {
         // contiguous rect
         if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
-        const width = xscale(e.x+e.width)-x;
+        const width = Math.max(0.5, xscale(e.x+e.width)-x);
         const exists = visible.query(x, x+width);
         if (exists != null) { exists[2].count++; continue; }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
