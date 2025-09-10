@@ -330,8 +330,8 @@ jobs:
     - name: Fuzz Test shape ops
       run: python test/external/fuzz_shape_ops.py
 
-  testgpuimage:
-    name: 'GPU IMAGE Tests'
+  testopenclimage:
+    name: 'CL IMAGE Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     env:
@@ -345,15 +345,15 @@ jobs:
           key: gpu-image
           deps: testing_minimal
           opencl: 'true'
-      - name: Test GPU IMAGE=2 ops + training
+      - name: Test CL IMAGE=2 ops + training
         run: |
-          GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
-          GPU=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+          CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
+          CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
   testgpumisc:
-    name: 'GPU Misc tests'
+    name: 'CL Misc tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     env:
@@ -368,11 +368,11 @@ jobs:
           deps: testing_minimal
           opencl: 'true'
       - name: Generate Dataset
-        run: GPU=1 extra/optimization/generate_dataset.sh
+        run: CL=1 extra/optimization/generate_dataset.sh
       - name: Run Kernel Count Test
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_opt.py
+        run: CL=1 python -m pytest -n=auto test/external/external_test_opt.py
       - name: Run fused optimizer tests
-        run: GPU=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
+        run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -397,17 +397,17 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2175 ALLOWED_GATED_READ_IMAGE=16 FLOAT16=0 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2175 ALLOWED_GATED_READ_IMAGE=16 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
-        run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
+        run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
-        run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+        run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       # - name: Test openpilot simple_plan vision model correctness (float32)
-      #   run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/35ff4f4577002f2685e50c8346addae33fe8da27a41dd4d6a0f14d1f4b1af81b
+      #   run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/35ff4f4577002f2685e50c8346addae33fe8da27a41dd4d6a0f14d1f4b1af81b
       - name: Test openpilot LLVM compile
         run: CPU=1 CPU_LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 IMAGE=0 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot compile4
-        run: NOLOCALS=1 GPU=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
+        run: NOLOCALS=1 CL=1 IMAGE=2 FLOAT16=1 DEBUG=2 python3 examples/openpilot/compile4.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -459,16 +459,16 @@ jobs:
           pydeps: "tensorflow==2.15.1 tensorflow_addons"
           python-version: '3.11'
           opencl: 'true'
-      - name: Test ONNX (GPU)
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (CL)
+        run: CL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       #- name: Test Optimization Helpers
       #  run: DEBUG=1 python3 extra/optimization/test_helpers.py
       #- name: Test Action Space
-      #  run: DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
+      #  run: DEBUG=1 CL=1 python3 extra/optimization/get_action_space.py
       - name: Test Beam Search
-        run: GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+        run: CL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
-        run: GPU=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
+        run: CL=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: Test llama 3 training
         run: MAX_BUFFER_SIZE=0 DEV=NULL SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=8 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
@@ -506,8 +506,8 @@ jobs:
           llvm: 'true'
       - name: Test models (llvm)
         run: CPU=1 CPU_LLVM=1 python -m pytest -n=auto test/models --durations=20
-      - name: Test models (gpu)
-        run: GPU=1 python -m pytest -n=auto test/models --durations=20
+      - name: Test models (opencl)
+        run: CL=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (cpu)
         run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
@@ -709,7 +709,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, gpu]
+        backend: [llvm, cpu, opencl]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -725,13 +725,13 @@ jobs:
         with:
           key: ${{ matrix.backend }}-minimal
           deps: testing_minimal
-          opencl: ${{ matrix.backend == 'gpu' && 'true' }}
+          opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'gpu' && 'GPU=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','GPU'], Device.DEFAULT"
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (${{ matrix.backend }})
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
@@ -772,7 +772,7 @@ jobs:
 
           start_server "remote-server-amd-1" "AMD" 6667
           start_server "remote-server-amd-2" "AMD" 6668
-          start_server "remote-server-gpu" "GPU" 7667
+          start_server "remote-server-gpu" "CL" 7667
           start_server "remote-server-cpu" "CPU" 8667
       - name: Check Device.DEFAULT and print some source
         env:
@@ -786,7 +786,7 @@ jobs:
           HOST: 127.0.0.1:6667*6,127.0.0.1:6668*6
         run: |
           python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_remote.py test/test_tensor_variable.py --durations 20
-      - name: Run REMOTE=1 Test (GPU)
+      - name: Run REMOTE=1 Test (CL)
         env:
           HOST: 127.0.0.1:7667*6
         run: |
