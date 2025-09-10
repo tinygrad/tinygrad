@@ -297,34 +297,32 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    const st = visibleX[0]; et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
-        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
-        else { start = e.x; end = e.x+e.width; }
-        if (start>visibleX[1] || end<visibleX[0]) continue;
-        ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
+          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
-          // NOTE: y coordinates are in reverse order
-          for (let i = 0; i<x.length-1; i++) {
-            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
+          ctx.beginPath();
+          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) {
+            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg })
           }
+          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
+          ctx.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill();
           continue;
         }
         // contiguous rect
-        const x = xscale(start);
-        const width = xscale(end)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
+        if (e.x>et || e.x+e.width<st) continue;
+        const x = xscale(e.x);
+        const width = xscale(e.x+e.width)-x;
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
         visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
