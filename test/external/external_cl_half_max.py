@@ -1,4 +1,4 @@
-from tinygrad.runtime.ops_gpu import CLDevice, CLProgram, compile_cl
+from tinygrad.runtime.ops_cl import CLDevice, CLProgram, compile_cl
 
 if __name__ == "__main__":
   dev = CLDevice()

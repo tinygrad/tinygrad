@@ -513,7 +513,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(vec))) == str(vec)
 
   def test_device_arg(self):
-    device = UOp(Ops.DEVICE, arg="GPU")
+    device = UOp(Ops.DEVICE, arg="CL")
     assert str(eval(str(device))) == str(device)
 
   def test_reduceop_arg(self):
