@@ -735,6 +735,8 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','GPU'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: What
+        run: DEBUG=2 python3 test/test_tensor.py TestTinygrad.test_tensor_mixed_list_tuple
       - name: Run pytest (${{ matrix.backend }})
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run TRANSCENDENTAL math
