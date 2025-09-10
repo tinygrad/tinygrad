@@ -1796,10 +1796,12 @@ def train_stable_diffusion():
       loss_item, lr_item = loss.item(), lr.item()
       t2 = time.perf_counter()
 
-      # hack to bring gpus back in sync
       base_i = i - RESUME_ITR
-      if base_i >= 6 and base_i <= 10:
+      if base_i == 5:
+        for _ in range(3): ckpt_to_cpu()
+      elif base_i >= 6 and base_i <= 10:
         step_times.append(train_step_time:=t2-t1)
+      # try to bring gpus back in sync
       elif base_i >= 10:
         recent_avg_time = sum(step_times[-5:]) / 5
         if train_step_time / recent_avg_time < 1.15:
