@@ -3,7 +3,6 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
@@ -31,6 +30,9 @@ class TestArange(unittest.TestCase):
       # PTX counts index ALU in flops
       assert f1 <= limit, f"{f1=}, {limit=}"
 
+  # reduce collapse now happens before optimizations
+  """
+  from tinygrad.codegen.opt import Opt, OptOps
   def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=0)
   def test_complexity_w_unroll2(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 2)], limit=0)
   def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=0)
@@ -47,6 +49,7 @@ class TestArange(unittest.TestCase):
     def test_complexity_w_local_unroll4(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UNROLL, 0, 4)], limit=0)
     @unittest.skip("doesn't work yet")
     def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
+  """
 
 class TestRand(unittest.TestCase):
   def test_fused_rand_less_ops(self, noopt=1):
