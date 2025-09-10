@@ -374,6 +374,16 @@ class TestSymbolic(unittest.TestCase):
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
+  def test_bool_or_not_tautology(self):
+    a = Variable("a", 0, 10)
+    c = a<10
+    self.helper_test_variable(c | c.logical_not(), True, True, "True")
+
+  def test_bool_and_not_contradiction(self):
+    a = Variable("a", 0, 10)
+    c = a<10
+    self.helper_test_variable(c & c.logical_not(), False, False, "False")
+
   def test_mod_factor_negative(self):
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
