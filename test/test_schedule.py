@@ -1654,7 +1654,7 @@ class TestSchedule(unittest.TestCase):
     constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
     check_schedule(constv, 1)
 
-  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_matmul(self):
     with Context(IMAGE=2):
       x = Tensor.randn((9, 9)).realize()
