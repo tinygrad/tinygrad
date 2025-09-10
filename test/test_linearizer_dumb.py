@@ -10,6 +10,7 @@ from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.codegen.opt.search import Opt, OptOps
 from tinygrad.engine.realize import get_program
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizerFailure(unittest.TestCase):
   @unittest.expectedFailure

@@ -5,6 +5,7 @@ from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import assume, given, settings, strategies as strat
 from test.helpers import rand_for_dtype
