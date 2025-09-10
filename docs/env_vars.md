@@ -3,7 +3,7 @@
 This is a list of environment variable that control the runtime behavior of tinygrad and its examples.
 Most of these are self-explanatory, and are usually used to set an option at runtime.
 
-Example: `GPU=1 DEBUG=4 python3 -m pytest`
+Example: `CL=1 DEBUG=4 python3 -m pytest`
 
 However you can also decorate a function to set a value only inside that function.
 
@@ -31,7 +31,7 @@ These control the behavior of core tinygrad even when used as a library.
 Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-7]      | enable debugging output (operations, timings, speed, generated code and more)
-GPU                 | [1]        | enable the GPU (OpenCL) backend
+CL                  | [1]        | enable OpenCL backend
 CUDA                | [1]        | enable CUDA backend
 AMD                 | [1]        | enable AMD backend
 NV                  | [1]        | enable NV backend

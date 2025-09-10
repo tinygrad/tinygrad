@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -336,11 +336,11 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
-    if device == "GPU": return not CI and not OSX
+    if device == "CL": return not CI and not OSX
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "CL")
   return True
 
 if PROFILE:
