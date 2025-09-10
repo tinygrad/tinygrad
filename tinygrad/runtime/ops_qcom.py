@@ -7,7 +7,7 @@ from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
+from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import

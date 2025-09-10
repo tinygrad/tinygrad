@@ -4,12 +4,12 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.runtime.ops_gpu import CLProgram, compile_gpu
+from tinygrad.runtime.ops_cl import CLProgram, compile_gpu
 from tinygrad.device import Device
 from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
-from tinygrad.runtime.ops_gpu import OSX_TIMING_RATIO
+from tinygrad.runtime.ops_cl import OSX_TIMING_RATIO
 CL = Device["GPU"]
 
 DEBUGCL = getenv("DEBUGCL", 0)

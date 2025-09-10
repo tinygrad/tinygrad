@@ -1,6 +1,6 @@
 import ctypes, array
 from hexdump import hexdump
-from tinygrad.runtime.ops_gpu import GPUDevice
+from tinygrad.runtime.ops_cl import GPUDevice
 from tinygrad.helpers import getenv, to_mv, mv_address
 from tinygrad.dtype import dtypes
 from tinygrad import Tensor, TinyJit

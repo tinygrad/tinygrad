@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
-from tinygrad.runtime.ops_gpu import CLProgram, CLCompiler
+from tinygrad.runtime.ops_cl import CLProgram, CLCompiler
 from tinygrad import Device, dtypes
 from tinygrad.device import Buffer
 from hexdump import hexdump
