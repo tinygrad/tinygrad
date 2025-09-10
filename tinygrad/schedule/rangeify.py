@@ -315,6 +315,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
+  # TODO: exclude fusion of user contiguous
   if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
 
   # this is the ranges replaced
