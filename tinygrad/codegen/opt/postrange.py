@@ -166,7 +166,8 @@ class Scheduler:
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")

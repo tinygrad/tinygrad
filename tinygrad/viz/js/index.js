@@ -267,9 +267,9 @@ async function renderProfiler() {
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+      for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
@@ -297,7 +297,7 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-    const st = visibleX[0]; et = visibleX[1];
+    const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
@@ -311,7 +311,7 @@ async function renderProfiler() {
           ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg })
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
