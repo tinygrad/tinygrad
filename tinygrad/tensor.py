@@ -1132,7 +1132,7 @@ class Tensor(MathTrait):
 
   # ***** movement high level ops *****
 
-  def _getitem(self, indices, v: Tensor|None = None, *, as_mask: bool = False) -> Tensor:
+  def _getitem(self, indices, v: Tensor|None = None, *, as_mask: bool=False, set_with: Tensor|None=None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     x, indices = self, list(indices)
@@ -1181,50 +1181,170 @@ class Tensor(MathTrait):
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
       if index is not None: dim += 1
 
-        # If requested, return a full-shape boolean mask selecting exactly the elements addressed by `indices`
-    if as_mask:
-      # We currently support only basic int/slice/None/ellipsis with step==1 for mask emission.
-      # Disallow tensor/advanced indexing here; the advanced path below already constructs masks for setitem.
-      for ip in indices_parsed:
-        # If the parser converted a list/tuple into a Tensor above, it will appear here as Tensor()
-        if isinstance(ip['index'], Tensor):
-          raise NotImplementedError("as_mask=True does not yet support advanced/tensor indexing")
+# one-shot setitem path:
+# Build a full-shape mask and padded RHS using only movement ops (shrink/flip/reshape/pad),
+# then return a fused `where`. We support:
+#   • slices with step ∈ {1, >1, -1}
+#   • integer indexing (treated as a 1-element slice)
+#   • Ellipsis / None (ellipsis is already normalized; None axes do not consume a dim)
+# We defer tensor/list (advanced) indexing to the fallback path by raising NotImplemented.
+    if set_with is not None:
+      # bail out to advanced path if any index is a Tensor (or list converted to Tensor)
+      if any(isinstance(ip["index"], Tensor) for ip in indices_parsed):
+        raise NotImplementedError("advanced/tensor indexing handled by fallback")
 
-      # Build one per-axis mask over the ORIGINAL tensor axes.
-      axis_masks: list[Tensor] = []
-      cur_axis = 0  # index over original self axes
-      for ip in indices_parsed:
-        idx = ip['index']
+      # We will iterate over *source* axes and collect metadata only for axes that consume a source dim
+      # (i.e., slice or int). `None` does not consume a source axis and is handled later by broadcasting.
+      n_sels: list[sint] = []                 # number of selected elements per *consumed* axis
+      span_lens: list[sint] = []              # span length in source after interleaving
+      pad_spec: list[tuple[sint, sint]] = []  # per *consumed* axis pad (before, after)
+      steps_abs: list[int] = []
+      rhs_flip_axes_local: list[int] = []     # flips within the compact tensor (for step == -1)
+      consumed_axis_map: list[int] = []       # compact axis -> source axis
+
+      src_ax = 0
+      for ent in indices_parsed:
+        idx = ent["index"]
+
+        # `None` does not consume a source axis; skip here (we'll reinsert by broadcasting)
         if idx is None:
-          # `None` adds a new result dim, but does not consume a source axis.
           continue
-        # from here, we are consuming one original axis
-        coord = Tensor.arange(self.shape[cur_axis], device=self.device)
+
+        size_src = self.shape[src_ax]
+
+        # integer indexing -> treat as [pos:pos+1] forward slice
         if isinstance(idx, int) or isinstance(idx, UOp):
-          start = ip['boundary'][0]
-          axis_mask = (coord == start)
-        elif isinstance(idx, slice):
-          if ip['stride'] != 1:
-            raise NotImplementedError("as_mask=True does not yet support slice steps != 1")
-          start, stop = ip['boundary']
-          axis_mask = (coord >= start) & (coord < stop)
-        else:
-          # Shouldn't get here because other cases raised earlier
-          raise NotImplementedError(f"unsupported index type in as_mask: {type(idx)}")
-        # reshape this axis mask to broadcast over all dims
-        shape = (1,)*cur_axis + (self.shape[cur_axis],) + (1,)*(self.ndim-cur_axis-1)
-        axis_masks.append(axis_mask.reshape(shape))
-        cur_axis += 1
+          pos = ent["boundary"][0]    # normalized start
+          n_sel = cast(sint, 1)
+          span_len = cast(sint, 1)
+          pad_before = cast(sint, pos)
+          pad_after  = cast(sint, size_src - (pos + 1))
+          step_abs = 1
+          n_sels.append(n_sel); span_lens.append(span_len)
+          pad_spec.append((pad_before, pad_after))
+          steps_abs.append(step_abs)
+          consumed_axis_map.append(src_ax)
+          src_ax += 1
+          continue
 
-      # Combine all per-axis masks. If no axes were consumed (degenerate), select-all.
-      if len(axis_masks) == 0:
-        full_mask = Tensor.ones(self.shape, device=self.device, dtype=dtypes.bool)
-      else:
-        full_mask = axis_masks[0]
-        for m in axis_masks[1:]:
-          full_mask = full_mask & m
-      return full_mask.cast(dtypes.bool)
+        # slice indexing
+        if isinstance(idx, slice):
+          # Use the original slice object and .indices for normalization (handles negative steps)
+          slc: slice = idx
+          start_raw, stop_raw, step_raw = slc.indices(size_src) if all(isinstance(x, int) for x in (slc.start, slc.stop, slc.step) if x is not None) else (slc.start, slc.stop, slc.step)
+          if not isinstance(step_raw, int):
+            raise NotImplementedError("symbolic step not supported in fast setitem")
+          if step_raw > 0:
+            # Forward slice
+            start_pad = start_raw
+            step_abs = step_raw
+            n_sel = cast(sint, ceildiv(stop_raw - start_raw, step_abs))
+            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
+            flip_local = False
+          else:
+            # Negative slice: positions are start_raw, start_raw-step_abs, ... > stop_raw
+            step_abs = -step_raw
+            n_sel = cast(sint, ceildiv((start_raw - stop_raw), step_abs))
+            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
+            # Place the mask at the true (decreasing) indices by padding from the *lowest* selected index.
+            # That lowest index is start_raw - (n_sel-1)*step_abs.
+            start_pad = cast(sint, start_raw - (n_sel - 1) * step_abs)
+            flip_local = True  # flip RHS order only; mask stays at real positions
+          pad_before = cast(sint, start_pad)
+          pad_after = cast(sint, size_src - (start_pad + span_len))
+          n_sels.append(n_sel)
+          span_lens.append(span_len)
+          pad_spec.append((pad_before, pad_after))
+          steps_abs.append(step_abs)
+          if flip_local:
+            rhs_flip_axes_local.append(len(n_sels)-1)
+          consumed_axis_map.append(src_ax)
+          src_ax += 1
+          continue
 
+        # Any other kind (Tensor advanced) is handled by fallback
+        raise NotImplementedError("advanced indexing handled by fallback")
+
+      # Start with compact local tensors over only the consumed axes
+      compact_shape = tuple(n_sels) if len(n_sels) else (1,)
+      mask_local = Tensor.ones(compact_shape, device=self.device, dtype=dtypes.bool)
+      rhs_local = set_with.cast(self.dtype)
+      rhs_local = rhs_local._broadcast_to(_broadcast_shape(tuple(n_sels) if len(n_sels) else (1,), rhs_local.shape))
+
+      # Interleave by step_abs using reshape -> pad lanes -> reshape -> shrink
+      def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
+        if step_abs == 1:
+          return t
+        shp = list(t.shape)
+        assert shp[axis] == n_sel
+        t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
+        pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
+        t = t.pad(pads)
+        shp2 = list(t.shape)
+        merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
+        t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
+        shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
+        return t.shrink(shr)
+
+      # Inflate per compact axis and flip RHS for step==-1
+      for ax_local, (n_sel, step_abs, span_len) in enumerate(zip(n_sels, steps_abs, span_lens)):
+        mask_local = _inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
+        rhs_local  = _inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
+      if rhs_flip_axes_local:
+        rhs_local = rhs_local.flip(tuple(rhs_flip_axes_local))
+
+      # Pad along consumed axes up to the source sizes
+      mask_full = mask_local.pad(tuple(pad_spec)) if len(pad_spec) else mask_local
+      rhs_full  = rhs_local.pad(tuple(pad_spec)) if len(pad_spec) else rhs_local
+
+      # After pad, shapes are per consumed source axis. For pure slice/int indexing this matches base shape.
+      if mask_full.shape != self.shape or rhs_full.shape != self.shape:
+        # If shapes don't match (e.g. degenerate all-None), fall back to slow path for now
+        raise NotImplementedError("shape mismatch in fast setitem; falling back")
+      return mask_full.where(rhs_full, self)
+
+
+    # fast path: when requested, return a full-shape boolean mask for pure slicing
+    if as_mask:
+      # only support slices/None/Ellipsis for now (ignore advanced/int indexing)
+      # NOTE: indices_parsed contains entries for None (dim not consumed) and actual dims (index not None)
+      unsupported = any((ip["index"] is not None) and (not isinstance(ip["index"], slice)) for ip in indices_parsed)
+      if unsupported:
+        raise NotImplementedError("as_mask only supports slicing indices for now")
+
+      # Start from a scalar True so we don't allocate a full-sized mask tensor.
+      # Build per-axis predicates with lazy arange views, and only broadcast at the end.
+      mask = Tensor(True, device=self.device, dtype=dtypes.bool)
+
+      ax = 0  # axis in source tensor (skips None entries)
+      for ent in indices_parsed:
+        if ent["index"] is None:
+          continue
+
+        # ent corresponds to a slice on axis `ax`
+        size_src = self.shape[ax]
+        start, stop = ent["boundary"]
+        step = ent["stride"]
+
+        # normalize step for predicate; boundary was already normalized above for negative steps
+        step_abs = -step if isinstance(step, int) and step < 0 else step
+
+        # coordinate along this axis (kept as a view, no realize)
+        k = Tensor.arange(size_src, device=self.device, dtype=dtypes.int).reshape((1,)*ax + (size_src,) + (1,)*(self.ndim-ax-1))
+
+        # in-bounds range check
+        cond = (k >= start) & (k < stop)
+
+        # stride congruence (only for integer, non-1 steps)
+        if isinstance(step_abs, int) and step_abs != 1:
+          cond = cond & (((k - start) % step_abs) == 0)
+
+        # accumulate; broadcasting happens lazily between axis predicates
+        mask = mask & cond
+        ax += 1
+
+      # Broadcast once at the end so consumers (e.g., where in __setitem__) see a full-shape mask.
+      return mask.expand(self.shape)
 
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
@@ -1327,26 +1447,18 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    # res = self.realize()._getitem(indices, v)
-    # # if shapes match and data is not shared it's a copy and we assign to self
-    # if res.shape == self.shape and res.uop is not self.uop:
-    #   self.assign(res).realize()
-    # else: # no copy, basic setitem
-    #   v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-    #   res.assign(v).realize()
-
-    # 1) full-shape boolean mask: True exactly where we will write
-    mask = self._getitem(indices, as_mask=True).cast(dtypes.bool)
-
-    # 2) make RHS broadcastable (for scalars this is already fine)
-    rhs = v.cast(self.dtype)
-
-    # 3) single lazy full-tensor assign using where
-    #    “use rhs where mask is True, otherwise keep self”
-
-    newval = mask.where(rhs, self)   # pick rhs where mask is True else "old" expression
-    self.uop = newval.uop
-    print(self.uop)
+    try:
+      # Try the fast one-shot builder (returns a fused Tensor expr)
+      newval = self._getitem(indices, set_with=v)
+      # *** IMPORTANT: do NOT call self.assign(newval) here ***
+      # Replace the defining graph of `self` directly. Shapes/dtypes already match.
+      self.uop = newval.uop
+      return
+    except NotImplementedError:
+      # Fallback path uses the existing advanced-index machinery (_masked_setitem etc.)
+      newval = self._getitem(indices, v=v)
+      self.assign(newval)
+      return
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
