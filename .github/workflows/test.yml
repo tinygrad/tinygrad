@@ -883,7 +883,7 @@ jobs:
     - name: Run pytest (ptx)
       env:
         MOCKGPU: 1
-        PTX: 1
+        NV_PTX: 1
         NV: 1
         FORWARD_ONLY: 1
       run: |
