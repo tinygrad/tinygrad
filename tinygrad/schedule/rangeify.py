@@ -58,8 +58,8 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # always realize ASSIGN/COPY/BUFFER_VIEW/CONTIGUOUS
+  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
   # realize input to assign (might be optimized out)
@@ -67,7 +67,7 @@ do_realize = PatternMatcher([
 ])
 
 add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.replace(tag=1).realize() if x in ctx and x.tag is None else None),
 ])
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
@@ -174,7 +174,7 @@ pm_mops = PatternMatcher([
   (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
 ])
 
-def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
+def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
   # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
   if not (RANGEIFY > 1): return idx.replace(src=(x.replace(arg=None),)+idx.src[1:])
@@ -191,7 +191,7 @@ def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=x.device)
   return ret.index(*passthrough_idx)
 
-def map_contiguous(ctx:RangeifyContext, x:UOp):
+def map_realize(ctx:RangeifyContext, x:UOp):
   if x.arg is not None: return None
   ranges = []
   for s in x.shape[len(x.src)-1:]:
@@ -263,9 +263,9 @@ def might_end_axis(idx:UOp):
 
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
-  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x", allow_any_len=True), map_contiguous),
+  (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
   # if there's an INDEX it can support partial contig
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_contiguous),
+  (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_realize),
 
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -281,7 +281,8 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
+    {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 ])
@@ -411,6 +412,10 @@ to_define_global = PatternMatcher([
 ])
 
 rangeify_codegen = PatternMatcher([
+  # no CONTIGUOUS in the kernel graph
+  # TODO: this can be moved into codegen?
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
@@ -444,7 +449,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add realize")
   tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="remove tags")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
