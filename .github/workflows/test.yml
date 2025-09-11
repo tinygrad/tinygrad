@@ -732,7 +732,7 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  tests:
+  testcpuopencl:
     strategy:
       fail-fast: false
       matrix:
@@ -854,10 +854,12 @@ jobs:
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
+    - name: Run unit tests
+      run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
-      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+      run: METAL=1 DEBUG=3 TC=2 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test Beam Search
@@ -865,11 +867,12 @@ jobs:
     #- name: Fuzz Test linearizer
     #  run: METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run TRANSCENDENTAL math
-      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      run: METAL=1 TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
       env:
         MOCKGPU: 1
         AMD: 1
+        AMD_LLVM: 0
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
@@ -877,6 +880,7 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
+        AMD_LLVM: 1
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
