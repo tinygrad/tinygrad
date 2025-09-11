@@ -394,7 +394,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     try: self.timeline_signal.wait(self.timeline_value - 1)
     except RuntimeError as e:
-      self.error_state = e
+      if MOCKGPU:
+        print(f"RESET HCQ {e}", flush=True)
+        self.timeline_signal.value = self.timeline_value - 1 # in mockgpu we can just set the value
+      else: self.error_state = e
       if hasattr(self, 'on_device_hang'): self.on_device_hang()
       else: raise e
 
