@@ -110,7 +110,7 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
+  def as_const(val: tuple[ConstType|InvalidType, ...]|ConstType|InvalidType, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
