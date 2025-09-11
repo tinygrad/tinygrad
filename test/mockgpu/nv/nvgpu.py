@@ -66,6 +66,7 @@ class GPFIFO:
       if not self.execute_buf():
         # Buffer isn't executed fully, check if any progress and report.
         # Do not move GPGet in this case, will continue from the same state next time.
+        print("GPFIFO yield", self.ctrl.GPGet, self.ctrl.GPPut, self.buf_ptr, self.buf_sz)
         return self.buf_ptr != initial_off
 
       self.ctrl.GPGet = (self.ctrl.GPGet + 1) % self.entries_cnt
