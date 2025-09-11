@@ -184,11 +184,17 @@ pm_mops = PatternMatcher([
 
 # 3b. rangeify (ops)
 
+# bufferization can happen in three ways
+#   1. there's an explicit REALIZE in the graph
+#   2. the ranges from the children don't match and we have to create a buffer (only on children)
+#   3. might_end_axis triggers because we should be closing a loop to save compute
+
 @dataclass(frozen=True)
 class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
   device: str|tuple[str, ...]|int
   addrspace: AddrSpace = AddrSpace.GLOBAL
+  tags: tuple[int, ...] = ()
 
 def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
@@ -212,7 +218,8 @@ def map_realize(ctx:RangeifyContext, x:UOp):
   ranges = []
   for s in x.shape[len(x.src)-1:]:
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
-  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
+  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST],
+                                          arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
   # was there a shrink? move this before the bufferize?
   # TODO: do we need this?
   if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
@@ -277,8 +284,7 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
-def unprocessed_index(x:UOp):
-  raise RuntimeError(f"unprocessed index on {x.src[0].op}")
+def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
@@ -304,7 +310,9 @@ pm_rangeify = pm_mops+PatternMatcher([
     {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
-  (UPat(Ops.INDEX, name="x"), unprocessed_index),
+
+  # assert if there's any index we didn't process
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # 3.5 cleanups
@@ -347,7 +355,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
@@ -374,14 +382,14 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, arg=x.arg.tags, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
   else:
     if not locals_allowed: return None
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg.device)
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, arg=x.arg.tags, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -436,6 +444,9 @@ rangeify_codegen = PatternMatcher([
   # TODO: this can be moved into codegen?
   (UPat((Ops.NOOP, Ops.CONTIGUOUS), name="x"), lambda x: x.src[0]),
 
+  # strip the arg from store
+  (UPat(Ops.STORE, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
+
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
@@ -466,11 +477,9 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
   ret = x.as_buf().assign(kernel)
 
   # put the stores in becomes map
-  stored_tag = x.src[1].tag
-  if stored_tag is not None and x.src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
-    # NOTE: this is wrong! it can be permuted or something
-    uop_in_tensor_graph = uop_list[stored_tag]
-    #print(uop_in_tensor_graph.shape, ret.shape, stored_tag)
+  for a in x.arg:
+    # NOTE: do we need this reshape?
+    uop_in_tensor_graph = uop_list[a]
     becomes_map[uop_in_tensor_graph] = ret.reshape(uop_in_tensor_graph.shape)
 
   return ret
