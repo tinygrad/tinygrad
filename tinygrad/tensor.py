@@ -1132,7 +1132,7 @@ class Tensor(MathTrait):
 
   # ***** movement high level ops *****
 
-  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+  def _getitem(self, indices, v: Tensor|None = None, *, as_mask: bool = False) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     x, indices = self, list(indices)
@@ -1180,6 +1180,51 @@ class Tensor(MathTrait):
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
       if index is not None: dim += 1
+
+        # If requested, return a full-shape boolean mask selecting exactly the elements addressed by `indices`
+    if as_mask:
+      # We currently support only basic int/slice/None/ellipsis with step==1 for mask emission.
+      # Disallow tensor/advanced indexing here; the advanced path below already constructs masks for setitem.
+      for ip in indices_parsed:
+        # If the parser converted a list/tuple into a Tensor above, it will appear here as Tensor()
+        if isinstance(ip['index'], Tensor):
+          raise NotImplementedError("as_mask=True does not yet support advanced/tensor indexing")
+
+      # Build one per-axis mask over the ORIGINAL tensor axes.
+      axis_masks: list[Tensor] = []
+      cur_axis = 0  # index over original self axes
+      for ip in indices_parsed:
+        idx = ip['index']
+        if idx is None:
+          # `None` adds a new result dim, but does not consume a source axis.
+          continue
+        # from here, we are consuming one original axis
+        coord = Tensor.arange(self.shape[cur_axis], device=self.device)
+        if isinstance(idx, int) or isinstance(idx, UOp):
+          start = ip['boundary'][0]
+          axis_mask = (coord == start)
+        elif isinstance(idx, slice):
+          if ip['stride'] != 1:
+            raise NotImplementedError("as_mask=True does not yet support slice steps != 1")
+          start, stop = ip['boundary']
+          axis_mask = (coord >= start) & (coord < stop)
+        else:
+          # Shouldn't get here because other cases raised earlier
+          raise NotImplementedError(f"unsupported index type in as_mask: {type(idx)}")
+        # reshape this axis mask to broadcast over all dims
+        shape = (1,)*cur_axis + (self.shape[cur_axis],) + (1,)*(self.ndim-cur_axis-1)
+        axis_masks.append(axis_mask.reshape(shape))
+        cur_axis += 1
+
+      # Combine all per-axis masks. If no axes were consumed (degenerate), select-all.
+      if len(axis_masks) == 0:
+        full_mask = Tensor.ones(self.shape, device=self.device, dtype=dtypes.bool)
+      else:
+        full_mask = axis_masks[0]
+        for m in axis_masks[1:]:
+          full_mask = full_mask & m
+      return full_mask.cast(dtypes.bool)
+
 
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
@@ -1282,13 +1327,26 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+    # res = self.realize()._getitem(indices, v)
+    # # if shapes match and data is not shared it's a copy and we assign to self
+    # if res.shape == self.shape and res.uop is not self.uop:
+    #   self.assign(res).realize()
+    # else: # no copy, basic setitem
+    #   v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+    #   res.assign(v).realize()
+
+    # 1) full-shape boolean mask: True exactly where we will write
+    mask = self._getitem(indices, as_mask=True).cast(dtypes.bool)
+
+    # 2) make RHS broadcastable (for scalars this is already fine)
+    rhs = v.cast(self.dtype)
+
+    # 3) single lazy full-tensor assign using where
+    #    “use rhs where mask is True, otherwise keep self”
+
+    newval = mask.where(rhs, self)   # pick rhs where mask is True else "old" expression
+    self.uop = newval.uop
+    print(self.uop)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
