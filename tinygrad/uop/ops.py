@@ -296,12 +296,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=() if src is None else (src,))
-    if shape is not None:
-      from tinygrad.shape.shapetracker import ShapeTracker
-      ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(shape, (0,)*len(shape))),))
-    if device is not None:
-      if shape is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
-      else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+    # NOTE: VIEW on const is no longer supported
+    if device is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+    if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
   def range(end:sint, *arg):

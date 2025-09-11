@@ -40,9 +40,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
   # const hacks
-  (UPat(Ops.CONST, name="x"), lambda x:
-   x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
-    len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
+  #(UPat(Ops.CONST, name="x"), lambda x:
+  # x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
+  #  len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
 
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -392,11 +392,12 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
+  store_arg = (x.arg.tags, shape)
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, arg=x.arg.tags, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, arg=store_arg, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
@@ -405,7 +406,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, arg=x.arg.tags, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, arg=store_arg, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -496,11 +497,13 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
   ret = x.as_buf().assign(kernel)
 
   # put the stores in becomes map
-  for a in x.arg:
+  shape = x.arg[1]
+  for a in x.arg[0]:
     if a is None: continue
-    # NOTE: do we need this reshape?
+    # NOTE: shape should be preserved, if it's not there's a bug
     uop_in_tensor_graph = uop_list[a]
-    becomes_map[uop_in_tensor_graph] = ret.reshape(uop_in_tensor_graph.shape)
+    assert shape == uop_in_tensor_graph.shape, f"shape mismatch {ret.shape} != {uop_in_tensor_graph.shape}"
+    becomes_map[uop_in_tensor_graph] = ret.reshape(shape)
 
   return ret
 
