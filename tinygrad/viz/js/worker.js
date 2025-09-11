@@ -7,7 +7,7 @@ ctx.font = `${LINE_HEIGHT}px sans-serif`;
 onmessage = (e) => {
   const { graph, additions } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
-  g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+  g.setGraph({ rankdir: "LR", edgesep:100 }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", className:"overlay", padding:0});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
