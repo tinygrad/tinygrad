@@ -131,19 +131,38 @@ function renderDag(graph, additions, recenter) {
 const RectView = { start: e => e.x, end: e => e.x + e.width };
 const PathView =  { start: e => e.x[0], end: e => e.x.at(-1) };
 
+class IntervalTreeNode { constructor(center, overlaps, left, right) { this.c=center; this.o=overlaps; this.l=left; this.r=right; } }
+
 class Track {
-  constructor() { this.data = []; }
-  push(e) { this.data.push(e); }
-  // linear scan in world units, this can use a range tree internally
-  *query(st, et, step) {
-    for (const e of this.data) {
-      if (this.view.start(e)>et || this.view.end(e)<st) continue;
-      yield e;
+  constructor() { this.items = []; this.root = null; }
+  push(item) { this.items.push({ item, a:this.view.start(item), b:this.view.end(item) }); }
+  build() {
+    const _build = (lst) => {
+      if (lst.length === 0) return null;
+      const midpoints = lst.map(x => (x.a+x.b)/2).sort((a,b)=>a-b);
+      const center = midpoints[(midpoints.length/2)|0];
+      const left=[], right=[], overlaps=[];
+      for (const x of lst) (x.b < center) ? left.push(x) : (x.a > center) ? right.push(x) : overlaps.push(x);
+      return new IntervalTreeNode(center, overlaps, _build(left), _build(right));
     }
+    // should never fail
+    const __temp_sorted = this.items.every((x,i,a)=> i===0 || a[i-1].a <= x.a);
+    if (!__temp_sorted) throw new Error("data isn't sorted");
+    this.root = _build(this.items);
+  }
+  *query(st, et) {
+    const visit = function* (node) {
+      if (!node) return;
+      // scan overlaps; early exit where possible
+      for (const x of node.o) { if (x.a>et) break; if (x.b>=st && x.a<=et) yield x.item; }
+      if (st < node.c) yield* visit(node.l);
+      if (et > node.c) yield* visit(node.r);
+    };
+    yield* visit(this.root);
   }
   // stuff from Array
-  get length() { return this.data.length; }
-  [Symbol.iterator]() { return this.data[Symbol.iterator](); }
+  get length() { return this.items.length; }
+  *[Symbol.iterator]() { for (const x of this.items) yield x.item; }
 }
 
 function formatTime(ts, dur=ts) {
@@ -303,6 +322,7 @@ async function renderProfiler() {
         return resize();
       });
     }
+    shapes.build();
   }
   updateProgress({ start:false });
   // draw events on a timeline
@@ -315,12 +335,11 @@ async function renderProfiler() {
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
-    const timePerPixel = (et-st)/canvas.clientWidth*dpr;
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
       visible.length = 0;
-      for (const e of shapes.query(st, et, timePerPixel)) {
+      for (const e of shapes.query(st, et)) {
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
