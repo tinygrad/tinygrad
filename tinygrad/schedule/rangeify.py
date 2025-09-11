@@ -479,7 +479,8 @@ def tag_uop(ctx:list[int], x:UOp):
   ctx.append(x)
   return x.replace(tag=len(ctx)-1)
 add_tags = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), tag_uop),
+  # don't tag BUFFERs, they are global
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE, Ops.UNIQUE}, name="x"), tag_uop),
 ])
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
