@@ -322,7 +322,6 @@ async function renderProfiler() {
       for (const e of shapes.query(st, et, timePerPixel)) {
         // generic polygon
         if (e.width == null) {
-          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
           ctx.beginPath();
           ctx.moveTo(x[0], offsetY+e.y0[0]);
@@ -336,7 +335,6 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
         const width = xscale(e.x+e.width)-x;
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
