@@ -2,7 +2,7 @@ from typing import Any
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -451,7 +451,8 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
-  kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=Kernel(ret,()))
+  kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None]))))
+  kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   ret = x.as_buf().assign(kernel)
 
   # put the stores in becomes map
