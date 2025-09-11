@@ -7,6 +7,6 @@ clean:
 	nvcc -arch ${ARCH} -o ${@} ${<} -lcuda	-lcublas
 
 %.cubin:
-	python assemble2.py -o matmul2.cubin
+	python assemble.py -o matmul.cubin
 	
 
