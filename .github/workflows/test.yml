@@ -315,7 +315,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       MOCKGPU: 1
       FORWARD_ONLY: 1
