@@ -128,16 +128,39 @@ function renderDag(graph, additions, recenter) {
 
 // ** profiler graph
 
-const RectView = { start: e => e.x, end: e => e.x + e.width };
-const PathView =  { start: e => e.x[0], end: e => e.x.at(-1) };
+const clipRect = (r, st, et) => {
+  const end = r.x+r.width;
+  if (end<=st || r.x>=et) return null
+  const nx = Math.max(r.x, st), nw = Math.min(end, et) - nx;
+  return { x:nx, width:nw, y:r.y, height:r.height, fillColor:r.fillColor, arg:r.arg, label:r.label };
+}
+const RectView = { clip:clipRect };
+
+// path: [x[], y0[], y1[]]
+const clipPath = (path, st, et) => {
+  const xs = [], y0 = [], y1 = [];
+  let earlyStop = false;
+  for (let i=0; i<path.x.length; i++) {
+    let x = path.x[i];
+    if (x < st) x = st;
+    if (x > et) {
+      x = et; earlyStop = true;
+    }
+    xs.push(x); y0.push(path.y0[i]); y1.push(path.y1[i]);
+    if (earlyStop) break;
+  }
+  return { x:xs, y0, y1, fillColor:path.fillColor, arg:path.arg };
+}
+const PathView = { clip:clipPath };
 
 class Track {
   constructor() { this.data = []; }
   push(e) { this.data.push(e); }
   *query(st, et, step) {
     for (const e of this.data) {
-      if (this.view.start(e)>et || this.view.end(e)<st) continue;
-      yield e;
+      const data = this.view.clip(e, st, et);
+      if (data == null) continue;
+      yield data;
     }
   }
   // stuff from Array
