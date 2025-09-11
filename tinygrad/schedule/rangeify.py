@@ -277,6 +277,9 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
+def unprocessed_index(x:UOp):
+  raise RuntimeError(f"unprocessed index on {x.src[0].op}")
+
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
@@ -301,6 +304,7 @@ pm_rangeify = pm_mops+PatternMatcher([
     {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
+  (UPat(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # 3.5 cleanups
