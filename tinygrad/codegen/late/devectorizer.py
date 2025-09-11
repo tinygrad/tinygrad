@@ -65,6 +65,7 @@ load_store_indexing = PatternMatcher([
 ])
 
 # ***** load/store grouping *****
+
 def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
   if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
   # generate the individual indexes

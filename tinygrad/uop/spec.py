@@ -179,6 +179,7 @@ spec = PatternMatcher([
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
+  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.src)),
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
