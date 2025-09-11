@@ -534,7 +534,7 @@ jobs:
         deps: testing
         python-version: '3.11'
     - name: Test models (Metal)
-      run: METAL=1 python -m pytest -n=auto test/models -v --durations=20
+      run: METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
       run: METAL=1 python test/external/external_test_speed_llama.py
 
