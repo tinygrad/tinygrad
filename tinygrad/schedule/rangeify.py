@@ -174,6 +174,14 @@ pm_mops = PatternMatcher([
   (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
 ])
 
+# 3b. rangeify (ops)
+
+@dataclass(frozen=True)
+class BufferizeOpts:
+  # on AddrSpace.LOCAL, device is the id
+  device: str|tuple[str, ...]|int
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+
 def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
   # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
@@ -188,7 +196,7 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
     passthrough_idx.append(idx.src[1+i])
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
     new_ranges.append(ranges[-1])
-  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=x.device)
+  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   return ret.index(*passthrough_idx)
 
 def map_realize(ctx:RangeifyContext, x:UOp):
@@ -196,7 +204,7 @@ def map_realize(ctx:RangeifyContext, x:UOp):
   ranges = []
   for s in x.shape[len(x.src)-1:]:
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
-  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device)
+  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   # was there a shrink? move this before the bufferize?
   # TODO: do we need this?
   if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
@@ -242,7 +250,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   # index based on the shared ranges
   ret = c.index(*out_rngs)
   # if all ranges aren't the same between children, we have to bufferize
-  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
+  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=x.device)).index(*[idx.src[1+i] for i in idx_ranges])
   return ret
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
@@ -258,7 +266,7 @@ def might_end_axis(idx:UOp):
   for i,a in enumerate(idx.src[1:]):
     if any(x.arg > idx.arg for x in a.toposort() if x.op is Ops.RANGE):
       to_end_axis.append(i)
-  if to_end_axis: return idx.replace(src=(idx.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
+  if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
 pm_rangeify = pm_mops+PatternMatcher([
@@ -350,17 +358,17 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
-  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, tuple) else x.arg[0])
+  sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.new_buffer(x.arg, size, x.dtype)
+    buf = UOp.new_buffer(x.arg.device, size, x.dtype)
   else:
     if not locals_allowed: return None
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg.device)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
