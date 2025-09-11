@@ -19,7 +19,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here, so is FUSE
-  #(UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0].f(Ops.NOOP, tag=x.tag)),
 
   # preserve tags?
   # UOp with size 0 is zero
@@ -40,8 +40,8 @@ earliest_rewrites = double_reshape+PatternMatcher([
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
 
   # assign only to buffer
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x"))),
-   lambda x,target: x if target.base.op is not Ops.BUFFER else None),
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
+   lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
@@ -298,7 +298,7 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
-    {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS})),), allow_any_len=True, name="x"),
+    {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 ])
@@ -306,14 +306,12 @@ pm_rangeify = pm_mops+PatternMatcher([
 # 3.5 cleanups
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
-# TODO: figure out how to reenable this
 def cleanup_dead_axes(b:UOp):
-  parents = b.src[0].toposort()
   new_rng = []
   hit = False
   reshape: list[sint] = []
   for s,rng in zip(b.shape, b.src[1:]):
-    if rng not in parents and rng.op is Ops.RANGE:
+    if rng not in b.src[0].sparents and rng.op is Ops.RANGE:
       reshape.append(1)
       hit = True
     else:
@@ -345,7 +343,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
-  #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
@@ -430,9 +428,9 @@ to_define_global = PatternMatcher([
 ])
 
 rangeify_codegen = PatternMatcher([
-  # no CONTIGUOUS in the kernel graph
+  # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+  (UPat((Ops.NOOP, Ops.CONTIGUOUS), name="x"), lambda x: x.src[0]),
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
@@ -465,8 +463,10 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
 
   # put the stores in becomes map
   stored_tag = x.src[1].tag
-  if stored_tag is not None:
+  if stored_tag is not None and x.src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
+    # NOTE: this is wrong! it can be permuted or something
     uop_in_tensor_graph = uop_list[stored_tag]
+    #print(uop_in_tensor_graph.shape, ret.shape, stored_tag)
     becomes_map[uop_in_tensor_graph] = ret.reshape(uop_in_tensor_graph.shape)
 
   return ret
@@ -507,7 +507,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add realize")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="remove tags")
+  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tuple_tags, input_map=tensor_map, name="remove tuple tags")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
