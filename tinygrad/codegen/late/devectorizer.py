@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 # ***** image load valid simplification *****
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(start_idx, UOp.const(dtypes.bool, False))
+  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
 
   # wait for it to be image indexed before running simplification
@@ -53,8 +53,7 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
-  # index True is just Index
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
+  # lower turn the invalid into a gate, must come before index dtype lowering
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate,),), lambda buf,x,cond,i: buf.index(x, cond)),
   # remove hanging cast
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast()),), lambda buf,idx: buf.index(idx)),
