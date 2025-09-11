@@ -217,22 +217,17 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
       ranges.append(idx.src[1+i])
       continue
     passthrough_idx.append(idx.src[1+i])
-    ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
+    ranges.append(ctx.new_range(s))
     new_ranges.append(ranges[-1])
   ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   return ret.index(*passthrough_idx)
 
 def map_realize(ctx:RangeifyContext, x:UOp):
   if x.arg is not None: return None
-  ranges = []
-  for s in x.shape[len(x.src)-1:]:
-    ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
-  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST],
-                                          arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
-  # was there a shrink? move this before the bufferize?
-  # TODO: do we need this?
-  if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
-  return ret.forced_reshape(x.shape)
+  ranges = [ctx.new_range(s) for s in x.shape]
+  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *ranges, arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
+  assert ret.shape == x.shape, f"shape mismatch {ret.shape} vs {x.shape}"
+  return ret
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
