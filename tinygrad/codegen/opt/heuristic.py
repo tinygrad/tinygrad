@@ -53,7 +53,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    idx0, idx1 = mulop.src[0].src[0].src[1], mulop.src[1].src[0].src[1]
+    idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
     first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
     if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
       for global_idx in k.axes_of(AxisType.GLOBAL):
