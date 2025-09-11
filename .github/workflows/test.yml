@@ -827,8 +827,6 @@ jobs:
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
-    - name: Run real world test
-      run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
     - name: Test models (Metal)
       run: METAL=1 python -m pytest -n=auto test/models -v --durations=20
     - name: Run ONNX
