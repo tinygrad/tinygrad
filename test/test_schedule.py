@@ -1927,7 +1927,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_assign_non_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
-    y = Tensor.randint(4, 2)
+    y = Tensor.randint(4, 2).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)+y
     x.shrink((None, (0, 2))).assign(a).realize()
     xref = np.zeros((4, 4), dtype=int)
