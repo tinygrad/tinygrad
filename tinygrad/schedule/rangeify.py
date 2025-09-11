@@ -19,7 +19,10 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
   # DETACH and CONTIGUOUS_BACKWARD are NOOPs here, so is FUSE
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0].f(Ops.NOOP, tag=x.tag)),
+  #(UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0].f(Ops.NOOP, tag=x.tag)),
+
+  # just removing it works...
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
   # preserve tags?
   # UOp with size 0 is zero
@@ -30,9 +33,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
   # copy reorder
   # RESHAPE after COPY
-  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).reshape(r.arg)),
+  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
-  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
+  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
   # const hacks
   (UPat(Ops.CONST, name="x"), lambda x:
@@ -478,6 +481,7 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
 
   # put the stores in becomes map
   for a in x.arg:
+    if a is None: continue
     # NOTE: do we need this reshape?
     uop_in_tensor_graph = uop_list[a]
     becomes_map[uop_in_tensor_graph] = ret.reshape(uop_in_tensor_graph.shape)
