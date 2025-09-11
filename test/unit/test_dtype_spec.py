@@ -378,7 +378,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
     # similar to jax but we don't use weak type
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.fp8e4m3
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
@@ -387,6 +387,14 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
     assert least_upper_dtype(dtypes.fp8e4m3, dtypes.fp8e5m2) == dtypes.half
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.bfloat16) == dtypes.bfloat16
+    assert least_upper_dtype(dtypes.fp8e5m2, dtypes.bfloat16) == dtypes.bfloat16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.float16) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e5m2, dtypes.float16) == dtypes.float16
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.int64) == dtypes.fp8e4m3
+    assert least_upper_dtype(dtypes.fp8e4m3, dtypes.uint64) == dtypes.fp8e4m3
+    assert least_upper_dtype(dtypes.fp8e5m2, dtypes.int64) == dtypes.fp8e5m2
+    assert least_upper_dtype(dtypes.fp8e5m2, dtypes.uint64) == dtypes.fp8e5m2
 
 class TestAutoCastType(unittest.TestCase):
   def setUp(self):
