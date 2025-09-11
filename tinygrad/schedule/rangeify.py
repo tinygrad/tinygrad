@@ -67,9 +67,10 @@ do_realize = PatternMatcher([
 ])
 
 add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"), lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
+   lambda ctx,x: x.replace(tag=(x.tag,)).contiguous() if x in ctx and not isinstance(x.tag, tuple) else None),
 ])
-remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
+remove_tuple_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag[0]) if isinstance(x.tag, tuple) else None)])
 
 # 2. mark all children
 
@@ -97,7 +98,7 @@ pm_children = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN}, name="x"), mark_children),
 ])
 
-# 3. rangeify
+# 3. rangeify (movement)
 
 @dataclass
 class RangeifyContext:
@@ -174,6 +175,13 @@ pm_mops = PatternMatcher([
   (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
 ])
 
+
+# 3b. rangeify (ops)
+
+@dataclass(frozen=True)
+class BufferizeOpts:
+  device: str
+
 def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
   # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
@@ -188,7 +196,7 @@ def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
     passthrough_idx.append(idx.src[1+i])
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
     new_ranges.append(ranges[-1])
-  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=x.device)
+  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   return ret.index(*passthrough_idx)
 
 def map_contiguous(ctx:RangeifyContext, x:UOp):
@@ -196,7 +204,7 @@ def map_contiguous(ctx:RangeifyContext, x:UOp):
   ranges = []
   for s in x.shape[len(x.src)-1:]:
     ranges.append(ctx.new_range(s) if resolve(s!=1) else UOp.const(dtypes.index, 0))
-  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=x.device)
+  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *[x for x in ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   # was there a shrink? move this before the bufferize?
   # TODO: do we need this?
   if resolve(prod(x.shape) != prod(ret.shape)): ret = ret.forced_reshape((prod(ret.shape),)).shrink(((0, prod(x.shape)),))
@@ -209,7 +217,7 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
     if i in red.arg[1]:
       rngs[i] = ctx.new_range(s, axistype=AxisType.REDUCE)
       new_ranges.append(rngs[i])
-  return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0])
+  return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0], tag=red.tag)
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
@@ -242,7 +250,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   # index based on the shared ranges
   ret = c.index(*out_rngs)
   # if all ranges aren't the same between children, we have to bufferize
-  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=x.device).index(*[idx.src[1+i] for i in idx_ranges])
+  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=x.device)).index(*[idx.src[1+i] for i in idx_ranges])
   return ret
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
@@ -356,7 +364,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.new_buffer(x.arg, size, x.dtype)
+    buf = UOp.new_buffer(x.arg.device, size, x.dtype)
   else:
     if not locals_allowed: return None
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
@@ -439,13 +447,31 @@ split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
 ])
 
+def tag_uop(ctx:list[int], x:UOp):
+  if x.tag is not None: return None
+  ctx.append(x)
+  return x.replace(tag=len(ctx)-1)
+add_tags = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), tag_uop),
+])
+
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
+  tsink = graph_rewrite(sink, add_tags, ctx=(uop_list:=[]), bottom_up=True, name="number the uops")
+  realize_map: dict[UOp, UOp] = {}
+  graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
+  tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add contiguous")
+  tsink = graph_rewrite(tsink, remove_tuple_tags, name="remove tuple tags")
+  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest")
+  tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="children")
+  tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
+  graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+
   tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
   tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="remove tags")
+  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tuple_tags, input_map=tensor_map, name="remove tuple tags")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
