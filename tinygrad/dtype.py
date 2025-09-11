@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv, prod
 from enum import Enum, auto
 
 class InvalidTypeMetaClass(type):
-  instance = None
+  instance:None|InvalidType = None
   def __call__(cls, *args, **kwargs):
     if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
     InvalidTypeMetaClass.instance = ret = super().__call__()
