@@ -328,7 +328,11 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  let lastFrame = performance.now(), fps = 0;
   function render(transform) {
+    const now = performance.now()
+    fps = 1000 / (now - lastFrame);
+    lastFrame = now;
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
@@ -403,6 +407,7 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    ctx.fillStyle = "red"; ctx.fillText(`FPS: ${fps.toFixed(1)}`, 5, tickSize/2);
   }
 
   function resize() {
