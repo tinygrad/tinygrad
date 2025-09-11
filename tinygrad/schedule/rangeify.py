@@ -1,8 +1,10 @@
 from typing import Any
+import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, flatten, dedup
+from tinygrad.uop.symbolic import sym
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -152,9 +154,8 @@ def map_pad(idx:UOp, r:UOp):
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
-    # this is safe but dumb
-    # TODO (S-Lykles): switch to mixed index/valid
-    ret[i] = (ret[i] - s).maximum(0).minimum(r.src[0].shape[i]-1)
+    with Context(TRACK_MATCH_STATS=0):
+      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
   # PAD is with 0
   return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
 
@@ -256,17 +257,20 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     idx_ranges = []
     # NOTE: locals aren't working, so we only fully bufferize here (unless RANGEIFY > 1)
     all_all_same = all(all_same(r) for r in all_rngs)
-    for i,r in enumerate(all_rngs):
-      if all_same(r) and (all_all_same or RANGEIFY > 1):
-        out_rngs.append(r[0])
+    for i,valid_rngs in enumerate(all_rngs):
+      rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
+      # we compare the ranges without their valids
+      if all_same(rngs) and (all_all_same or RANGEIFY > 1):
+        # the new valid is the OR of all the children valids
+        minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
+        out_rngs.append(minimum_valid.where(rngs[0], UOp.invalid()).simplify())
       else:
         out_rngs.append(ctx.new_range(c.shape[i]))
         end_ranges.append(out_rngs[-1])
         idx_ranges.append(i)
-    ctx.seen_child[c] = (idx_ranges, end_ranges)
+    ctx.seen_child[c] = (out_rngs, idx_ranges, end_ranges)
   else:
-    out_rngs = list(idx.src[1:])
-    idx_ranges, end_ranges = ctx.seen_child[c]
+    out_rngs, idx_ranges, end_ranges = ctx.seen_child[c]
     for i,nr in zip(idx_ranges, end_ranges): out_rngs[i] = nr
   # index based on the shared ranges
   ret = c.index(*out_rngs)
