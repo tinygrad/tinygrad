@@ -898,7 +898,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def BatchNormalization(X:Tensor, scale:Tensor, B:Tensor, input_mean:Tensor, input_var:Tensor, epsilon:float=1e-05, momentum:float=0.9,
                         training_mode:int=0, spatial=1, is_test=0):
     if training_mode:
-      x_detached = X.detach().cast(dtypes.float) if X.dtype in (dtypes.float16, dtypes.bfloat16) else X.detach()
+      x_detached = X.detach().cast(least_upper_dtype(X.dtype, dtypes.float32))
       current_mean = x_detached.mean(axis=(0,2,3))
       y = (x_detached - current_mean.reshape(shape=[1, -1, 1, 1]))
       current_var = (y*y).mean(axis=(0,2,3))
