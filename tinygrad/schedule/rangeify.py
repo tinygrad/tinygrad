@@ -182,12 +182,13 @@ pm_mops = PatternMatcher([
   (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
 ])
 
-
 # 3b. rangeify (ops)
 
 @dataclass(frozen=True)
 class BufferizeOpts:
-  device: str
+  # on AddrSpace.LOCAL, device is the id
+  device: str|tuple[str, ...]|int
+  addrspace: AddrSpace = AddrSpace.GLOBAL
 
 def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
@@ -277,7 +278,7 @@ def might_end_axis(idx:UOp):
   return idx.replace(arg=None)
 
 pm_rangeify = pm_mops+PatternMatcher([
-  # sink realize to kick it off
+  # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
   # if there's an INDEX it can support partial contig
   (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_realize),
@@ -367,7 +368,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
-  sdtype = x.dtype.ptr(size=size, addrspace=AddrSpace.GLOBAL if not isinstance(x.arg, tuple) else x.arg[0])
+  sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src = x.src[0].src
     assert assign_target.op is Ops.INDEX
@@ -377,7 +378,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
   else:
     if not locals_allowed: return None
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg[1])
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg.device)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
@@ -505,8 +506,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add contiguous")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tuple_tags, input_map=tensor_map, name="remove tuple tags")
+  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add realize")
+  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tags, input_map=tensor_map, name="remove tags")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
