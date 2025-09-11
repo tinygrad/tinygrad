@@ -6,8 +6,9 @@ from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIF
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
-from tinygrad.uop.ops import track_rewrites, graph_rewrite_map, graph_rewrite, identity_element, sint, AxisType
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 
+# *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 double_reshape = PatternMatcher([
@@ -32,6 +33,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
   # copy reorder
+  # TODO: this is causing many copies
   # RESHAPE after COPY
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
@@ -50,7 +52,8 @@ earliest_rewrites = double_reshape+PatternMatcher([
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
 ])
 
-# 1. add contiguous where we have to
+# *****************
+# 1. add realize where we have to
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -82,6 +85,7 @@ add_contiguous = PatternMatcher([
 ])
 remove_tuple_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag[0]) if isinstance(x.tag, tuple) else None)])
 
+# *****************
 # 2. mark all children
 
 @dataclass
@@ -108,7 +112,8 @@ pm_children = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN}, name="x"), mark_children),
 ])
 
-# 3. rangeify (movement)
+# *****************
+# 3a. rangeify (movement)
 
 @dataclass
 class RangeifyContext:
@@ -185,6 +190,7 @@ pm_mops = PatternMatcher([
   (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
 ])
 
+# *****************
 # 3b. rangeify (ops)
 
 # bufferization can happen in three ways
@@ -249,12 +255,14 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   ctx.progress = 0
 
   if c not in ctx.seen_child:
-    all_rngs = zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()])
+    all_rngs = list(zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()]))
     out_rngs = []
     end_ranges = []
     idx_ranges = []
+    # NOTE: locals aren't working, so we only fully bufferize here (unless RANGEIFY > 1)
+    all_all_same = all(all_same(r) for r in all_rngs)
     for i,r in enumerate(all_rngs):
-      if all_same(r):
+      if all_same(r) and (all_all_same or RANGEIFY > 1):
         out_rngs.append(r[0])
       else:
         out_rngs.append(ctx.new_range(c.shape[i]))
@@ -273,6 +281,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
       # this is a global bufferize
       ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=x.device))
     else:
+      assert RANGEIFY > 1, "this isn't supported with RANGEIFY=1"
       ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
     ret = ret.index(*[idx.src[1+i] for i in idx_ranges])
   return ret
@@ -324,6 +333,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
+# *****************
 # 3.5 cleanups
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
@@ -362,7 +372,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
 
-
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
@@ -375,6 +384,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
 ])
 
+# *****************
 # 4. put in buffers for bufferize
 # TODO: should BUFFERIZE look a lot more like STORE
 # BUFFERIZE has device in arg
@@ -414,6 +424,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
    lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
 ])
 
+# *****************
 # 5. split into kernels
 
 @dataclass
@@ -475,6 +486,8 @@ rangeify_codegen = PatternMatcher([
 def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
   if len(x.ranges): return None
   uop_list, becomes_map = ctx
+
+  # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
@@ -500,7 +513,7 @@ split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
 ])
 
-def tag_uop(ctx:list[int], x:UOp):
+def tag_uop(ctx:list[UOp], x:UOp):
   if x.tag is not None: return None
   ctx.append(x)
   return x.replace(tag=len(ctx)-1)
@@ -511,7 +524,8 @@ add_tags = PatternMatcher([
 
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
-  tsink = graph_rewrite(sink, add_tags, ctx=(uop_list:=[]), bottom_up=True, name="number the uops")
+  uop_list: list[UOp] = []
+  tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
   tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
@@ -519,34 +533,20 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
   tsink = graph_rewrite(tsink, remove_tuple_tags, name="remove tuple tags")
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
+
+  # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+
+  # bufferize -> store
   tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=(uop_list, becomes_map:={}), name="split kernels")
-  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-  becomes_map[sink] = tsink
-  return becomes_map
-
-  tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
-  realize_map: dict[UOp, UOp] = {}
-  graph_rewrite(tensor_map[sink], do_realize, ctx=realize_map, name="Input Graph")
-  tensor_map = graph_rewrite_map(tensor_map[sink], add_contiguous, ctx=realize_map, bottom_up=True, input_map=tensor_map, name="add realize")
-  tensor_map = graph_rewrite_map(tensor_map[sink], remove_tuple_tags, input_map=tensor_map, name="remove tuple tags")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_children, ctx=ChildrenContext(), bottom_up=True, input_map=tensor_map, name="children")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=RangeifyContext(), bottom_up=True, input_map=tensor_map, name="rangeify")
-  # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
-  #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="buffer cost")
-  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Rangeify Graph")
-
-  tensor_map = graph_rewrite_map(tensor_map[sink], pm_add_buffers, bottom_up=True, input_map=tensor_map, name="add buffers")
-  tensor_map = graph_rewrite_map(tensor_map[sink], split_kernels, input_map=tensor_map, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tensor_map[sink].toposort():
+  for u in tsink.toposort():
     if u.op is not Ops.ASSIGN: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
@@ -555,8 +555,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
-  if assign_rep:
-    tensor_map = graph_rewrite_map(tensor_map[sink], _substitute, ctx=assign_rep, bottom_up=True, input_map=tensor_map, name="fix_assign")
+  if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
-  if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Kernel Graph")
-  return tensor_map
+  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
+  becomes_map[sink] = tsink
+  return becomes_map
