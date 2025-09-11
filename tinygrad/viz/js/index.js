@@ -81,7 +81,7 @@ function renderDag(graph, additions, recenter) {
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
       .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
-    nodes.selectAll("g.label").data(d => [d]).join("g").attr("transform", d => {
+    nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
       return `translate(-${x}, -${y})`;
