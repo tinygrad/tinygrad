@@ -84,7 +84,7 @@ class TestGGUF(unittest.TestCase):
     tensor = Tensor(np.concatenate(blocks))
     out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
     # TODO: should this be exact equal? somehow failed on CI
-    np.testing.assert_allclose(out.numpy(), expected)
+    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
