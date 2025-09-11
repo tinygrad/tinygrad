@@ -58,8 +58,8 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # always realize ASSIGN/COPY/BUFFER_VIEW/CONTIGUOUS
+  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
   # realize input to assign (might be optimized out)
@@ -67,8 +67,8 @@ do_realize = PatternMatcher([
 ])
 
 add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="x"),
-   lambda ctx,x: x.replace(tag=(x.tag,)).contiguous() if x in ctx and not isinstance(x.tag, tuple) else None),
+  (UPat(GroupOp.All, name="x"),
+   lambda ctx,x: x.replace(tag=(x.tag,)).realize() if x in ctx and not isinstance(x.tag, tuple) else None),
 ])
 remove_tuple_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag[0]) if isinstance(x.tag, tuple) else None)])
 
@@ -266,14 +266,14 @@ def might_end_axis(idx:UOp):
   for i,a in enumerate(idx.src[1:]):
     if any(x.arg > idx.arg for x in a.toposort() if x.op is Ops.RANGE):
       to_end_axis.append(i)
-  if to_end_axis: return idx.replace(src=(idx.src[0].contiguous(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
+  if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
 pm_rangeify = pm_mops+PatternMatcher([
-  # sink contigs to kick it off
-  (UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x", allow_any_len=True), map_contiguous),
+  # sink realize to kick it off
+  (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_contiguous),
   # if there's an INDEX it can support partial contig
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONTIGUOUS, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_contiguous),
+  (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_contiguous),
 
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
@@ -289,7 +289,8 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND})),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
+    {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 ])
@@ -320,14 +321,16 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert len(buf.src) == len(idx.src), "index on wrong bufferize"
   assert all(x.op is Ops.RANGE for x in buf.src[1:])
 
+  # if it's user contiguous, we never remove it
+  if src.op is Ops.CONTIGUOUS: return None
+
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
-  # TODO: exclude fusion of user contiguous
-  #ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
-  #if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
+  ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
+  if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.ASSIGN} for x in ran): return None
 
   # simple, matching old behavior
-  if src.op is not Ops.INDEX: return None
+  #if src.op is not Ops.INDEX: return None
 
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
@@ -419,6 +422,10 @@ to_define_global = PatternMatcher([
 ])
 
 rangeify_codegen = PatternMatcher([
+  # no CONTIGUOUS in the kernel graph
+  # TODO: this can be moved into codegen?
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
   (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
@@ -433,15 +440,25 @@ rangeify_codegen = PatternMatcher([
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
 ])
 
-def split_store(x:UOp):
+def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
   if len(x.ranges): return None
-  ctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=ctx, name="kernel split", bottom_up=True)
+  uop_list, becomes_map = ctx
+  lctx = LocalAddBufferContext()
+  ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+
+  # gather the metadata
+  metadatas = [uop_list[x.tag].metadata for x in ret.sparents if x.tag is not None]
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
-  kernel = UOp(Ops.KERNEL, src=tuple(ctx.map.values())+tuple(ctx.vars.keys()), arg=Kernel(ret,()))
-  return x.as_buf().assign(kernel)
+  kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=Kernel(ret,()))
+  ret = x.as_buf().assign(kernel)
+
+  # put the stores in becomes map
+  stored_tag = x.src[1].tag
+  if stored_tag is not None: becomes_map[uop_list[stored_tag]] = ret
+
+  return ret
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
@@ -458,14 +475,21 @@ add_tags = PatternMatcher([
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(sink, add_tags, ctx=(uop_list:=[]), bottom_up=True, name="number the uops")
+  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
-  tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add contiguous")
+  # NOTE: we don't use contiguous here, contiguous is a user op
+  tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
   tsink = graph_rewrite(tsink, remove_tuple_tags, name="remove tuple tags")
-  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest")
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="children")
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="buffer cost")
+  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="add buffers")
+  tsink = graph_rewrite(tsink, split_kernels, ctx=(uop_list, becomes_map:={}), name="split kernels")
+  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
+  becomes_map[sink] = tsink
+  return becomes_map
 
   tensor_map = graph_rewrite_map(sink, multi_pm+earliest_rewrites, name="earliest")
   realize_map: dict[UOp, UOp] = {}
