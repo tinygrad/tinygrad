@@ -37,7 +37,6 @@ class TestArange(unittest.TestCase):
   def test_complexity_w_unroll2(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 2)], limit=0)
   def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=0)
   def test_complexity_w_unroll8(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 8)], limit=0)
-  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "displacement is folded into store on x86 backend")
   def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=0)
 
   if Device.default.renderer.has_local:
