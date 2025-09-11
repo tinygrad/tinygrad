@@ -66,7 +66,7 @@ function renderDag(graph, additions, recenter) {
     // draw nodes
     const STROKE_WIDTH = 1.4;
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
@@ -80,7 +80,7 @@ function renderDag(graph, additions, recenter) {
         e.stopPropagation();
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
