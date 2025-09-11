@@ -535,6 +535,8 @@ jobs:
         python-version: '3.11'
     - name: Test models (Metal)
       run: METAL=1 python -m pytest -n=auto test/models -v --durations=20
+    - name: Test LLaMA compile speed
+      run: METAL=1 python test/external/external_test_speed_llama.py
 
 # ****** Feature Tests ******
 
@@ -858,8 +860,6 @@ jobs:
       run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test LLaMA compile speed
-      run: METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
       run: METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     #- name: Fuzz Test linearizer
