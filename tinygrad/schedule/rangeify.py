@@ -189,7 +189,7 @@ pm_mops = PatternMatcher([
 class BufferizeOpts:
   device: str
 
-def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
+def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
   # NOTE: all partial contiguous can safely be replaced by full contiguous. we should be able to match old functionality like this
   if not (RANGEIFY > 1): return idx.replace(src=(x.replace(arg=None),)+idx.src[1:])
@@ -206,7 +206,7 @@ def map_partial_contiguous(ctx:RangeifyContext, x:UOp, idx:UOp):
   ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
   return ret.index(*passthrough_idx)
 
-def map_contiguous(ctx:RangeifyContext, x:UOp):
+def map_realize(ctx:RangeifyContext, x:UOp):
   if x.arg is not None: return None
   ranges = []
   for s in x.shape[len(x.src)-1:]:
@@ -267,7 +267,7 @@ def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
 def might_end_axis(idx:UOp):
   if idx.arg is None: return None
   # TODO: write a proper cost function here
-  if all(x.op not in {Ops.BUFFER, Ops.CONTIGUOUS, Ops.BUFFERIZE} for x in idx.toposort()): return None
+  if all(x.op not in {Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE} for x in idx.toposort()): return None
   if all(x.op not in {Ops.REDUCE_AXIS} for x in idx.toposort()): return None
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
@@ -278,9 +278,9 @@ def might_end_axis(idx:UOp):
 
 pm_rangeify = pm_mops+PatternMatcher([
   # sink realize to kick it off
-  (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_contiguous),
+  (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
   # if there's an INDEX it can support partial contig
-  (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_contiguous),
+  (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_realize),
 
   # if there are new ended children, tag the SINK
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
