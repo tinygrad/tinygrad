@@ -10,7 +10,7 @@ from tinygrad.uop.ops import Ops
 import json
 from collections import OrderedDict
 
-EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "GPU"]
+EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0

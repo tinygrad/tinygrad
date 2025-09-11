@@ -155,8 +155,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # VIEW and MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.VIEW: return self.arg
-    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape((prod(tuple([int(r.vmax+1) for r in self.src[1:]])),))
-    #if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([r.vmax+1 for r in self.src[1:]]))
+    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
     # allow reshape from nothing
     if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
@@ -322,6 +321,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
+  def realize(self, *args, **kwargs): return UOp(Ops.REALIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)

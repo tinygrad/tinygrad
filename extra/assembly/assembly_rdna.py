@@ -4,7 +4,7 @@ from tinygrad import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.opt.kernel import Ops
 from tinygrad.uop.ops import BinaryOps, UnaryOps, TernaryOps
-from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
+from tinygrad.runtime.ops_cl import ROCM_LLVM_PATH
 
 # ugh, is this really needed?
 from extra.helpers import enable_early_exec

@@ -359,7 +359,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "((gidx*3)+-1438)", "0")
 
   def test_simplify2(self):
-    # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
+    # from CL=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Special("lidx", 4)
     valid = (lidx<3) & (lidx<1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)

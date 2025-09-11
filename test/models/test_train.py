@@ -27,7 +27,7 @@ def train_one_step(model,X,Y):
   print("done in %.2f ms" % (et*1000.))
 
 def check_gc():
-  if Device.DEFAULT == "GPU":
+  if Device.DEFAULT == "CL":
     from extra.introspection import print_objects
     assert print_objects() == 0
 
