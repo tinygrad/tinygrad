@@ -93,8 +93,6 @@ jobs:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -132,8 +130,6 @@ jobs:
     name: Torch Backend Tests More
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -156,8 +152,6 @@ jobs:
     name: Tensor Core tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -216,8 +210,6 @@ jobs:
     name: Python Backend
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -334,8 +326,6 @@ jobs:
     name: 'CL IMAGE Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -356,8 +346,6 @@ jobs:
     name: 'CL Misc tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -383,8 +371,6 @@ jobs:
     name: 'openpilot Compile Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -417,8 +403,6 @@ jobs:
     name: 'ONNX (CPU) Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
 
     steps:
       - name: Checkout Code
@@ -447,9 +431,6 @@ jobs:
     name: 'ONNX (GPU)+Optimization Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -496,8 +477,6 @@ jobs:
     name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -521,9 +500,6 @@ jobs:
     name: Models (metal)
     runs-on: macos-14
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -572,8 +548,6 @@ jobs:
     name: Linux (devectorize)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -595,8 +569,6 @@ jobs:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -663,7 +635,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      IGNORE_OOB: 0
       AMD: 1
       MOCKGPU: 1
       FORWARD_ONLY: 1
@@ -741,9 +712,6 @@ jobs:
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -838,9 +806,6 @@ jobs:
     name: MacOS (unit)
     runs-on: macos-14
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -964,8 +929,6 @@ jobs:
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -1001,8 +964,6 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
