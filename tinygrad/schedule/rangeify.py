@@ -17,27 +17,34 @@ double_reshape = PatternMatcher([
 
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
+  #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
+  # DETACH and CONTIGUOUS_BACKWARD are NOOPs here, so is FUSE
+  #(UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+
+  # preserve tags?
   # UOp with size 0 is zero
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-  # DETACH and CONTIGUOUS_BACKWARD are NOOPs here, so is FUSE
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+
+  # copy reorder
   # RESHAPE after COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).reshape(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d)).shrink(r.arg)),
+
   # const hacks
   (UPat(Ops.CONST, name="x"), lambda x:
    x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
     len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
+
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x"))),
    lambda x,target: x if target.base.op is not Ops.BUFFER else None),
+
   # contiguous/buffer/copy/assign is already contiguous
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
+  #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
 ])
 
 # 1. add contiguous where we have to
@@ -457,7 +464,9 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
 
   # put the stores in becomes map
   stored_tag = x.src[1].tag
-  if stored_tag is not None: becomes_map[uop_list[stored_tag]] = ret
+  if stored_tag is not None:
+    uop_in_tensor_graph = uop_list[stored_tag]
+    becomes_map[uop_in_tensor_graph] = ret.reshape(uop_in_tensor_graph.shape)
 
   return ret
 
@@ -476,17 +485,17 @@ add_tags = PatternMatcher([
 @track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(sink, add_tags, ctx=(uop_list:=[]), bottom_up=True, name="number the uops")
-  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest")
+  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
   tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
   tsink = graph_rewrite(tsink, remove_tuple_tags, name="remove tuple tags")
-  tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="children")
+  tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="buffer cost")
+  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="add buffers")
+  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=(uop_list, becomes_map:={}), name="split kernels")
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   becomes_map[sink] = tsink
