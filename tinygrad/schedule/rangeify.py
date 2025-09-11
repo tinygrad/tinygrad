@@ -195,7 +195,7 @@ pm_mops = PatternMatcher([
 @dataclass(frozen=True)
 class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int
+  device: str|tuple[str, ...]|int|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   tags: tuple[int, ...] = ()
 
@@ -268,7 +268,13 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   # index based on the shared ranges
   ret = c.index(*out_rngs)
   # if all ranges aren't the same between children, we have to bufferize
-  if len(idx_ranges) > 0: ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=x.device)).index(*[idx.src[1+i] for i in idx_ranges])
+  if len(idx_ranges) > 0:
+    if len(idx_ranges) == len(out_rngs):
+      # this is a global bufferize
+      ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=x.device))
+    else:
+      ret = ret.bufferize(*end_ranges, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+    ret = ret.index(*[idx.src[1+i] for i in idx_ranges])
   return ret
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
@@ -391,7 +397,9 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
   else:
     if not locals_allowed: return None
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=x.arg.device)
+    tag = x.arg.device
+    if tag is None: tag = UOp.unique().arg # TODO: hack
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, arg=x.arg.tags, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
