@@ -1925,14 +1925,22 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
-  def test_assign_non_contiguous(self):
-    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
-    y = Tensor.randint(4, 2).contiguous().realize()
-    a = Tensor.arange(8).reshape(4, 2)+y
-    x.shrink((None, (0, 2))).assign(a).realize()
-    xref = np.zeros((4, 4), dtype=int)
-    xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
+  def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
+  def test_assign_non_contiguous(self, alt=False):
+    x = (Tensor.arange(16)-100).reshape(4,4).contiguous().realize()
+    xref = x.numpy()
+    if alt:
+      y = Tensor.randint(2, 4).contiguous().realize()
+      a = Tensor.arange(8).reshape(2, 4)+y
+      tst = x.shrink(((0, 2), None)).assign(a).realize()
+      xref[:2, :] = np.arange(8).reshape(2, 4)+y.numpy()
+    else:
+      y = Tensor.randint(4, 2).contiguous().realize()
+      a = Tensor.arange(8).reshape(4, 2)+y
+      tst = x.shrink((None, (0, 2))).assign(a).realize()
+      xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
+    np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
