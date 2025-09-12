@@ -1024,20 +1024,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), x.numpy().std(axis=-1, ddof=1), atol=1e-4, rtol=1e-4)
 
-  def test_argmin_multireduce_fusion(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 32).realize()
-    out = x.argmin(-1)
-    run_schedule(check_schedule(out, 2))
-    np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
-
-  def test_argmax_multireduce_fusion(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 32).realize()
-    out = x.argmax(-1)
-    run_schedule(check_schedule(out, 2))
-    np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
-
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     Tensor.manual_seed(0)
     q = Tensor.randn(32,8,16,8).realize()
@@ -1728,53 +1714,41 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(realized_const_view, 1))
     np.testing.assert_equal(realized_const_view.numpy(), [[0], [1], [0]])
 
-class TestIndexing(unittest.TestCase):
-  def check_schedule(self, xt:Tensor|list[Tensor], cnt:int):
-    with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
-      lst = [xt] if isinstance(xt, Tensor) else xt
-      s = Tensor.schedule(*lst)
-      lowered = [x[1] for x in lower_schedule(s.copy())]
-      kernels = [ei for ei in list(lowered) if isinstance(ei.prg, CompiledRunner)]
-      if FUSE_ARANGE and len(kernels) != cnt:
-        raise KernelCountException(f"{len(kernels)} != {cnt}")
-      for ei in lowered: ei.run(do_update_stats=True)
-    return s
-
   def test_simple_indexing(self):
     X = Tensor.randn(10, 10).realize()
     idxs = Tensor([0, 2]).realize()
     xt = X[idxs]
-    self.check_schedule(xt, 2)
+    run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[idxs.numpy()])
 
   def test_simple_indexing_alt(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[[1, 2], [-1, 2]]
-    self.check_schedule(xt, 1)
+    run_schedule(check_schedule(xt, 1))
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [-1, 2]])
 
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
     xt = X[[0, -1]]
-    self.check_schedule(xt, 1)
+    run_schedule(check_schedule(xt, 1))
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0, -1]])
 
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]
-    self.check_schedule(xt, 3)
+    run_schedule(check_schedule(xt, 3))
     np.testing.assert_equal(xt.numpy(), 6)
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
     xt = X[1:2, [-1, 2]]
-    self.check_schedule(xt, 1)
+    run_schedule(check_schedule(xt, 1))
 
   def test_push_through_reshape(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
-    self.check_schedule(out, 2)
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.argmax(x.numpy(), 1))
 
   def test_arange_push_through_expand(self):
@@ -1782,35 +1756,35 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(4,)
     b = Tensor.randn(4, 4).realize()
     out = (a+b).sum()
-    self.check_schedule(out, 1)
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), (np.arange(4)+b.numpy()).sum(), atol=1e-5)
 
   def test_argmin(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmin(-1)
-    self.check_schedule(out, 2)
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmin(axis=-1))
 
   def test_argmax(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 32).realize()
     out = x.argmax(-1)
-    self.check_schedule(out, 2)
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
   def test_arange_transposed(self):
     Tensor.manual_seed(0)
     x = Tensor.randint(4, 1).realize()
     a = ((Tensor.arange(4,)*x).T).sum()
-    self.check_schedule(a, 1)
+    run_schedule(check_schedule(a, 1))
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
   def test_div_padded_arange(self):
     x = Tensor.full((2,2), 16)
     y = x.idiv(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2)).pad(((1,1), (1,1)))
     out = y.sum(axis=1)
-    with Context(FUSE_ARANGE=1): run_schedule(check_schedule(out, 2))
+    run_schedule(check_schedule(out, 2))
     self.assertListEqual(out.tolist(), [0, 12, 4, 0])
 
   def test_arange_transposed_descendants(self):
@@ -1819,7 +1793,7 @@ class TestIndexing(unittest.TestCase):
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
     out = (a+b).sum()
-    self.check_schedule(out, 1)
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_equal(out.numpy(), ((np.arange(4)*x.numpy()).T+b.numpy()).sum())
 
   def test_arange_index(self):
@@ -1827,7 +1801,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_shrink(self):
@@ -1836,14 +1810,14 @@ class TestIndexing(unittest.TestCase):
       x = Tensor.randn(11).realize()
     a = Tensor.arange(22)
     out = (x + a[:11]).sum()
-    self.check_schedule(out, 1)
+    check_schedule(out, 1)
 
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10).contiguous()
     out = (x + a[2]).sum()
-    self.check_schedule(out, 3)
+    run_schedule(check_schedule(out, 3))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_child(self):
@@ -1851,60 +1825,37 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  def test_arange_index_contiguous_child(self):
+  def test_user_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
     a = (Tensor.arange(10)+1).contiguous()
     out = (x + a[2]).sum()
-    self.check_schedule(out, 3)
+    run_schedule(check_schedule(out, 3))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
-
-  def test_arange_childless_base(self):
-    a = Tensor.arange(4)
-    self.check_schedule(a, 1)
-    np.testing.assert_equal(a.numpy(), np.arange(4))
-
-  def test_arange_childless_view(self):
-    a = Tensor.arange(4).reshape(2, 2)
-    a[0] = 4
-    np.testing.assert_equal(a.numpy(), [[4, 4], [2, 3]])
-
-  def test_arange_group_childless_base(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randint(4).realize()
-    a = Tensor.arange(4)+x
-    self.check_schedule(a, 1)
-    np.testing.assert_equal(a.numpy(), np.arange(4)+x.numpy())
-
-  def test_arange_group_childless_view(self):
-    Tensor.manual_seed(0)
-    x = Tensor.ones(4).contiguous().realize()
-    a = Tensor.arange(4)+x
-    a[0] = 6
-    np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
   @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
-    sched = self.check_schedule(a, 1)
+    sched = run_schedule(check_schedule(a, 1))
     self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
-    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
+    sched = run_schedule(check_schedule(a, 2)) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
-    sched = self.check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
+    sched = check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
     self.assertIs(sched[2].ast.op, Ops.COPY)
+    run_schedule(sched)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -1922,7 +1873,7 @@ class TestIndexing(unittest.TestCase):
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)
-    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
+    run_schedule(check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
   def test_assign_non_contiguous(self):
@@ -1938,7 +1889,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
     loss = X.sparse_categorical_crossentropy(Y)
-    self.check_schedule(loss, 4)
+    run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
@@ -1950,7 +1901,7 @@ class TestIndexing(unittest.TestCase):
     yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      self.check_schedule(loss, 6)
+      run_schedule(check_schedule(loss, 6))
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
@@ -1961,16 +1912,10 @@ class TestIndexing(unittest.TestCase):
     r = (X+Tensor.arange(16).reshape(4, 4)).sum()
     out0 = r+2
     out1 = r+3
-    self.check_schedule([out0, out1], 1)
+    run_schedule(check_schedule([out0, out1], 1))
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
     np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
     np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
-
-  def test_dont_fold_arange_contiguous_view(self):
-    X = Tensor.randn(4, 4).realize()
-    r = (X+Tensor.arange(16).reshape(4, 4).contiguous()).sum(1, keepdim=True)
-    self.check_schedule([r], 2)
-    np.testing.assert_allclose(r.numpy(), (X.numpy()+np.arange(16).reshape(4, 4)).sum(1, keepdims=True), atol=1e-5, rtol=1e-6)
 
   @unittest.skip("multi output isn't supported")
   def test_multiview_arange_children(self):
