@@ -3882,24 +3882,18 @@ class Tensor(MathTrait):
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
-  def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
-  def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
-  def __imul__(self, x) -> Tensor:
-    self.__setitem__(Ellipsis, self.mul(x))
-    return self
-    # if _has_real_buffer(self):
-    #   return self.replace(self.mul(x))
-    # else:
-    #   return self.assign(self.mul(x))
-  def __ipow__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.pow(x)) or self
-  def __itruediv__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.div(x)) or self
-  def __ifloordiv__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.__floordiv__(x)) or self
-  def __imatmul__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.matmul(x)) or self
-  def __iand__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_and(x)) or self
-  def __ior__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_or(x)) or self
-  def __ixor__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_xor(x)) or self
-  def __ilshift__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.lshift(x)) or self
-  def __irshift__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.rshift(x)) or self
+  def __iadd__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.add(x)); return self
+  def __isub__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.sub(x)); return self
+  def __imul__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.mul(x)); return self
+  def __ipow__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.pow(x)); return self
+  def __itruediv__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.div(x)); return self
+  def __ifloordiv__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.__floordiv__(x)); return self
+  def __imatmul__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.matmul(x)); return self
+  def __iand__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_and(x)); return self
+  def __ior__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_or(x)); return self
+  def __ixor__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_xor(x)); return self
+  def __ilshift__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.lshift(x)); return self
+  def __irshift__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.rshift(x)); return self
 
   def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
