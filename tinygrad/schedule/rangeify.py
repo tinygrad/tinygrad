@@ -322,9 +322,13 @@ pm_rangeify = pm_mops+PatternMatcher([
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
+  # handle assign
+  (UPat(Ops.INDEX, src=(UPat(Ops.ASSIGN, name="assign"),), allow_any_len=True, name="x"),
+    lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],))),
+
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
-    {Ops.STORE, Ops.ASSIGN, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
+    {Ops.STORE, Ops.COPY, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
@@ -396,12 +400,22 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
-  store_arg = (x.arg.tags, shape)
+
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
-    assign_target, assign_src = x.src[0].src
+    assign_target, assign_src, assign_mops = x.src[0].src
     assert assign_target.op is Ops.INDEX
-    return assign_target.replace(dtype=sdtype).store(assign_src, *rngs, arg=store_arg, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+    # in assign, this is the buffer size, not the bufferize size
+    # TODO: assign_mops here
+    ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
+    mops = []
+    walk = assign_mops
+    while walk is not assign_mops.base:
+      mops.append((walk.op, walk.arg))
+      walk = walk.src[0]
+    for m in mops[::-1]: ret = ret._mop(*m)
+    return ret.replace(tag=x.arg.tags)
+
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
@@ -409,8 +423,9 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     if not locals_allowed: return None
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, arg=store_arg, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+    buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
+  ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype).forced_reshape(shape)
+  return ret.replace(tag=x.arg.tags)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -420,8 +435,8 @@ pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
-  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
+  #(UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
+  # lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
 ])
 
 # *****************
@@ -483,16 +498,15 @@ rangeify_codegen = PatternMatcher([
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
 ])
 
-def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
+def split_store(ctx:list[UOp], x:UOp):
   if len(x.ranges): return None
-  uop_list, becomes_map = ctx
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # gather the metadata
-  metadatas = [uop_list[x.tag].metadata for x in ret.sparents if x.tag is not None]
+  metadatas = [ctx[x.tag].metadata for x in ret.sparents if x.tag is not None]
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
@@ -501,13 +515,16 @@ def split_store(ctx:tuple[list[UOp], dict[UOp, UOp]], x:UOp):
   ret = x.as_buf().assign(kernel)
 
   # put the stores in becomes map
-  shape = x.arg[1]
-  for a in x.arg[0]:
-    if a is None: continue
-    # NOTE: shape should be preserved, if it's not there's a bug
-    uop_in_tensor_graph = uop_list[a]
-    assert shape == uop_in_tensor_graph.shape, f"shape mismatch {ret.shape} != {uop_in_tensor_graph.shape}"
-    becomes_map[uop_in_tensor_graph] = ret.reshape(shape)
+  """
+  if x.arg is not None:
+    shape = x.arg[1]
+    for a in x.arg[0]:
+      if a is None: continue
+      # NOTE: shape should be preserved, if it's not there's a bug
+      uop_in_tensor_graph = uop_list[a]
+      assert shape == uop_in_tensor_graph.shape, f"shape mismatch {ret.shape} != {uop_in_tensor_graph.shape}"
+      becomes_map[uop_in_tensor_graph] = ret.reshape(shape)
+  """
 
   return ret
 
@@ -540,11 +557,16 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
   #tsink = graph_rewrite(tsink, symbolic_simple, bottom_up=True, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+
+  # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
+  # if it's not tagged by here, it's out
+  tsink = UOp.sink(*[x for x in tsink.parents if x.op is Ops.BUFFERIZE and len(x.arg.tags)])
+
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
   tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
-  tsink = graph_rewrite(tsink, split_kernels, ctx=(uop_list, becomes_map:={}), name="split kernels")
+  tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
@@ -561,5 +583,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-  becomes_map[sink] = tsink
+
+  becomes_map = {sink:tsink}
+  for s in tsink.src:
+    assert s.tag is not None
+    for a in s.tag: becomes_map[uop_list[a]] = s.replace(tag=None)
   return becomes_map
