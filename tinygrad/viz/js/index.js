@@ -41,6 +41,7 @@ function intersectRect(r1, r2) {
   const scale = Math.min(scaleX, scaleY);
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
+const overlaps = (p1, p2, tol) => Math.abs(p1.x - p2.x) <= tol && Math.abs(p1.y - p2.y) <= tol;
 
 function addTags(root) {
   root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
@@ -151,15 +152,12 @@ function renderDag(graph, additions, recenter) {
       points.unshift(intersectRect(g.node(e.v), points[0]));
       points.push(intersectRect(g.node(e.w), points[points.length-1]));
       let incoming = edgePoints.get(e.w);
-      if (incoming != null && g.node(e.w).label === "STORE") {
-        const [temp1, temp2] = points.slice(-2);
-        console.log("curr: -----"); console.log(g.node(e.v).label); console.log(temp1, temp2);
-        for (const [fr, [p1, p2]] of incoming) {
-          console.log(g.node(fr).label);
-          console.log(p1, p2);
+      // adjust the current edge forward if it overlaps with others
+      if (incoming != null) {
+        const edgeEnd = points[points.length-1], step = 10;
+        for (const [_, [__, existing]] of incoming) {
+          if (overlaps(edgeEnd, existing, step)) edgeEnd.x += step;
         }
-        // xx.x += ixs*10; // 2r
-        // ixs++;
       } else edgePoints.set(e.w, incoming=new Map());
       incoming.set(e.v, points.slice(-2));
       return line(points);
