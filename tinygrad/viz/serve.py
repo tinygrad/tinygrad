@@ -6,7 +6,7 @@ from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
@@ -90,7 +90,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src) if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":ref, "tag":u.tag}
+                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
   return graph
 
 @functools.cache
@@ -303,8 +303,8 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=None)
-  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=None)
+  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
