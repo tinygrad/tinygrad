@@ -54,7 +54,6 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-
 function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
@@ -576,8 +575,7 @@ async function main() {
         }
       }
     }
-    return setState({ "currentCtx": 2, "currentStep": 8, "currentRewrite": 0, "expandSteps": true });
-    // return setState({ currentCtx:-1 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
