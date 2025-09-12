@@ -79,7 +79,7 @@ class LLVMCompiler(Compiler):
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
 
-class HostLLVMCompiler(LLVMCompiler):
+class CPULLVMCompiler(LLVMCompiler):
   def __init__(self):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())

@@ -4,13 +4,13 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.runtime.ops_gpu import CLProgram, compile_gpu
+from tinygrad.runtime.ops_cl import CLProgram, compile_gpu
 from tinygrad.device import Device
 from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
-from tinygrad.runtime.ops_gpu import OSX_TIMING_RATIO
-CL = Device["GPU"]
+from tinygrad.runtime.ops_cl import OSX_TIMING_RATIO
+CL = Device["CL"]
 
 DEBUGCL = getenv("DEBUGCL", 0)
 FLOAT16 = getenv("FLOAT16", 0)
@@ -110,7 +110,7 @@ class Thneed:
     prgs = {}
     for o in jdat['binaries']:
       nptr = ptr + o['length']
-      prgs[o['name']] = CLProgram(Device["GPU"], o['name'], weights[ptr:nptr])
+      prgs[o['name']] = CLProgram(Device["CL"], o['name'], weights[ptr:nptr])
       ptr = nptr
 
     # populate the cl_cache
@@ -267,7 +267,7 @@ class Thneed:
     for prg, args in self.cl_cache:
       events.append(prg.clprg(CL.queue, *args))
     mt = time.monotonic()
-    Device["GPU"].synchronize()
+    Device["CL"].synchronize()
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 

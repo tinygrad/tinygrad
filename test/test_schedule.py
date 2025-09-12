@@ -1654,7 +1654,7 @@ class TestSchedule(unittest.TestCase):
     constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
     check_schedule(constv, 1)
 
-  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_matmul(self):
     with Context(IMAGE=2):
       x = Tensor.randn((9, 9)).realize()
@@ -1927,7 +1927,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_assign_non_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
-    y = Tensor.randint(4, 2)
+    y = Tensor.randint(4, 2).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)+y
     x.shrink((None, (0, 2))).assign(a).realize()
     xref = np.zeros((4, 4), dtype=int)
