@@ -1282,20 +1282,6 @@ class Tensor(MathTrait):
     """
     return self._getitem(indices)
 
-  def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
-    if step_abs == 1:
-      return t
-    shp = list(t.shape)
-    assert shp[axis] == n_sel
-    t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
-    pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
-    t = t.pad(pads)
-    shp2 = list(t.shape)
-    merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
-    t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
-    shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
-    return t.shrink(shr)
-
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
@@ -1305,12 +1291,14 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     indices_parsed = self._parse_indices(indices)
+
+    #TODO: write complex tests for tensor indexing so it behaves as expected
+    #TODO: ensure it handles mixed indices?
     if any(isinstance(ip["index"], Tensor) for ip in indices_parsed):
-      # Fallback path uses the existing advanced-index machinery (_masked_setitem etc.)
       newval = self._getitem(indices, v=v)
-      self.assign(newval)
+      self.uop = newval.uop
       return
-    # Try the fast one-shot builder (returns a fused Tensor expr)
+
     n_sels: list[sint] = []
     span_lens: list[sint] = []
     pad_spec: list[tuple[sint, sint]] = []
@@ -1338,7 +1326,7 @@ class Tensor(MathTrait):
         slc: slice = idx
         start_raw, stop_raw, step_raw = slc.indices(size_src) if all(isinstance(x, int) for x in (slc.start, slc.stop, slc.step) if x is not None) else (slc.start, slc.stop, slc.step)
         if not isinstance(step_raw, int):
-          raise NotImplementedError("symbolic step not supported in fast setitem")
+          raise NotImplementedError("symbolic step not supported")
         if step_raw > 0:
           start_pad = start_raw
           step_abs = step_raw
@@ -1361,21 +1349,35 @@ class Tensor(MathTrait):
           rhs_flip_axes_local.append(len(n_sels)-1)
         src_ax += 1
         continue
-      raise NotImplementedError("advanced indexing handled by fallback")
+
     compact_shape = tuple(n_sels) if len(n_sels) else (1,)
     mask_local = Tensor.ones(compact_shape, device=self.device, dtype=dtypes.bool)
     rhs_local = v.cast(self.dtype)
     rhs_local = rhs_local._broadcast_to(_broadcast_shape(tuple(n_sels) if len(n_sels) else (1,), rhs_local.shape))
 
+    def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
+      if step_abs == 1:
+        return t
+      shp = list(t.shape)
+      assert shp[axis] == n_sel
+      t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
+      pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
+      t = t.pad(pads)
+      shp2 = list(t.shape)
+      merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
+      t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
+      shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
+      return t.shrink(shr)
+
     for ax_local, (n_sel, step_abs, span_len) in enumerate(zip(n_sels, steps_abs, span_lens)):
-      mask_local = Tensor._inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
-      rhs_local  = Tensor._inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
+      mask_local = _inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
+      rhs_local  = _inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
     if rhs_flip_axes_local:
       rhs_local = rhs_local.flip(tuple(rhs_flip_axes_local))
     mask_full = mask_local.pad(tuple(pad_spec)) if len(pad_spec) else mask_local
     rhs_full  = rhs_local.pad(tuple(pad_spec)) if len(pad_spec) else rhs_local
     if mask_full.shape != self.shape or rhs_full.shape != self.shape:
-      raise NotImplementedError("shape mismatch in fast setitem; falling back")
+      raise NotImplementedError("shape mismatch in setitem")
     
     result = mask_full.where(rhs_full, self)
 
@@ -3877,19 +3879,18 @@ class Tensor(MathTrait):
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
-  def __iadd__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.add(x)); return self
-  def __isub__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.sub(x)); return self
-  def __imul__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.mul(x)); return self
-  def __ipow__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.pow(x)); return self
-  def __itruediv__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.div(x)); return self
-  def __ifloordiv__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.__floordiv__(x)); return self
-  def __imatmul__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.matmul(x)); return self
-  def __iand__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_and(x)); return self
-  def __ior__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_or(x)); return self
-  def __ixor__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.bitwise_xor(x)); return self
-  def __ilshift__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.lshift(x)); return self
-  def __irshift__(self, x) -> Tensor: self.__setitem__(Ellipsis, self.rshift(x)); return self
-
+  def __iadd__(self, x) -> Tensor: return self.add(x)
+  def __isub__(self, x) -> Tensor: return self.sub(x)
+  def __imul__(self, x) -> Tensor: return self.mul(x)
+  def __ipow__(self, x) -> Tensor: return self.pow(x)
+  def __itruediv__(self, x) -> Tensor: return self.div(x)
+  def __ifloordiv__(self, x) -> Tensor: return self.__floordiv__(x)
+  def __imatmul__(self, x) -> Tensor: return self.matmul(x)
+  def __iand__(self, x) -> Tensor: return self.bitwise_and(x)
+  def __ior__(self, x) -> Tensor: return self.bitwise_or(x)
+  def __ixor__(self, x) -> Tensor: return self.bitwise_xor(x)
+  def __ilshift__(self, x) -> Tensor: return self.lshift(x)
+  def __irshift__(self, x) -> Tensor: return self.rshift(x)
   def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
   def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
