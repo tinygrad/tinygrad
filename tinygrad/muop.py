@@ -346,6 +346,18 @@ class MUOpA64(MUOp):
     return MUOpA64(opstr, opcode, rd, (rn,), MUOpA64.VEC, (MUOpA64.VEC,), b31=0b0, b30=q, b29=u,
                    b28_24=0b01110, b23_22=size, b21=0b1, b20_16=b20_19<<3|0b001, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
   @staticmethod
+  def _I(opstr:str, opcode:int, label:Label, cond:int):
+    return MUOpA64(opstr, opcode, None, (label,), (), ((),), b31=0b0, b30=opcode<<6, b29=opcode<<5,
+                   b28_24=opcode, b23_22=0<<27, b21=0<<16, b20_16=0<<11, b15_10=0<<5, b9_5=0, b4_0=cond&0b01111)
+  @staticmethod
+  def R_I(opstr:str, opcode:int, rd:Register, imm:int, sf:int, shift:int=0b00):
+    return MUOpA64(opstr, opcode, rd, (imm,), MUOpA64.GPR, ((),), b31=sf, b30=opcode<<6, b29=opcode<<5,
+                   b28_24=opcode, b23_22=(shift<<1)&0b10, b21=shift, b20_16=imm<<11, b15_10=imm<<5, b9_5=imm, b4_0=rd.index)
+  @staticmethod
+  def R_R(opstr:str, opcode:int, rd:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
+    return MUOpA64(opstr, opcode, rd, (rm,), MUOpA64.GPR, (MUOpA64.GPR,), b31=sf, b30=opcode<<6, b29=opcode<<5,
+                   b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=0b11111, b4_0=rd.index)
+  @staticmethod
   def R_R_R(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
     return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.GPR, (MUOpA64.GPR, MUOpA64.GPR), b31=sf, b30=opcode<<6, b29=opcode<<5,
                    b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=rn.index, b4_0=rd.index)
@@ -359,7 +371,13 @@ class MUOpA64(MUOp):
     imm12 = imm12 & 0xFFF
     return MUOpA64(opstr, opcode, rd, (rn, imm12), MUOpA64.VEC, (MUOpA64.GPR, ()), b31=size<<1, b30=size, b29=opcode<<5,
                    b28_24=opcode, b23_22=shift, b21=imm12<<11, b20_16=imm12<<6, b15_10=imm12, b9_5=rn.index, b4_0=rd.index)
-
+  def replace(self, out, ins) -> MUOp:
+    def _sub(x):
+      for old,new in zip((self.out,)+self.ins, (out,)+ins):
+        if x is old: return new
+      return x
+    return MUOpX86(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, _sub(self.reg), _sub(self.rm), self.pp, self.map_select, self.we,
+                   self.l, _sub(self.vvvv), self.prefix, self.w, _sub(self.imm))
   def encode(self) -> bytes:
     return (self.b31 & 0b1) << 31 | (self.b30 & 0b1) << 30 | (self.b29 & 0b1) << 29 | (self.b28_24 & 0b0000) << 24 | \
            (self.b23_22 & 0b11) << 22 | (self.b21 & 0b1) << 21 | (self.b20_16 & 0b11111) << 16 | (self.b15_10 & 0b111111) << 10 | \
