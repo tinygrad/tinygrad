@@ -53,7 +53,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    idx0, idx1 = mulop.src[0].src[0].src[1], mulop.src[1].src[0].src[1]
+    idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
     first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
     if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
       for global_idx in k.axes_of(AxisType.GLOBAL):
@@ -77,7 +77,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for buf_index,buf in enumerate(k.bufs):
     if isinstance(buf.src[0].dtype, ImageDType):
       # part of real_strides
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
+        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
       if len(unit_stride_axes_mul_4):
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
@@ -94,8 +95,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
-    is_masked = any(len(st.src) > 2 and k.rngs[axis] in st.src[2].parents for st in k.bufs) or \
-                any(any(o is k.rngs[axis] for o in u.src[0].parents) for u in k.ast.parents if u.op is Ops.WHERE)
+    is_masked = any(any(o is k.rngs[axis] for o in u.src[0].parents) for u in k.ast.parents if u.op is Ops.WHERE)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
@@ -111,11 +111,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
-      if any(rng not in b.src[1].parents and all(r2 in b.src[1].parents for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
+      if any(rng not in b.src[1].get_idx().parents and all(r2 in b.src[1].get_idx().parents
+          for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
         num_strides, sum_strides = 0, 0
         for b in k.bufs:
-          if rng in b.src[1].parents: num_strides += 1
-          for c in b.src[1].split_uop(Ops.ADD):
+          idx = b.src[1].get_idx()
+          if rng in idx.parents: num_strides += 1
+          for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
             if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
             if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
@@ -157,7 +159,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local
-      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].parents for b in k.bufs), axis) \
+      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().parents for b in k.bufs), axis) \
                               for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):

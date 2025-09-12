@@ -560,7 +560,7 @@ class TestUOpGraph(unittest.TestCase):
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     glbl2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
-    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(idx, UOp.const(dtypes.bool, False)),))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(UOp.invalid()),))
     ld1 = UOp(Ops.LOAD, dtypes.int, (glbl2.index(idx, UOp.const(dtypes.bool, True)),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx), ld1+ld0))])
     ld0 = uops[-1].src[-1]
@@ -573,7 +573,7 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 16),), "lidx0")
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
-    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+1, UOp.const(dtypes.bool, False)), barrier))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(UOp.invalid()), barrier))
     ld1 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+2, UOp.const(dtypes.bool, True)), barrier))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx), ld1+ld0))])
 
@@ -586,7 +586,7 @@ class TestUOpGraph(unittest.TestCase):
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = glbl.index(idx0, UOp.const(dtypes.bool, False)).store(val)
+    st0 = glbl.index(UOp.invalid()).store(val)
     st1 = glbl.index(idx0, UOp.const(dtypes.bool, True)).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
