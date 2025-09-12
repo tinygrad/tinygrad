@@ -12,6 +12,7 @@ testing_minimal = [
   "torch==2.7.1",
   "pytest",
   "pytest-xdist",
+  "pytest-timeout",
   "hypothesis",
   "z3-solver",
   "ml_dtypes"
