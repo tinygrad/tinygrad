@@ -35,11 +35,11 @@ earliest_rewrites = double_reshape+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
   # copy reorder
-  # TODO: this is causing many copies
+  # TODO: this is causing many copies wih the replace tag None
   # RESHAPE after COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
@@ -414,7 +414,7 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
       mops.append((walk.op, walk.arg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
-    return ret.replace(tag=x.arg.tags)
+    return ret.forced_reshape(shape).replace(tag=x.arg.tags)
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
@@ -424,8 +424,8 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
-  ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype).forced_reshape(shape)
-  return ret.replace(tag=x.arg.tags)
+  ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
+  return ret.forced_reshape(shape).replace(tag=x.arg.tags)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -541,7 +541,8 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}, name="x"), tag_uop),
 ])
 
-@track_rewrites(name=lambda sink,ret: f"Schedule {pluralize('Kernel',len([u for u in ret[sink].toposort() if u.op is Ops.KERNEL]))}", replay=True)
+@track_rewrites(name=lambda _,ret: f"Schedule {pluralize('Kernel',
+                                                         len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", replay=True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
@@ -584,8 +585,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
-  becomes_map = {sink:tsink}
+  becomes_map = {}
   for s in tsink.src:
     assert s.tag is not None
-    for a in s.tag: becomes_map[uop_list[a]] = s.replace(tag=None)
+    for a in s.tag:
+      becomes_map[uop_list[a]] = s.replace(tag=None)
   return becomes_map
