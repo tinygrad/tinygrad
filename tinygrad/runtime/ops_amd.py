@@ -717,6 +717,8 @@ class USBIface(PCIIface):
     self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
     self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
 
+    # print(self.usb.scsi_read(4096 * 16)[:0x600])
+
   def _dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def _dma_region(self, ctrl_addr, sys_addr, size):
     region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], system=True, uncached=True)
@@ -795,6 +797,12 @@ class AMDDevice(HCQCompiled):
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
                      functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
+
+    x = self.allocator.alloc(2 << 20)
+    self.allocator._copyin(x, memoryview(bytes([0] * (2 << 20))))
+
+    # print(self.dev_iface.usb.scsi_read(4096, lba=0x1000))
+    # exit(0)
 
     # Scratch setup
     self.max_private_segment_size = 0
