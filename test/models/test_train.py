@@ -1,9 +1,8 @@
-import unittest
-import time
+import unittest, time
 import numpy as np
+from tinygrad import Device
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.tensor import Device
 from tinygrad.helpers import getenv, CI
 from extra.training import train
 from extra.models.convnext import ConvNeXt
