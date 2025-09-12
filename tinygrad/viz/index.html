@@ -90,11 +90,11 @@
   .label :is(text, p) {
     font-weight: 350;
   }
-  rect.node {
+  g.node rect {
     stroke-width: 1.4;
     stroke: #4a4b57;
   }
-  rect.overlay {
+  g.overlay rect {
     fill: rgba(26, 27, 38, 0.5);
   }
   .edgePath {
@@ -104,6 +104,9 @@
   }
   .highlight rect, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
+  }
+  .highlight.child rect, .edgePath.highlight.child {
+    stroke: #C888B0;
   }
   #edge-labels g.port.highlight {
     display: block
@@ -244,15 +247,15 @@
     z-index: 4;
     background-color: #1e2029;
     padding: 4px 8px;
+    max-width: 164px;
     border-radius: 4px;
     pointer-events: none;
     display: none;
     font-size: 10px;
-    white-space: pre;
   }
   #device-list > div {
     min-height: 32px;
-    max-width: 132px;
+    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -260,6 +263,9 @@
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  #device-list {
+    height: fit-content;
   }
   .raw-text {
     padding: 0 8px;
@@ -363,7 +369,7 @@
     </div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
-  <div id="tooltip"></div>
+  <div id="tooltip" class="wrap"></div>
   <script src="/js/index.js"></script>
 </body>
 </html>

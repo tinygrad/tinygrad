@@ -1,7 +1,7 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
-from tinygrad.helpers import CI, fetch
+from tinygrad.helpers import CI, fetch, CPU_LLVM
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 
@@ -16,7 +16,7 @@ TRANSCRIPTION_2 = "a slightly longer audio file so that we can test batch transc
 TEST_FILE_3_URL = 'https://homepage.ntu.edu.tw/~karchung/miniconversations/mc45.mp3'
 TRANSCRIPTION_3 = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine, and I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs and the back trimmed, and I'd like the rest thinned out a bit and layered. Where would you like the part? On the left, right about here. Here, have a look. What do you think? It's fine. Here's a thousand anti-dollars. It's 30-ant extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time."   # noqa: E501
 
-@unittest.skipIf(Device.DEFAULT in ["CPU", "LLVM"], "slow")
+@unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
 class TestWhisper(unittest.TestCase):
   @classmethod
@@ -33,11 +33,11 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
-  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too many tests for CI")
+  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
   def test_transcribe_file2(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
 
-  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too many tests for CI")
+  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
   def test_transcribe_batch12(self):
     waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
@@ -52,13 +52,13 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
-  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
+  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertEqual(TRANSCRIPTION_3, transcription)
 
-  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
+  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
 

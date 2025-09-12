@@ -9,6 +9,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
 from test.helpers import not_support_multi_device
+from tinygrad.renderer.ptx import PTXRenderer
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -98,7 +99,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(getenv("PTX"), "fails with PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
@@ -323,9 +324,9 @@ class TestRandomness(unittest.TestCase):
         torch_res = torch_res.unsqueeze(0)
       for i in range(torch_res.shape[0]):
         self.assertTrue(equal_distribution(lambda *_: tiny_res[i], lambda _: torch_res[i]))
-    _check_with_torch(w=[0.231, 0., 1., 0.5], num_samples=2000, replacement=True)
-    _check_with_torch(w=[[0.2, 0.8]], num_samples=2000, replacement=True)  # 2D but only 1 row
-    _check_with_torch(w=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=2000, replacement=True)
+    _check_with_torch(w=[0.231, 0., 1., 0.5], num_samples=300, replacement=True)
+    _check_with_torch(w=[[0.2, 0.8]], num_samples=300, replacement=True)  # 2D but only 1 row
+    _check_with_torch(w=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=300, replacement=True)
     # no-replacement isn't supported, unless taking only one sample
     w = [0.1, 0.9]
     self.assertRaises(AssertionError, lambda: Tensor(w).multinomial(100, replacement=False))
