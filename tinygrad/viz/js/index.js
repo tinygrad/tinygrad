@@ -100,30 +100,24 @@ function renderDag(graph, additions, recenter) {
       .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
     // draw edges
     const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
-    let ixs = 0;
-    const customPoints = new Map();
-    d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
+    const edgePoints = new Map();
+    d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e, i) => {
       const edge = g.edge(e);
       const points = edge.points.slice(1, edge.points.length-1);
-      // debug
-      const vn = g.node(e.v);
-      const wn = g.node(e.w);
-      const xx = intersectRect(g.node(e.w), points[points.length-1]);
-      if (wn.label === "STORE" && vn.label.startsWith("RANGE")) {
-        console.log(vn);
-        console.log(xx);
-        xx.x += ixs*10;
-        ixs++;
-        console.log("--------");
-      }
       points.unshift(intersectRect(g.node(e.v), points[0]));
-      points.push(xx);
-      customPoints.set(e, points.slice(-2));
+      points.push(intersectRect(g.node(e.w), points[points.length-1]));
+      let incoming = edgePoints.get(e.w);
+      if (incoming != null) {
+        console.log("todo!");
+        // xx.x += ixs*10; // 2r
+        // ixs++;
+      } else edgePoints.set(e.w, incoming=new Map());
+      incoming.set(e.v, points.slice(-2));
       return line(points);
     }).attr("marker-end", "url(#arrowhead)");
-    addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
+    addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e, i) => {
       // get a point near the end
-      const [p1, p2] = customPoints.get(e);
+      const [p1, p2] = edgePoints.get(e.w).get(e.v);
       const dx = p2.x-p1.x;
       const dy = p2.y-p1.y;
       // normalize to the unit vector
@@ -579,6 +573,7 @@ async function main() {
       }
     }
     return setState({ "currentCtx": 2, "currentStep": 8, "currentRewrite": 0, "expandSteps": true });
+    // return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
