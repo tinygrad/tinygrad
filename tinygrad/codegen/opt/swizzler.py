@@ -5,11 +5,6 @@ from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_re
 from tinygrad.schedule.grouper import ALWAYS_CONTIGUOUS
 from tinygrad.dtype import ImageDType, dtypes
 
-const_hacks = PatternMatcher([
-  (UPat(Ops.CONST, name="c").f((Ops.RESHAPE, Ops.EXPAND), name="e"),
-   lambda c,e: c.replace(src=(UOp(Ops.VIEW, dtypes.void, c.src, ShapeTracker.from_shape(e.arg, (0,)*len(e.arg))),)))
-])
-
 merge_views = PatternMatcher([
   # merge adjacent views
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
@@ -137,6 +132,4 @@ fix_kernel_ops = view_left_through_load+PatternMatcher([
    lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
-  # no DEVICE on CONST
-  (UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
 ])
