@@ -2,7 +2,7 @@
 import unittest, pickle, functools, math
 import z3
 
-from tinygrad.dtype import dtypes, ConstType, DType
+from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.codegen import full_rewrite
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer, track_rewrites
@@ -373,6 +373,16 @@ class TestSymbolic(unittest.TestCase):
 
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
+
+  def test_bool_or_not_tautology(self):
+    a = Variable("a", 0, 10)
+    c = a<10
+    self.helper_test_variable(c | c.logical_not(), True, True, "True")
+
+  def test_bool_and_not_contradiction(self):
+    a = Variable("a", 0, 10)
+    c = a<10
+    self.helper_test_variable(c & c.logical_not(), False, False, "False")
 
   def test_mod_factor_negative(self):
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
@@ -923,6 +933,46 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = b.substitute({a: uconst(1)})
     assert c == uconst(2)
 """
+
+class TestInvalidIndex(unittest.TestCase):
+  def test_invalid_times_0(self):
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())*0
+    self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+
+  def test_invalid_comparison_drops_invalid(self):
+    # comparisons return a bool, and bools can't be invalid
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())<3
+    self.assertIs(idx.simplify(), (ridx<3), "comparison of index should drop the invalid")
+    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0),
+      "comparison of index should drop the invalid")
+
+  def test_alu_moves_inside_invalid(self):
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())*10
+    self.assertIs(idx.simplify(), (ridx<5).where(ridx*10, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+
+  def test_merge_invalid_conditions(self):
+    ridx0 = Variable("ridx0", 0, 10)
+    ridx1 = Variable("ridx1", 0, 10)
+    idx0 = (ridx0<5).where(ridx0, UOp.invalid())
+    idx1 = (ridx1<5).where(idx0//2, UOp.invalid())
+    self.assertIs(idx1.simplify(), ((ridx1<5)&(ridx0<5)).where(ridx0//2, UOp.invalid()),
+      "valid inside a valid should make a single valid and & the conditions")
+
+  def test_alu_invalid(self):
+    self.assertIs((UOp.invalid()*2).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()*0).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()+8).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()+Variable("a",0,10)).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()*Variable("a",0,10)).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
+
+  def test_alu_invalid_vconst(self):
+    c1 = UOp.const(dtypes.index.vec(4), (1, 1, Invalid, Invalid))
+    c2 = UOp.const(dtypes.index.vec(4), (1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.index.vec(4), (2, Invalid, Invalid, Invalid)))
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):

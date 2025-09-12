@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
@@ -10,7 +10,8 @@ from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
-  idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.int, val)])
+  valid_idx = st.reshape((st.size,)).to_valid_uop([UOp.const(dtypes.int, val)])
+  idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is Ops.CONST and valid.op is Ops.CONST
   return idx.arg, valid.arg
@@ -68,7 +69,7 @@ class CheckingShapeTracker:
   def contiguous(self): return self.st.contiguous
 
   def assert_same(self):
-    x = [(v[0] if (v:=shapetracker_getitem(self.st, i))[1] else -1) for i in range(prod(self.st.shape))]
+    x = [(v[0] if (v:=shapetracker_getitem(self.st, i))[1] and v[0] is not Invalid else -1) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
@@ -154,7 +155,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
       View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (132, None, None, None, None))
+    self.assertEqual(st.real_strides(), (132, 12, None, None, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
@@ -619,20 +620,6 @@ class TestMaskedShapeTracker(unittest.TestCase):
     st3.reshape((4, 3, 6, 5))
     st3.assert_same()
 
-  def test_axis_is_masked(self):
-    st = ShapeTracker.from_shape((100, 100, 100, 100)).pad(((0,1),(0,0),(2,0), (0,0)))
-    assert st.axis_is_masked(0)
-    assert not st.axis_is_masked(1)
-    assert st.axis_is_masked(2)
-    assert not st.axis_is_masked(3)
-
-  def test_axis_is_masked_rw1(self):
-    st = ShapeTracker(views=(View(shape=(1, 2, 1, 4, 4, 13, 4, 13), strides=(0, 324, 0, 81, 0, 9, 0, 1), offset=-20,
-                                  mask=((0, 1), (0, 2), (0, 1), (0, 4), (0, 4), (2, 11), (0, 4), (2, 11)), contiguous=False),
-                             View(shape=(2, 4, 11, 11, 4, 3, 3), strides=(10816, 0, 52, 1, 2704, 728, 14), offset=0,
-                                  mask=None, contiguous=False)))
-    assert not st.axis_is_masked(0)
-
 class TestShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -830,12 +817,14 @@ class TestShapeTrackerSize(unittest.TestCase):
 class TestRender(unittest.TestCase):
   def test_render(self):
     st = ShapeTracker.from_shape((2, 3))
-    idx, valid = st.to_indexed_uops()
+    valid_idx = st.to_valid_uop()
+    idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
     self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
     self.assertEqual(valid.render(), "True")
 
     st = st.pad(((0, 1), (0, 0)))
-    idx, valid = st.to_indexed_uops()
+    valid_idx = st.to_valid_uop()
+    idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
     self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
     self.assertEqual(valid.render(), "(ridx0<2)")
 

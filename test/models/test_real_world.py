@@ -114,7 +114,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 93)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "GPU", "LLVM"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
@@ -166,10 +166,6 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
           data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.25, 347)
-
-  def test_bert_fuse_arange(self):
-    with Context(FUSE_ARANGE=1):
-      self.test_bert()
 
 if __name__ == '__main__':
   unittest.main()
