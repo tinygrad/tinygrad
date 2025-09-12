@@ -2,7 +2,7 @@ import onnx, yaml, tempfile, time, argparse, json
 from pathlib import Path
 from typing import Any
 from tinygrad.frontend.onnx import OnnxRunner
-from extra.onnx_helpers import validate, get_example_inputs
+from extra.onnx_helpers import validate, get_example_inputs, truncate_model
 from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
 
 def get_config(root_path: Path) -> dict[str, Any]:
@@ -40,12 +40,7 @@ def validate_repos(models:dict[str, tuple[Path, Path]]):
 def debug_run(model_path, truncate, config, rtol, atol):
   if truncate != -1:
     model = onnx.load(model_path)
-    nodes_up_to_limit = list(model.graph.node)[:truncate + 1]
-    new_output_values = [onnx.helper.make_empty_tensor_value_info(output_name) for output_name in nodes_up_to_limit[-1].output]
-    model.graph.ClearField("node")
-    model.graph.node.extend(nodes_up_to_limit)
-    model.graph.ClearField("output")
-    model.graph.output.extend(new_output_values)
+    model = truncate_model(model, truncate)
     with tempfile.NamedTemporaryFile(suffix=model_path.suffix) as tmp:
       onnx.save(model, tmp.name)
       run_huggingface_validate(tmp.name, config, rtol, atol)
