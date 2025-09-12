@@ -419,13 +419,16 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
+    ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
+    return ret.forced_reshape(shape).replace(tag=x.arg.tags)
   else:
     if not locals_allowed: return None
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
-  ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
-  return ret.forced_reshape(shape).replace(tag=x.arg.tags)
+    # store has the other dtype here
+    # TODO: how is this unified?
+    return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
