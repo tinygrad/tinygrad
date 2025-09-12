@@ -37,9 +37,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # copy reorder
   # TODO: this is causing many copies wih the replace tag None
   # RESHAPE after COPY
-  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
+  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
-  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
+  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
@@ -515,21 +515,7 @@ def split_store(ctx:list[UOp], x:UOp):
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None]))))
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
-  ret = x.as_buf().assign(kernel)
-
-  # put the stores in becomes map
-  """
-  if x.arg is not None:
-    shape = x.arg[1]
-    for a in x.arg[0]:
-      if a is None: continue
-      # NOTE: shape should be preserved, if it's not there's a bug
-      uop_in_tensor_graph = uop_list[a]
-      assert shape == uop_in_tensor_graph.shape, f"shape mismatch {ret.shape} != {uop_in_tensor_graph.shape}"
-      becomes_map[uop_in_tensor_graph] = ret.reshape(shape)
-  """
-
-  return ret
+  return x.as_buf().assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
@@ -592,5 +578,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   for s in tsink.src:
     assert s.tag is not None
     for a in s.tag:
+      if a is None: continue
       becomes_map[uop_list[a]] = s.replace(tag=None)
   return becomes_map
