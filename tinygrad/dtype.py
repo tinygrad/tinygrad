@@ -188,10 +188,10 @@ class dtypes:
   masks = (mask8, mask16, mask32, mask64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
-  ints8 = (uint8, int8)
-  ints16 = (uint16, int16)
-  ints32 = (uint32, int32)
-  ints64 = (uint64, int64)
+  int8s = (uint8, int8)
+  int16s = (uint16, int16)
+  int32s = (uint32, int32)
+  int64s = (uint64, int64)
   ints = uints + sints
   all = floats + ints + (bool, index)
 
