@@ -1225,8 +1225,7 @@ class Tensor(MathTrait):
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
-        bshape = _broadcast_shape(x.shape, v.shape)
-        vb = v.cast(self.dtype)._broadcast_to(bshape)
+        vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
