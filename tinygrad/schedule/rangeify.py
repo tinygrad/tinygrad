@@ -3,7 +3,7 @@ import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
-from tinygrad.uop.symbolic import sym
+from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
 
@@ -538,6 +538,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
+  #tsink = graph_rewrite(tsink, symbolic_simple, bottom_up=True, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
