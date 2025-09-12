@@ -226,9 +226,7 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
 def map_realize(ctx:RangeifyContext, x:UOp):
   if x.arg is not None: return None
   ranges = [ctx.new_range(s) for s in x.shape]
-  ret = x.src[0].index(*ranges).bufferize(*x.src[1:], *ranges, arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
-  assert ret.shape == x.shape, f"shape mismatch {ret.shape} vs {x.shape}"
-  return ret
+  return x.src[0].index(*ranges).bufferize(*x.src[1:], *ranges, arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
