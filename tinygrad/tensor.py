@@ -77,6 +77,11 @@ def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
+def _has_real_buffer(t: Tensor) -> bool:
+  base = t.uop.base
+  # True if this tensor ultimately points at concrete storage
+  return base.op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT)
+
 # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
 def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
@@ -1188,128 +1193,9 @@ class Tensor(MathTrait):
       if index is not None: dim += 1
     return indices_parsed
 
-  def _getitem(self, indices, v: Tensor|None = None, *, as_mask: bool=False, set_with: Tensor|None=None) -> Tensor:
+  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     indices_parsed = self._parse_indices(indices)
     x = self
-
-# one-shot setitem path:
-# Build a full-shape mask and padded RHS using only movement ops (shrink/flip/reshape/pad),
-# then return a fused `where`. We support:
-#   • slices with step ∈ {1, >1, -1}
-#   • integer indexing (treated as a 1-element slice)
-#   • Ellipsis / None (ellipsis is already normalized; None axes do not consume a dim)
-# We defer tensor/list (advanced) indexing to the fallback path by raising NotImplemented.
-    if set_with is not None:
-      # bail out to advanced path if any index is a Tensor (or list converted to Tensor)
-      if any(isinstance(ip["index"], Tensor) for ip in indices_parsed):
-        raise NotImplementedError("advanced/tensor indexing handled by fallback")
-      n_sels: list[sint] = []
-      span_lens: list[sint] = []
-      pad_spec: list[tuple[sint, sint]] = []
-      steps_abs: list[int] = []
-      rhs_flip_axes_local: list[int] = []
-      consumed_axis_map: list[int] = []
-      src_ax = 0
-      for ent in indices_parsed:
-        idx = ent["index"]
-        if idx is None:
-          continue
-        size_src = self.shape[src_ax]
-        # integer indexing -> treat as [pos:pos+1] forward slice
-        if isinstance(idx, int) or isinstance(idx, UOp):
-          pos = ent["boundary"][0]
-          n_sel = cast(sint, 1)
-          span_len = cast(sint, 1)
-          pad_before = cast(sint, pos)
-          pad_after  = cast(sint, size_src - (pos + 1))
-          step_abs = 1
-          n_sels.append(n_sel); span_lens.append(span_len)
-          pad_spec.append((pad_before, pad_after))
-          steps_abs.append(step_abs)
-          consumed_axis_map.append(src_ax)
-          src_ax += 1
-          continue
-        # slice indexing
-        if isinstance(idx, slice):
-          slc: slice = idx
-          start_raw, stop_raw, step_raw = slc.indices(size_src) if all(isinstance(x, int) for x in (slc.start, slc.stop, slc.step) if x is not None) else (slc.start, slc.stop, slc.step)
-          if not isinstance(step_raw, int):
-            raise NotImplementedError("symbolic step not supported in fast setitem")
-          if step_raw > 0:
-            start_pad = start_raw
-            step_abs = step_raw
-            n_sel = cast(sint, ceildiv(stop_raw - start_raw, step_abs))
-            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
-            flip_local = False
-          else:
-            step_abs = -step_raw
-            n_sel = cast(sint, ceildiv((start_raw - stop_raw), step_abs))
-            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
-            start_pad = cast(sint, start_raw - (n_sel - 1) * step_abs)
-            flip_local = True
-          pad_before = cast(sint, start_pad)
-          pad_after = cast(sint, size_src - (start_pad + span_len))
-          n_sels.append(n_sel)
-          span_lens.append(span_len)
-          pad_spec.append((pad_before, pad_after))
-          steps_abs.append(step_abs)
-          if flip_local:
-            rhs_flip_axes_local.append(len(n_sels)-1)
-          consumed_axis_map.append(src_ax)
-          src_ax += 1
-          continue
-        raise NotImplementedError("advanced indexing handled by fallback")
-      compact_shape = tuple(n_sels) if len(n_sels) else (1,)
-      mask_local = Tensor.ones(compact_shape, device=self.device, dtype=dtypes.bool)
-      rhs_local = set_with.cast(self.dtype)
-      rhs_local = rhs_local._broadcast_to(_broadcast_shape(tuple(n_sels) if len(n_sels) else (1,), rhs_local.shape))
-      def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
-        if step_abs == 1:
-          return t
-        shp = list(t.shape)
-        assert shp[axis] == n_sel
-        t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
-        pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
-        t = t.pad(pads)
-        shp2 = list(t.shape)
-        merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
-        t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
-        shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
-        return t.shrink(shr)
-      for ax_local, (n_sel, step_abs, span_len) in enumerate(zip(n_sels, steps_abs, span_lens)):
-        mask_local = _inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
-        rhs_local  = _inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
-      if rhs_flip_axes_local:
-        rhs_local = rhs_local.flip(tuple(rhs_flip_axes_local))
-      mask_full = mask_local.pad(tuple(pad_spec)) if len(pad_spec) else mask_local
-      rhs_full  = rhs_local.pad(tuple(pad_spec)) if len(pad_spec) else rhs_local
-      if mask_full.shape != self.shape or rhs_full.shape != self.shape:
-        raise NotImplementedError("shape mismatch in fast setitem; falling back")
-      return mask_full.where(rhs_full, self)
-
-
-    # fast path: when requested, return a full-shape boolean mask for pure slicing
-    if as_mask:
-      unsupported = any((ip["index"] is not None) and (not isinstance(ip["index"], slice)) for ip in indices_parsed)
-      if unsupported:
-        raise NotImplementedError("as_mask only supports slicing indices for now")
-      mask = Tensor(True, device=self.device, dtype=dtypes.bool)
-      ax = 0
-      for ent in indices_parsed:
-        if ent["index"] is None:
-          continue
-        size_src = self.shape[ax]
-        start, stop = ent["boundary"]
-        step = ent["stride"]
-        step_abs = -step if isinstance(step, int) and step < 0 else step
-        k = Tensor.arange(size_src, device=self.device, dtype=dtypes.int).reshape((1,)*ax + (size_src,) + (1,)*(self.ndim-ax-1))
-        cond = (k >= start) & (k < stop)
-        if isinstance(step_abs, int) and step_abs != 1:
-          cond = cond & (((k - start) % step_abs) == 0)
-        mask = mask & cond
-        ax += 1
-      return mask.expand(self.shape)
-
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
@@ -1401,6 +1287,20 @@ class Tensor(MathTrait):
     """
     return self._getitem(indices)
 
+  def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
+    if step_abs == 1:
+      return t
+    shp = list(t.shape)
+    assert shp[axis] == n_sel
+    t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
+    pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
+    t = t.pad(pads)
+    shp2 = list(t.shape)
+    merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
+    t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
+    shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
+    return t.shrink(shr)
+
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
@@ -1410,102 +1310,83 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     indices_parsed = self._parse_indices(indices)
-    has_advanced = any(isinstance(ip["index"], Tensor) for ip in indices_parsed)
-    if has_advanced:
+    if any(isinstance(ip["index"], Tensor) for ip in indices_parsed):
       # Fallback path uses the existing advanced-index machinery (_masked_setitem etc.)
       newval = self._getitem(indices, v=v)
       self.assign(newval)
       return
     # Try the fast one-shot builder (returns a fused Tensor expr)
-    try:
-      n_sels: list[sint] = []
-      span_lens: list[sint] = []
-      pad_spec: list[tuple[sint, sint]] = []
-      steps_abs: list[int] = []
-      rhs_flip_axes_local: list[int] = []
-      consumed_axis_map: list[int] = []
-      src_ax = 0
-      for ent in indices_parsed:
-        idx = ent["index"]
-        if idx is None:
-          continue
-        size_src = self.shape[src_ax]
-        if isinstance(idx, int) or isinstance(idx, UOp):
-          pos = ent["boundary"][0]
-          n_sel = cast(sint, 1)
-          span_len = cast(sint, 1)
-          pad_before = cast(sint, pos)
-          pad_after  = cast(sint, size_src - (pos + 1))
-          step_abs = 1
-          n_sels.append(n_sel); span_lens.append(span_len)
-          pad_spec.append((pad_before, pad_after))
-          steps_abs.append(step_abs)
-          consumed_axis_map.append(src_ax)
-          src_ax += 1
-          continue
-        if isinstance(idx, slice):
-          slc: slice = idx
-          start_raw, stop_raw, step_raw = slc.indices(size_src) if all(isinstance(x, int) for x in (slc.start, slc.stop, slc.step) if x is not None) else (slc.start, slc.stop, slc.step)
-          if not isinstance(step_raw, int):
-            raise NotImplementedError("symbolic step not supported in fast setitem")
-          if step_raw > 0:
-            start_pad = start_raw
-            step_abs = step_raw
-            n_sel = cast(sint, ceildiv(stop_raw - start_raw, step_abs))
-            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
-            flip_local = False
-          else:
-            step_abs = -step_raw
-            n_sel = cast(sint, ceildiv((start_raw - stop_raw), step_abs))
-            span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
-            start_pad = cast(sint, start_raw - (n_sel - 1) * step_abs)
-            flip_local = True
-          pad_before = cast(sint, start_pad)
-          pad_after = cast(sint, size_src - (start_pad + span_len))
-          n_sels.append(n_sel)
-          span_lens.append(span_len)
-          pad_spec.append((pad_before, pad_after))
-          steps_abs.append(step_abs)
-          if flip_local:
-            rhs_flip_axes_local.append(len(n_sels)-1)
-          consumed_axis_map.append(src_ax)
-          src_ax += 1
-          continue
-        raise NotImplementedError("advanced indexing handled by fallback")
-      compact_shape = tuple(n_sels) if len(n_sels) else (1,)
-      mask_local = Tensor.ones(compact_shape, device=self.device, dtype=dtypes.bool)
-      rhs_local = v.cast(self.dtype)
-      rhs_local = rhs_local._broadcast_to(_broadcast_shape(tuple(n_sels) if len(n_sels) else (1,), rhs_local.shape))
-      def _inflate_axis(t: Tensor, axis: int, n_sel: sint, step_abs: int, span_len: sint) -> Tensor:
-        if step_abs == 1:
-          return t
-        shp = list(t.shape)
-        assert shp[axis] == n_sel
-        t = t.reshape(tuple(shp[:axis] + [n_sel, 1] + shp[axis+1:]))
-        pads = tuple(None if i != axis+1 else (0, step_abs-1) for i in range(t.ndim))
-        t = t.pad(pads)
-        shp2 = list(t.shape)
-        merged = int(n_sel) * int(step_abs) if isinstance(n_sel, int) else (n_sel * step_abs)
-        t = t.reshape(tuple(shp2[:axis] + [merged] + shp2[axis+2:]))
-        shr = tuple((0, span_len) if i == axis else None for i in range(t.ndim))
-        return t.shrink(shr)
-      for ax_local, (n_sel, step_abs, span_len) in enumerate(zip(n_sels, steps_abs, span_lens)):
-        mask_local = _inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
-        rhs_local  = _inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
-      if rhs_flip_axes_local:
-        rhs_local = rhs_local.flip(tuple(rhs_flip_axes_local))
-      mask_full = mask_local.pad(tuple(pad_spec)) if len(pad_spec) else mask_local
-      rhs_full  = rhs_local.pad(tuple(pad_spec)) if len(pad_spec) else rhs_local
-      if mask_full.shape != self.shape or rhs_full.shape != self.shape:
-        raise NotImplementedError("shape mismatch in fast setitem; falling back")
-      result = mask_full.where(rhs_full, self)
-      # Write the result back into the existing buffer so TinyJit captures a single in-place store.
-      self.assign(result)
-      return
-    except NotImplementedError:
-      newval = self._getitem(indices, v=v)
-      self.assign(newval)
-      return
+    n_sels: list[sint] = []
+    span_lens: list[sint] = []
+    pad_spec: list[tuple[sint, sint]] = []
+    steps_abs: list[int] = []
+    rhs_flip_axes_local: list[int] = []
+    src_ax = 0
+    for ent in indices_parsed:
+      idx = ent["index"]
+      if idx is None:
+        continue
+      size_src = self.shape[src_ax]
+      if isinstance(idx, int) or isinstance(idx, UOp):
+        pos = ent["boundary"][0]
+        n_sel = cast(sint, 1)
+        span_len = cast(sint, 1)
+        pad_before = cast(sint, pos)
+        pad_after  = cast(sint, size_src - (pos + 1))
+        step_abs = 1
+        n_sels.append(n_sel); span_lens.append(span_len)
+        pad_spec.append((pad_before, pad_after))
+        steps_abs.append(step_abs)
+        src_ax += 1
+        continue
+      if isinstance(idx, slice):
+        slc: slice = idx
+        start_raw, stop_raw, step_raw = slc.indices(size_src) if all(isinstance(x, int) for x in (slc.start, slc.stop, slc.step) if x is not None) else (slc.start, slc.stop, slc.step)
+        if not isinstance(step_raw, int):
+          raise NotImplementedError("symbolic step not supported in fast setitem")
+        if step_raw > 0:
+          start_pad = start_raw
+          step_abs = step_raw
+          n_sel = cast(sint, ceildiv(stop_raw - start_raw, step_abs))
+          span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
+          flip_local = False
+        else:
+          step_abs = -step_raw
+          n_sel = cast(sint, ceildiv((start_raw - stop_raw), step_abs))
+          span_len = cast(sint, 0 if resolve(n_sel == 0, False) else ((n_sel - 1) * step_abs + 1))
+          start_pad = cast(sint, start_raw - (n_sel - 1) * step_abs)
+          flip_local = True
+        pad_before = cast(sint, start_pad)
+        pad_after = cast(sint, size_src - (start_pad + span_len))
+        n_sels.append(n_sel)
+        span_lens.append(span_len)
+        pad_spec.append((pad_before, pad_after))
+        steps_abs.append(step_abs)
+        if flip_local:
+          rhs_flip_axes_local.append(len(n_sels)-1)
+        src_ax += 1
+        continue
+      raise NotImplementedError("advanced indexing handled by fallback")
+    compact_shape = tuple(n_sels) if len(n_sels) else (1,)
+    mask_local = Tensor.ones(compact_shape, device=self.device, dtype=dtypes.bool)
+    rhs_local = v.cast(self.dtype)
+    rhs_local = rhs_local._broadcast_to(_broadcast_shape(tuple(n_sels) if len(n_sels) else (1,), rhs_local.shape))
+
+    for ax_local, (n_sel, step_abs, span_len) in enumerate(zip(n_sels, steps_abs, span_lens)):
+      mask_local = Tensor._inflate_axis(mask_local, ax_local, n_sel, step_abs, span_len)
+      rhs_local  = Tensor._inflate_axis(rhs_local,  ax_local, n_sel, step_abs, span_len)
+    if rhs_flip_axes_local:
+      rhs_local = rhs_local.flip(tuple(rhs_flip_axes_local))
+    mask_full = mask_local.pad(tuple(pad_spec)) if len(pad_spec) else mask_local
+    rhs_full  = rhs_local.pad(tuple(pad_spec)) if len(pad_spec) else rhs_local
+    if mask_full.shape != self.shape or rhs_full.shape != self.shape:
+      raise NotImplementedError("shape mismatch in fast setitem; falling back")
+    
+    result = mask_full.where(rhs_full, self)
+
+    self.uop = result.uop
+    return
+
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
@@ -4003,16 +3884,22 @@ class Tensor(MathTrait):
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
-  def __imul__(self, x) -> Tensor: return self.assign(self.mul(x))
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
-  def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
-  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
-  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
-  def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x))
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
+  def __imul__(self, x) -> Tensor:
+    self.__setitem__(Ellipsis, self.mul(x))
+    return self
+    # if _has_real_buffer(self):
+    #   return self.replace(self.mul(x))
+    # else:
+    #   return self.assign(self.mul(x))
+  def __ipow__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.pow(x)) or self
+  def __itruediv__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.div(x)) or self
+  def __ifloordiv__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.__floordiv__(x)) or self
+  def __imatmul__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.matmul(x)) or self
+  def __iand__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_and(x)) or self
+  def __ior__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_or(x)) or self
+  def __ixor__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.bitwise_xor(x)) or self
+  def __ilshift__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.lshift(x)) or self
+  def __irshift__(self, x) -> Tensor: return self.__setitem__(Ellipsis, self.rshift(x)) or self
 
   def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
   def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
