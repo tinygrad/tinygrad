@@ -2107,6 +2107,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2),
       lambda x,w: Tensor.conv_transpose2d(x,w,groups=2), grad_rtol=1e-5)
 
+  @slow_test
   def test_padded_conv_transpose2d(self):
     for padding in [(1,2), (2,1), 2, 1, 0]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
@@ -2276,6 +2277,7 @@ class TestOps(unittest.TestCase):
   def test_strided_conv2d_simple_vec(self):
     with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
 
+  @slow_test
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
