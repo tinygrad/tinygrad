@@ -2,7 +2,7 @@ import struct, sys
 from typing import cast
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType, truncate
-from tinygrad.muop import Register, Memory, Label, Operand, MUOp, MUOpX86
+from tinygrad.muop import Register, Memory, Label, Operand, MUOp, MUOpX86, MUOpA64
 from tinygrad.uop.ops import UPat, UOp, Ops, GroupOp, PatternMatcher
 from tinygrad.uop.spec import x86_spec
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu, load_store_folding
@@ -655,5 +655,237 @@ class X86Renderer(ISARenderer):
                [MUOpX86.RM_I("sub", 0x81, 5, rsp, self.stack_size)]
     epilogue = [MUOpX86.RM_I("add", 0x81, 0, rsp, self.stack_size)] + \
                [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, rbp)]
+    kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
+    return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
+
+# *** ARM64 ***
+
+a64_pre_matcher = PatternMatcher([])
+a64_extra_matcher = PatternMatcher([])
+#https://developer.arm.com/documentation/ddi0602/2025-06/SIMD-FP-Instructions
+a64_vec_lowerer = PatternMatcher([
+  # casts
+  (UPat.var("y", dtypes.uint16).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.V_V("ucvtf", 0b110110, ctx[x], ctx[y], 0b11, 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.uint32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.V_V("ucvtf", 0b110110, ctx[x], ctx[y], 0b00, 0b00, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.V_V("ucvtf", 0b110110, ctx[x], ctx[y], 0b00, 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.int16).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.V_V("scvtf", 0b110110, ctx[x], ctx[y], 0b11, 0b01, 0b1)),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.V_V("scvtf", 0b110110, ctx[x], ctx[y], 0b00, 0b00, 0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.V_V("scvtf", 0b110110, ctx[x], ctx[y], 0b00, 0b01, 0b1)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.uint16, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzu", 0b101110, ctx[x], ctx[y], 0b11, 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.float32).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzu", 0b101110, ctx[x], ctx[y], 0b00, 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.float64).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzu", 0b101110, ctx[x], ctx[y], 0b00, 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat.var("y", dtypes.float16).cast(dtypes.int16, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzs", 0b101110, ctx[x], ctx[y], 0b11, 0b11, 0b1, 0b0)), # noqa: E501
+  (UPat.var("y", dtypes.float32).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzs", 0b101110, ctx[x], ctx[y], 0b00, 0b10, 0b1, 0b0)), # noqa: E501
+  (UPat.var("y", dtypes.float64).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.V_V("fcvtzs", 0b101110, ctx[x], ctx[y], 0b00, 0b11, 0b1, 0b0)), # noqa: E501
+  # unary
+  (UPat.var("y", dtypes.float16).sqrt().named("x"), lambda ctx,y,x: MUOpA64.V_V("fsqrt", 0b111110, ctx[x], ctx[y], 0b11, 0b11, 0b1, 0b1)),
+  (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda ctx,y,x: MUOpA64.V_V("fsqrt", 0b111110, ctx[x], ctx[y], 0b00, 0b10, 0b1, 0b1)),
+  (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda ctx,y,x: MUOpA64.V_V("fsqrt", 0b111110, ctx[x], ctx[y], 0b00, 0b11, 0b1, 0b1)),
+  (UPat.var("y", dtypes.float16).trunc().named("x"), lambda ctx,y,x: MUOpA64.V_V("frintz", 0b100110, ctx[x], ctx[y], 0b11, 0b11, 0b1, 0b0)),
+  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda ctx,y,x: MUOpA64.V_V("frintz", 0b100110, ctx[x], ctx[y], 0b00, 0b10, 0b1, 0b0)),
+  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda ctx,y,x: MUOpA64.V_V("frintz", 0b100110, ctx[x], ctx[y], 0b00, 0b11, 0b1, 0b0)),
+  # binary
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("and", 0b000111, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) | UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("orr", 0b000111, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints+(dtypes.bool,)) ^ UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("eor", 0b000111, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("add", 0b100001, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints16) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("add", 0b100001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("add", 0b100001, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("add", 0b100001, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.float16) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fadd", 0b000101, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.float32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fadd", 0b110101, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.float64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fadd", 0b110101, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints8) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("mul", 0b100111, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints16) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("mul", 0b100111, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints32) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("mul", 0b100111, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.float16) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fmul", 0b000111, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1, 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.float32) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fmul", 0b110111, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  ((UPat.var("a", dtypes.float64) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fmul", 0b110111, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1)), # noqa: E501
+  # TODO: for >> the values must be negative
+  (UPat((Ops.SHL, Ops.SHR), dtypes.uint8, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("ushl", 0b010001, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.uint16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("ushl", 0b010001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.uint32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("ushl", 0b010001, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.uint64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("ushl", 0b010001, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.int8, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sshl", 0b010001, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.int16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sshl", 0b010001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.int32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sshl", 0b010001, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b0)), # noqa: E501
+  (UPat((Ops.SHL, Ops.SHR), dtypes.int64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sshl", 0b010001, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints8, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sub", 0b100001, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sub", 0b100001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sub", 0b100001, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("sub", 0b100001, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.float16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fsub", 0b000101, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b0, 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fsub", 0b110101, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fsub", 0b110101, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fdiv", 0b001111, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fdiv", 0b111111, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fdiv", 0b111111, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmgt", 0b001101, ctx[x], ctx[b], ctx[a], 0b00, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmgt", 0b001101, ctx[x], ctx[b], ctx[a], 0b01, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmgt", 0b001101, ctx[x], ctx[b], ctx[a], 0b10, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmgt", 0b001101, ctx[x], ctx[b], ctx[a], 0b11, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmgt", 0b001001, ctx[x], ctx[b], ctx[a], 0b11, 0b1, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmgt", 0b111001, ctx[x], ctx[b], ctx[a], 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmgt", 0b111001, ctx[x], ctx[b], ctx[a], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints8), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmeq", 0b100011, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmeq", 0b100011, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmeq", 0b100011, ctx[x], ctx[a], ctx[b], 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("cmeq", 0b100011, ctx[x], ctx[a], ctx[b], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmeq", 0b001001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0, 0b0)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmeq", 0b111001, ctx[x], ctx[a], ctx[b], 0b00, 0b1, 0b0)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.V_V_V("fcmeq", 0b111001, ctx[x], ctx[a], ctx[b], 0b01, 0b1, 0b0)), # noqa: E501
+  # ternary, TODO: these need a move before
+  (UPat.var("m").where(UPat.var("a"), UPat.var("b")).named("x"), lambda ctx,m,a,b,x: [MUOpA64.V_V_V("bsl", 0b000111, ctx[x], ctx[a], ctx[b], 0b01, 0b1)]), # noqa: E501
+  (UPat(Ops.MULACC, dtypes.ints8, name="x"), lambda ctx,x: [MUOpA64.V_V_V("mla", 0b100101, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b00, 0b1)]),
+  (UPat(Ops.MULACC, dtypes.ints16, name="x"), lambda ctx,x: [MUOpA64.V_V_V("mla", 0b100101, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b01, 0b1)]),
+  (UPat(Ops.MULACC, dtypes.ints32, name="x"), lambda ctx,x: [MUOpA64.V_V_V("mla", 0b100101, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b10, 0b1)]),
+  (UPat(Ops.MULACC, dtypes.float16, name="x"), lambda ctx,x: [MUOpA64.V_V_V("fmla", 0b000011, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b01, 0b1, 0b1)]), # noqa: E501
+  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda ctx,x: [MUOpA64.V_V_V("fmla", 0b110011, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b00, 0b1)]),
+  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda ctx,x: [MUOpA64.V_V_V("fmla", 0b110011, ctx[x], ctx[x.src[1]], ctx[x.src[2]], 0b01, 0b1)]),
+])
+
+def a64_abi(ctx, x:UOp):
+  i = ctx.arg_pos
+  if i < 8: return MUOpA64.R_R_R("mov", 0b0101010, ctx[x], MUOpA64.GPR[i])
+  return MUOpA64.R_R_I("ldr", 0b1111001, ctx[x], Register("x29", 29, 8), (i-7)*8+8, 0b1, 0b01)
+
+dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
+dt_16bit = tuple(dt for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 2 and dt.vec(l) not in dtypes.ints16)
+dt_32bit = tuple(dt for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 4 and dt.vec(l) not in dtypes.ints32)
+dt_64bit = tuple(dt for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 8 and dt.vec(l) not in dtypes.ints64)
+dt_128bit = tuple(dt for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 16)
+#https://developer.arm.com/documentation/ddi0602/2025-06/Base-Instructions
+a64_lowerer = PatternMatcher([
+  # float/packed load/store
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_16bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b01, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_32bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b10, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_64bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b11, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_128bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b00, 0b11)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dt_16bit), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b01, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dt_32bit), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b10, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dt_64bit), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b11, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dt_128bit), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b00, 0b10)), # noqa: E501
+  # TODO: can load/store 256 bits with ldp/stp, requires multiple outs. Then the load needs to be followed by two noops
+  # use vec_lowerer for vector dtypes
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: a64_vec_lowerer.rewrite(x, ctx) if x.dtype.count > 1 or x.op is Ops.STORE and x.src[1].dtype.count > 1 else None), # noqa: E501
+  # int load/store
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints8+(dtypes.bool,), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("ldrb", 0b0111001, ctx[x], ctx[a], c.arg, 0b0, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints16, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("ldrh", 0b1111001, ctx[x], ctx[a], c.arg, 0b0, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints32, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("ldr", 0b0111001, ctx[x], ctx[a], c.arg, 0b1, 0b01)), # noqa: E501
+  (UPat.var("a").load(UPat.cvar("c"), dtype=dtypes.ints64, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("ldr", 0b1111001, ctx[x], ctx[a], c.arg, 0b1, 0b01)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints8+(dtypes.bool,)), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("strb", 0b0111001, ctx[x], ctx[a], c.arg, 0b0, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints16), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("strh", 0b1111001, ctx[x], ctx[a], c.arg, 0b0, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints32), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("str", 0b0111001, ctx[x], ctx[a], c.arg, 0b1, 0b00)), # noqa: E501
+  (UPat.var("a").store(UPat.var("b", dtypes.ints64), UPat.cvar("c"), allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.R_R_I("str", 0b1111001, ctx[x], ctx[a], c.arg, 0b1, 0b00)), # noqa: E501
+  # defines, define global is modeled as a move from real to vitual
+  (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), name="x"), a64_abi),
+  #(UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], Register("rbp", 5, 8), 1),
+  #                                                                    MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4), 1)]),
+  # index
+  (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg*a.base.scalar().dtype.itemsize, 0b0)), # noqa: E501
+  (UPat.var("a").index(UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("add", 0b0001011, ctx[x], ctx[a], ctx[b], 0b0, 0b00, a.base.scalar().dtype.itemsize)), # noqa: E501
+  # casts
+  (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("uxtb", 0b1010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b000111)), # noqa: E501
+  (UPat.var("y", dtypes.uint16).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("uxth", 0b1010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b001111)), # noqa: E501
+  (UPat.var("y", dtypes.int8).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("sxtb", 0b0010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b000111)), # noqa: E501
+  (UPat.var("y", dtypes.int8).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("sxtb", 0b0010011, ctx[x], ctx[y], 0b00000, 0b1, 0b01, 0b000111)), # noqa: E501
+  (UPat.var("y", dtypes.int16).cast(dtypes.ints32, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("sxth", 0b0010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b001111)), # noqa: E501
+  (UPat.var("y", dtypes.int16).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("sxth", 0b0010011, ctx[x], ctx[y], 0b00000, 0b1, 0b01, 0b001111)), # noqa: E501
+  (UPat.var("y", dtypes.int32).cast(dtypes.ints64, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("sxtw", 0b0010011, ctx[x], ctx[y], 0b00000, 0b1, 0b01, 0b011111)), # noqa: E501
+  (UPat.var("y", dtypes.uint32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b11)),
+  (UPat.var("y", dtypes.uint32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b00)),
+  (UPat.var("y", dtypes.uint32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b01)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b11, b31=0b1)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b00, b31=0b1)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b11)),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b00)),
+  (UPat.var("y", dtypes.int32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b01)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b11, b31=0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b00, b31=0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b11)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b00)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b01)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b11, b31=0b1)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b00, b31=0b1)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b11)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b00)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b01)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b11, b31=0b1)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b00, b31=0b1)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b01, b31=0b1)),
+  # binary with immediate
+  ((UPat.var("a", dtypes.ints64) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg, 0b1, 0b00)),
+  ((UPat.var("a", dtypes.ints) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg, 0b0, 0b00)),
+  ((UPat.var("a", dtypes.ints64) << UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("lsl", 0b1010011, ctx[x], ctx[a], c.arg, 0b1, 0b01)),
+  ((UPat.var("a", dtypes.ints) << UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("lsl", 0b1010011, ctx[x], ctx[a], c.arg, 0b0, 0b00)),
+  ((UPat.var("a", dtypes.uint64) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("lsr", 0b1010011, ctx[x], ctx[a], c.arg, 0b1, 0b01)),
+  ((UPat.var("a", dtypes.uints) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("lsr", 0b1010011, ctx[x], ctx[a], c.arg, 0b0, 0b00)),
+  ((UPat.var("a", dtypes.int64) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("asr", 0b0010011, ctx[x], ctx[a], c.arg, 0b1, 0b01)),
+  ((UPat.var("a", dtypes.sints) >> UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("asr", 0b0010011, ctx[x], ctx[a], c.arg, 0b0, 0b00)),
+  # binary
+  ((UPat.var("a", dtypes.ints64) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("and", 0b0001010, ctx[x], ctx[a], ctx[b], 0b1)),
+  ((UPat.var("a", (dtypes.bool,)+dtypes.ints) & UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("and", 0b0001010, ctx[x], ctx[a], ctx[b], 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints64) | UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("orr", 0b0101010, ctx[x], ctx[a], ctx[b], 0b1)),
+  ((UPat.var("a", (dtypes.bool,)+dtypes.ints) | UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("orr", 0b0101010, ctx[x], ctx[a], ctx[b], 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints64) ^ UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("eor", 0b1001010, ctx[x], ctx[a], ctx[b], 0b1)),
+  ((UPat.var("a", (dtypes.bool,)+dtypes.ints) ^ UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("eor", 0b1001010, ctx[x], ctx[a], ctx[b], 0b0)), # noqa: E501
+  ((UPat.var("a", dtypes.ints64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("add", 0b0001011, ctx[x], ctx[a], ctx[b], 0b1)),
+  ((UPat.var("a", dtypes.ints) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("add", 0b0001011, ctx[x], ctx[a], ctx[b], 0b0)),
+  ((UPat.var("a", dtypes.float16) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fadd", 0b001010, ctx[x], ctx[a], ctx[b], 0b11)),
+  ((UPat.var("a", dtypes.float32) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fadd", 0b001010, ctx[x], ctx[a], ctx[b], 0b00)),
+  ((UPat.var("a", dtypes.float64) + UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fadd", 0b001010, ctx[x], ctx[a], ctx[b], 0b01)),
+  ((UPat.var("a", dtypes.ints64) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("mul", 0b0011011, ctx[x], ctx[a], ctx[b], 0b1, 0b00, 0b011111)), # noqa: E501
+  ((UPat.var("a", dtypes.ints) * UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("mul", 0b0011011, ctx[x], ctx[a], ctx[b], 0b0, 0b00, 0b011111)), # noqa: E501
+  ((UPat.var("a", dtypes.uint64) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("udiv", 0b0011010, ctx[x], ctx[a], ctx[b], 0b1, 0b11, 0b000010)), # noqa: E501
+  ((UPat.var("a", dtypes.uints) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("udiv", 0b0011010, ctx[x], ctx[a], ctx[b], 0b0, 0b11, 0b000010)), # noqa: E501
+  ((UPat.var("a", dtypes.int64) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("sdiv", 0b0011010, ctx[x], ctx[a], ctx[b], 0b1, 0b11, 0b000011)), # noqa: E501
+  ((UPat.var("a", dtypes.sints) // UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("sdiv", 0b0011010, ctx[x], ctx[a], ctx[b], 0b0, 0b11, 0b000011)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.R_R_R("sub", 0b1001011, ctx[x], ctx[a], ctx[b], 0b1)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.ints, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.R_R_R("sub", 0b1001011, ctx[x], ctx[a], ctx[b], 0b0)),
+  (UPat(Ops.SUB, dtypes.float16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fsub", 0b001110, ctx[x], ctx[a], ctx[b], 0b11)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fsub", 0b001110, ctx[x], ctx[a], ctx[b], 0b00)), # noqa: E501
+  (UPat(Ops.SUB, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fsub", 0b001110, ctx[x], ctx[a], ctx[b], 0b01)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float16, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fdiv", 0b000110, ctx[x], ctx[a], ctx[b], 0b11)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float32, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fdiv", 0b000110, ctx[x], ctx[a], ctx[b], 0b00)), # noqa: E501
+  (UPat(Ops.FDIV, dtypes.float64, (UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fdiv", 0b000110, ctx[x], ctx[a], ctx[b], 0b01)), # noqa: E501
+  # TODO: get these to print right, also cmp has no out
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b1), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b1, 0b10, 0b101001)]), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b0), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b0, 0b10, 0b101001)]), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b1), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b1, 0b10, 0b000001)]), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b0), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b0, 0b10, 0b000001)]), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmgt", 0b001001, ctx[x], ctx[b], ctx[a], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmgt", 0b111001, ctx[x], ctx[b], ctx[a], 0b10, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmgt", 0b111001, ctx[x], ctx[b], ctx[a], 0b11, 0b1, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints64), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b1), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b1, 0b10, 0b000101)]), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.ints), UPat.var("b")), name="x"), lambda ctx,a,b,x: [MUOpA64.R_R_R("cmp", 0b1101011, ctx[x], ctx[a], ctx[b], 0b0), MUOpA64.R_R_R("cset", 0b0011010, ctx[x], 0b11111, 0b11111, 0b0, 0b10, 0b000101)]), # noqa: E501  
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmeq", 0b001001, ctx[x], ctx[a], ctx[b], 0b01, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float32), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmeq", 0b111001, ctx[x], ctx[a], ctx[b], 0b00, 0b1)), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmeq", 0b111001, ctx[x], ctx[a], ctx[b], 0b01, 0b1)), # noqa: E501
+  # ternary
+])
+
+class A64Renderer(ISARenderer):
+  device = "CPU"
+  max_vec_sz = 16
+  has_local = False
+  global_max = None
+  pre_matcher = a64_pre_matcher
+  extra_matcher = a64_extra_matcher
+  extra_spec = x86_spec
+  lowerer = a64_lowerer
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MULACC)}
+
+  def load(self, dest:Register, src:Memory): return MUOpA64.load(dest, src)
+  def store(self, dest:Memory, src:Register): return MUOpA64.store(dest, src)
+  def assign(self, dest:Register, src:Register): return MUOpA64.assign(dest, src)
+  def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
+    prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
+               [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
+               [MUOpA64.R_R_I("sub", 0b1010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)]
+    epilogue = [MUOpA64.R_R_I("add", 0b0010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)] + \
+               [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
     kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
     return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]

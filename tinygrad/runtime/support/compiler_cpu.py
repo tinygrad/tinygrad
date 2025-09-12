@@ -88,3 +88,7 @@ class CPULLVMCompiler(LLVMCompiler):
 class X86Compiler(Compiler):
   def __init__(self): super().__init__(None)
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
+
+class A64Compiler(Compiler):
+  def __init__(self): super().__init__(None)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib)

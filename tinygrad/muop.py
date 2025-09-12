@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
+import sys
 
 @dataclass(frozen=True)
 class Register:
@@ -308,3 +309,58 @@ class MUOpX86(MUOp):
     if isinstance(self.imm, Register): inst.append((self.imm.index & 0b1111) << 4 | 0b0000)
     elif isinstance(self.imm, bytes): inst.extend(self.imm)
     return bytes(inst)
+
+# *** ARM64 ***
+
+@dataclass(frozen=True)
+class MUOpA64(MUOp):
+  b31: int = 0b0
+  b30: int = 0b0
+  b29: int = 0b0
+  b28_24: int = 0b0000
+  b23_22: int = 0b00
+  b21: int = 0b0
+  b20_16: int = 0b00000
+  b15_10: int = 0b000000
+  b9_5: int = 0b00000
+  b4_0: int = 0b00000
+  # registers
+  GPR = tuple(Register(f"x{i}", i, 8, {l:f"w{i}" for l in (4,2,1)}) for i in range(31) if i != 29 and not \
+              (i == 18 and sys.platform in ("darwin", "win32")))
+  VEC = tuple(Register(f"v{i}", i, 16, {8:f"d{i}", 4:f"s{i}", 2:f"h{i}"}) for i in range(32))
+  # encoding methods
+  @staticmethod
+  def V_V_V(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, size:int, q:int, u:int=0b0, b21:int=0b1):
+    return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.VEC, (MUOpA64.VEC, MUOpA64.VEC), b30=q, b29=u,
+                   b28_24=0b01110, b23_22=size, b21=b21, b20_16=rm.index, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def S_S_S(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, size:int, q:int=0b0, u:int=0b0, b31:int=0b0):
+    return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.VEC, (MUOpA64.VEC, MUOpA64.VEC), b31=b31, b30=q, b29=u,
+                   b28_24=0b11110, b23_22=size, b21=0b1, b20_16=rm.index, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def S_R(opstr:str, opcode:int, rd:Register, rn:Register, size:int, b31:int=0b0):
+    return MUOpA64(opstr, opcode, rd, (rn,), MUOpA64.VEC, (MUOpA64.GPR,), b31=b31, b30=0b0, b29=0b0,
+                   b28_24=0b11110, b23_22=size, b21=0b1, b20_16=opcode, b15_10=0b000000, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def V_V(opstr:str, opcode:int, rd:Register, rn:Register, b20_19:int, size:int, q:int, u:int):
+    return MUOpA64(opstr, opcode, rd, (rn,), MUOpA64.VEC, (MUOpA64.VEC,), b31=0b0, b30=q, b29=u,
+                   b28_24=0b01110, b23_22=size, b21=0b1, b20_16=b20_19<<3|0b001, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def R_R_R(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
+    return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.GPR, (MUOpA64.GPR, MUOpA64.GPR), b31=sf, b30=opcode<<6, b29=opcode<<5,
+                   b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def R_R_I(opstr:str, opcode:int, rd:Register, rn:Register, imm12:int, sf:int, shift:int=0b00):
+    imm12 = imm12 & 0xFFF
+    return MUOpA64(opstr, opcode, rd, (rn, imm12), MUOpA64.GPR, (MUOpA64.GPR, ()), b31=sf, b30=opcode<<6, b29=opcode<<5,
+                   b28_24=opcode, b23_22=shift, b21=imm12<<11, b20_16=imm12<<6, b15_10=imm12, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def V_R_I(opstr:str, opcode:int, rd:Register, rn:Register, imm12:int, size:int, shift:int=0b00):
+    imm12 = imm12 & 0xFFF
+    return MUOpA64(opstr, opcode, rd, (rn, imm12), MUOpA64.VEC, (MUOpA64.GPR, ()), b31=size<<1, b30=size, b29=opcode<<5,
+                   b28_24=opcode, b23_22=shift, b21=imm12<<11, b20_16=imm12<<6, b15_10=imm12, b9_5=rn.index, b4_0=rd.index)
+
+  def encode(self) -> bytes:
+    return (self.b31 & 0b1) << 31 | (self.b30 & 0b1) << 30 | (self.b29 & 0b1) << 29 | (self.b28_24 & 0b0000) << 24 | \
+           (self.b23_22 & 0b11) << 22 | (self.b21 & 0b1) << 21 | (self.b20_16 & 0b11111) << 16 | (self.b15_10 & 0b111111) << 10 | \
+           (self.b9_5 & 0b11111) << 5 | (self.b4_0 & 0b11111)
