@@ -44,7 +44,7 @@ function intersectRect(r1, r2) {
 
 function addTags(root) {
   root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
-  root.selectAll("text").data(d => [d]).join("text").text(d => Array.isArray(d) ? `(${d})` : d).attr("dy", "0.35em");
+  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
 let [workerUrl, worker] = [null, null];
