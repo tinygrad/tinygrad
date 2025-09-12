@@ -232,14 +232,16 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   ctx.progress = 0
 
   if c not in ctx.seen_child:
-    all_rngs = zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()])
+    all_rngs = list(zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()]))
     out_rngs = []
     end_ranges = []
     idx_ranges = []
+    # NOTE: locals aren't working, so we only fully bufferize here (unless RANGEIFY > 1)
+    all_all_same = all(all_same(r) for r in all_rngs)
     for i,valid_rngs in enumerate(all_rngs):
       rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
       # we compare the ranges without their valids
-      if all_same(rngs):
+      if all_same(rngs) and (all_all_same or RANGEIFY > 1):
         # the new valid is the OR of all the children valids
         minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
         out_rngs.append(minimum_valid.where(rngs[0], UOp.invalid()).simplify())
