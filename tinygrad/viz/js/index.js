@@ -20,13 +20,14 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ show=true }) => {
+const updateProgress = ({ start }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
-  if (show) {
+  msg.style.display = "none";
+  if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  } else msg.style.display = "none";
+  }
 }
 
 // ** UOp graph
@@ -47,41 +48,39 @@ function addTags(root) {
 }
 
 let [workerUrl, worker] = [null, null];
-async function renderDag(graph, additions, recenter=false) {
+async function initWorker() {
+  const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
+  workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+}
+
+function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ show:true });
-  if (worker == null) {
-    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
-    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
-    worker = new Worker(workerUrl);
-  } else {
-    worker.terminate();
-    worker = new Worker(workerUrl);
-  }
-  worker.postMessage({graph, additions, ctxs});
+  updateProgress({ start:true });
+  if (worker != null) worker.terminate();
+  worker = new Worker(workerUrl);
+  worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    updateProgress({ show:false });
+    updateProgress({ start:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
-        if (parents == null) return;
-        const src = [...parents, d.id];
-        nodes.classed("highlight", n => src.includes(n.id));
-        d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
-          const [v, w] = nodes[i].id.split("-");
-          return src.includes(v) && w===d.id;
-        });
+        const children = g.successors(d.id);
+        if (parents == null && children == null) return;
+        const src = [...parents, ...children, d.id];
+        nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
+        d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
@@ -125,7 +124,6 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-
 }
 
 // ** profiler graph
@@ -170,7 +168,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
-  if (data != null) return;
+  if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
@@ -268,9 +266,9 @@ async function renderProfiler() {
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+      for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
@@ -288,7 +286,7 @@ async function renderProfiler() {
       });
     }
   }
-  updateProgress({ "show":false });
+  updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -298,34 +296,32 @@ async function renderProfiler() {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
-        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
-        else { start = e.x; end = e.x+e.width; }
-        if (start>visibleX[1] || end<visibleX[0]) continue;
-        ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
+          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
-          // NOTE: y coordinates are in reverse order
-          for (let i = 0; i<x.length-1; i++) {
-            visible.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:e.arg });
+          ctx.beginPath();
+          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) {
+            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
           }
+          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
+          ctx.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill();
           continue;
         }
         // contiguous rect
-        const x = xscale(start);
-        const width = xscale(end)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
+        if (e.x>et || e.x+e.width<st) continue;
+        const x = xscale(e.x);
+        const width = xscale(e.x+e.width)-x;
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
         visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
@@ -584,6 +580,7 @@ async function main() {
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
+  if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
@@ -653,7 +650,7 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
