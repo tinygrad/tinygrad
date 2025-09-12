@@ -55,49 +55,6 @@ async function initWorker() {
 }
 
 
-(function() {
-  const svg = document.getElementById("graph-svg"); if (!svg) { console.warn("No #graph-svg"); return; }
-  if (window.__svgMouseTip) { window.__svgMouseTip.remove(); delete window.__svgMouseTip; return; }
-
-  const tip = document.createElement("div");
-  Object.assign(tip.style, {
-    position: "fixed", zIndex: 2147483647, pointerEvents: "none",
-    padding: "4px 6px", border: "1px solid #999", background: "rgba(0,0,0,.75)",
-    color: "#fff", font: "12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-    borderRadius: "6px", whiteSpace: "pre"
-  });
-  document.body.appendChild(tip); window.__svgMouseTip = tip;
-
-  const toSvg = (cx, cy) => {
-    const m = svg.getScreenCTM(); if (!m) return null;
-    const inv = m.inverse();
-    const p = new DOMPoint(cx, cy).matrixTransform(inv);
-    return { x: p.x, y: p.y };
-  };
-
-  const fmt = n => (Math.abs(n) >= 1000 ? n.toFixed(1) : n.toFixed(2));
-
-  const onMove = e => {
-    const p = toSvg(e.clientX, e.clientY); if (!p) return;
-    tip.style.left = (e.clientX + 10) + "px";
-    tip.style.top = (e.clientY + 10) + "px";
-    const vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
-    const dpr = window.devicePixelRatio || 1;
-    tip.textContent = `svg ${fmt(p.x)}, ${fmt(p.y)}`;
-  };
-
-  const onLeave = () => { tip.style.display = "none"; };
-  const onEnter = () => { tip.style.display = ""; };
-
-  svg.addEventListener("mousemove", onMove, { passive: true });
-  svg.addEventListener("mouseenter", onEnter, { passive: true });
-  svg.addEventListener("mouseleave", onLeave, { passive: true });
-
-  tip.title = "click to remove";
-  tip.addEventListener("click", () => { tip.remove(); delete window.__svgMouseTip; });
-})();
-
-
 function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
