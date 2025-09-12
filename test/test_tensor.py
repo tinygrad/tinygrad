@@ -918,6 +918,10 @@ class TestIdxUpcast(unittest.TestCase):
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
+  def test_arange_raise_overflow(self):
+    with self.assertRaises(ValueError):
+      self._schedule_render(Tensor.arange(2**33, dtype=dtypes.int))
+
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises(KeyError):
