@@ -165,7 +165,6 @@ class TestSetitem(unittest.TestCase):
     t[idx] = val
     self.assertEqual(t.tolist(), [val]*idx_size+[idx_size])
 
-  @unittest.expectedFailure # TODO: fix
   def test_setitem_advanced_indexing(self):
     # Example from https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
     t = Tensor.zeros(10,20,30,40,50).contiguous()
