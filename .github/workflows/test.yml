@@ -93,8 +93,6 @@ jobs:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -132,8 +130,6 @@ jobs:
     name: Torch Backend Tests More
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -156,8 +152,6 @@ jobs:
     name: Tensor Core tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -216,8 +210,6 @@ jobs:
     name: Python Backend
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -334,8 +326,6 @@ jobs:
     name: 'CL IMAGE Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -356,8 +346,6 @@ jobs:
     name: 'CL Misc tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -383,8 +371,6 @@ jobs:
     name: 'openpilot Compile Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -411,12 +397,12 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+# ****** ONNX Tests ******
+
   testonnxcpu:
     name: 'ONNX (CPU) Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
 
     steps:
       - name: Checkout Code
@@ -445,9 +431,6 @@ jobs:
     name: 'ONNX (GPU)+Optimization Tests'
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -488,12 +471,12 @@ jobs:
       - name: Test 1B LLM
         run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm | grep -i rooster
 
+# ****** Models Tests ******
+
   testmodels:
     name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -513,6 +496,26 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testmetalmodels:
+    name: Models (metal)
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: metal
+        deps: testing
+        python-version: '3.11'
+    - name: Test models (Metal)
+      run: METAL=1 python -m pytest -n=auto test/models --durations=20
+    - name: Test LLaMA compile speed
+      run: METAL=1 python test/external/external_test_speed_llama.py
+
+# ****** Feature Tests ******
+
   testrangeify:
     name: Linux (rangeify)
     runs-on: ubuntu-24.04
@@ -525,6 +528,7 @@ jobs:
       with:
         key: rangeify-minimal-llvm
         deps: testing_minimal
+        opencl: 'true'
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
@@ -535,6 +539,8 @@ jobs:
           -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
+    - name: Test GPU=1 RANGEIFY=1
+      run: GPU=1 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test CPU=1 RANGEIFY=2
       run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
@@ -545,8 +551,6 @@ jobs:
     name: Linux (devectorize)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -568,8 +572,6 @@ jobs:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -636,7 +638,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      IGNORE_OOB: 0
       AMD: 1
       MOCKGPU: 1
       FORWARD_ONLY: 1
@@ -705,7 +706,7 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  tests:
+  testcpuopencl:
     strategy:
       fail-fast: false
       matrix:
@@ -714,9 +715,6 @@ jobs:
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -807,48 +805,42 @@ jobs:
 
 # ****** OSX Tests ******
 
-  testmetal2:
+  testmetal:
     name: MacOS (unit)
     runs-on: macos-14
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
-
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: metal2
+        key: metal
         deps: testing
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
-    - name: Run real world test
-      run: METAL=1 python -m pytest -n=auto test/models/test_real_world.py --durations=20
-    - name: Test models (Metal)
-      run: METAL=1 python -m pytest -n=auto test/models -v --durations=20
+    - name: Run unit tests
+      run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
-      run: TC=2 METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_gemm
+      run: METAL=1 DEBUG=3 TC=2 python test/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
       run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test LLaMA compile speed
-      run: METAL=1 python test/external/external_test_speed_llama.py
     - name: Test Beam Search
       run: METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     #- name: Fuzz Test linearizer
     #  run: METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run TRANSCENDENTAL math
-      run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      run: METAL=1 TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
       env:
         MOCKGPU: 1
         AMD: 1
+        AMD_LLVM: 0
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
@@ -856,13 +848,14 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
+        AMD_LLVM: 1
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
       env:
         MOCKGPU: 1
-        PTX: 1
+        NV_PTX: 1
         NV: 1
         FORWARD_ONLY: 1
       run: |
@@ -939,8 +932,6 @@ jobs:
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -976,8 +967,6 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

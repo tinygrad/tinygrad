@@ -2,16 +2,16 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
+  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
 
   # wait for it to be image indexed before running simplification
@@ -53,8 +53,10 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
-  # index True is just Index
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
+  # lower turn the invalid into a gate, must come before index dtype lowering
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate,),), lambda buf,x,cond,i: buf.index(x, cond)),
+  # drop true gate
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
   # remove hanging cast
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast()),), lambda buf,idx: buf.index(idx)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
@@ -76,6 +78,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
     idx: Any = midx.src[i].src[1]
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
+    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
@@ -255,7 +258,7 @@ pm_render = PatternMatcher([
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
-   lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op is Ops.CUSTOM else None),
+    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE) else None),
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \

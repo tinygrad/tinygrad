@@ -5,6 +5,21 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
 from enum import Enum, auto
 
+class InvalidTypeMetaClass(type):
+  instance:None|InvalidType = None
+  def __call__(cls, *args, **kwargs):
+    if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
+    InvalidTypeMetaClass.instance = ret = super().__call__()
+    return ret
+
+class InvalidType(metaclass=InvalidTypeMetaClass):
+  def __eq__(self, other): return self is other
+  def __hash__(self): return id(self)
+  def __repr__(self): return "Invalid"
+  def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
+
+Invalid = InvalidType()
+
 ConstType = float|int|bool
 
 FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
@@ -104,10 +119,11 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
+  def as_const(val: tuple[ConstType|InvalidType, ...]|ConstType|InvalidType, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
+    if isinstance(val, InvalidType): return val
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache

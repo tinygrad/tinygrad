@@ -1,6 +1,6 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
-from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace
+from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
@@ -178,6 +178,8 @@ spec = PatternMatcher([
 
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
+  (UPat(Ops.CONST, arg=Invalid), lambda: False),
+  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.src)),
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
