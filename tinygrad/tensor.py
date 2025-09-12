@@ -77,11 +77,6 @@ def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
-def _has_real_buffer(t: Tensor) -> bool:
-  base = t.uop.base
-  # True if this tensor ultimately points at concrete storage
-  return base.op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT)
-
 # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
 def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
