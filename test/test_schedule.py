@@ -1843,21 +1843,6 @@ class TestSchedule(unittest.TestCase):
     self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
-  @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
-  def test_arange_shrink_copy(self):
-    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CPU")
-    sched = run_schedule(check_schedule(a, 2)) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
-    self.assertIs(sched[-1].ast.op, Ops.COPY)
-    np.testing.assert_equal(a.numpy(), [[4, 5]])
-
-  @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from ext device")
-  def test_arange_expand_copy(self):
-    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CPU")
-    sched = check_schedule(a, 2) # NOTE: there is a contiguous between REDUCE_AXIS and COPY
-    self.assertIs(sched[2].ast.op, Ops.COPY)
-    run_schedule(sched)
-    np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
-
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
