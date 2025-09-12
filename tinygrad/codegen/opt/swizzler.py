@@ -5,6 +5,11 @@ from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_re
 from tinygrad.schedule.grouper import ALWAYS_CONTIGUOUS
 from tinygrad.dtype import ImageDType, dtypes
 
+const_hacks = PatternMatcher([
+  (UPat(Ops.CONST, name="c").f((Ops.RESHAPE, Ops.EXPAND), name="e"),
+   lambda c,e: c.replace(src=(UOp(Ops.VIEW, dtypes.void, c.src, ShapeTracker.from_shape(e.arg, (0,)*len(e.arg))),)))
+])
+
 merge_views = PatternMatcher([
   # merge adjacent views
   (UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="v1"),), name="v2"), lambda v1,v2: v1.replace(arg=v1.arg+v2.arg)),
@@ -17,7 +22,7 @@ merge_views = PatternMatcher([
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # only unmaksed VIEW on CONST replaces the ShapeTracker
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
+   lambda x,view: x.replace(src=(UOp(Ops.VIEW, x.dtype, x.src, view.arg),)) if all(v.mask is None for v in view.st.views) else None),
 ])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):
@@ -132,4 +137,6 @@ fix_kernel_ops = view_left_through_load+PatternMatcher([
    lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   # if this kernel also assigns to the loaded buffer, ensure we can index it correctly
   (UPat(Ops.LOAD, src=(UPat.var("glbl").view(name="view"),)), check_load_st),
+  # no DEVICE on CONST
+  (UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
 ])

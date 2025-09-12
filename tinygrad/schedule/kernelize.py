@@ -7,7 +7,7 @@ from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, g
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
-from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
+from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop, const_hacks
 from tinygrad.codegen.opt import Opt
 
 # creation can recurse a lot
@@ -332,7 +332,7 @@ def get_kernelize_map(sink:UOp) -> dict[UOp, UOp]:
   """
 
   # multi + merge_views + simplify
-  tensor_map = graph_rewrite_map(sink, multi_pm+do_fuse+merge_views+kernelize_sym+replace_contiguous, ctx={}, name="merge_views")
+  tensor_map = graph_rewrite_map(sink, const_hacks+multi_pm+do_fuse+merge_views+kernelize_sym+replace_contiguous, ctx={}, name="merge_views")
 
   # display the cleaned up tensor graph
   if getenv("VIZ"): graph_rewrite(tensor_map[sink], PatternMatcher([]), name="View Tensor Graph")
