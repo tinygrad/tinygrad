@@ -20,7 +20,7 @@ class TestLLaMASpeed(unittest.TestCase):
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
     backup_allocator = Device[Device.DEFAULT].allocator
-    backup_compiler_func = Device[Device.DEFAULT].compiler.compile_cached
+    backup_compiler = Device[Device.DEFAULT].compiler.compile_cached
     Device[Device.DEFAULT].runtime = FakeProgram
     Device[Device.DEFAULT].allocator = FakeAllocator(Device.default)
 
@@ -51,7 +51,7 @@ class TestLLaMASpeed(unittest.TestCase):
 
     Device[Device.DEFAULT].runtime = backup_program
     Device[Device.DEFAULT].allocator = backup_allocator
-    Device[Device.DEFAULT].compiler.compile_cached = backup_compiler_func
+    Device[Device.DEFAULT].compiler.compile_cached = backup_compiler
 
 if __name__ == '__main__':
   TestLLaMASpeed().test_llama_compile()

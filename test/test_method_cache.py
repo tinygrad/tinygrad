@@ -5,9 +5,9 @@ from tinygrad.nn.state import get_state_dict
 
 class TestMethodCache(unittest.TestCase):
   def setUp(self):
-    self.backup_compiler_func = Device[Device.DEFAULT].compiler.compile_cached
+    self.backup_compiler = Device[Device.DEFAULT].compiler.compile_cached
   def tearDown(self):
-    Device[Device.DEFAULT].compiler.compile_cached = self.backup_compiler_func
+    Device[Device.DEFAULT].compiler.compile_cached = self.backup_compiler
 
   def test_simple_methodcache(self):
     a = Tensor([1])
