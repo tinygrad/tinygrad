@@ -369,7 +369,7 @@ if __name__ == "__main__":
           d.renderer, d.compiler = r(), c()
           with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
           if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          default_text = '(default)' if type(default_compiler) == type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+          default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
           compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
           any_works = True
         except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
