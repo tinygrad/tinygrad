@@ -66,5 +66,5 @@ if __name__ == "__main__":
     gc.collect()
     new_uops_gc = uops_allocated()
     print(f"{t.__name__:30s}: {new_uops:3d} -> {new_uops_gc:3d}")
-    assert new_uops == start_uops
+    assert new_uops_gc == start_uops, f"{print_uops()}"
   #print_uops()
