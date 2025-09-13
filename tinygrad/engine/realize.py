@@ -3,7 +3,6 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import DISABLE_METHOD_CACHE
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -145,10 +144,10 @@ method_cache: dict[tuple[str, bytes, tuple[int, ...], bool], CompiledRunner] = {
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
-  ckey = (device, ast.key, context, False)
-  if (cret:=method_cache.get(ckey)) and not DISABLE_METHOD_CACHE: return cret
-  bkey = (device.split(":")[0], ast.key, context, True)
-  if (bret:=method_cache.get(bkey)) and not DISABLE_METHOD_CACHE:
+  ckey = (device, Device[device].compiler, ast.key, context, False)
+  if cret:=method_cache.get(ckey): return cret
+  bkey = (device.split(":")[0], Device[device].compiler, ast.key, context, True)
+  if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)

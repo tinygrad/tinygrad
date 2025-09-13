@@ -366,7 +366,7 @@ if __name__ == "__main__":
       for i,(r,c) in enumerate(d.compilers):
         try:
           d.renderer, d.compiler = r(), c()
-          with Context(CACHELEVEL=0, DISABLE_METHOD_CACHE=1): test = (Tensor([1,2,3], device=device) * 2).tolist()
+          with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
           if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
           compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__}")
           any_works = True
