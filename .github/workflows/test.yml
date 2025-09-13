@@ -148,18 +148,28 @@ jobs:
     - name: Test some torch tests (expect failure)
       run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
-  tc:
-    name: Tensor Core tests
+  bepython:
+    name: Python Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: uops-minimal
+        key: be-minimal
         deps: testing_minimal
+    - name: Test dtype with Python emulator
+      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+    - name: Test ops with Python emulator
+      run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
+    - name: Test uops with Python emulator
+      run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
+    - name: Test symbolic with Python emulator
+      run: PYTHON=1 python3 test/test_symbolic_ops.py
+    - name: test_renderer_failures with Python emulator
+      run: PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -205,29 +215,6 @@ jobs:
         DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
-
-  bepython:
-    name: Python Backend
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: be-minimal
-        deps: testing_minimal
-    - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
-    - name: Test ops with Python emulator
-      run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
-    - name: Test uops with Python emulator
-      run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
-    - name: Test symbolic with Python emulator
-      run: PYTHON=1 python3 test/test_symbolic_ops.py
-    - name: test_renderer_failures with Python emulator
-      run: PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
 
   linter:
     name: Linters

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import unittest
-import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor
 from extra.models.rnnt import LSTM
+import numpy as np
 import torch
 
 class TestRNNT(unittest.TestCase):

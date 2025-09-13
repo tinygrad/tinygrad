@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 import unittest
+from tinygrad import Tensor
 import numpy as np
-from tinygrad.tensor import Tensor
 import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
   np.random.seed(seed)
   in_ids= np.random.randint(vocab_size, size=(bsz, seq_len))
   mask = np.random.choice([True, False], size=(bsz, seq_len))
-  seg_ids = np.random.randint(1, size=(bsz, seq_len))
+  seg_ids = np.random.randint(2, size=(bsz, seq_len))  # type_vocab_size
   return in_ids, mask, seg_ids
 
 def set_equal_weights(mdl, torch_mdl):
@@ -45,7 +45,7 @@ class TestBert(unittest.TestCase):
 
     seeds = (1337, 3141)
     bsz, seq_len = 1, 16
-    for _, seed in enumerate(seeds):
+    for seed in seeds:
       in_ids, mask, seg_ids = get_question_samp(bsz, seq_len, config['vocab_size'], seed)
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
       torch_out = torch_mdl.forward(torch.from_numpy(in_ids).long(), torch.from_numpy(mask), torch.from_numpy(seg_ids).long())[:2]
