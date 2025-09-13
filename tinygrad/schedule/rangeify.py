@@ -419,14 +419,15 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
     ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
     return ret.forced_reshape(shape).replace(tag=x.arg.tags)
-  else:
-    if not locals_allowed: return None
-    tag = x.arg.device
-    if tag is None: tag = UOp.unique().arg # TODO: hack
-    buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
-    # store has the other dtype here
-    # TODO: how is this unified?
-    return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+
+  # handle locals
+  if not locals_allowed: return None
+  tag = x.arg.device
+  if tag is None: tag = UOp.unique().arg # TODO: hack
+  buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
+  # store has the other dtype here
+  # TODO: how is this unified?
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
 pm_add_buffers_local = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
@@ -528,8 +529,7 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}, name="x"), tag_uop),
 ])
 
-@track_rewrites(name=lambda _,ret: f"Schedule {pluralize('Kernel',
-                                                         len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", replay=True)
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
