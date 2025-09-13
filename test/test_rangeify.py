@@ -3,6 +3,19 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
 from tinygrad.uop.ops import UOp
 
+@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
+class TestRangeifyAssign(unittest.TestCase):
+  def test_assign_permuted(self):
+    A = Tensor.empty(4, 4, dtype='int')
+    B = Tensor.arange(16).reshape(4,4)
+    ret = A.permute(1,0).assign(B)
+    lst = ret.tolist()
+    lst2 = A.tolist()
+    lst3 = B.tolist()
+    print(lst)
+    print(lst2)
+    print(lst3)
+
 N = 256
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
