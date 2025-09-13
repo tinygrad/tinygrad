@@ -371,7 +371,7 @@ if __name__ == "__main__":
           compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__}")
           any_works = True
         except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
-      result = (colored(f"PASS", "green") if any_works else f"{colored('FAIL', 'yellow')}:") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
+      result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
     print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")

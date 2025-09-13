@@ -148,7 +148,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   ckey = (device, ast.key, context, False)
   if cret:=method_cache.get(ckey) and not DISABLE_METHOD_CACHE: return cret
   bkey = (device.split(":")[0], ast.key, context, True)
-  if bret:=method_cache.get(bkey) and not DISABLE_METHOD_CACHE:
+  if (bret:=method_cache.get(bkey)) and not DISABLE_METHOD_CACHE:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
