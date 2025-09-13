@@ -3,8 +3,9 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
-from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM, \
+                             X86, Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, \
+                             ProfilePointEvent, dedup
 from tinygrad.helpers import unwrap_class_type
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
@@ -324,7 +325,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
     if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX")
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    if device in {"CPU"}: return not X86 and not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
     return device in {"AMD", "PYTHON"}
   if dtype in dtypes.fp8s:
     # not supported yet - in progress

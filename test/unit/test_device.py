@@ -33,17 +33,19 @@ class TestDevice(unittest.TestCase):
     expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept RuntimeError: pass"
 
     if Device.DEFAULT == "CPU":
-      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-      try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
+      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler, X86Compiler
+      try: _, _, _ = CPULLVMCompiler(), ClangJITCompiler(), X86Compiler()
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler, X86Compiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, X86Compiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_X86": "1"})
       subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CLANGJIT": "0", "CPU_LLVM": "0"})
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CLANGJIT": "0", "CPU_LLVM": "0", "CPU_X86": "0"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CLANGJIT": "0"})
       subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
