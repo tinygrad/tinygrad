@@ -190,7 +190,7 @@ rewritten_ast = full_rewrite_to_sink(kernel_ast)
 print(rewritten_ast)
 """
 UOp(Ops.SINK, dtypes.void, arg=None, src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+  UOp(Ops.STORE, dtypes.int.ptr(4), arg=None, src=(
     UOp(Ops.INDEX, dtypes.int.ptr(4), arg=None, src=(
       UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(4), arg=0, src=()),
       x3:=UOp(Ops.SPECIAL, dtypes.int, arg=('gidx0', 4), src=()),)),
