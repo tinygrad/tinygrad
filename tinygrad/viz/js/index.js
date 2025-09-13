@@ -320,15 +320,16 @@ async function renderProfiler() {
         // contiguous rect
         if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
+        const y = offsetY+e.y;
         const width = xscale(e.x+e.width)-x;
-        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
+        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        let [labelX, labelWidth] = [x+2, 0];
-        const labelY = offsetY+e.y+e.height/2;
+        let labelX = x+2, labelWidth = 0;
+        const labelY = y+e.height/2;
         for (const [i,l] of e.label.entries()) {
           if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
             if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
