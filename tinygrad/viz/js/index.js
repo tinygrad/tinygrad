@@ -165,6 +165,22 @@ class Track {
   *[Symbol.iterator]() { for (const x of this.items) yield x.item; }
 }
 
+// TODO: same thing
+class Range {
+  constructor() {
+    this.data = [];
+  }
+  push(e) {
+    this.data.push(e);
+  }
+  clear() { this.data.length = 0; }
+  query(x0, x1, match) {
+    for (const r of this.data) {
+      if (x0>=r.x0 && x1<=r.x1 && match(r)) return r;
+    }
+  }
+}
+
 function formatTime(ts, dur=ts) {
   if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
@@ -236,13 +252,13 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = new Track();
+    const shapes = new Track(), visible = new Track();
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = []; shapes.view = RectView;
-      data.tracks.set(k, { shapes, visible:[], offsetY });
+      data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -308,7 +324,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -329,6 +345,7 @@ async function renderProfiler() {
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
   let lastFrame = performance.now(), fps = 0;
+  const opts = { minWidth:0.5, distanceTol:0.2 };
   function render(transform) {
     const now = performance.now()
     fps = 1000 / (now - lastFrame);
@@ -342,7 +359,7 @@ async function renderProfiler() {
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
-      visible.length = 0;
+      visible.clear();
       for (const e of shapes.query(st, et)) {
         // generic polygon
         if (e.width == null) {
@@ -360,9 +377,14 @@ async function renderProfiler() {
         }
         // contiguous rect
         const x = xscale(e.x);
-        const width = xscale(e.x+e.width)-x;
+        let width = xscale(e.x+e.width)-x, arg = e.arg;
+        if (width < opts.minWidth) {
+          const found = visible.query(x, x+width-opts.minWidth+opts.distanceTol, (v) => v.y0 === offsetY+e.y);
+          if (found) continue;
+          width = opts.minWidth; arg = null;
+        }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -439,9 +461,7 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
-      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
-    }
+    return data.tracks.get(tid).visible.query(X, X, (v) => Y>=v.y0 && Y<=v.y1);
   }
 
   canvas.addEventListener("click", e => {
