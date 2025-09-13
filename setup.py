@@ -60,7 +60,7 @@ setup(name='tinygrad',
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
             "pylint",
-            "mypy==1.13.0",
+            "mypy==1.18.1",
             "typing-extensions",
             "pre-commit",
             "ruff",
