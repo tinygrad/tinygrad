@@ -294,7 +294,8 @@ class Compiled:
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
 
   def _get_compiler_envvar(self, c):
-    return f"{(devname:=self.device.split(':')[0].upper())}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}"
+    compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
+    return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
 
   def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
     for renderer, compiler in compilers:
