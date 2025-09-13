@@ -1,78 +1,46 @@
 # Using the Tinygrad Backend for hlb-cifar10
 
-This document outlines how to run the `hlb-cifar10` training script using the `tinygrad` backend instead of the default PyTorch backend.
+This short guide shows how to run the `hlb-cifar10` trainer using tinygrad backend instead of vanilla PyTorch/CUDA.
 
-## Approach
+## What changed in `hlb-CIFAR10/main.py`
 
-The current integration with `tinygrad` supports core model computations, data loading, and certain initial preprocessing steps. However, model weight initialization is not yet supported due to the missing `unfold` operation (refer to PR: https://github.com/tinygrad/tinygrad/pull/9919) and issues with the `batch_crop` function. The primary changes made in `hlb-CIFAR10/main.py` are as follows:
+- Conditional frontend: tinygrad’s Torch frontend is enabled only when `TINY_BACKEND` is set.
+  ```python
+  from tinygrad import getenv
+  if getenv("TINY_BACKEND"): import tinygrad.frontend.torch
+  ```
+- Device selection: the script uses `'tiny'` when `TINY_BACKEND` is set, otherwise `'cuda'`.
+  ```python
+  hyp['misc']['device'] = 'tiny' if getenv('TINY_BACKEND') else 'cuda'
+  ```
+- Device‑aware randomness: places that create tensors on a device (e.g. `batch_cutmix`, `get_batches`) select `'tiny'` or `'cuda'` based on `TINY_BACKEND`.
 
-1.  **Conditional Import:** The `tinygrad.frontend.torch` module is imported only when the environment variable `TINY_BACKEND` is set to a non-empty value (e.g., `1`).
-    ```python
-    if getenv("TINY_BACKEND"):
-        import tinygrad.frontend.torch
-        hyp["misc"]["device"] = "tiny" # Device set for tinygrad
-    ```
+  ```python
+  def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
+    num_epoch_examples = len(data_dict[key]['images'])
+    device = "tiny" if getenv("TINY_BACKEND") else "cuda"
+    shuffled = torch.randperm(num_epoch_examples, device=device)
+    ...
 
-2.  **Data Handling:**
-    Dataset loading and preprocessing steps such as normalization and padding are fully compatible with the tinygrad backend without requiring any code modifications. However, minor adjustments are necessary in the original hlb-cifar10 repository due to hardcoded device specifications in the `batch_cutmix` and `get_batches` functions, which default to "cuda". We have updated these functions to dynamically select the device based on the `TINY_BACKEND` environment variable as shown below:
-
-    ```python
-    def get_batches(data_dict, key, batchsize, epoch_fraction=1., cutmix_size=None):
-        num_epoch_examples = len(data_dict[key]['images'])
+  def batch_cutmix(inputs, targets, patch_size):
+    with torch.no_grad():
         device = "tiny" if getenv("TINY_BACKEND") else "cuda"
-        shuffled = torch.from_numpy(np.random.permutation(num_epoch_examples)).to(device=device)
+        batch_permuted = torch.randperm(inputs.shape[0], device=device)
         ...
-
-    def batch_cutmix(inputs, targets, patch_size):
-        with torch.no_grad():
-            device = "tiny" if getenv("TINY_BACKEND") else "cuda"
-            batch_permuted = torch.randperm(inputs.shape[0], device=device)
-            ...
     ```
 
-    In the `get_batches` function, the `shuffled` tensor is first created on the CPU to ensure eager evaluation and avoid issues with lazy execution on the tinygrad backend. After creation, it is moved to the target device (`tiny` or `cuda`). This prevents potential infinite loops or hangs that can occur if the tensor is created directly on the `tiny` device.
+No other code changes are required to run with tinygrad.
 
-    The `batch_crop` function has been modified to work around a recursion depth issue in the tinygrad backend. The key changes are:
+## Run with tinygrad
 
-    1. Moving mask generation and selection operations to CPU/numpy to avoid tinygrad backend issues
-    2. Maintaining the same random crop behavior (not switching to center crop)
-    3. Ensuring proper device handling by moving the final result back to the original device
-
-    Original implementation:
-    ```python
-    def batch_crop(inputs, crop_size):
-        with torch.no_grad():
-            crop_mask_batch = make_random_square_masks(inputs, crop_size)
-            crop_mask_batch = crop_mask_batch.expand((-1, 3, -1, -1))
-            cropped_batch = torch.masked_select(inputs, crop_mask_batch).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
-            return cropped_batch
-    ```
-
-    Modified version:
-    ```python
-    def batch_crop(inputs, crop_size):
-        with torch.no_grad():
-            crop_mask_batch = make_random_square_masks(inputs, crop_size)
-            crop_mask_batch = crop_mask_batch.expand((-1, 3, -1, -1)).cpu().numpy()
-            cropped_batch = torch.from_numpy(inputs.cpu().numpy()[crop_mask_batch]).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
-            return cropped_batch.to(inputs.device)
-    ```
-
-    The modification maintains the same functionality while working around current tinygrad limitations.
-
-## Running the Script
-
-To run the training with the `tinygrad` backend, set the `TINY_BACKEND` environment variable:
-
-```bash
-TINY_BACKEND=1 python hlb-CIFAR10/main.py
-```
-
-You can also increase the debug level to see the kernels being executed by `tinygrad`:
-
-```bash
-TINY_BACKEND=1 DEBUG=2 python hlb-CIFAR10/main.py
-```
+- Direct:
+  ```bash
+  TINY_BACKEND=1 python hlb-CIFAR10/main.py
+  ```
+- With debug kernels:
+  ```bash
+  TINY_BACKEND=1 DEBUG=2 python hlb-CIFAR10/main.py
+  ```
 
 ## Results Comparison
 
@@ -99,6 +67,7 @@ Here are the results obtained using the standard Torch backend and the `tinygrad
 ```
 
 **Tinygrad Backend**
+
 ```
 --------------------------------------------------------------------------------------------------------
 |  epoch  |  train_loss  |  val_loss  |  train_acc  |  val_acc  |  ema_val_acc  |  total_time_seconds  |
@@ -149,3 +118,8 @@ Enabling `DEBUG=2` shows the `tinygrad` kernels being compiled and executed, con
 *** CUDA    1720 E_4608_32_4                               arg  2 mem  0.92 GB tm     12.48us/  1730.41ms (     0.00 GFLOPS  189.0|189.0   GB/s)
 # ... (rest of the debug log truncated)
 ```
+
+## Notes
+
+- The first run downloads CIFAR-10 and caches preprocessed tensors to `data.pt`.
+- Unset `TINY_BACKEND` to run the same script with PyTorch/CUDA.
