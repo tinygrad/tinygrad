@@ -112,16 +112,17 @@ class View:
   mask:tuple[tuple[sint, sint], ...]|None
   contiguous:bool
 
-  def to_indexed_uops(self:View, idxs:Sequence[UOp]|None=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
-    """(idx, valid)"""
+  def to_valid_uop(self, idxs:Sequence[UOp]|None=None) -> UOp:
+    """valid.where(idx, INVALID)"""
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
+    where = UOp.const(dtypes.bool, True)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      iexpr = iexpr + idx*sint_to_uop(st)
       if m is not None:
-        if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
-        if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
-    return iexpr, vexpr
+        if resolve(m[0] != 0): where &= (idx >= sint_to_uop(m[0]))
+        if resolve(m[1] != sh): where &= (idx < sint_to_uop(m[1]))
+    return where.where(iexpr, UOp.invalid())
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:

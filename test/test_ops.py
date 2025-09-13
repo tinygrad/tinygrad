@@ -1458,6 +1458,7 @@ class TestOps(unittest.TestCase):
   def test_mean_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.mean(axis=(1,3)))
 
+  @slow_test
   def test_var(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=0))
@@ -1493,6 +1494,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, keepdim=True, correction=0))
 
+  @slow_test
   def test_std(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std())
     helper_test_op([(15, 25, 35)], lambda x: x.std(correction=0))
@@ -1525,6 +1527,7 @@ class TestOps(unittest.TestCase):
   def test_std_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))
+  @slow_test
   def test_std_mean(self):
     helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x)),
                                  lambda x: Tensor.stack(*x.std_mean()))
@@ -2040,12 +2043,14 @@ class TestOps(unittest.TestCase):
       lambda x,w,b: torch.nn.functional.conv2d(x,w,b),
       lambda x,w,b: Tensor.conv2d(x,w,b), grad_rtol=1e-5)
 
+  @slow_test
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv3d(self):
     helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
       lambda x,w: torch.nn.functional.conv3d(x,w),
       lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
+  @slow_test
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_padded_conv3d(self):
     helper_test_op([(1,4,5,5,5), (4,4,3,3,3)],
@@ -2102,6 +2107,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv_transpose2d(x,w,groups=2),
       lambda x,w: Tensor.conv_transpose2d(x,w,groups=2), grad_rtol=1e-5)
 
+  @slow_test
   def test_padded_conv_transpose2d(self):
     for padding in [(1,2), (2,1), 2, 1, 0]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
@@ -2110,6 +2116,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=(1,1,1)),
                    lambda x,w: Tensor.conv_transpose2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
+  @slow_test
   def test_dilated_conv_transpose2d(self):
     for dilation in [(1,2), (2,1), 2, 1]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
@@ -2122,6 +2129,7 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride), atol=1e-5, grad_rtol=1e-5)
 
+  @slow_test
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
@@ -2183,8 +2191,10 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
               lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
+  @slow_test
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
+  @slow_test
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
   def test_conv2d_errors(self):
@@ -2256,6 +2266,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
       lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
+  @slow_test
   def test_strided_conv2d_simple(self):
     bs,H,W = 2,3,1
     helper_test_op([(bs,1,5,1), (1,1,H,W)],
@@ -2266,6 +2277,7 @@ class TestOps(unittest.TestCase):
   def test_strided_conv2d_simple_vec(self):
     with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
 
+  @slow_test
   def test_strided_conv2d(self):
     bs = 4
     cin = 3
@@ -2501,6 +2513,7 @@ class TestOps(unittest.TestCase):
       ),
       forward_only=True)
 
+  @slow_test
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
@@ -2928,13 +2941,13 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_scatter_reduce(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    a = Tensor(b.detach().cpu().numpy().astype(np.int32), requires_grad=False)
     for reduce in ("sum", "prod", "mean", "amin", "amax"):
       for dim in (-1,1,-3):
-        helper_test_op([(4,5,6), (4,5,6)],
+        helper_test_op([(3,4,5), (3,4,5)],
           lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce),
           lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce), forward_only=True)
-        helper_test_op([(4,5,6), (4,5,6)],
+        helper_test_op([(3,4,5), (3,4,5)],
           lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce, include_self=False),
           lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce, include_self=False), forward_only=True)
 
