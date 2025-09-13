@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 import unittest
-
 import torch
-
 from tinygrad import Tensor
-
 
 def try_events(starter=None, ender=None):
   starter = starter or torch.cuda.Event(enable_timing=True)
