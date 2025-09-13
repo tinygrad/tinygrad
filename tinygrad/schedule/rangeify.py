@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
@@ -572,10 +572,10 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
-  becomes_map = {}
+  becomes_map: dict[UOp, UOp] = {}
   for s in tsink.src:
     assert s.tag is not None
     for a in s.tag:
       if a is None: continue
-      becomes_map[uop_list[a]] = s.replace(tag=None)
+      becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
   return becomes_map
