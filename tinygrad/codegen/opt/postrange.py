@@ -315,12 +315,12 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
-  if BEAM >= 1:
+  if ast.arg is not None and ast.arg.opts_to_apply is not None:
+    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
+  elif BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  elif ast.arg is not None and ast.arg.opts_to_apply is not None:
-    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
