@@ -44,8 +44,8 @@ class TestLinearizer(unittest.TestCase):
     g0, g1, g2, g3 = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), arg=i) for i in range(4)]
     a = UOp(Ops.LOAD, dtype, src=(g2.view(st),))
     b = UOp(Ops.LOAD, dtype, src=(g3.view(st),))
-    out0 = UOp(Ops.STORE, dtypes.void, src=(g0.view(st), a + b))
-    out1 = UOp(Ops.STORE, dtypes.void, src=(g1.view(st), a * b))
+    out0 = UOp(Ops.STORE, (v0:=g0.view(st)).dtype, src=(v0, a + b))
+    out1 = UOp(Ops.STORE, (v1:=g1.view(st)).dtype, src=(v1, a * b))
     sink = UOp(Ops.SINK, src=(out0, out1))
 
     a_t = Tensor.full(st.shape, 2).contiguous().realize()

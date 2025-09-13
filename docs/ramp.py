@@ -168,7 +168,7 @@ UOp(Ops.ADD, dtypes.int, arg=None, src=(
 t_plus_3_plus_4.kernelize()
 print(t_plus_3_plus_4.uop)
 """
-UOp(Ops.ASSIGN, dtypes.int, arg=None, src=(
+UOp(Ops.STORE, dtypes.int, arg=None, src=(
   x0:=UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
     UOp(Ops.UNIQUE, dtypes.void, arg=7, src=()),
     x2:=UOp(Ops.DEVICE, dtypes.void, arg='CPU', src=()),)),
@@ -178,7 +178,7 @@ UOp(Ops.ASSIGN, dtypes.int, arg=None, src=(
       UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
        x2,)),)),))
 """
-# ASSIGN has two srcs, src[0] is the BUFFER that's assigned to, and src[1] is the thing to assign
+# STORE has two srcs, src[0] is the BUFFER that's stored to, and src[1] is the thing to store
 # src[1] is the GPU Kernel that's going to be run
 # we can get the ast of the Kernel as follows
 kernel_ast = t_plus_3_plus_4.uop.src[1].arg.ast
@@ -190,7 +190,7 @@ rewritten_ast = full_rewrite_to_sink(kernel_ast)
 print(rewritten_ast)
 """
 UOp(Ops.SINK, dtypes.void, arg=None, src=(
-  UOp(Ops.STORE, dtypes.void, arg=None, src=(
+  UOp(Ops.STORE, dtypes.int.ptr(4), arg=None, src=(
     UOp(Ops.INDEX, dtypes.int.ptr(4), arg=None, src=(
       UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(4), arg=0, src=()),
       x3:=UOp(Ops.SPECIAL, dtypes.int, arg=('gidx0', 4), src=()),)),
