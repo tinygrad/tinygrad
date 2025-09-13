@@ -163,7 +163,7 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, canvasZoom, frameQueued, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -290,8 +290,7 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
-  function render(transform) {
-    zoomLevel = transform;
+  function redraw() {
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
@@ -368,6 +367,12 @@ async function renderProfiler() {
       ctx.fillText(m.name, x+2, 1);
     }
   }
+  function render(e) {
+    zoomLevel = e.transform;
+    if (frameQueued) return;
+    frameQueued = true;
+    requestAnimationFrame(() => { frameQueued = false; redraw(); });
+  }
 
   function resize() {
     const profiler = document.querySelector(".profiler");
@@ -382,7 +387,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", render);
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
