@@ -146,7 +146,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
   ckey = (device, ast.key, context, False)
-  if cret:=method_cache.get(ckey) and not DISABLE_METHOD_CACHE: return cret
+  if (cret:=method_cache.get(ckey)) and not DISABLE_METHOD_CACHE: return cret
   bkey = (device.split(":")[0], ast.key, context, True)
   if (bret:=method_cache.get(bkey)) and not DISABLE_METHOD_CACHE:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
