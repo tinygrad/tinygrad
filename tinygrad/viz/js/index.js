@@ -128,6 +128,59 @@ function renderDag(graph, additions, recenter) {
 
 // ** profiler graph
 
+const RectView = { start: e => e.x, end: e => e.x + e.width };
+const PathView =  { start: e => e.x[0], end: e => e.x.at(-1) };
+
+class IntervalTreeNode { constructor(center, overlaps, left, right) { this.c=center; this.o=overlaps; this.l=left; this.r=right; } }
+
+class Track {
+  constructor() { this.items = []; this.root = null; }
+  push(item) { this.items.push({ item, a:this.view.start(item), b:this.view.end(item) }); }
+  build() {
+    const _build = (lst) => {
+      if (lst.length === 0) return null;
+      const midpoints = lst.map(x => (x.a+x.b)/2).sort((a,b)=>a-b);
+      const center = midpoints[(midpoints.length/2)|0];
+      const left=[], right=[], overlaps=[];
+      for (const x of lst) (x.b < center) ? left.push(x) : (x.a > center) ? right.push(x) : overlaps.push(x);
+      return new IntervalTreeNode(center, overlaps, _build(left), _build(right));
+    }
+    // should never fail
+    const __temp_sorted = this.items.every((x,i,a)=> i===0 || a[i-1].a <= x.a);
+    if (!__temp_sorted) throw new Error("data isn't sorted");
+    this.root = _build(this.items);
+  }
+  *query(st, et) {
+    const visit = function* (node) {
+      if (!node) return;
+      // scan overlaps; early exit where possible
+      for (const x of node.o) { if (x.a>et) break; if (x.b>=st && x.a<=et) yield x.item; }
+      if (st < node.c) yield* visit(node.l);
+      if (et > node.c) yield* visit(node.r);
+    };
+    yield* visit(this.root);
+  }
+  // stuff from Array
+  get length() { return this.items.length; }
+  *[Symbol.iterator]() { for (const x of this.items) yield x.item; }
+}
+
+// TODO: same thing
+class Range {
+  constructor() {
+    this.data = [];
+  }
+  push(e) {
+    this.data.push(e);
+  }
+  clear() { this.data.length = 0; }
+  query(x0, x1, match) {
+    for (const r of this.data) {
+      if (x0>=r.x0 && x1<=r.x1 && match(r)) return r;
+    }
+  }
+}
+
 function formatTime(ts, dur=ts) {
   if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
@@ -199,13 +252,13 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [];
+    const shapes = new Track(), visible = new Track();
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
-      const levels = [];
-      data.tracks.set(k, { shapes, visible:[], offsetY });
+      const levels = []; shapes.view = RectView;
+      data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -233,7 +286,7 @@ async function renderProfiler() {
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
-      const peak = u64();
+      const peak = u64(); shapes.view = PathView;
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
       const timestamps = [];
@@ -271,7 +324,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -285,12 +338,18 @@ async function renderProfiler() {
         return resize();
       });
     }
+    shapes.build();
   }
   updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  let lastFrame = performance.now(), fps = 0;
+  const opts = { minWidth:0.5, distanceTol:0.2 };
   function render(transform) {
+    const now = performance.now()
+    fps = 1000 / (now - lastFrame);
+    lastFrame = now;
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
@@ -300,11 +359,10 @@ async function renderProfiler() {
     xscale.domain(visibleX);
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
-      visible.length = 0;
-      for (const e of shapes) {
+      visible.clear();
+      for (const e of shapes.query(st, et)) {
         // generic polygon
         if (e.width == null) {
-          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
           ctx.beginPath();
           ctx.moveTo(x[0], offsetY+e.y0[0]);
@@ -318,11 +376,15 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
-        const width = xscale(e.x+e.width)-x;
+        let width = xscale(e.x+e.width)-x, arg = e.arg;
+        if (width < opts.minWidth) {
+          const found = visible.query(x, x+width-opts.minWidth+opts.distanceTol, (v) => v.y0 === offsetY+e.y);
+          if (found) continue;
+          width = opts.minWidth; arg = null;
+        }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -367,6 +429,7 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    ctx.fillStyle = "red"; ctx.fillText(`FPS: ${fps.toFixed(1)}`, 5, tickSize/2);
   }
 
   function resize() {
@@ -398,9 +461,7 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
-      if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
-    }
+    return data.tracks.get(tid).visible.query(X, X, (v) => Y>=v.y0 && Y<=v.y1);
   }
 
   canvas.addEventListener("click", e => {
@@ -564,7 +625,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
