@@ -20,7 +20,7 @@ class TestLLaMASpeed(unittest.TestCase):
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
     backup_allocator = Device[Device.DEFAULT].allocator
-    backup_compiler = Device[Device.DEFAULT].compiler
+    backup_compiler_func = Device[Device.DEFAULT].compiler.compile_cached
     Device[Device.DEFAULT].runtime = FakeProgram
     Device[Device.DEFAULT].allocator = FakeAllocator(Device.default)
 
@@ -44,14 +44,14 @@ class TestLLaMASpeed(unittest.TestCase):
     run_llama("codegen(1)")
 
     # test no compiler use for this
-    Device[Device.DEFAULT].compiler = None
+    Device[Device.DEFAULT].compiler.compile_cached = None
     run_llama("methodcache", False)
     with Profiling(sort='time', frac=0.1, fn="/tmp/llama.prof", ts=5):
       run_llama("profile", False)
 
     Device[Device.DEFAULT].runtime = backup_program
     Device[Device.DEFAULT].allocator = backup_allocator
-    Device[Device.DEFAULT].compiler = backup_compiler
+    Device[Device.DEFAULT].compiler.compile_cached = backup_compiler_func
 
 if __name__ == '__main__':
   TestLLaMASpeed().test_llama_compile()
