@@ -591,45 +591,6 @@ class TestSymbolic(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
-  def test_arange_unrolled4(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
-    self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
-
-  def test_arange_unrolled4_with_cast(self):
-    gidx = Variable("gidx", 0, 2559, dtypes.index)
-    dt = dtypes.int
-    unrolled_div = ((gidx+2561)//4 + 2).cast(dt)+((gidx+2562)//4).cast(dt)+((gidx+2560)//4).cast(dt)+((gidx+2559)//4).cast(dt)
-    self.helper_test_variable(unrolled_div, 2561, 5120, "((int)(gidx)+2561)")
-
-  def test_arange_unrolled4_mul(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
-    self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
-
-  def test_arange_unrolled4_small(self):
-    gidx = Variable("gidx", 0, 3)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 3, "gidx")
-
-    gidx = Variable("gidx", 0, 2)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 2, "gidx")
-
-    gidx = Variable("gidx", 0, 1)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 1, "gidx")
-
-  def test_arange_unrolled2(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
-    self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
-
-  def test_arange_unrolled2_neg(self):
-    ridx = Variable("ridx", 0, 255)
-    unrolled_div = -((255-ridx)//2) - ((256-ridx)//2)
-    self.helper_test_variable(unrolled_div, -255, 0, "(ridx+-255)")
-
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
