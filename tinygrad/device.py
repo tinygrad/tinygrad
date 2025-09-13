@@ -281,9 +281,7 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
     self.compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
 
-    devname = device.split(':')[0].upper()
-    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}" for r,c in self.compilers]
-
+    envnames = [self._get_compiler_envvar(c) for r,c in self.compilers]
     enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 1)
     disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 0)
 
@@ -295,8 +293,11 @@ class Compiled:
 
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
 
+  def _get_compiler_envvar(self, c):
+    return f"{(devname:=self.device.split(':')[0].upper())}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}"
+
   def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
-    for renderer, compiler in self.compilers:
+    for renderer, compiler in compilers:
       with contextlib.suppress(Exception): yield renderer(), compiler()
 
   def synchronize(self):
@@ -362,13 +363,14 @@ if __name__ == "__main__":
   for device in ALL_DEVICES:
     compilers_results, any_works = [], False
     try:
-      d = Device[device]
+      default_compiler = (d:=Device[device]).compiler
       for i,(r,c) in enumerate(d.compilers):
         try:
           d.renderer, d.compiler = r(), c()
           with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
           if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__}")
+          default_text = '(default)' if type(default_compiler) == type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
           any_works = True
         except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
