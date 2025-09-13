@@ -446,8 +446,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     for iface_t in ifaces:
       try: return iface_t(self, self.device_id)
       except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}"
-    raise RuntimeError(f"{errs}\nNo interface for {type(self).__name__[:-6]}:{self.device_id} is available:{err_short}\n" \
-                       f"\nForce an interface with {type(self).__name__[:-6].upper()}_IFACE={('|'.join(x.__name__[:-5] for x in ifaces))}.")
+    e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
+    e.add_note(f"{errs}\n{err_short}")
+    raise e
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
