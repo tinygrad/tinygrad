@@ -1837,7 +1837,7 @@ def train_stable_diffusion():
           Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
       return clip_score, fid_score
     
-  BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", 0)
+  BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", CKPT_STEP_INTERVAL)
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
 
@@ -1878,7 +1878,7 @@ def train_stable_diffusion():
       loss_item, lr_item = loss.item(), lr.item()
       t2 = time.perf_counter()
 
-      if i - RESUME_ITR == 5:
+      if i - RESUME_ITR == 3:
         for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
 
       if WANDB:

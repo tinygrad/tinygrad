@@ -89,7 +89,8 @@ class Decoder:
         x = l['upsample']['conv'](x)
 
       # for BEAM on mi300x GPUS=8 DECODE_BS=384, (and other similar BS), necessary for beam kernels to not hang
-      if x.shape[1:] == (128,512,512):
+      #if x.shape[1:] == (128,512,512):
+      if False:
         with Context(BEAM=0):
           x.realize()
       else: x.realize()

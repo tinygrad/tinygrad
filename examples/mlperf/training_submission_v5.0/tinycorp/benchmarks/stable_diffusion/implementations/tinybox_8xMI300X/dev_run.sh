@@ -47,7 +47,7 @@ export MODEL="stable_diffusion"
 export AMD_LLVM=0 # bf16 seems to require this
 #export GPUS=8 BS=336
 export GPUS=8 BS=304
-export BACKUP_INTERVAL=762
+#export BACKUP_INTERVAL=1685
 export CONTEXT_BS=816
 export DENOISE_BS=600
 export DECODE_BS=384
@@ -56,12 +56,12 @@ export CLIP_BS=240
 
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-#export RUN_EVAL=1
-#export EVAL_ONLY=1
+export RUN_EVAL=1
+export EVAL_ONLY=1
 
-export WANDB=1
+#export WANDB=1
 export PARALLEL=4
 #export PARALLEL=0
 
-#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09100305/run_eval_15240" RUNMLPERF=1 python3 examples/mlperf/model_train.py
-RUNMLPERF=1 python3 examples/mlperf/model_train.py
+EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09120204/run_eval_11795" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#RUNMLPERF=1 python3 examples/mlperf/model_train.py
