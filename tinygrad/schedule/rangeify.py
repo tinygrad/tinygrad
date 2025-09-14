@@ -220,7 +220,8 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
     passthrough_idx.append(idx.src[1+i])
     ranges.append(ctx.new_range(s))
     new_ranges.append(ranges[-1])
-  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST], arg=BufferizeOpts(device=x.device))
+  ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST],
+                                          arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
   return ret.index(*passthrough_idx)
 
 def map_realize(ctx:RangeifyContext, x:UOp):
@@ -393,7 +394,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp, locals_allowed=False):
+def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
   sym_shape = tuple([ssimplify(r.src[0]) for r in rngs])
@@ -425,17 +426,12 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
     return ret.replace(tag=x.arg.tags)
 
   # handle locals
-  if not locals_allowed: return None
   tag = x.arg.device
   if tag is None: tag = UOp.unique().arg # TODO: hack
-  buf = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=size, addrspace=x.arg.addrspace), arg=tag)
+  buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   # store has the other dtype here
   # TODO: how is this unified?
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
-
-pm_add_buffers_local = pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, True)),
-])
 
 pm_add_buffers = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
