@@ -319,6 +319,9 @@ pm_rangeify = pm_mops+PatternMatcher([
   # CONST (or DEFINE_VAR) can't have axes. remove srcs when we INDEX it
   (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
 
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat())), lambda c: c),
+
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
@@ -379,12 +382,12 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
-  #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
-  # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
+   lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
-  #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
 ])
 
 # *****************
@@ -496,10 +499,6 @@ rangeify_codegen = PatternMatcher([
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
     lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
 
-  # copy on const is const
-  # TODO: this can be moved into codegen. this rule is probably in other places
-  (UPat(Ops.COPY, src=(UPat.cvar("c",), UPat())), lambda c: c),
-
   # TODO: hack for group for reduce
   (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
@@ -554,7 +553,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  #tsink = graph_rewrite(tsink, symbolic_simple, bottom_up=True, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, sym, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
