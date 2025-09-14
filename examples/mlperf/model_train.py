@@ -1506,7 +1506,7 @@ def train_stable_diffusion():
   from collections import namedtuple
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state
-  import csv, PIL, pickle
+  import csv, PIL, pickle, subprocess
   import numpy as np
 
   config = {}
@@ -1841,6 +1841,7 @@ def train_stable_diffusion():
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", CKPT_STEP_INTERVAL)
   RUN_EVAL=getenv("RUN_EVAL", "")
   if WANDB: wandb_run=wandb.run
+  TOTAL_CKPTS=getenv("TOTAL_CKPTS", 0)
 
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
   @TinyJit
@@ -1881,7 +1882,7 @@ def train_stable_diffusion():
 
       if i - RESUME_ITR == 3:
         for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
-
+      
       if WANDB:
         wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
                      "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
@@ -1894,7 +1895,8 @@ def train_stable_diffusion():
       if WANDB: wandb_log["train/loss"] = loss_item
       if WANDB: wandb_log["train/lr"] = lr_item
 
-      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
+      # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
+      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
         prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
         # seen keys from dataset
@@ -1905,12 +1907,16 @@ def train_stable_diffusion():
         safe_save(ckpt_to_cpu(), fn)
         with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
           pickle.dump(seen_keys, f)
-
         # delete all except above backup, and penultimate backup (prev[-1]):
         for prev in (prev_ckpt, prev_keys):
           for to_delete in prev[:-1]:
             print(f"deleting {to_delete.name}")
             to_delete.unlink()
+
+      # because we can't resume from later checkpoints, limit power for more stability
+      if i == 2_500_000 // BS:
+        cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
+        res = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
       if i % CKPT_STEP_INTERVAL == 0:
         # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
@@ -1918,6 +1924,10 @@ def train_stable_diffusion():
         fn = f"{UNET_CKPTDIR}/{i}.safetensors"
         print(f"saving unet checkpoint at {fn}")
         safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
+        if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
+          import sys
+          print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
+          sys.exit()
 
       if RUN_EVAL:
         EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))

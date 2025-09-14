@@ -31,8 +31,6 @@ export DATADIR="/raid/datasets/stable_diffusion"
 export CKPTDIR="/raid/weights/stable_diffusion"
 
 #export SEED=$RANDOM
-DATETIME=$(date "+%m%d%H%M")
-#LOGFILE="sd_red_${DATETIME}_${SEED}.log"
 export HCQDEV_WAIT_TIMEOUT_MS=300000
 
 export PYTHONPATH="."
@@ -54,14 +52,24 @@ export DECODE_BS=384
 export INCEPTION_BS=560
 export CLIP_BS=240
 
+#export RUN_EVAL=1 EVAL_ONLY=1
+
+export WANDB=1
+#export PARALLEL=4
+export PARALLEL=0
+
+export TOTAL_CKPTS=6
+
+DATETIME=$(date "+%m%d%H%M")
+#LOGFILE="sd_red_${DATETIME}_${SEED}.log"
 export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-export RUN_EVAL=1
-export EVAL_ONLY=1
+LEARNING_RATE="6.25e-8" RUNMLPERF=1 python3 examples/mlperf/model_train.py
 
-#export WANDB=1
-export PARALLEL=4
-#export PARALLEL=0
+sleep 120
 
-EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09120204/run_eval_11795" RUNMLPERF=1 python3 examples/mlperf/model_train.py
-#RUNMLPERF=1 python3 examples/mlperf/model_train.py
+DATETIME=$(date "+%m%d%H%M")
+export UNET_CKPTDIR="${BASEDIR}/checkpoints/training_checkpoints/${DATETIME}"
+mkdir -p $UNET_CKPTDIR
+LEARNING_RATE="2.5e-7" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09130207/run_eval_2" RUNMLPERF=1 python3 examples/mlperf/model_train.py
