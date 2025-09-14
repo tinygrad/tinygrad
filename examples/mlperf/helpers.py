@@ -4,9 +4,8 @@ from typing import Optional
 import math
 import numpy as np
 from tinygrad.nn import state
-from tinygrad.nn.optim import LAMB
 from tinygrad.tensor import Tensor, dtypes
-from tinygrad.helpers import getenv, unwrap
+from tinygrad.helpers import getenv
 
 #
 # checkpointing utils
@@ -15,11 +14,10 @@ from tinygrad.helpers import getenv, unwrap
 def invert_dict(d): return {v: k for k, v in reversed(d.items())}
 def dedup_dict(d): return invert_dict(invert_dict(d))
 # store each tensor into the first key it appears in
-def get_training_state(model, optimizer, scheduler, grad_scaler=None):
+def get_training_state(model, optimizer, scheduler):
   # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
   # readable and can be loaded as a model for eval
   train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
-  if grad_scaler is not None: train_state['grad_scaler'] = grad_scaler
   return dedup_dict(state.get_state_dict(train_state))
 def load_training_state(model, optimizer, scheduler, state_dict):
   # use fresh model to restore duplicate keys
@@ -356,48 +354,6 @@ class BoxCoder(object):
     h = pred_ctr_y + 0.5 * pred_h - 1
     pred_boxes = Tensor.stack(x, y, w, h).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
     return pred_boxes
-
-# based on torch.cuda.amp.grad_scaler.py class GradScaler
-# this is used in mlperf training reference for Stable Diffusion v2, with default setting of "precision: 16" in pytorch lightning config
-class GradScaler:
-  def __init__(self, optimizer:LAMB, init_scale:float=2.0**16, growth_factor:float=2.0, backoff_factor:float=0.5, growth_interval:int=2000):
-    self.scale, self.growth_tracker = Tensor(init_scale).to(optimizer.device), Tensor(0).to(optimizer.device)
-    self.growth_factor, self.backoff_factor, self.growth_interval = growth_factor, backoff_factor, growth_interval
-    self.opt = optimizer
-
-  def step(self):
-    opt = self.opt
-    grads_all_finite = []
-    for t in opt.params:
-      grads_all_finite.append(t.grad.isfinite().all().unsqueeze(0))
-    grads_all_finite = Tensor.cat(*grads_all_finite).all()
-
-    # if any non-finite grads were detected, skip the optimizer step (modified version of LAMB._step)
-    opt.b1_t *= grads_all_finite.where(opt.b1, 1.0)
-    opt.b2_t *= grads_all_finite.where(opt.b2, 1.0)
-    for i, (t, g) in enumerate(zip(opt.params, [unwrap(t.grad) for t in opt.params])):
-      stepped_m = (opt.b1 * opt.m[i] + (1.0 - opt.b1) * g).cast(opt.m[i].dtype)
-      stepped_v = (opt.b2 * opt.v[i] + (1.0 - opt.b2) * (g * g)).cast(opt.v[i].dtype)
-      opt.m[i].assign(grads_all_finite.where(stepped_m, opt.m[i]))
-      opt.v[i].assign(grads_all_finite.where(stepped_v, opt.v[i]))
-      m_hat = opt.m[i] / (1.0 - opt.b1_t)
-      v_hat = opt.v[i] / (1.0 - opt.b2_t)
-      up = (m_hat / (v_hat.sqrt() + opt.eps)) + opt.wd * t.detach()
-      r = 1.0
-      stepped_t = (t.detach() - opt.lr * r * up).cast(t.dtype)
-      t.assign(grads_all_finite.where(stepped_t, t))
-
-    # grow the scale if we haven't been generating non-finite grads, otherwise shrink it
-    at_interval = (self.growth_tracker == self.growth_interval)
-    scale_if_all_finite = at_interval.where(self.scale * self.growth_factor, self.scale)
-    self.scale.assign(grads_all_finite.where(scale_if_all_finite, self.scale * self.backoff_factor))
-    self.growth_tracker.assign(
-      grads_all_finite.where(at_interval.where(Tensor(0, device=opt.device), self.growth_tracker + 1), Tensor(0, device=opt.device))
-    )
-    for t in opt.params:
-      t.grad = None
-    del g, grads_all_finite, stepped_m, stepped_v, m_hat, v_hat, up, stepped_t
-    Tensor.realize(*[opt.b1_t, opt.b2_t, self.scale, self.growth_tracker] + opt.m + opt.v + opt.params + opt.buffers)
 
 # Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
 def gelu_erf(x:Tensor) -> Tensor:
