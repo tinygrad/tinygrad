@@ -1778,7 +1778,8 @@ def train_stable_diffusion():
         # Tensor.interpolate does not yet support bicubic, so we use PIL
         batch = (batch.to(GPUS[0]).permute(0,2,3,1) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
         batch = [np.array(PIL.Image.fromarray(batch[i]).resize((224,224), PIL.Image.BICUBIC)) for i in range(bs)]
-        batch = shard_tensor(Tensor.stack(*[Tensor(x, device="CPU") for x in batch], dim=0).permute(0,3,1,2))
+        #batch = shard_tensor(Tensor.stack(*[Tensor(x, device="CPU") for x in batch], dim=0).permute(0,3,1,2))
+        batch = shard_tensor(Tensor(np.stack(batch, axis=0).transpose(0,3,1,2), device="CPU").realize())
         batch = batch.cast(dtypes.float) / 255
         batch = (batch - model.mean) / model.std
         batch = jit_clip(shard_tensor(batch_tokens), batch)
@@ -1814,7 +1815,7 @@ def train_stable_diffusion():
         for batch_idx in tqdm(range(stage_progress(stage_idx), inputs.shape[0], bs)):
           t1 = time.perf_counter()
           batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
-          if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0])
+          if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0].realize())
           else: batch = callback(batch)
           # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
           batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
