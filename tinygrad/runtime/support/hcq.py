@@ -450,7 +450,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
         del e
     excp = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
     if hasattr(excp, 'add_note'): excp.add_note(f"{errs}{err_short}")
-    raise excp
+    raise excp from None
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
