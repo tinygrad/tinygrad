@@ -4,20 +4,18 @@
 # setup dirs
 
 DATA=/raid/datasets/stable_diffusion
-#DATA=/home/hooved/stable_diffusion/datasets
 
 LAION=$DATA/laion-400m/webdataset-moments-filtered 
 COCO=$DATA/coco2014
 mkdir -p $LAION $COCO
 
 CKPT=/raid/weights/stable_diffusion
-#CKPT=/home/hooved/stable_diffusion/checkpoints
 mkdir -p $CKPT/clip $CKPT/sd $CKPT/inception
 
 # download data
 
-# didn't want to install rclone system wide if it wasn't already
-#RCLONE="/home/hooved/rclone-v1.70.3-linux-amd64/rclone"
+# if rclone isn't installed system-wide / in your PATH, put the executable path in quotes below
+#RCLONE=""
 RCLONE="rclone"
 
 ## VAE-encoded image latents, from 6.1M image subset of laion-400m
