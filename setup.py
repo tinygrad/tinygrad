@@ -14,8 +14,7 @@ testing_minimal = [
   "pytest-xdist",
   "pytest-timeout",
   "hypothesis",
-  "z3-solver",
-  "ml_dtypes"
+  "z3-solver"
 ]
 
 setup(name='tinygrad',
