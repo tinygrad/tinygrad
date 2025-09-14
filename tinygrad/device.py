@@ -280,21 +280,23 @@ class Compiled:
 
   def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
-    compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
+    self.compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
 
-    devname = device.split(':')[0].upper()
-    envnames = [f"{devname}_{unwrap_class_type(c).__name__.removesuffix('Compiler').removeprefix(devname).upper()}" for r,c in compilers]
-
-    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 1)
-    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, compilers) if en is not None and getenv(en, -1) == 0)
+    envnames = [self._get_compiler_envvar(c) for r,c in self.compilers]
+    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 1)
+    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 0)
 
     if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
-    for _, comp_pair in disable_comps: compilers.remove(comp_pair)
+    for _, comp_pair in disable_comps: self.compilers.remove(comp_pair)
 
-    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else compilers))
+    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers))
     except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
 
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+
+  def _get_compiler_envvar(self, c):
+    compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
+    return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
 
   def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
     for renderer, compiler in compilers:
@@ -358,16 +360,22 @@ if PROFILE:
       launch_viz(PROFILE, fn)
 
 if __name__ == "__main__":
+  from tinygrad import Tensor, Device
+
   for device in ALL_DEVICES:
+    compilers_results, any_works = [], False
     try:
-      _ = Device[device].device
-      try:
-        from tinygrad import Tensor
-        with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
-        if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-        result = colored("PASS", "green")
-      except Exception as e:
-        result = f"{colored('FAIL', 'yellow')} {e}"
+      default_compiler = (d:=Device[device]).compiler
+      for i,(r,c) in enumerate(d.compilers):
+        try:
+          d.renderer, d.compiler = r(), c()
+          with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+          if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+          default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
+          any_works = True
+        except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
     print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")
