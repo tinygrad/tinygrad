@@ -220,6 +220,7 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
     passthrough_idx.append(idx.src[1+i])
     ranges.append(ctx.new_range(s))
     new_ranges.append(ranges[-1])
+  # TODO: this should be able to be global or local
   ret = x.src[0].index(*ranges).bufferize(*[x for x in new_ranges if x.op is not Ops.CONST],
                                           arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
   return ret.index(*passthrough_idx)
@@ -502,6 +503,7 @@ rangeify_codegen = PatternMatcher([
 
 def split_store(ctx:list[UOp], x:UOp):
   if len(x.ranges): return None
+  if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
