@@ -128,16 +128,29 @@ function renderDag(graph, additions, recenter) {
 
 // ** profiler graph
 
+const RectView = { st: e => e.x, et: e => e.x + e.width };
+const PathView =  { st: e => e.x[0], et: e => e.x.at(-1) };
+
 class Range {
-  constructor() { this.data = []; }
-  push(e) { this.data.push(e); }
-  query(t0, t1, match) {
-    if (match == null) match = () => {};
-    for (const e of this.data) {
-      if (t0>=e.x0 && t1<=e.x1 && match(e)) return e;
+  constructor() { this.items = []; }
+  push(e) {
+    this.items.push(this.view != null ? { arg:e, x0:this.view.st(e), x1:this.view.et(e) } : e);
+  }
+  *query(t0, t1) {
+    for (const e of this.items) {
+      if (t1>=e.x0 && t0<=e.x1) yield e.arg;
     }
   }
-  clear() { this.data.length = 0; }
+  find(t0, t1, match) {
+    if (match == null) match = () => true;
+    for (const e of this.items) {
+      if (t0>=e.x0 && t1<=e.x1 && match(e)) return e.arg;
+    }
+  }
+  clear() { this.items.length = 0; }
+  // stuff from Array
+  get length() { return this.items.length; }
+  *[Symbol.iterator]() { for (const e of this.items) yield e.arg; }
 }
 
 function formatTime(ts, dur=ts) {
@@ -211,12 +224,12 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [], visible = new Range();
+    const shapes = new Range(), visible = new Range();
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
-      const levels = [];
+      const levels = []; shapes.view = RectView;
       data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
@@ -245,7 +258,7 @@ async function renderProfiler() {
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
-      const peak = u64();
+      const peak = u64(); shapes.view = PathView;
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
       const timestamps = [];
@@ -314,10 +327,9 @@ async function renderProfiler() {
     // draw shapes
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
       visible.clear();
-      for (const e of shapes) {
+      for (const e of shapes.query(st, et)) {
         // generic polygon
         if (e.width == null) {
-          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
           ctx.beginPath();
           ctx.moveTo(x[0], offsetY+e.y0[0]);
@@ -331,12 +343,11 @@ async function renderProfiler() {
           continue;
         }
         // contiguous rect
-        if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
         const y = offsetY+e.y;
         let width = xscale(e.x+e.width)-x, arg = e.arg;
         if (width < opts.minWidth) {
-          const found = visible.query(x, x+width-opts.minWidth+opts.distanceTol, (v) => v.y0 === offsetY+e.y);
+          const found = visible.find(x, x+width-opts.minWidth+opts.distanceTol, (v) => v.y0 === offsetY+e.y);
           if (found) continue;
           width = opts.minWidth; arg = null;
         }
@@ -417,7 +428,7 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    return data.tracks.get(tid).visible.query(X, X, (v) => Y>=v.y0 && Y<=v.y1)?.arg;
+    return data.tracks.get(tid).visible.find(X, X, (v) => Y>=v.y0 && Y<=v.y1);
   }
 
   canvas.addEventListener("click", e => {
