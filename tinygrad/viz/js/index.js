@@ -657,28 +657,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  if (ctx.runtime_stats != null) {
-    const div = metadata.appendChild(document.createElement("div"));
-    div.className = "stats-list";
-    for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
-      const table = div.appendChild(document.createElement("table"));
-      const tbody = table.appendChild(document.createElement("tbody"));
-      for (const { name, value, unit, subunits } of s.data) {
-          const mainRow = appendRow(tbody, name, value, unit, "main-row");
-          if (!subunits?.length) continue;
-          const subunitRow = tbody.appendChild(document.createElement("tr"));
-          subunitRow.style.display = "none";
-          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
-          mainRow.style.cursor = "pointer";
-          const td = subunitRow.appendChild(document.createElement("td"));
-          td.colSpan = 2;
-          const table = td.appendChild(document.createElement("table"));
-          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
-      }
-    }
-  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
