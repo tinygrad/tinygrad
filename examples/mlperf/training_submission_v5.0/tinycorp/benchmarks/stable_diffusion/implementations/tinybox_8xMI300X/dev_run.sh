@@ -45,7 +45,8 @@ export MODEL="stable_diffusion"
 #export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09090228"
 #export RESUME_ITR=5334
 export AMD_LLVM=0 # bf16 seems to require this
-export GPUS=8 BS=336
+#export GPUS=8 BS=336
+export GPUS=8 BS=304
 export BACKUP_INTERVAL=762
 export CONTEXT_BS=816
 export DENOISE_BS=600
@@ -58,7 +59,7 @@ mkdir -p $UNET_CKPTDIR
 #export RUN_EVAL=1
 #export EVAL_ONLY=1
 
-#export WANDB=1
+export WANDB=1
 export PARALLEL=4
 #export PARALLEL=0
 
