@@ -496,6 +496,10 @@ rangeify_codegen = PatternMatcher([
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
     lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
 
+  # copy on const is const
+  # TODO: this can be moved into codegen. this rule is probably in other places
+  (UPat(Ops.COPY, src=(UPat.cvar("c",), UPat())), lambda c: c),
+
   # TODO: hack for group for reduce
   (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
