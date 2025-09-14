@@ -35,7 +35,7 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
   for i, v in enumerate(st.views):
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
+    offset = (v.offset or 0) + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
     real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
     real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
     strides: List[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
