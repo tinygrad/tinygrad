@@ -23,7 +23,8 @@ RCLONE="rclone"
 $RCLONE config create mlc-training s3 provider=Cloudflare access_key_id=76ea42eadb867e854061a1806220ee1e secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
 $RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/ ${LAION} --include="*.tar" -P
 $RCLONE copy mlc-training:mlcommons-training-wg-public/stable_diffusion/datasets/laion-400m/moments-webdataset-filtered/sha512sums.txt ${LAION} -P
-sha512sum --quiet -c sha512sums.txt
+cd $LAION && grep -E '\.tar$' sha512sums.txt | sha512sum -c --quiet - && \
+  echo "All .tar files verified" || { echo "Checksum failure when validating downloaded Laion moments"; exit 1; }
 
 ## prompts and FID statistics from 30k image subset of coco2014
 ## 33 MB
