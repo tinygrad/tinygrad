@@ -2,60 +2,37 @@
 for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
 sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750
 
-# *** dependencies
+# dependencies
 #pip install tqdm
 #pip install numpy
-
-#### to match mlperf reference clip tokenizer behavior
 #pip install ftfy
 #pip install regex
-
-## PIL is for validation step: preprocessing the generated images before clip vision encoder encodes the image
 #pip install pillow
-
-## for inception, calculating the frechet distance, which uses scipy.linalg
 #pip install scipy
-
-#### to use mlperf reference dataloader
-#pip install --index-url https://download.pytorch.org/whl/cpu torch # for torch.utils.data.DataLoader, which webdataset depends on
+# webdataset depends on torch.utils.data.DataLoader
+#pip install --index-url https://download.pytorch.org/whl/cpu torch
 #pip install webdataset
 source venv/bin/activate
 pip list
 apt list --installed | grep amdgpu
-#export DEBUG=2
-export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
-export IGNORE_JIT_FIRST_BEAM=1
 
-export BASEDIR="/home/hooved/stable_diffusion"
+export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 IGNORE_JIT_FIRST_BEAM=1 HCQDEV_WAIT_TIMEOUT_MS=300000
+export AMD_LLVM=0 # bf16 seems to require this
+
+export BASEDIR="~/stable_diffusion"
 export DATADIR="/raid/datasets/stable_diffusion"
 export CKPTDIR="/raid/weights/stable_diffusion"
+export MODEL="stable_diffusion" PYTHONPATH="."
 
-#export SEED=$RANDOM
-export HCQDEV_WAIT_TIMEOUT_MS=300000
-
-export PYTHONPATH="."
-export MODEL="stable_diffusion"
-
-# mi300x
-# use separate BS for the various jits in eval to maximize throughput
-#export JIT=3 # eval takes ~80% longer, but doesn't crash with Bus error
-
+# set these if resuming from checkpoint
 #export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09090228"
 #export RESUME_ITR=5334
-export AMD_LLVM=0 # bf16 seems to require this
-#export GPUS=8 BS=336
 export GPUS=8 BS=304
-#export BACKUP_INTERVAL=1685
-export CONTEXT_BS=816
-export DENOISE_BS=600
-export DECODE_BS=384
-export INCEPTION_BS=560
-export CLIP_BS=240
 
-#export RUN_EVAL=1 EVAL_ONLY=1
+# use separate BS for the jits in eval to maximize throughput
+#export RUN_EVAL=1 EVAL_ONLY=1 CONTEXT_BS=816 DENOISE_BS=600 DECODE_BS=384 INCEPTION_BS=560 CLIP_BS=240
 
 export WANDB=1
-#export PARALLEL=4
 export PARALLEL=0
 
 export TOTAL_CKPTS=6

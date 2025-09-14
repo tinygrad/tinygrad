@@ -1859,7 +1859,7 @@ def train_stable_diffusion():
     if RESUME_CKPTDIR:
       with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
     else: seen_keys = []
-    dl = batch_load_train_stable_diffusion(BS)
+    dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
     t0 = t6 = time.perf_counter()
     for i, batch in enumerate(dl, start=1):
       loop_time = time.perf_counter() - t0
