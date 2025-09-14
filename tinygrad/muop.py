@@ -337,10 +337,18 @@ class MUOpA64(MUOp):
   def V_V_V(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, size:int, q:int, u:int=0b0, b21:int=0b1):
     return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.VEC, (MUOpA64.VEC, MUOpA64.VEC), b30=q, b29=u,
                    b28_24=0b01110, b23_22=size, b21=b21, b20_16=rm.index, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod # bits 18 - 14 are essentially the opcode
+  def S_S(opstr:str, opcode:int, rd:Register, rn:Register, size:int):
+    return MUOpA64(opstr, opcode, rd, (rn,), MUOpA64.VEC, (MUOpA64.VEC,), b31=0b0, b30=0b0, b29=0b0,
+                   b28_24=0b11110, b23_22=size, b21=0b1, b20_16=opcode>>2, b15_10=opcode<<4, b9_5=rn.index, b4_0=rd.index)
   @staticmethod
   def S_S_S(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, size:int, q:int=0b0, u:int=0b0, b31:int=0b0):
     return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.VEC, (MUOpA64.VEC, MUOpA64.VEC), b31=b31, b30=q, b29=u,
                    b28_24=0b11110, b23_22=size, b21=0b1, b20_16=rm.index, b15_10=opcode, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def S_S_S_S(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, ra:Register, size:int):
+    return MUOpA64(opstr, opcode, rd, (rn, rm, ra), MUOpA64.VEC, (MUOpA64.VEC, MUOpA64.VEC, MUOpA64.VEC), b31=0b0, b30=0b0, b29=0b0,
+                   b28_24=opcode, b23_22=size, b21=0b0, b20_16=rm.index, b15_10=ra.index, b9_5=rn.index, b4_0=rd.index)
   @staticmethod
   def S_R(opstr:str, opcode:int, rd:Register, rn:Register, size:int, b31:int=0b0):
     return MUOpA64(opstr, opcode, rd, (rn,), MUOpA64.VEC, (MUOpA64.GPR,), b31=b31, b30=0b0, b29=0b0,
@@ -354,21 +362,33 @@ class MUOpA64(MUOp):
     return MUOpA64(opstr, opcode, None, (label,), (), ((),), b31=0b0, b30=opcode>>6, b29=opcode>>5,
                    b28_24=opcode, b23_22=0>>27, b21=0>>16, b20_16=0>>11, b15_10=0>>5, b9_5=0, b4_0=cond&0b01111)
   @staticmethod
+  def R(opstr:str, opcode:int, rd:Register, cond:int, sf:int, shift:int=0b00):
+    return MUOpA64(opstr, opcode, rd, (), MUOpA64.GPR, (), b31=sf, b30=opcode>>6, b29=opcode>>5,
+                   b28_24=opcode, b23_22=shift, b21=0b0, b20_16=0b11111, b15_10=cond, b9_5=0b11111, b4_0=rd.index)
+  @staticmethod
   def R_I(opstr:str, opcode:int, rd:Register, imm16:int, sf:int, shift:int=0b00):
     return MUOpA64(opstr, opcode, rd, (imm16,), MUOpA64.GPR, ((),), b31=sf, b30=opcode>>6, b29=opcode>>5,
                    b28_24=opcode, b23_22=0b10, b21=shift, b20_16=imm16>>11, b15_10=imm16>>5, b9_5=imm16, b4_0=rd.index)
   @staticmethod
   def _R_I(opstr:str, opcode:int, rn:Register, imm12:int, sf:int, shift:int=0b00):
-    return MUOpA64(opstr, opcode, None, (rn, imm12), MUOpA64.GPR, (MUOpA64.GPR, ()), b31=sf, b30=opcode>>6, b29=opcode>>5,
+    return MUOpA64(opstr, opcode, None, (rn, imm12), (), (MUOpA64.GPR, ()), b31=sf, b30=opcode>>6, b29=opcode>>5,
                    b28_24=opcode, b23_22=shift, b21=imm12>>11, b20_16=imm12>>6, b15_10=imm12, b9_5=rn.index, b4_0=0b11111)
   @staticmethod
   def R_R(opstr:str, opcode:int, rd:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
     return MUOpA64(opstr, opcode, rd, (rm,), MUOpA64.GPR, (MUOpA64.GPR,), b31=sf, b30=opcode>>6, b29=opcode>>5,
                    b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=0b11111, b4_0=rd.index)
   @staticmethod
+  def _R_R(opstr:str, opcode:int, rn:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
+    return MUOpA64(opstr, opcode, None, (rn, rm), (), (MUOpA64.GPR, MUOpA64.GPR), b31=sf, b30=opcode>>6, b29=opcode>>5,
+                   b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=rn.index, b4_0=0b11111)
+  @staticmethod
   def R_R_R(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, sf:int, shift:int=0b00, imm6:int=0b000000):
     return MUOpA64(opstr, opcode, rd, (rn, rm), MUOpA64.GPR, (MUOpA64.GPR, MUOpA64.GPR), b31=sf, b30=opcode>>6, b29=opcode>>5,
                    b28_24=opcode, b23_22=shift, b21=0b0, b20_16=rm.index, b15_10=imm6, b9_5=rn.index, b4_0=rd.index)
+  @staticmethod
+  def R_R_R_R(opstr:str, opcode:int, rd:Register, rn:Register, rm:Register, ra:Register, sf:int):
+    return MUOpA64(opstr, opcode, rd, (rn, rm, ra), MUOpA64.GPR, (MUOpA64.GPR, MUOpA64.GPR, MUOpA64.GPR), b31=sf, b30=opcode>>6, b29=opcode>>5,
+                   b28_24=opcode, b23_22=0b00, b21=0b0, b20_16=rm.index, b15_10=ra.index, b9_5=rn.index, b4_0=rd.index)
   @staticmethod
   def R_R_I(opstr:str, opcode:int, rd:Register, rn:Register, imm12:int, sf:int, shift:int=0b00):
     imm12 = imm12
@@ -379,13 +399,15 @@ class MUOpA64(MUOp):
     imm12 = imm12 & 0xFFF
     return MUOpA64(opstr, opcode, rd, (rn, imm12), MUOpA64.VEC, (MUOpA64.GPR, ()), b31=size>>1, b30=size, b29=opcode>>5,
                    b28_24=opcode, b23_22=shift, b21=imm12>>11, b20_16=imm12>>6, b15_10=imm12, b9_5=rn.index, b4_0=rd.index)
+  # TODO: fix this mess
   def replace(self, out, ins) -> MUOp:
     if self.ins and isinstance(self.ins[0], Label) and isinstance(ins[0], int):
       rep = ins[0] // 4
       return MUOpA64(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, self.b31, self.b30, self.b29, self.b28_24,
                      rep>>27, rep>>16, rep>>11, rep>>5, rep, self.b4_0)
     return MUOpA64(self.opstr, self.opcode, out, ins, self.out_con, self.ins_con, self.b31, self.b30, self.b29, self.b28_24,
-                   self.b23_22, self.b21, ins[-1].index if ins and isinstance(ins[-1], Register) else self.b20_16, self.b15_10,
+                   self.b23_22, self.b21, ins[1].index if len(ins)>1 and isinstance(ins[1], Register) else self.b20_16,
+                   ins[2].index if len(ins)>2 and isinstance(ins[2], Register) else self.b15_10,
                    ins[0].index if ins and isinstance(ins[0], Register) else self.b9_5, out.index if isinstance(out, Register) else self.b4_0)
   def encode(self) -> bytes:
     return ((self.b31 & 0b1) << 31 | (self.b30 & 0b1) << 30 | (self.b29 & 0b1) << 29 | (self.b28_24 & 0b11111) << 24 | \
