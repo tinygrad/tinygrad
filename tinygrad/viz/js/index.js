@@ -163,7 +163,45 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+class BitGrid {
+  constructor(width, height) { this.rows = Array.from({length: height}, () => new Uint32Array((width + 31) >>> 5)); this.items = []; }
+  _maskRange(b0, b1) {
+    let n = (b1 - b0 + 1) | 0;
+    return ((-1 >>> (32 - n)) << b0) >>> 0
+  }
+  push(e) {
+    this.items.push(e);
+    const X0 = e.x0 | 0, Y0 = e.y0 | 0, X1 = e.x1 | 0, Y1 = e.y1 | 0;
+    const w0 = X0 >>> 5, w1 = X1 >>> 5, b0 = X0 & 31, b1 = X1 & 31;
+    for (let y = Y0; y <= Y1; y++) {
+      const row = this.rows[y];
+      if (w0 === w1) { row[w0] |= this._maskRange(b0, b1); continue; }
+      row[w0] |= ((-1 << b0) >>> 0);
+      for (let w = w0 + 1; w < w1; w++) row[w] = 0xFFFFFFFF;
+      row[w1] |= (-1 >>> (31 - b1));
+    }
+  }
+  query(x0, y0, x1, y1) {
+    const X0 = x0 | 0, Y0 = y0 | 0, X1 = x1 | 0, Y1 = y1 | 0;
+    const w0 = X0 >>> 5, w1 = X1 >>> 5, b0 = X0 & 31, b1 = X1 & 31;
+    for (let y = Y0; y <= Y1; y++) {
+      const row = this.rows[y];
+      if (w0 === w1) {
+        const m = this._maskRange(b0, b1);
+        if ((row[w0] & m) !== m) return false;
+        continue;
+      }
+      const m0 = ((-1 << b0) >>> 0), m1 = (-1 >>> (31 - b1));
+      if ((row[w0] & m0) !== m0) return false;
+      for (let w = w0 + 1; w < w1; w++) if (row[w] !== 0xFFFFFFFF) return false;
+      if ((row[w1] & m1) !== m1) return false;
+    }
+    return true;
+  }
+  clear() { for (const r of this.rows) r.fill(0); this.items.length = 0; }
+}
+
+var data, visible, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -199,13 +237,13 @@ async function renderProfiler() {
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [], visible = [];
+    const shapes = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible, offsetY });
+      data.tracks.set(k, { shapes, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -271,7 +309,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -290,17 +328,18 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const opts = { minWidth:1 };
   function render(transform) {
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    visible.clear();
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
-      visible.length = 0;
+    for (const [_, { offsetY, shapes }] of data.tracks) {
       for (const e of shapes) {
         // generic polygon
         if (e.width == null) {
@@ -321,7 +360,11 @@ async function renderProfiler() {
         if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
         const y = offsetY+e.y;
-        const width = xscale(e.x+e.width)-x;
+        let width = xscale(e.x+e.width)-x;
+        if (width < opts.minWidth) {
+          if (visible.query(x, y, x+opts.minWidth, y+e.height)) continue;
+          width = opts.minWidth; arg = null;
+        }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
         visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
@@ -380,6 +423,7 @@ async function renderProfiler() {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    visible = new BitGrid(width, height);
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
@@ -390,16 +434,10 @@ async function renderProfiler() {
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
-    let tid = null;
-    for (const k of data.tracks.keys()) {
-      const r = rect(document.getElementById(k));
-      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
-    }
-    if (tid == null) return;
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
+    for (const r of visible?.items) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
