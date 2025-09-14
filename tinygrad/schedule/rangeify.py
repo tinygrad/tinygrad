@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify
 from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
@@ -396,6 +396,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 def bufferize_to_store(x:UOp, locals_allowed=False):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
+  sym_shape = tuple([ssimplify(r.src[0]) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
 
@@ -418,7 +419,10 @@ def bufferize_to_store(x:UOp, locals_allowed=False):
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
     ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
-    return ret.forced_reshape(shape).replace(tag=x.arg.tags)
+    ret = ret.forced_reshape(shape)
+    # TODO: is this right? what if it's offset
+    if shape is not sym_shape: ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
+    return ret.replace(tag=x.arg.tags)
 
   # handle locals
   if not locals_allowed: return None
