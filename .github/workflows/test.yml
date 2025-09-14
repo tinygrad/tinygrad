@@ -526,6 +526,8 @@ jobs:
           -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
+    - name: Test multitensor
+      run: RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1
     - name: Test GPU=1 RANGEIFY=1
       run: GPU=1 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test CPU=1 RANGEIFY=2
