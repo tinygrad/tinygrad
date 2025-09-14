@@ -447,10 +447,12 @@ c__EA_hsa_device_type_t__enumvalues = {
     0: 'HSA_DEVICE_TYPE_CPU',
     1: 'HSA_DEVICE_TYPE_GPU',
     2: 'HSA_DEVICE_TYPE_DSP',
+    3: 'HSA_DEVICE_TYPE_AIE',
 }
 HSA_DEVICE_TYPE_CPU = 0
 HSA_DEVICE_TYPE_GPU = 1
 HSA_DEVICE_TYPE_DSP = 2
+HSA_DEVICE_TYPE_AIE = 3
 c__EA_hsa_device_type_t = ctypes.c_uint32 # enum
 hsa_device_type_t = c__EA_hsa_device_type_t
 hsa_device_type_t__enumvalues = c__EA_hsa_device_type_t__enumvalues
@@ -1366,10 +1368,29 @@ hsa_kernel_dispatch_packet_setup_width_t__enumvalues = c__EA_hsa_kernel_dispatch
 class struct_hsa_kernel_dispatch_packet_s(Structure):
     pass
 
-struct_hsa_kernel_dispatch_packet_s._pack_ = 1 # source:False
-struct_hsa_kernel_dispatch_packet_s._fields_ = [
+class union_hsa_kernel_dispatch_packet_s_0(Union):
+    pass
+
+class struct_hsa_kernel_dispatch_packet_s_0_0(Structure):
+    pass
+
+struct_hsa_kernel_dispatch_packet_s_0_0._pack_ = 1 # source:False
+struct_hsa_kernel_dispatch_packet_s_0_0._fields_ = [
     ('header', ctypes.c_uint16),
     ('setup', ctypes.c_uint16),
+]
+
+union_hsa_kernel_dispatch_packet_s_0._pack_ = 1 # source:False
+union_hsa_kernel_dispatch_packet_s_0._anonymous_ = ('_0',)
+union_hsa_kernel_dispatch_packet_s_0._fields_ = [
+    ('_0', struct_hsa_kernel_dispatch_packet_s_0_0),
+    ('full_header', ctypes.c_uint32),
+]
+
+struct_hsa_kernel_dispatch_packet_s._pack_ = 1 # source:False
+struct_hsa_kernel_dispatch_packet_s._anonymous_ = ('_0',)
+struct_hsa_kernel_dispatch_packet_s._fields_ = [
+    ('_0', union_hsa_kernel_dispatch_packet_s_0),
     ('workgroup_size_x', ctypes.c_uint16),
     ('workgroup_size_y', ctypes.c_uint16),
     ('workgroup_size_z', ctypes.c_uint16),
@@ -2492,10 +2513,27 @@ struct_hsa_ext_sampler_descriptor_s._fields_ = [
 ]
 
 hsa_ext_sampler_descriptor_t = struct_hsa_ext_sampler_descriptor_s
+class struct_hsa_ext_sampler_descriptor_v2_s(Structure):
+    pass
+
+struct_hsa_ext_sampler_descriptor_v2_s._pack_ = 1 # source:False
+struct_hsa_ext_sampler_descriptor_v2_s._fields_ = [
+    ('coordinate_mode', ctypes.c_uint32),
+    ('filter_mode', ctypes.c_uint32),
+    ('address_modes', ctypes.c_uint32 * 3),
+]
+
+hsa_ext_sampler_descriptor_v2_t = struct_hsa_ext_sampler_descriptor_v2_s
 try:
     hsa_ext_sampler_create = _libraries['libhsa-runtime64.so'].hsa_ext_sampler_create
     hsa_ext_sampler_create.restype = hsa_status_t
     hsa_ext_sampler_create.argtypes = [hsa_agent_t, ctypes.POINTER(struct_hsa_ext_sampler_descriptor_s), ctypes.POINTER(struct_hsa_ext_sampler_s)]
+except AttributeError:
+    pass
+try:
+    hsa_ext_sampler_create_v2 = _libraries['libhsa-runtime64.so'].hsa_ext_sampler_create_v2
+    hsa_ext_sampler_create_v2.restype = hsa_status_t
+    hsa_ext_sampler_create_v2.argtypes = [hsa_agent_t, ctypes.POINTER(struct_hsa_ext_sampler_descriptor_v2_s), ctypes.POINTER(struct_hsa_ext_sampler_s)]
 except AttributeError:
     pass
 try:
@@ -2540,9 +2578,16 @@ struct_hsa_ext_images_1_pfn_s._fields_ = [
     ('hsa_ext_image_get_capability_with_layout', ctypes.CFUNCTYPE(c__EA_hsa_status_t, struct_hsa_agent_s, c__EA_hsa_ext_image_geometry_t, ctypes.POINTER(struct_hsa_ext_image_format_s), c__EA_hsa_ext_image_data_layout_t, ctypes.POINTER(ctypes.c_uint32))),
     ('hsa_ext_image_data_get_info_with_layout', ctypes.CFUNCTYPE(c__EA_hsa_status_t, struct_hsa_agent_s, ctypes.POINTER(struct_hsa_ext_image_descriptor_s), c__EA_hsa_access_permission_t, c__EA_hsa_ext_image_data_layout_t, ctypes.c_uint64, ctypes.c_uint64, ctypes.POINTER(struct_hsa_ext_image_data_info_s))),
     ('hsa_ext_image_create_with_layout', ctypes.CFUNCTYPE(c__EA_hsa_status_t, struct_hsa_agent_s, ctypes.POINTER(struct_hsa_ext_image_descriptor_s), ctypes.POINTER(None), c__EA_hsa_access_permission_t, c__EA_hsa_ext_image_data_layout_t, ctypes.c_uint64, ctypes.c_uint64, ctypes.POINTER(struct_hsa_ext_image_s))),
+    ('hsa_ext_sampler_create_v2', ctypes.CFUNCTYPE(c__EA_hsa_status_t, struct_hsa_agent_s, ctypes.POINTER(struct_hsa_ext_sampler_descriptor_v2_s), ctypes.POINTER(struct_hsa_ext_sampler_s))),
 ]
 
 hsa_ext_images_1_pfn_t = struct_hsa_ext_images_1_pfn_s
+try:
+    hsa_flag_set64 = _libraries['FIXME_STUB'].hsa_flag_set64
+    hsa_flag_set64.restype = None
+    hsa_flag_set64.argtypes = [ctypes.POINTER(ctypes.c_ubyte), uint32_t]
+except AttributeError:
+    pass
 try:
     hsa_flag_isset64 = _libraries['FIXME_STUB'].hsa_flag_isset64
     hsa_flag_isset64.restype = ctypes.c_bool
@@ -2554,8 +2599,10 @@ hsa_signal_condition32_t = ctypes.c_uint32
 # values for enumeration 'c__EA_hsa_amd_packet_type_t'
 c__EA_hsa_amd_packet_type_t__enumvalues = {
     2: 'HSA_AMD_PACKET_TYPE_BARRIER_VALUE',
+    3: 'HSA_AMD_PACKET_TYPE_AIE_ERT',
 }
 HSA_AMD_PACKET_TYPE_BARRIER_VALUE = 2
+HSA_AMD_PACKET_TYPE_AIE_ERT = 3
 c__EA_hsa_amd_packet_type_t = ctypes.c_uint32 # enum
 hsa_amd_packet_type_t = c__EA_hsa_amd_packet_type_t
 hsa_amd_packet_type_t__enumvalues = c__EA_hsa_amd_packet_type_t__enumvalues
@@ -2590,6 +2637,128 @@ struct_hsa_amd_barrier_value_packet_s._fields_ = [
 
 hsa_amd_barrier_value_packet_t = struct_hsa_amd_barrier_value_packet_s
 
+# values for enumeration 'c__EA_hsa_amd_aie_ert_state'
+c__EA_hsa_amd_aie_ert_state__enumvalues = {
+    1: 'HSA_AMD_AIE_ERT_STATE_NEW',
+    2: 'HSA_AMD_AIE_ERT_STATE_QUEUED',
+    3: 'HSA_AMD_AIE_ERT_STATE_RUNNING',
+    4: 'HSA_AMD_AIE_ERT_STATE_COMPLETED',
+    5: 'HSA_AMD_AIE_ERT_STATE_ERROR',
+    6: 'HSA_AMD_AIE_ERT_STATE_ABORT',
+    7: 'HSA_AMD_AIE_ERT_STATE_SUBMITTED',
+    8: 'HSA_AMD_AIE_ERT_STATE_TIMEOUT',
+    9: 'HSA_AMD_AIE_ERT_STATE_NORESPONSE',
+    10: 'HSA_AMD_AIE_ERT_STATE_SKERROR',
+    11: 'HSA_AMD_AIE_ERT_STATE_SKCRASHED',
+    12: 'HSA_AMD_AIE_ERT_STATE_MAX',
+}
+HSA_AMD_AIE_ERT_STATE_NEW = 1
+HSA_AMD_AIE_ERT_STATE_QUEUED = 2
+HSA_AMD_AIE_ERT_STATE_RUNNING = 3
+HSA_AMD_AIE_ERT_STATE_COMPLETED = 4
+HSA_AMD_AIE_ERT_STATE_ERROR = 5
+HSA_AMD_AIE_ERT_STATE_ABORT = 6
+HSA_AMD_AIE_ERT_STATE_SUBMITTED = 7
+HSA_AMD_AIE_ERT_STATE_TIMEOUT = 8
+HSA_AMD_AIE_ERT_STATE_NORESPONSE = 9
+HSA_AMD_AIE_ERT_STATE_SKERROR = 10
+HSA_AMD_AIE_ERT_STATE_SKCRASHED = 11
+HSA_AMD_AIE_ERT_STATE_MAX = 12
+c__EA_hsa_amd_aie_ert_state = ctypes.c_uint32 # enum
+hsa_amd_aie_ert_state = c__EA_hsa_amd_aie_ert_state
+hsa_amd_aie_ert_state__enumvalues = c__EA_hsa_amd_aie_ert_state__enumvalues
+
+# values for enumeration 'c__EA_hsa_amd_aie_ert_cmd_opcode_t'
+c__EA_hsa_amd_aie_ert_cmd_opcode_t__enumvalues = {
+    0: 'HSA_AMD_AIE_ERT_START_CU',
+    0: 'HSA_AMD_AIE_ERT_START_KERNEL',
+    2: 'HSA_AMD_AIE_ERT_CONFIGURE',
+    3: 'HSA_AMD_AIE_ERT_EXIT',
+    4: 'HSA_AMD_AIE_ERT_ABORT',
+    5: 'HSA_AMD_AIE_ERT_EXEC_WRITE',
+    6: 'HSA_AMD_AIE_ERT_CU_STAT',
+    7: 'HSA_AMD_AIE_ERT_START_COPYBO',
+    8: 'HSA_AMD_AIE_ERT_SK_CONFIG',
+    9: 'HSA_AMD_AIE_ERT_SK_START',
+    10: 'HSA_AMD_AIE_ERT_SK_UNCONFIG',
+    11: 'HSA_AMD_AIE_ERT_INIT_CU',
+    12: 'HSA_AMD_AIE_ERT_START_FA',
+    13: 'HSA_AMD_AIE_ERT_CLK_CALIB',
+    14: 'HSA_AMD_AIE_ERT_MB_VALIDATE',
+    15: 'HSA_AMD_AIE_ERT_START_KEY_VAL',
+    16: 'HSA_AMD_AIE_ERT_ACCESS_TEST_C',
+    17: 'HSA_AMD_AIE_ERT_ACCESS_TEST',
+    18: 'HSA_AMD_AIE_ERT_START_DPU',
+    19: 'HSA_AMD_AIE_ERT_CMD_CHAIN',
+    20: 'HSA_AMD_AIE_ERT_START_NPU',
+    21: 'HSA_AMD_AIE_ERT_START_NPU_PREEMPT',
+}
+HSA_AMD_AIE_ERT_START_CU = 0
+HSA_AMD_AIE_ERT_START_KERNEL = 0
+HSA_AMD_AIE_ERT_CONFIGURE = 2
+HSA_AMD_AIE_ERT_EXIT = 3
+HSA_AMD_AIE_ERT_ABORT = 4
+HSA_AMD_AIE_ERT_EXEC_WRITE = 5
+HSA_AMD_AIE_ERT_CU_STAT = 6
+HSA_AMD_AIE_ERT_START_COPYBO = 7
+HSA_AMD_AIE_ERT_SK_CONFIG = 8
+HSA_AMD_AIE_ERT_SK_START = 9
+HSA_AMD_AIE_ERT_SK_UNCONFIG = 10
+HSA_AMD_AIE_ERT_INIT_CU = 11
+HSA_AMD_AIE_ERT_START_FA = 12
+HSA_AMD_AIE_ERT_CLK_CALIB = 13
+HSA_AMD_AIE_ERT_MB_VALIDATE = 14
+HSA_AMD_AIE_ERT_START_KEY_VAL = 15
+HSA_AMD_AIE_ERT_ACCESS_TEST_C = 16
+HSA_AMD_AIE_ERT_ACCESS_TEST = 17
+HSA_AMD_AIE_ERT_START_DPU = 18
+HSA_AMD_AIE_ERT_CMD_CHAIN = 19
+HSA_AMD_AIE_ERT_START_NPU = 20
+HSA_AMD_AIE_ERT_START_NPU_PREEMPT = 21
+c__EA_hsa_amd_aie_ert_cmd_opcode_t = ctypes.c_uint32 # enum
+hsa_amd_aie_ert_cmd_opcode_t = c__EA_hsa_amd_aie_ert_cmd_opcode_t
+hsa_amd_aie_ert_cmd_opcode_t__enumvalues = c__EA_hsa_amd_aie_ert_cmd_opcode_t__enumvalues
+class struct_hsa_amd_aie_ert_start_kernel_data_s(Structure):
+    pass
+
+struct_hsa_amd_aie_ert_start_kernel_data_s._pack_ = 1 # source:False
+struct_hsa_amd_aie_ert_start_kernel_data_s._fields_ = [
+    ('pdi_addr', ctypes.POINTER(None)),
+    ('data', ctypes.c_uint32 * 0),
+]
+
+hsa_amd_aie_ert_start_kernel_data_t = struct_hsa_amd_aie_ert_start_kernel_data_s
+class struct_hsa_amd_aie_ert_packet_s(Structure):
+    pass
+
+class struct_hsa_amd_aie_ert_packet_s_0(Structure):
+    pass
+
+struct_hsa_amd_aie_ert_packet_s_0._pack_ = 1 # source:False
+struct_hsa_amd_aie_ert_packet_s_0._fields_ = [
+    ('state', ctypes.c_uint32, 4),
+    ('custom', ctypes.c_uint32, 8),
+    ('count', ctypes.c_uint32, 11),
+    ('opcode', ctypes.c_uint32, 5),
+    ('type', ctypes.c_uint32, 4),
+]
+
+struct_hsa_amd_aie_ert_packet_s._pack_ = 1 # source:False
+struct_hsa_amd_aie_ert_packet_s._anonymous_ = ('_0',)
+struct_hsa_amd_aie_ert_packet_s._fields_ = [
+    ('header', hsa_amd_vendor_packet_header_t),
+    ('_0', struct_hsa_amd_aie_ert_packet_s_0),
+    ('reserved0', ctypes.c_uint64),
+    ('reserved1', ctypes.c_uint64),
+    ('reserved2', ctypes.c_uint64),
+    ('reserved3', ctypes.c_uint64),
+    ('reserved4', ctypes.c_uint64),
+    ('reserved5', ctypes.c_uint64),
+    ('payload_data', ctypes.c_uint64),
+]
+
+hsa_amd_aie_ert_packet_t = struct_hsa_amd_aie_ert_packet_s
+
 # values for enumeration 'c__Ea_HSA_STATUS_ERROR_INVALID_MEMORY_POOL'
 c__Ea_HSA_STATUS_ERROR_INVALID_MEMORY_POOL__enumvalues = {
     40: 'HSA_STATUS_ERROR_INVALID_MEMORY_POOL',
@@ -2599,6 +2768,7 @@ c__Ea_HSA_STATUS_ERROR_INVALID_MEMORY_POOL__enumvalues = {
     44: 'HSA_STATUS_CU_MASK_REDUCED',
     45: 'HSA_STATUS_ERROR_OUT_OF_REGISTERS',
     46: 'HSA_STATUS_ERROR_RESOURCE_BUSY',
+    47: 'HSA_STATUS_ERROR_NOT_SUPPORTED',
 }
 HSA_STATUS_ERROR_INVALID_MEMORY_POOL = 40
 HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION = 41
@@ -2607,6 +2777,7 @@ HSA_STATUS_ERROR_MEMORY_FAULT = 43
 HSA_STATUS_CU_MASK_REDUCED = 44
 HSA_STATUS_ERROR_OUT_OF_REGISTERS = 45
 HSA_STATUS_ERROR_RESOURCE_BUSY = 46
+HSA_STATUS_ERROR_NOT_SUPPORTED = 47
 c__Ea_HSA_STATUS_ERROR_INVALID_MEMORY_POOL = ctypes.c_uint32 # enum
 
 # values for enumeration 'c__EA_hsa_amd_iommu_version_t'
@@ -2656,6 +2827,8 @@ hsa_amd_agent_info_s__enumvalues = {
     41235: 'HSA_AMD_AGENT_INFO_NEAREST_CPU',
     41236: 'HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES',
     41237: 'HSA_AMD_AGENT_INFO_AQL_EXTENSIONS',
+    41238: 'HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX',
+    41239: 'HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT',
 }
 HSA_AMD_AGENT_INFO_CHIP_ID = 40960
 HSA_AMD_AGENT_INFO_CACHELINE_SIZE = 40961
@@ -2691,6 +2864,8 @@ HSA_AMD_AGENT_INFO_DRIVER_UID = 41234
 HSA_AMD_AGENT_INFO_NEAREST_CPU = 41235
 HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES = 41236
 HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 41237
+HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX = 41238
+HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT = 41239
 hsa_amd_agent_info_s = ctypes.c_uint32 # enum
 hsa_amd_agent_info_t = hsa_amd_agent_info_s
 hsa_amd_agent_info_t__enumvalues = hsa_amd_agent_info_s__enumvalues
@@ -2778,6 +2953,17 @@ HSA_AMD_COHERENCY_TYPE_NONCOHERENT = 1
 hsa_amd_coherency_type_s = ctypes.c_uint32 # enum
 hsa_amd_coherency_type_t = hsa_amd_coherency_type_s
 hsa_amd_coherency_type_t__enumvalues = hsa_amd_coherency_type_s__enumvalues
+
+# values for enumeration 'hsa_amd_dma_buf_mapping_type_s'
+hsa_amd_dma_buf_mapping_type_s__enumvalues = {
+    0: 'HSA_AMD_DMABUF_MAPPING_TYPE_NONE',
+    1: 'HSA_AMD_DMABUF_MAPPING_TYPE_PCIE',
+}
+HSA_AMD_DMABUF_MAPPING_TYPE_NONE = 0
+HSA_AMD_DMABUF_MAPPING_TYPE_PCIE = 1
+hsa_amd_dma_buf_mapping_type_s = ctypes.c_uint32 # enum
+hsa_amd_dma_buf_mapping_type_t = hsa_amd_dma_buf_mapping_type_s
+hsa_amd_dma_buf_mapping_type_t__enumvalues = hsa_amd_dma_buf_mapping_type_s__enumvalues
 try:
     hsa_amd_coherency_get_type = _libraries['libhsa-runtime64.so'].hsa_amd_coherency_get_type
     hsa_amd_coherency_get_type.restype = hsa_status_t
@@ -2871,15 +3057,38 @@ try:
 except AttributeError:
     pass
 try:
-    hsa_amd_async_function = _libraries['libhsa-runtime64.so'].hsa_amd_async_function
-    hsa_amd_async_function.restype = hsa_status_t
-    hsa_amd_async_function.argtypes = [ctypes.CFUNCTYPE(None, ctypes.POINTER(None)), ctypes.POINTER(None)]
+    hsa_amd_signal_wait_all = _libraries['libhsa-runtime64.so'].hsa_amd_signal_wait_all
+    hsa_amd_signal_wait_all.restype = uint32_t
+    hsa_amd_signal_wait_all.argtypes = [uint32_t, ctypes.POINTER(struct_hsa_signal_s), ctypes.POINTER(c__EA_hsa_signal_condition_t), ctypes.POINTER(ctypes.c_int64), uint64_t, hsa_wait_state_t, ctypes.POINTER(ctypes.c_int64)]
 except AttributeError:
     pass
 try:
     hsa_amd_signal_wait_any = _libraries['libhsa-runtime64.so'].hsa_amd_signal_wait_any
     hsa_amd_signal_wait_any.restype = uint32_t
     hsa_amd_signal_wait_any.argtypes = [uint32_t, ctypes.POINTER(struct_hsa_signal_s), ctypes.POINTER(c__EA_hsa_signal_condition_t), ctypes.POINTER(ctypes.c_int64), uint64_t, hsa_wait_state_t, ctypes.POINTER(ctypes.c_int64)]
+except AttributeError:
+    pass
+try:
+    hsa_amd_async_function = _libraries['libhsa-runtime64.so'].hsa_amd_async_function
+    hsa_amd_async_function.restype = hsa_status_t
+    hsa_amd_async_function.argtypes = [ctypes.CFUNCTYPE(None, ctypes.POINTER(None)), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+class struct_hsa_amd_image_descriptor_s(Structure):
+    pass
+
+struct_hsa_amd_image_descriptor_s._pack_ = 1 # source:False
+struct_hsa_amd_image_descriptor_s._fields_ = [
+    ('version', ctypes.c_uint32),
+    ('deviceID', ctypes.c_uint32),
+    ('data', ctypes.c_uint32 * 1),
+]
+
+hsa_amd_image_descriptor_t = struct_hsa_amd_image_descriptor_s
+try:
+    hsa_amd_image_create = _libraries['libhsa-runtime64.so'].hsa_amd_image_create
+    hsa_amd_image_create.restype = hsa_status_t
+    hsa_amd_image_create.argtypes = [hsa_agent_t, ctypes.POINTER(struct_hsa_ext_image_descriptor_s), ctypes.POINTER(struct_hsa_amd_image_descriptor_s), ctypes.POINTER(None), hsa_access_permission_t, ctypes.POINTER(struct_hsa_ext_image_s)]
 except AttributeError:
     pass
 try:
@@ -2983,10 +3192,12 @@ hsa_amd_memory_pool_flag_s__enumvalues = {
     0: 'HSA_AMD_MEMORY_POOL_STANDARD_FLAG',
     1: 'HSA_AMD_MEMORY_POOL_PCIE_FLAG',
     2: 'HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG',
+    4: 'HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG',
 }
 HSA_AMD_MEMORY_POOL_STANDARD_FLAG = 0
 HSA_AMD_MEMORY_POOL_PCIE_FLAG = 1
 HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = 2
+HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = 4
 hsa_amd_memory_pool_flag_s = ctypes.c_uint32 # enum
 hsa_amd_memory_pool_flag_t = hsa_amd_memory_pool_flag_s
 hsa_amd_memory_pool_flag_t__enumvalues = hsa_amd_memory_pool_flag_s__enumvalues
@@ -3030,6 +3241,12 @@ try:
     hsa_amd_memory_copy_engine_status = _libraries['libhsa-runtime64.so'].hsa_amd_memory_copy_engine_status
     hsa_amd_memory_copy_engine_status.restype = hsa_status_t
     hsa_amd_memory_copy_engine_status.argtypes = [hsa_agent_t, hsa_agent_t, ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    hsa_amd_memory_get_preferred_copy_engine = _libraries['libhsa-runtime64.so'].hsa_amd_memory_get_preferred_copy_engine
+    hsa_amd_memory_get_preferred_copy_engine.restype = hsa_status_t
+    hsa_amd_memory_get_preferred_copy_engine.argtypes = [hsa_agent_t, hsa_agent_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 class struct_hsa_pitched_ptr_s(Structure):
@@ -3185,23 +3402,6 @@ try:
     hsa_amd_interop_unmap_buffer.argtypes = [ctypes.POINTER(None)]
 except AttributeError:
     pass
-class struct_hsa_amd_image_descriptor_s(Structure):
-    pass
-
-struct_hsa_amd_image_descriptor_s._pack_ = 1 # source:False
-struct_hsa_amd_image_descriptor_s._fields_ = [
-    ('version', ctypes.c_uint32),
-    ('deviceID', ctypes.c_uint32),
-    ('data', ctypes.c_uint32 * 1),
-]
-
-hsa_amd_image_descriptor_t = struct_hsa_amd_image_descriptor_s
-try:
-    hsa_amd_image_create = _libraries['libhsa-runtime64.so'].hsa_amd_image_create
-    hsa_amd_image_create.restype = hsa_status_t
-    hsa_amd_image_create.argtypes = [hsa_agent_t, ctypes.POINTER(struct_hsa_ext_image_descriptor_s), ctypes.POINTER(struct_hsa_amd_image_descriptor_s), ctypes.POINTER(None), hsa_access_permission_t, ctypes.POINTER(struct_hsa_ext_image_s)]
-except AttributeError:
-    pass
 
 # values for enumeration 'c__EA_hsa_amd_pointer_type_t'
 c__EA_hsa_amd_pointer_type_t__enumvalues = {
@@ -3210,12 +3410,14 @@ c__EA_hsa_amd_pointer_type_t__enumvalues = {
     2: 'HSA_EXT_POINTER_TYPE_LOCKED',
     3: 'HSA_EXT_POINTER_TYPE_GRAPHICS',
     4: 'HSA_EXT_POINTER_TYPE_IPC',
+    5: 'HSA_EXT_POINTER_TYPE_RESERVED_ADDR',
 }
 HSA_EXT_POINTER_TYPE_UNKNOWN = 0
 HSA_EXT_POINTER_TYPE_HSA = 1
 HSA_EXT_POINTER_TYPE_LOCKED = 2
 HSA_EXT_POINTER_TYPE_GRAPHICS = 3
 HSA_EXT_POINTER_TYPE_IPC = 4
+HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5
 c__EA_hsa_amd_pointer_type_t = ctypes.c_uint32 # enum
 hsa_amd_pointer_type_t = c__EA_hsa_amd_pointer_type_t
 hsa_amd_pointer_type_t__enumvalues = c__EA_hsa_amd_pointer_type_t__enumvalues
@@ -3293,9 +3495,11 @@ except AttributeError:
 hsa_amd_event_type_s__enumvalues = {
     0: 'HSA_AMD_GPU_MEMORY_FAULT_EVENT',
     1: 'HSA_AMD_GPU_HW_EXCEPTION_EVENT',
+    2: 'HSA_AMD_GPU_MEMORY_ERROR_EVENT',
 }
 HSA_AMD_GPU_MEMORY_FAULT_EVENT = 0
 HSA_AMD_GPU_HW_EXCEPTION_EVENT = 1
+HSA_AMD_GPU_MEMORY_ERROR_EVENT = 2
 hsa_amd_event_type_s = ctypes.c_uint32 # enum
 hsa_amd_event_type_t = hsa_amd_event_type_s
 hsa_amd_event_type_t__enumvalues = hsa_amd_event_type_s__enumvalues
@@ -3335,6 +3539,27 @@ struct_hsa_amd_gpu_memory_fault_info_s._fields_ = [
 
 hsa_amd_gpu_memory_fault_info_t = struct_hsa_amd_gpu_memory_fault_info_s
 
+# values for enumeration 'c__EA_hsa_amd_memory_error_reason_t'
+c__EA_hsa_amd_memory_error_reason_t__enumvalues = {
+    1: 'HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE',
+}
+HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE = 1
+c__EA_hsa_amd_memory_error_reason_t = ctypes.c_uint32 # enum
+hsa_amd_memory_error_reason_t = c__EA_hsa_amd_memory_error_reason_t
+hsa_amd_memory_error_reason_t__enumvalues = c__EA_hsa_amd_memory_error_reason_t__enumvalues
+class struct_hsa_amd_gpu_memory_error_info_s(Structure):
+    pass
+
+struct_hsa_amd_gpu_memory_error_info_s._pack_ = 1 # source:False
+struct_hsa_amd_gpu_memory_error_info_s._fields_ = [
+    ('agent', hsa_agent_t),
+    ('virtual_address', ctypes.c_uint64),
+    ('error_reason_mask', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+hsa_amd_gpu_memory_error_info_t = struct_hsa_amd_gpu_memory_error_info_s
+
 # values for enumeration 'c__EA_hsa_amd_hw_exception_reset_type_t'
 c__EA_hsa_amd_hw_exception_reset_type_t__enumvalues = {
     1: 'HSA_AMD_HW_EXCEPTION_RESET_TYPE_OTHER',
@@ -3367,14 +3592,12 @@ class struct_hsa_amd_event_s(Structure):
     pass
 
 class union_hsa_amd_event_s_0(Union):
-    pass
-
-union_hsa_amd_event_s_0._pack_ = 1 # source:False
-union_hsa_amd_event_s_0._fields_ = [
+    _pack_ = 1 # source:False
+    _fields_ = [
     ('memory_fault', hsa_amd_gpu_memory_fault_info_t),
     ('hw_exception', hsa_amd_gpu_hw_exception_info_t),
-    ('PADDING_0', ctypes.c_ubyte * 8),
-]
+    ('memory_error', hsa_amd_gpu_memory_error_info_t),
+     ]
 
 struct_hsa_amd_event_s._pack_ = 1 # source:False
 struct_hsa_amd_event_s._anonymous_ = ('_0',)
@@ -3411,6 +3634,19 @@ try:
     hsa_amd_queue_set_priority.argtypes = [ctypes.POINTER(struct_hsa_queue_s), hsa_amd_queue_priority_t]
 except AttributeError:
     pass
+
+# values for enumeration 'c__EA_hsa_amd_queue_create_flag_t'
+c__EA_hsa_amd_queue_create_flag_t__enumvalues = {
+    0: 'HSA_AMD_QUEUE_CREATE_SYSTEM_MEM',
+    1: 'HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF',
+    2: 'HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR',
+}
+HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = 0
+HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = 1
+HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = 2
+c__EA_hsa_amd_queue_create_flag_t = ctypes.c_uint32 # enum
+hsa_amd_queue_create_flag_t = c__EA_hsa_amd_queue_create_flag_t
+hsa_amd_queue_create_flag_t__enumvalues = c__EA_hsa_amd_queue_create_flag_t__enumvalues
 hsa_amd_deallocation_callback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(None))
 try:
     hsa_amd_register_deallocation_callback = _libraries['libhsa-runtime64.so'].hsa_amd_register_deallocation_callback
@@ -3521,11 +3757,26 @@ try:
 except AttributeError:
     pass
 try:
+    hsa_amd_portable_export_dmabuf_v2 = _libraries['libhsa-runtime64.so'].hsa_amd_portable_export_dmabuf_v2
+    hsa_amd_portable_export_dmabuf_v2.restype = hsa_status_t
+    hsa_amd_portable_export_dmabuf_v2.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint64), uint64_t]
+except AttributeError:
+    pass
+try:
     hsa_amd_portable_close_dmabuf = _libraries['libhsa-runtime64.so'].hsa_amd_portable_close_dmabuf
     hsa_amd_portable_close_dmabuf.restype = hsa_status_t
     hsa_amd_portable_close_dmabuf.argtypes = [ctypes.c_int32]
 except AttributeError:
     pass
+
+# values for enumeration 'hsa_amd_vmem_address_reserve_flag_s'
+hsa_amd_vmem_address_reserve_flag_s__enumvalues = {
+    1: 'HSA_AMD_VMEM_ADDRESS_NO_REGISTER',
+}
+HSA_AMD_VMEM_ADDRESS_NO_REGISTER = 1
+hsa_amd_vmem_address_reserve_flag_s = ctypes.c_uint32 # enum
+hsa_amd_vmem_address_reserve_flag_t = hsa_amd_vmem_address_reserve_flag_s
+hsa_amd_vmem_address_reserve_flag_t__enumvalues = hsa_amd_vmem_address_reserve_flag_s__enumvalues
 try:
     hsa_amd_vmem_address_reserve = _libraries['libhsa-runtime64.so'].hsa_amd_vmem_address_reserve
     hsa_amd_vmem_address_reserve.restype = hsa_status_t
@@ -3658,6 +3909,21 @@ try:
     hsa_amd_queue_get_info.argtypes = [ctypes.POINTER(struct_hsa_queue_s), hsa_queue_info_attribute_t, ctypes.POINTER(None)]
 except AttributeError:
     pass
+
+# values for enumeration 'hsa_amd_log_flag_s'
+hsa_amd_log_flag_s__enumvalues = {
+    0: 'HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS',
+}
+HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = 0
+hsa_amd_log_flag_s = ctypes.c_uint32 # enum
+hsa_amd_log_flag_t = hsa_amd_log_flag_s
+hsa_amd_log_flag_t__enumvalues = hsa_amd_log_flag_s__enumvalues
+try:
+    hsa_amd_enable_logging = _libraries['libhsa-runtime64.so'].hsa_amd_enable_logging
+    hsa_amd_enable_logging.restype = hsa_status_t
+    hsa_amd_enable_logging.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(None)]
+except AttributeError:
+    pass
 amd_queue_properties32_t = ctypes.c_uint32
 
 # values for enumeration 'amd_queue_properties_t'
@@ -3704,13 +3970,19 @@ amd_queue_capabilities32_t = ctypes.c_uint32
 
 # values for enumeration 'amd_queue_capabilities_t'
 amd_queue_capabilities_t__enumvalues = {
-    0: 'AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT',
-    1: 'AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH',
-    1: 'AMD_QUEUE_CAPS_ASYNC_RECLAIM',
+    0: 'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_SHIFT',
+    1: 'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_WIDTH',
+    1: 'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM',
+    1: 'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_SHIFT',
+    1: 'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_WIDTH',
+    2: 'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM',
 }
-AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT = 0
-AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH = 1
-AMD_QUEUE_CAPS_ASYNC_RECLAIM = 1
+AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_SHIFT = 0
+AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_WIDTH = 1
+AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM = 1
+AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_SHIFT = 1
+AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_WIDTH = 1
+AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM = 2
 amd_queue_capabilities_t = ctypes.c_uint32 # enum
 class struct_amd_queue_s(Structure):
     pass
@@ -3733,24 +4005,64 @@ struct_amd_queue_s._fields_ = [
     ('compute_tmpring_size', ctypes.c_uint32),
     ('scratch_resource_descriptor', ctypes.c_uint32 * 4),
     ('scratch_backing_memory_location', ctypes.c_uint64),
+    ('reserved3', ctypes.c_uint32 * 2),
+    ('scratch_wave64_lane_byte_size', ctypes.c_uint32),
+    ('queue_properties', ctypes.c_uint32),
+    ('reserved4', ctypes.c_uint32 * 2),
+    ('queue_inactive_signal', hsa_signal_t),
+    ('reserved5', ctypes.c_uint32 * 14),
+]
+
+amd_queue_t = struct_amd_queue_s
+class struct_scratch_last_used_index_xcc_s(Structure):
+    pass
+
+struct_scratch_last_used_index_xcc_s._pack_ = 1 # source:False
+struct_scratch_last_used_index_xcc_s._fields_ = [
+    ('main', ctypes.c_uint64),
+    ('alt', ctypes.c_uint64),
+]
+
+scratch_last_used_index_xcc_t = struct_scratch_last_used_index_xcc_s
+class struct_amd_queue_v2_s(Structure):
+    pass
+
+struct_amd_queue_v2_s._pack_ = 1 # source:False
+struct_amd_queue_v2_s._fields_ = [
+    ('hsa_queue', hsa_queue_t),
+    ('caps', ctypes.c_uint32),
+    ('reserved1', ctypes.c_uint32 * 3),
+    ('write_dispatch_id', ctypes.c_uint64),
+    ('group_segment_aperture_base_hi', ctypes.c_uint32),
+    ('private_segment_aperture_base_hi', ctypes.c_uint32),
+    ('max_cu_id', ctypes.c_uint32),
+    ('max_wave_id', ctypes.c_uint32),
+    ('max_legacy_doorbell_dispatch_id_plus_1', ctypes.c_uint64),
+    ('legacy_doorbell_lock', ctypes.c_uint32),
+    ('reserved2', ctypes.c_uint32 * 9),
+    ('read_dispatch_id', ctypes.c_uint64),
+    ('read_dispatch_id_field_base_byte_offset', ctypes.c_uint32),
+    ('compute_tmpring_size', ctypes.c_uint32),
+    ('scratch_resource_descriptor', ctypes.c_uint32 * 4),
+    ('scratch_backing_memory_location', ctypes.c_uint64),
     ('scratch_backing_memory_byte_size', ctypes.c_uint64),
     ('scratch_wave64_lane_byte_size', ctypes.c_uint32),
     ('queue_properties', ctypes.c_uint32),
-    ('scratch_last_used_index', ctypes.c_uint64),
+    ('scratch_max_use_index', ctypes.c_uint64),
     ('queue_inactive_signal', hsa_signal_t),
-    ('reserved4', ctypes.c_uint32 * 2),
-    ('alt_scratch_last_used_index', ctypes.c_uint64),
+    ('alt_scratch_max_use_index', ctypes.c_uint64),
+    ('alt_scratch_resource_descriptor', ctypes.c_uint32 * 4),
     ('alt_scratch_backing_memory_location', ctypes.c_uint64),
-    ('alt_scratch_backing_memory_byte_size', ctypes.c_uint64),
     ('alt_scratch_dispatch_limit_x', ctypes.c_uint32),
     ('alt_scratch_dispatch_limit_y', ctypes.c_uint32),
     ('alt_scratch_dispatch_limit_z', ctypes.c_uint32),
     ('alt_scratch_wave64_lane_byte_size', ctypes.c_uint32),
     ('alt_compute_tmpring_size', ctypes.c_uint32),
     ('reserved5', ctypes.c_uint32),
+    ('scratch_last_used_index', struct_scratch_last_used_index_xcc_s * 128),
 ]
 
-amd_queue_t = struct_amd_queue_s
+amd_queue_v2_t = struct_amd_queue_v2_s
 amd_signal_kind64_t = ctypes.c_int64
 
 # values for enumeration 'amd_signal_kind_t'
@@ -3774,7 +4086,6 @@ class union_amd_signal_s_0(Union):
 union_amd_signal_s_0._pack_ = 1 # source:False
 union_amd_signal_s_0._fields_ = [
     ('value', ctypes.c_int64),
-    ('legacy_hardware_doorbell_ptr', ctypes.POINTER(ctypes.c_uint32)),
     ('hardware_doorbell_ptr', ctypes.POINTER(ctypes.c_uint64)),
 ]
 
@@ -3783,7 +4094,7 @@ class union_amd_signal_s_1(Union):
 
 union_amd_signal_s_1._pack_ = 1 # source:False
 union_amd_signal_s_1._fields_ = [
-    ('queue_ptr', ctypes.POINTER(struct_amd_queue_s)),
+    ('queue_ptr', ctypes.POINTER(struct_amd_queue_v2_s)),
     ('reserved2', ctypes.c_uint64),
 ]
 
@@ -4119,9 +4430,12 @@ amd_kernel_code_properties_t__enumvalues = {
     9: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z_SHIFT',
     1: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z_WIDTH',
     512: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z',
-    10: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1_SHIFT',
-    6: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1_WIDTH',
-    64512: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1',
+    10: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT',
+    1: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_WIDTH',
+    1024: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32',
+    11: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1_SHIFT',
+    5: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1_WIDTH',
+    63488: 'AMD_KERNEL_CODE_PROPERTIES_RESERVED1',
     16: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS_SHIFT',
     1: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS_WIDTH',
     65536: 'AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS',
@@ -4174,9 +4488,12 @@ AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Y = 256
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z_SHIFT = 9
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z_WIDTH = 1
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_GRID_WORKGROUP_COUNT_Z = 512
-AMD_KERNEL_CODE_PROPERTIES_RESERVED1_SHIFT = 10
-AMD_KERNEL_CODE_PROPERTIES_RESERVED1_WIDTH = 6
-AMD_KERNEL_CODE_PROPERTIES_RESERVED1 = 64512
+AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT = 10
+AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_WIDTH = 1
+AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32 = 1024
+AMD_KERNEL_CODE_PROPERTIES_RESERVED1_SHIFT = 11
+AMD_KERNEL_CODE_PROPERTIES_RESERVED1_WIDTH = 5
+AMD_KERNEL_CODE_PROPERTIES_RESERVED1 = 63488
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS_SHIFT = 16
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS_WIDTH = 1
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_ORDERED_APPEND_GDS = 65536
@@ -4986,6 +5303,9 @@ __all__ = \
     'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_QUEUE_PTR',
     'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_QUEUE_PTR_SHIFT',
     'AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_QUEUE_PTR_WIDTH',
+    'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32',
+    'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT',
+    'AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_WIDTH',
     'AMD_KERNEL_CODE_PROPERTIES_IS_DEBUG_ENABLED',
     'AMD_KERNEL_CODE_PROPERTIES_IS_DEBUG_ENABLED_SHIFT',
     'AMD_KERNEL_CODE_PROPERTIES_IS_DEBUG_ENABLED_WIDTH',
@@ -5012,9 +5332,12 @@ __all__ = \
     'AMD_POWERTWO_1', 'AMD_POWERTWO_128', 'AMD_POWERTWO_16',
     'AMD_POWERTWO_2', 'AMD_POWERTWO_256', 'AMD_POWERTWO_32',
     'AMD_POWERTWO_4', 'AMD_POWERTWO_64', 'AMD_POWERTWO_8',
-    'AMD_QUEUE_CAPS_ASYNC_RECLAIM',
-    'AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT',
-    'AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH',
+    'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM',
+    'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_SHIFT',
+    'AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM_WIDTH',
+    'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM',
+    'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_SHIFT',
+    'AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_WIDTH',
     'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING',
     'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_SHIFT',
     'AMD_QUEUE_PROPERTIES_ENABLE_PROFILING_WIDTH',
@@ -5083,6 +5406,8 @@ __all__ = \
     'HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES',
     'HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU',
     'HSA_AMD_AGENT_INFO_NUM_XCC', 'HSA_AMD_AGENT_INFO_PRODUCT_NAME',
+    'HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT',
+    'HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX',
     'HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION',
     'HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS',
     'HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY',
@@ -5090,9 +5415,31 @@ __all__ = \
     'HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS',
     'HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO',
     'HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS',
+    'HSA_AMD_AIE_ERT_ABORT', 'HSA_AMD_AIE_ERT_ACCESS_TEST',
+    'HSA_AMD_AIE_ERT_ACCESS_TEST_C', 'HSA_AMD_AIE_ERT_CLK_CALIB',
+    'HSA_AMD_AIE_ERT_CMD_CHAIN', 'HSA_AMD_AIE_ERT_CONFIGURE',
+    'HSA_AMD_AIE_ERT_CU_STAT', 'HSA_AMD_AIE_ERT_EXEC_WRITE',
+    'HSA_AMD_AIE_ERT_EXIT', 'HSA_AMD_AIE_ERT_INIT_CU',
+    'HSA_AMD_AIE_ERT_MB_VALIDATE', 'HSA_AMD_AIE_ERT_SK_CONFIG',
+    'HSA_AMD_AIE_ERT_SK_START', 'HSA_AMD_AIE_ERT_SK_UNCONFIG',
+    'HSA_AMD_AIE_ERT_START_COPYBO', 'HSA_AMD_AIE_ERT_START_CU',
+    'HSA_AMD_AIE_ERT_START_DPU', 'HSA_AMD_AIE_ERT_START_FA',
+    'HSA_AMD_AIE_ERT_START_KERNEL', 'HSA_AMD_AIE_ERT_START_KEY_VAL',
+    'HSA_AMD_AIE_ERT_START_NPU', 'HSA_AMD_AIE_ERT_START_NPU_PREEMPT',
+    'HSA_AMD_AIE_ERT_STATE_ABORT', 'HSA_AMD_AIE_ERT_STATE_COMPLETED',
+    'HSA_AMD_AIE_ERT_STATE_ERROR', 'HSA_AMD_AIE_ERT_STATE_MAX',
+    'HSA_AMD_AIE_ERT_STATE_NEW', 'HSA_AMD_AIE_ERT_STATE_NORESPONSE',
+    'HSA_AMD_AIE_ERT_STATE_QUEUED', 'HSA_AMD_AIE_ERT_STATE_RUNNING',
+    'HSA_AMD_AIE_ERT_STATE_SKCRASHED',
+    'HSA_AMD_AIE_ERT_STATE_SKERROR',
+    'HSA_AMD_AIE_ERT_STATE_SUBMITTED',
+    'HSA_AMD_AIE_ERT_STATE_TIMEOUT',
     'HSA_AMD_COHERENCY_TYPE_COHERENT',
-    'HSA_AMD_COHERENCY_TYPE_NONCOHERENT', 'HSA_AMD_FIRST_EXTENSION',
+    'HSA_AMD_COHERENCY_TYPE_NONCOHERENT',
+    'HSA_AMD_DMABUF_MAPPING_TYPE_NONE',
+    'HSA_AMD_DMABUF_MAPPING_TYPE_PCIE', 'HSA_AMD_FIRST_EXTENSION',
     'HSA_AMD_GPU_HW_EXCEPTION_EVENT',
+    'HSA_AMD_GPU_MEMORY_ERROR_EVENT',
     'HSA_AMD_GPU_MEMORY_FAULT_EVENT',
     'HSA_AMD_HW_EXCEPTION_CAUSE_ECC',
     'HSA_AMD_HW_EXCEPTION_CAUSE_GPU_HANG',
@@ -5100,6 +5447,8 @@ __all__ = \
     'HSA_AMD_LINK_INFO_TYPE_HYPERTRANSPORT',
     'HSA_AMD_LINK_INFO_TYPE_INFINBAND', 'HSA_AMD_LINK_INFO_TYPE_PCIE',
     'HSA_AMD_LINK_INFO_TYPE_QPI', 'HSA_AMD_LINK_INFO_TYPE_XGMI',
+    'HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS',
+    'HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE',
     'HSA_AMD_MEMORY_FAULT_DRAMECC', 'HSA_AMD_MEMORY_FAULT_HANG',
     'HSA_AMD_MEMORY_FAULT_HOST_ONLY',
     'HSA_AMD_MEMORY_FAULT_IMPRECISE', 'HSA_AMD_MEMORY_FAULT_NX',
@@ -5109,6 +5458,7 @@ __all__ = \
     'HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT',
     'HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED',
     'HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG',
+    'HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG',
     'HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED',
     'HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED',
     'HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED',
@@ -5128,7 +5478,11 @@ __all__ = \
     'HSA_AMD_MEMORY_POOL_PCIE_FLAG',
     'HSA_AMD_MEMORY_POOL_STANDARD_FLAG',
     'HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU',
-    'HSA_AMD_PACKET_TYPE_BARRIER_VALUE', 'HSA_AMD_QUEUE_INFO_AGENT',
+    'HSA_AMD_PACKET_TYPE_AIE_ERT',
+    'HSA_AMD_PACKET_TYPE_BARRIER_VALUE',
+    'HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR',
+    'HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF',
+    'HSA_AMD_QUEUE_CREATE_SYSTEM_MEM', 'HSA_AMD_QUEUE_INFO_AGENT',
     'HSA_AMD_QUEUE_INFO_DOORBELL_ID', 'HSA_AMD_QUEUE_PRIORITY_HIGH',
     'HSA_AMD_QUEUE_PRIORITY_LOW', 'HSA_AMD_QUEUE_PRIORITY_NORMAL',
     'HSA_AMD_REGION_INFO_BASE', 'HSA_AMD_REGION_INFO_BUS_WIDTH',
@@ -5166,7 +5520,8 @@ __all__ = \
     'HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT',
     'HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED',
     'HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED',
-    'HSA_AMD_SYSTEM_INFO_XNACK_ENABLED', 'HSA_CACHE_INFO_LEVEL',
+    'HSA_AMD_SYSTEM_INFO_XNACK_ENABLED',
+    'HSA_AMD_VMEM_ADDRESS_NO_REGISTER', 'HSA_CACHE_INFO_LEVEL',
     'HSA_CACHE_INFO_NAME', 'HSA_CACHE_INFO_NAME_LENGTH',
     'HSA_CACHE_INFO_SIZE',
     'HSA_CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE',
@@ -5194,10 +5549,11 @@ __all__ = \
     'HSA_CODE_SYMBOL_INFO_VARIABLE_SIZE',
     'HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT',
     'HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR',
-    'HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO', 'HSA_DEVICE_TYPE_CPU',
-    'HSA_DEVICE_TYPE_DSP', 'HSA_DEVICE_TYPE_GPU',
-    'HSA_ENDIANNESS_BIG', 'HSA_ENDIANNESS_LITTLE',
-    'HSA_EXCEPTION_POLICY_BREAK', 'HSA_EXCEPTION_POLICY_DETECT',
+    'HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO', 'HSA_DEVICE_TYPE_AIE',
+    'HSA_DEVICE_TYPE_CPU', 'HSA_DEVICE_TYPE_DSP',
+    'HSA_DEVICE_TYPE_GPU', 'HSA_ENDIANNESS_BIG',
+    'HSA_ENDIANNESS_LITTLE', 'HSA_EXCEPTION_POLICY_BREAK',
+    'HSA_EXCEPTION_POLICY_DETECT',
     'HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE',
     'HSA_EXECUTABLE_INFO_PROFILE', 'HSA_EXECUTABLE_INFO_STATE',
     'HSA_EXECUTABLE_STATE_FROZEN', 'HSA_EXECUTABLE_STATE_UNFROZEN',
@@ -5292,6 +5648,7 @@ __all__ = \
     'HSA_EXT_IMAGE_GEOMETRY_2DDEPTH', 'HSA_EXT_IMAGE_GEOMETRY_3D',
     'HSA_EXT_POINTER_TYPE_GRAPHICS', 'HSA_EXT_POINTER_TYPE_HSA',
     'HSA_EXT_POINTER_TYPE_IPC', 'HSA_EXT_POINTER_TYPE_LOCKED',
+    'HSA_EXT_POINTER_TYPE_RESERVED_ADDR',
     'HSA_EXT_POINTER_TYPE_UNKNOWN',
     'HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE',
     'HSA_EXT_PROGRAM_INFO_MACHINE_MODEL',
@@ -5397,6 +5754,7 @@ __all__ = \
     'HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION',
     'HSA_STATUS_ERROR_MEMORY_FAULT',
     'HSA_STATUS_ERROR_NOT_INITIALIZED',
+    'HSA_STATUS_ERROR_NOT_SUPPORTED',
     'HSA_STATUS_ERROR_OUT_OF_REGISTERS',
     'HSA_STATUS_ERROR_OUT_OF_RESOURCES',
     'HSA_STATUS_ERROR_REFCOUNT_OVERFLOW',
@@ -5494,22 +5852,26 @@ __all__ = \
     'amd_machine_version16_t', 'amd_powertwo8_t', 'amd_powertwo_t',
     'amd_queue_capabilities32_t', 'amd_queue_capabilities_t',
     'amd_queue_properties32_t', 'amd_queue_properties_t',
-    'amd_queue_t', 'amd_runtime_loader_debug_info_t',
-    'amd_signal_kind64_t', 'amd_signal_kind_t', 'amd_signal_t',
+    'amd_queue_t', 'amd_queue_v2_t',
+    'amd_runtime_loader_debug_info_t', 'amd_signal_kind64_t',
+    'amd_signal_kind_t', 'amd_signal_t',
     'amd_system_vgpr_workitem_id_t', 'c__EA_hsa_access_permission_t',
     'c__EA_hsa_agent_feature_t', 'c__EA_hsa_agent_info_t',
     'c__EA_hsa_amd_agent_memory_pool_info_t',
-    'c__EA_hsa_amd_copy_direction_t',
+    'c__EA_hsa_amd_aie_ert_cmd_opcode_t',
+    'c__EA_hsa_amd_aie_ert_state', 'c__EA_hsa_amd_copy_direction_t',
     'c__EA_hsa_amd_hw_exception_reset_cause_t',
     'c__EA_hsa_amd_hw_exception_reset_type_t',
     'c__EA_hsa_amd_iommu_version_t', 'c__EA_hsa_amd_link_info_type_t',
+    'c__EA_hsa_amd_memory_error_reason_t',
     'c__EA_hsa_amd_memory_fault_reason_t',
     'c__EA_hsa_amd_memory_pool_access_t',
     'c__EA_hsa_amd_memory_pool_info_t', 'c__EA_hsa_amd_memory_type_t',
     'c__EA_hsa_amd_packet_type_t', 'c__EA_hsa_amd_pointer_type_t',
-    'c__EA_hsa_amd_segment_t', 'c__EA_hsa_amd_signal_attribute_t',
-    'c__EA_hsa_cache_info_t', 'c__EA_hsa_code_object_info_t',
-    'c__EA_hsa_code_object_type_t', 'c__EA_hsa_code_symbol_info_t',
+    'c__EA_hsa_amd_queue_create_flag_t', 'c__EA_hsa_amd_segment_t',
+    'c__EA_hsa_amd_signal_attribute_t', 'c__EA_hsa_cache_info_t',
+    'c__EA_hsa_code_object_info_t', 'c__EA_hsa_code_object_type_t',
+    'c__EA_hsa_code_symbol_info_t',
     'c__EA_hsa_default_float_rounding_mode_t',
     'c__EA_hsa_device_type_t', 'c__EA_hsa_endianness_t',
     'c__EA_hsa_exception_policy_t', 'c__EA_hsa_executable_info_t',
@@ -5567,18 +5929,26 @@ __all__ = \
     'hsa_amd_agent_memory_properties_t',
     'hsa_amd_agent_memory_properties_t__enumvalues',
     'hsa_amd_agent_set_async_scratch_limit',
-    'hsa_amd_agents_allow_access', 'hsa_amd_async_function',
-    'hsa_amd_barrier_value_packet_t', 'hsa_amd_coherency_get_type',
-    'hsa_amd_coherency_set_type', 'hsa_amd_coherency_type_s',
-    'hsa_amd_coherency_type_t',
+    'hsa_amd_agents_allow_access', 'hsa_amd_aie_ert_cmd_opcode_t',
+    'hsa_amd_aie_ert_cmd_opcode_t__enumvalues',
+    'hsa_amd_aie_ert_packet_t', 'hsa_amd_aie_ert_start_kernel_data_t',
+    'hsa_amd_aie_ert_state', 'hsa_amd_aie_ert_state__enumvalues',
+    'hsa_amd_async_function', 'hsa_amd_barrier_value_packet_t',
+    'hsa_amd_coherency_get_type', 'hsa_amd_coherency_set_type',
+    'hsa_amd_coherency_type_s', 'hsa_amd_coherency_type_t',
     'hsa_amd_coherency_type_t__enumvalues',
     'hsa_amd_copy_direction_t',
     'hsa_amd_copy_direction_t__enumvalues',
     'hsa_amd_deallocation_callback_t',
-    'hsa_amd_deregister_deallocation_callback', 'hsa_amd_event_t',
+    'hsa_amd_deregister_deallocation_callback',
+    'hsa_amd_dma_buf_mapping_type_s',
+    'hsa_amd_dma_buf_mapping_type_t',
+    'hsa_amd_dma_buf_mapping_type_t__enumvalues',
+    'hsa_amd_enable_logging', 'hsa_amd_event_t',
     'hsa_amd_event_type_s', 'hsa_amd_event_type_t',
     'hsa_amd_event_type_t__enumvalues',
     'hsa_amd_gpu_hw_exception_info_t',
+    'hsa_amd_gpu_memory_error_info_t',
     'hsa_amd_gpu_memory_fault_info_t', 'hsa_amd_hdp_flush_t',
     'hsa_amd_hw_exception_reset_cause_t',
     'hsa_amd_hw_exception_reset_cause_t__enumvalues',
@@ -5592,16 +5962,19 @@ __all__ = \
     'hsa_amd_ipc_memory_detach', 'hsa_amd_ipc_memory_t',
     'hsa_amd_ipc_signal_attach', 'hsa_amd_ipc_signal_create',
     'hsa_amd_ipc_signal_t', 'hsa_amd_link_info_type_t',
-    'hsa_amd_link_info_type_t__enumvalues',
+    'hsa_amd_link_info_type_t__enumvalues', 'hsa_amd_log_flag_s',
+    'hsa_amd_log_flag_t', 'hsa_amd_log_flag_t__enumvalues',
     'hsa_amd_memory_access_desc_t', 'hsa_amd_memory_async_copy',
     'hsa_amd_memory_async_copy_on_engine',
     'hsa_amd_memory_async_copy_rect',
     'hsa_amd_memory_copy_engine_status',
+    'hsa_amd_memory_error_reason_t',
+    'hsa_amd_memory_error_reason_t__enumvalues',
     'hsa_amd_memory_fault_reason_t',
     'hsa_amd_memory_fault_reason_t__enumvalues',
-    'hsa_amd_memory_fill', 'hsa_amd_memory_lock',
-    'hsa_amd_memory_lock_to_pool', 'hsa_amd_memory_migrate',
-    'hsa_amd_memory_pool_access_t',
+    'hsa_amd_memory_fill', 'hsa_amd_memory_get_preferred_copy_engine',
+    'hsa_amd_memory_lock', 'hsa_amd_memory_lock_to_pool',
+    'hsa_amd_memory_migrate', 'hsa_amd_memory_pool_access_t',
     'hsa_amd_memory_pool_access_t__enumvalues',
     'hsa_amd_memory_pool_allocate', 'hsa_amd_memory_pool_can_migrate',
     'hsa_amd_memory_pool_flag_s', 'hsa_amd_memory_pool_flag_t',
@@ -5623,6 +5996,7 @@ __all__ = \
     'hsa_amd_pointer_info_set_userdata', 'hsa_amd_pointer_info_t',
     'hsa_amd_pointer_type_t', 'hsa_amd_pointer_type_t__enumvalues',
     'hsa_amd_portable_close_dmabuf', 'hsa_amd_portable_export_dmabuf',
+    'hsa_amd_portable_export_dmabuf_v2',
     'hsa_amd_profiling_async_copy_enable',
     'hsa_amd_profiling_async_copy_time_t',
     'hsa_amd_profiling_convert_tick_to_system_domain',
@@ -5630,6 +6004,8 @@ __all__ = \
     'hsa_amd_profiling_get_async_copy_time',
     'hsa_amd_profiling_get_dispatch_time',
     'hsa_amd_profiling_set_profiler_enabled',
+    'hsa_amd_queue_create_flag_t',
+    'hsa_amd_queue_create_flag_t__enumvalues',
     'hsa_amd_queue_cu_get_mask', 'hsa_amd_queue_cu_set_mask',
     'hsa_amd_queue_get_info', 'hsa_amd_queue_priority_s',
     'hsa_amd_queue_priority_t',
@@ -5644,10 +6020,11 @@ __all__ = \
     'hsa_amd_signal_attribute_t',
     'hsa_amd_signal_attribute_t__enumvalues', 'hsa_amd_signal_create',
     'hsa_amd_signal_handler', 'hsa_amd_signal_value_pointer',
-    'hsa_amd_signal_wait_any', 'hsa_amd_spm_acquire',
-    'hsa_amd_spm_release', 'hsa_amd_spm_set_dest_buffer',
-    'hsa_amd_svm_attribute_pair_t', 'hsa_amd_svm_attribute_s',
-    'hsa_amd_svm_attribute_t', 'hsa_amd_svm_attribute_t__enumvalues',
+    'hsa_amd_signal_wait_all', 'hsa_amd_signal_wait_any',
+    'hsa_amd_spm_acquire', 'hsa_amd_spm_release',
+    'hsa_amd_spm_set_dest_buffer', 'hsa_amd_svm_attribute_pair_t',
+    'hsa_amd_svm_attribute_s', 'hsa_amd_svm_attribute_t',
+    'hsa_amd_svm_attribute_t__enumvalues',
     'hsa_amd_svm_attributes_get', 'hsa_amd_svm_attributes_set',
     'hsa_amd_svm_model_s', 'hsa_amd_svm_model_t',
     'hsa_amd_svm_model_t__enumvalues', 'hsa_amd_svm_prefetch_async',
@@ -5655,6 +6032,9 @@ __all__ = \
     'hsa_amd_vendor_packet_header_t', 'hsa_amd_vmem_address_free',
     'hsa_amd_vmem_address_reserve',
     'hsa_amd_vmem_address_reserve_align',
+    'hsa_amd_vmem_address_reserve_flag_s',
+    'hsa_amd_vmem_address_reserve_flag_t',
+    'hsa_amd_vmem_address_reserve_flag_t__enumvalues',
     'hsa_amd_vmem_alloc_handle_t',
     'hsa_amd_vmem_export_shareable_handle', 'hsa_amd_vmem_get_access',
     'hsa_amd_vmem_get_alloc_properties_from_handle',
@@ -5737,20 +6117,22 @@ __all__ = \
     'hsa_ext_sampler_coordinate_mode32_t',
     'hsa_ext_sampler_coordinate_mode_t',
     'hsa_ext_sampler_coordinate_mode_t__enumvalues',
-    'hsa_ext_sampler_create', 'hsa_ext_sampler_descriptor_t',
+    'hsa_ext_sampler_create', 'hsa_ext_sampler_create_v2',
+    'hsa_ext_sampler_descriptor_t', 'hsa_ext_sampler_descriptor_v2_t',
     'hsa_ext_sampler_destroy', 'hsa_ext_sampler_filter_mode32_t',
     'hsa_ext_sampler_filter_mode_t',
     'hsa_ext_sampler_filter_mode_t__enumvalues', 'hsa_ext_sampler_t',
     'hsa_extension_get_name', 'hsa_extension_t',
     'hsa_extension_t__enumvalues', 'hsa_fence_scope_t',
     'hsa_fence_scope_t__enumvalues', 'hsa_file_t', 'hsa_flag_isset64',
-    'hsa_flush_mode_t', 'hsa_flush_mode_t__enumvalues',
-    'hsa_fp_type_t', 'hsa_fp_type_t__enumvalues', 'hsa_init',
-    'hsa_isa_compatible', 'hsa_isa_from_name',
-    'hsa_isa_get_exception_policies', 'hsa_isa_get_info',
-    'hsa_isa_get_info_alt', 'hsa_isa_get_round_method',
-    'hsa_isa_info_t', 'hsa_isa_info_t__enumvalues',
-    'hsa_isa_iterate_wavefronts', 'hsa_isa_t', 'hsa_iterate_agents',
+    'hsa_flag_set64', 'hsa_flush_mode_t',
+    'hsa_flush_mode_t__enumvalues', 'hsa_fp_type_t',
+    'hsa_fp_type_t__enumvalues', 'hsa_init', 'hsa_isa_compatible',
+    'hsa_isa_from_name', 'hsa_isa_get_exception_policies',
+    'hsa_isa_get_info', 'hsa_isa_get_info_alt',
+    'hsa_isa_get_round_method', 'hsa_isa_info_t',
+    'hsa_isa_info_t__enumvalues', 'hsa_isa_iterate_wavefronts',
+    'hsa_isa_t', 'hsa_iterate_agents',
     'hsa_kernel_dispatch_packet_setup_t',
     'hsa_kernel_dispatch_packet_setup_t__enumvalues',
     'hsa_kernel_dispatch_packet_setup_width_t',
@@ -5883,10 +6265,12 @@ __all__ = \
     'hsa_ven_amd_aqlprofile_version_minor', 'hsa_wait_state_t',
     'hsa_wait_state_t__enumvalues', 'hsa_wavefront_get_info',
     'hsa_wavefront_info_t', 'hsa_wavefront_info_t__enumvalues',
-    'hsa_wavefront_t', 'int32_t', 'kAqlProfileLib', 'size_t',
+    'hsa_wavefront_t', 'int32_t', 'kAqlProfileLib',
+    'scratch_last_used_index_xcc_t', 'size_t',
     'struct_BrigModuleHeader', 'struct_amd_control_directives_s',
     'struct_amd_kernel_code_s', 'struct_amd_queue_s',
-    'struct_amd_runtime_loader_debug_info_s', 'struct_amd_signal_s',
+    'struct_amd_queue_v2_s', 'struct_amd_runtime_loader_debug_info_s',
+    'struct_amd_signal_s',
     'struct_c__SA_hsa_ext_amd_aql_pm4_packet_t',
     'struct_c__SA_hsa_ven_amd_aqlprofile_descriptor_t',
     'struct_c__SA_hsa_ven_amd_aqlprofile_event_t',
@@ -5896,8 +6280,12 @@ __all__ = \
     'struct_c__SA_hsa_ven_amd_aqlprofile_parameter_t',
     'struct_c__SA_hsa_ven_amd_aqlprofile_profile_t',
     'struct_hsa_agent_dispatch_packet_s', 'struct_hsa_agent_s',
+    'struct_hsa_amd_aie_ert_packet_s',
+    'struct_hsa_amd_aie_ert_packet_s_0',
+    'struct_hsa_amd_aie_ert_start_kernel_data_s',
     'struct_hsa_amd_barrier_value_packet_s', 'struct_hsa_amd_event_s',
     'struct_hsa_amd_gpu_hw_exception_info_s',
+    'struct_hsa_amd_gpu_memory_error_info_s',
     'struct_hsa_amd_gpu_memory_fault_info_s',
     'struct_hsa_amd_hdp_flush_s', 'struct_hsa_amd_image_descriptor_s',
     'struct_hsa_amd_ipc_memory_s',
@@ -5922,13 +6310,17 @@ __all__ = \
     'struct_hsa_ext_image_format_s', 'struct_hsa_ext_image_region_s',
     'struct_hsa_ext_image_s', 'struct_hsa_ext_images_1_00_pfn_s',
     'struct_hsa_ext_images_1_pfn_s', 'struct_hsa_ext_program_s',
-    'struct_hsa_ext_sampler_descriptor_s', 'struct_hsa_ext_sampler_s',
-    'struct_hsa_isa_s', 'struct_hsa_kernel_dispatch_packet_s',
+    'struct_hsa_ext_sampler_descriptor_s',
+    'struct_hsa_ext_sampler_descriptor_v2_s',
+    'struct_hsa_ext_sampler_s', 'struct_hsa_isa_s',
+    'struct_hsa_kernel_dispatch_packet_s',
+    'struct_hsa_kernel_dispatch_packet_s_0_0',
     'struct_hsa_loaded_code_object_s', 'struct_hsa_pitched_ptr_s',
     'struct_hsa_queue_s', 'struct_hsa_region_s',
     'struct_hsa_signal_group_s', 'struct_hsa_signal_s',
     'struct_hsa_ven_amd_aqlprofile_1_00_pfn_s',
-    'struct_hsa_wavefront_s', 'uint16_t', 'uint32_t', 'uint64_t',
-    'union_amd_signal_s_0', 'union_amd_signal_s_1',
+    'struct_hsa_wavefront_s', 'struct_scratch_last_used_index_xcc_s',
+    'uint16_t', 'uint32_t', 'uint64_t', 'union_amd_signal_s_0',
+    'union_amd_signal_s_1',
     'union_c__SA_hsa_ven_amd_aqlprofile_info_data_t_0',
-    'union_hsa_amd_event_s_0']
+    'union_hsa_amd_event_s_0', 'union_hsa_kernel_dispatch_packet_s_0']

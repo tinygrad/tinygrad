@@ -817,21 +817,21 @@ class AMDDevice(HCQCompiled):
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
-    gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
+    gart = self.iface.alloc(256 if queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE else ctypes.sizeof(hsa.amd_queue_v2_t), uncached=True, cpu_access=True)
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
-      aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
-        read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
+      aql_desc = hsa.amd_queue_v2_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
+        read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_v2_t, 'read_dispatch_id').offset,
         max_cu_id=self.max_cu_id, max_wave_id=self.max_wave_id)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
-      self.aql_desc = hsa.amd_queue_t.from_address(gart.va_addr)
+      self.aql_desc = hsa.amd_queue_v2_t.from_address(gart.va_addr)
 
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.iface.props.get('num_xcc', 1), mmap.PAGESIZE)
     cwsr_buffer = self.iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None
     eop_buffer = self.iface.alloc(eop_buffer_size) if eop_buffer_size else None
 
-    return (self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-            wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
+    return (self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_v2_t, 'read_dispatch_id').offset,
+            wptr=getattr(hsa.amd_queue_v2_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size))
 
   def _ensure_has_local_memory(self, required):
