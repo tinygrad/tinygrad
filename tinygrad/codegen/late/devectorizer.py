@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
@@ -73,6 +73,7 @@ def expand_index(buf:UOp, vec:UOp):
     idx: Any = midx.src[i].src[1].get_idx()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
+    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     root_src = (midx.src[i].src[1].get_valid(), root_src)
@@ -230,7 +231,7 @@ def no_vectorized_buf(buf:UOp):
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
-  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
+  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
