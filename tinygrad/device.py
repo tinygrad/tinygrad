@@ -356,7 +356,7 @@ if PROFILE:
 
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz
-      launch_viz(PROFILE, fn)
+      launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":
   from tinygrad import Tensor, Device
