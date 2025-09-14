@@ -100,7 +100,8 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   # Tensor const has a device and an unmasked ShapeTracker of stride 0
   # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
   # TODO: remove after rangeify is default
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEVICE),)),)),
+  (UPat(Ops.CONST, src=(UPat.any(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="st"),
+                                 UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND)), name="st")),)),
    lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
 
