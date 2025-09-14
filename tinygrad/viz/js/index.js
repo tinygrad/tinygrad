@@ -134,23 +134,23 @@ const PathView =  { st: e => e.x[0], et: e => e.x.at(-1) };
 class Range {
   constructor() { this.items = []; }
   push(e) {
-    this.items.push(this.view != null ? { arg:e, x0:this.view.st(e), x1:this.view.et(e) } : e);
+    this.items.push(this.view != null ? { e, x0:this.view.st(e), x1:this.view.et(e) } : e);
   }
-  *query(t0, t1) {
+  *query(t0, t1, match) {
+    if (match == null) match = () => { return true; };
     for (const e of this.items) {
-      if (t1>=e.x0 && t0<=e.x1) yield e.arg;
+      if (t1>=e.x0 && t0<=e.x1 && match(e)) yield e;
     }
   }
-  find(t0, t1, match) {
-    if (match == null) match = () => true;
+  find(t0, t1, match, debug) {
     for (const e of this.items) {
-      if (t0>=e.x0 && t1<=e.x1 && match(e)) return e.arg;
+      if (t0>=e.x0 && t1<=e.x1 && match(e)) return e;
     }
   }
-  clear() { this.items.length = 0; }
   // stuff from Array
   get length() { return this.items.length; }
-  *[Symbol.iterator]() { for (const e of this.items) yield e.arg; }
+  clear() { this.items.length = 0; }
+  *[Symbol.iterator]() { for (const item of this.items) yield item.e; }
 }
 
 function formatTime(ts, dur=ts) {
@@ -315,7 +315,7 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
-  const opts = { minWidth:0.5, distanceTol:0.2 };
+  const opts = { minWidth:0.5, distanceTol:1.0 };
   function render(transform) {
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -325,9 +325,9 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+    for (const [k, { offsetY, shapes, visible }] of data.tracks) {
       visible.clear();
-      for (const e of shapes.query(st, et)) {
+      for (const { e } of shapes.query(st, et)) {
         // generic polygon
         if (e.width == null) {
           const x = e.x.map(xscale);
@@ -347,8 +347,8 @@ async function renderProfiler() {
         const y = offsetY+e.y;
         let width = xscale(e.x+e.width)-x, arg = e.arg;
         if (width < opts.minWidth) {
-          const found = visible.find(x, x+width-opts.minWidth+opts.distanceTol, (v) => v.y0 === offsetY+e.y);
-          if (found) continue;
+          const found = visible.query(x-opts.distanceTol, x+opts.minWidth+opts.distanceTol, (v) => v.y0 === y).next();
+          if (found.value != null) continue;
           width = opts.minWidth; arg = null;
         }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
@@ -428,7 +428,7 @@ async function renderProfiler() {
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    return data.tracks.get(tid).visible.find(X, X, (v) => Y>=v.y0 && Y<=v.y1);
+    return data.tracks.get(tid).visible.find(X, X, (v) => Y>=v.y0 && Y<=v.y1)?.arg;
   }
 
   canvas.addEventListener("click", e => {
