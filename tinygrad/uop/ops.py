@@ -327,6 +327,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   @staticmethod
   def invalid(): return UOp(Ops.CONST, dtypes.index, src=(), arg=Invalid)
+  def valid(self, cond): return cond.where(self, UOp.invalid())
   def get_idx(self) -> UOp:
     assert self.dtype is dtypes.index, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
@@ -1063,6 +1064,11 @@ pm_lower_index_dtype = PatternMatcher([
     else dtypes.long)).vec(u.dtype.count),src=tuple(x.cast(dt) for x in u.src))),
   (UPat((Ops.SPECIAL,Ops.DEFINE_VAR), dtypes.index, name="u"), lambda u: u.replace(dtype=dtypes.int)),
   (UPat((Ops.BIND), dtypes.index, name="u"), lambda u: u.replace(dtype=u.src[0].dtype)),
+  # lower Invalid
+  (UPat.var("buf").index(UPat.var("cond").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid))), lambda buf,idx,cond: buf.index(idx, cond)),
+  # remove hanging cast
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast()),), lambda buf,idx: buf.index(idx)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
 ])
 def index_to_concrete_int(u:UOp): return graph_rewrite(u, pm_lower_index_dtype)
 
