@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
 from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
@@ -535,7 +535,12 @@ add_tags = PatternMatcher([
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
-  tsink = graph_rewrite(tsink, multi_pm+earliest_rewrites, name="earliest rewrites")
+
+  # HACKS: handle multi with graph_rewrite_map in order to not have to add all the tag logic to multi
+  msink = graph_rewrite_map(tsink, multi_pm, name="multi")
+  tsink = msink[tsink].substitute({v:v.rtag(k.tag) for k,v in msink.items() if v.tag is None and k.tag is not None})
+
+  tsink = graph_rewrite(tsink, earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
