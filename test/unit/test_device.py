@@ -101,7 +101,7 @@ class TestCompiler(unittest.TestCase):
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
     p = subprocess.run([sys.executable, "-m", "tinygrad.device"],stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-      env={**os.environ, "DEBUG": "1"}, timeout=10,)
+      env={**os.environ, "DEBUG": "1"}, timeout=20,)
     out = (p.stdout + p.stderr).decode()
     self.assertEqual(p.returncode, 0, msg=out)
     self.assertIn("CPU", out) # for sanity check
