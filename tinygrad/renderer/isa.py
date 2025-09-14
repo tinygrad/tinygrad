@@ -663,6 +663,9 @@ class X86Renderer(ISARenderer):
 
 a64_pre_matcher = PatternMatcher([])
 a64_extra_matcher = PatternMatcher([
+  # some ops can't take imm in srcs
+  (UPat((Ops.IDIV, Ops.MUL, Ops.WHERE), name="x"),
+   lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   # *** INDEX/LOAD/STORE ***
   # loading from register is a noop
   #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
@@ -782,14 +785,14 @@ dt_128bit = tuple(dt for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize =
 #https://developer.arm.com/documentation/ddi0602/2025-06/Base-Instructions
 a64_lowerer = PatternMatcher([
   # float/packed load/store
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_16bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b01, 0b01)), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_32bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b10, 0b01)), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_64bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b11, 0b01)), # noqa: E501
-  (UPat.var("a").load(UPat.cvar("c"), dtype=dt_128bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b00, 0b11)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dt_16bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b01, 0b00)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dt_32bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b10, 0b00)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dt_64bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b11, 0b00)), # noqa: E501
-  (UPat.var("a").store(UPat.var("b", dt_128bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b00, 0b10)), # noqa: E501
+  #(UPat.var("a").load(UPat.cvar("c"), dtype=dt_16bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b01, 0b01)), # noqa: E501
+  #(UPat.var("a").load(UPat.cvar("c"), dtype=dt_32bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b10, 0b01)), # noqa: E501
+  #(UPat.var("a").load(UPat.cvar("c"), dtype=dt_64bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b11, 0b01)), # noqa: E501
+  #(UPat.var("a").load(UPat.cvar("c"), dtype=dt_128bit, allow_any_len=True, name="x"), lambda ctx,a,c,x: MUOpA64.V_R_I("ldr", 0b111101, ctx[x], ctx[a], c.arg, 0b00, 0b11)), # noqa: E501
+  #(UPat.var("a").store(UPat.var("b", dt_16bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b01, 0b00)), # noqa: E501
+  #(UPat.var("a").store(UPat.var("b", dt_32bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b10, 0b00)), # noqa: E501
+  #(UPat.var("a").store(UPat.var("b", dt_64bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b11, 0b00)), # noqa: E501
+  #(UPat.var("a").store(UPat.var("b", dt_128bit), UPat.cvar("c"), allow_any_len=True), lambda ctx,a,b,c: MUOpA64.V_R_I("str", 0b111101, ctx[b], ctx[a], c.arg, 0b00, 0b10)), # noqa: E501
   # TODO: can load/store 256 bits with ldp/stp, requires multiple outs. Then the load needs to be followed by two noops
   # use vec_lowerer for vector dtypes
   (UPat(GroupOp.All, name="x"), lambda ctx,x: a64_vec_lowerer.rewrite(x, ctx) if x.dtype.count > 1 else None), # noqa: E501
@@ -806,9 +809,11 @@ a64_lowerer = PatternMatcher([
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), name="x"), a64_abi),
   #(UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: [MUOpX86.R_RM("mov", 0x8B, ctx[x], Register("rbp", 5, 8), 1),
   #                                                                    MUOpX86.RM_I("sub", 0x81, 5, ctx[x], Immediate(ctx.stack_size, 4), 1)]),
+  # immediate loads
+  (UPat.cvar("c", dtypes.int32s).load(name="x"), lambda ctx,c,x: MUOpA64.R_I("movz", 0b1010010, ctx[x], c.arg, 0b0)),
   # index
-  (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg*a.dtype.base.scalar().itemsize, 0b0)), # noqa: E501
-  (UPat.var("a").index(UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("add", 0b0001011, ctx[x], ctx[a], ctx[b], 0b0, 0b00, a.dtype.base.scalar().itemsize)), # noqa: E501
+  (UPat.var("a").index(UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg*a.dtype.base.scalar().itemsize, 0b1)), # noqa: E501
+  (UPat.var("a").index(UPat.var("b")).named("x"), lambda ctx,a,b,x: MUOpA64.R_R_R("add", 0b0001011, ctx[x], ctx[a], ctx[b], 0b1, 0b00, powers_of_two[a.dtype.base.scalar().itemsize])), # noqa: E501
   # casts
   (UPat.var("y", (dtypes.uint8, dtypes.bool)).cast(dtypes.int32s, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("uxtb", 0b1010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b000111)), # noqa: E501
   (UPat.var("y", dtypes.uint16).cast(dtypes.int32s, name="x"), lambda ctx,y,x: MUOpA64.R_R_R("uxth", 0b1010011, ctx[x], ctx[y], 0b00000, 0b0, 0b00, 0b001111)), # noqa: E501
@@ -820,27 +825,27 @@ a64_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.uint32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b11)),
   (UPat.var("y", dtypes.uint32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b00)),
   (UPat.var("y", dtypes.uint32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b01)),
-  (UPat.var("y", dtypes.uint64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b11, b31=0b1)),
-  (UPat.var("y", dtypes.uint64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b00, b31=0b1)),
-  (UPat.var("y", dtypes.uint64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b11, 0b1)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b00, 0b1)),
+  (UPat.var("y", dtypes.uint64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("ucvtf", 0b00011, ctx[x], ctx[y], 0b01, 0b1)),
   (UPat.var("y", dtypes.int32).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b11)),
   (UPat.var("y", dtypes.int32).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b00)),
   (UPat.var("y", dtypes.int32).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b01)),
-  (UPat.var("y", dtypes.int64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b11, b31=0b1)),
-  (UPat.var("y", dtypes.int64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b00, b31=0b1)),
-  (UPat.var("y", dtypes.int64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float16, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b11, 0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float32, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b00, 0b1)),
+  (UPat.var("y", dtypes.int64).cast(dtypes.float64, name="x"), lambda ctx,y,x: MUOpA64.S_R("scvtf", 0b00010, ctx[x], ctx[y], 0b01, 0b1)),
   (UPat.var("y", dtypes.float16).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b11)),
   (UPat.var("y", dtypes.float32).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b00)),
   (UPat.var("y", dtypes.float64).cast(dtypes.uint32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b01)),
-  (UPat.var("y", dtypes.float16).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b11, b31=0b1)),
-  (UPat.var("y", dtypes.float32).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b00, b31=0b1)),
-  (UPat.var("y", dtypes.float64).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b11, 0b1)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b00, 0b1)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.uint64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzu", 0b11001, ctx[x], ctx[y], 0b01, 0b1)),
   (UPat.var("y", dtypes.float16).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b11)),
   (UPat.var("y", dtypes.float32).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b00)),
   (UPat.var("y", dtypes.float64).cast(dtypes.int32, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b01)),
-  (UPat.var("y", dtypes.float16).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b11, b31=0b1)),
-  (UPat.var("y", dtypes.float32).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b00, b31=0b1)),
-  (UPat.var("y", dtypes.float64).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b01, b31=0b1)),
+  (UPat.var("y", dtypes.float16).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b11, 0b1)),
+  (UPat.var("y", dtypes.float32).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b00, 0b1)),
+  (UPat.var("y", dtypes.float64).cast(dtypes.int64, name="x"), lambda ctx,y,x: MUOpA64.S_R("fcvtzs", 0b11000, ctx[x], ctx[y], 0b01, 0b1)),
   # binary with immediate
   ((UPat.var("a", dtypes.int64s) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg, 0b1, 0b00)),
   ((UPat.var("a", dtypes.ints) + UPat.cvar("c")).named("x"), lambda ctx,a,c,x: MUOpA64.R_R_I("add", 0b0010001, ctx[x], ctx[a], c.arg, 0b0, 0b00)),
@@ -891,9 +896,9 @@ a64_lowerer = PatternMatcher([
   (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"), lambda ctx,a,b,x: MUOpA64.S_S_S("fcmeq", 0b111001, ctx[x], ctx[a], ctx[b], 0b01, 0b1)), # noqa: E501
   # ternary
   # range / endrange
-  (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpA64.R_I("movz", 0b1010010, ctx[x], 0, 0b1), MUOpA64("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
+  (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpA64.R_I("movz", 0b1010010, ctx[x], 0, 0b0), MUOpA64("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
   (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpA64.R_R_I("add", 0b0010001, ctx[a], ctx[a], 1, 0b0, 0b00), # noqa: E501
-                                                                                                                    MUOpA64.R_R_I("cmp", 0b1110001, ctx[a], ctx[a], c.arg, 0b0), # noqa: E501
+                                                                                                                    MUOpA64._R_I("cmp", 0b1110001, ctx[a], c.arg, 0b0), # noqa: E501
                                                                                                                     MUOpA64._I("b.lt", 0b1010100, Label(f".LOOP_{a.arg[0]}:"), 0b1011)]), # noqa: E501
 ])
 
@@ -906,16 +911,19 @@ class A64Renderer(ISARenderer):
   extra_matcher = a64_extra_matcher
   extra_spec = x86_spec
   lowerer = a64_lowerer
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MULACC)}
+  # TODO: shift immediate is weird
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MULACC)}
 
   def load(self, dest:Register, src:Memory): return MUOpA64.load(dest, src)
   def store(self, dest:Memory, src:Register): return MUOpA64.store(dest, src)
   def assign(self, dest:Register, src:Register): return MUOpA64.assign(dest, src)
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]:
-    prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
-               [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
-               [MUOpA64.R_R_I("sub", 0b1010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)]
-    epilogue = [MUOpA64.R_R_I("add", 0b0010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)] + \
-               [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
-    kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
-    return [MUOpX86("", -1, Label(f"{self.name}:"))] + kernel + [MUOpX86("ret", 0xC3)]
+    #prologue = [MUOpX86._RM("push", 0xFF, 6, Register("rbp", 5, 8)), MUOpX86.R_RM("mov", 0x8B, Register("rbp", 5, 8), Register("rsp", 4, 8), 1)] + \
+    #           [MUOpX86._RM("push", 0xFF, 6, r) for r in reversed(callee_saved)] + \
+    #           [MUOpA64.R_R_I("sub", 0b1010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)]
+    #epilogue = [MUOpA64.R_R_I("add", 0b0010001, Register("sp", 31, 8), Register("sp", 31, 8), self.stack_size, 0b1, 0b00)] + \
+    #           [MUOpX86._RM("pop", 0x8F, 0, r) for r in callee_saved] + [MUOpX86._RM("pop", 0x8F, 0, Register("rbp", 5, 8))]
+    #kernel = prologue + kernel + epilogue if self.stack_size > 0 or callee_saved else kernel
+    return [MUOpA64("", -1, Label(f"{self.name}:"))] + kernel + [MUOpA64("ret", 0, None, (), (), (), 0b1, 0b1, 0b0, 0b10110, 0b01, 0b0, 0b11111, 0b00000, 0b11110, 0b00000)]
+
+# TODO: opcode shouldn't be in base muop
