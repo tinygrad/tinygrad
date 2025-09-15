@@ -54,27 +54,23 @@ class MUOp:
   def encode(self) -> bytes: raise NotImplementedError("arch specific")
   @staticmethod
   def assemble(muops:list[MUOp]) -> bytes:
-    # TODO: don't hardcore jump size (6)
     binary = bytearray()
     targets: dict[Label, int] = {}
-    fixups: list[tuple[Label, int]] = []
+    fixups: list[tuple[Label, int, MUOp]] = []
     for mu in muops:
       if isinstance(mu.out, Label):
         targets[mu.out] = len(binary)
         continue
+      # jumps are encoded with placeholder immediate and patched later
       if mu.ins and isinstance(v:=mu.ins[0], Label):
-        if v in targets:
-          #imm = (targets[v] - (len(binary) + 6)).to_bytes(4, 'little', signed=True)
-          imm = targets[v] - len(binary)
-          mu = mu.replace(mu.out, (imm,))
-        else:
-          fixups.append((v, len(binary) + 2))
-          mu = mu.replace(mu.out, (int(0).to_bytes(4, 'little', signed=True),))
+        mu = mu.replace(mu.out, (int(0).to_bytes(4, 'little', signed=True),))
+        fixups.append((v, len(binary), mu))
       binary.extend(mu.encode())
-    # patch offsets for forward jumps
-    for label,loc in fixups:
-      offset = targets[label] - (loc + 4)
-      binary[loc:loc+4] = offset.to_bytes(4, "little", signed=True)
+    # patch offsets for jumps
+    for label,loc,mu in fixups:
+      offset = targets[label] - (loc + len(mu.encode()))
+      patch = mu.replace(mu.out, (offset.to_bytes(4, "little", signed=True),)).encode()
+      binary[loc:loc+len(patch)] = patch
     return bytes(binary)
 
 # *** X86 ***
