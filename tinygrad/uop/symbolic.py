@@ -97,9 +97,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
-  # if the intermediate cast doesnt narrow we can do it in one cast, we have to be carefull with bfloat16
-  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) and
-    not (a.dtype==dtypes.float and (b.dtype==dtypes.bfloat16 or x.dtype==dtypes.bfloat16)) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
@@ -120,33 +117,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
-
-def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
-  # div pattern in unrolled arange
-  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  seen_const, ans = [], None
-  for u in divs.split_uop(Ops.ADD):
-    if fac!=1:
-      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
-      u = u.src[0]
-    if u.op is Ops.CAST and u.src[0].dtype == dtypes.index: u = u.src[0]
-    if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator != u.src[1].arg: return None
-    if (s0:=u.src[0]).vmin < 0: return None
-    # assumed CONST is the last of an ADD
-    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
-      seen_const.append(s0.src[1].arg)
-      s0 = s0.src[0]
-    else: seen_const.append(0)
-    if ans is None: ans = s0
-    if ans is not s0: return None
-  if ans is None: return None
-  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  if sorted(seen_const)==list(range(denominator)):
-    return (fac*ans).cast(divs.dtype)
-  return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
@@ -350,9 +320,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
-  # unrolled arange div folding
-  ((UPat()+(UPat()//UPat.cvar("d", vec=False)).or_casted()).named("divs"), lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat()+((UPat()//UPat.cvar("d", vec=False)).or_casted()*UPat.cvar("c"))).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.index)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.index)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
@@ -382,6 +349,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
   # cast/long folding
+  # if the intermediate cast doesnt narrow we can do it in one cast
+  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) else None),
   (UPat.var('x', dtypes.ints+(dtypes.index,)).cast(dtypes.ints+(dtypes.index,), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # try to do math in int instead of long
@@ -519,10 +488,14 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index"))), allow_any_len=True, name="store"),
-   lambda index, gate, alt, store: UOp.store(index.src[0].index(index.src[1], gate), alt, *store.src[2:])),
+   lambda index, gate, alt, store: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt, *store.src[2:])),
   # fold gated LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat().index(UPat.const(dtypes.index, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
+  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c")).or_casted(),), allow_any_len=True, name="l"), UPat.var("a")),
+    lambda c,idx,l,a: l.replace(src=(l.src[0], a)+l.src[1:])),
+  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
+    allow_any_len=True, name="l")), lambda c,idx,l,a: l.replace(src=(l.src[0], a)+l.src[1:])),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)

@@ -417,6 +417,38 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_where_on_gated_load_fold(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    ld = d0.index(ridx0, ridx0<50).load()
+    w = (ridx0<50).where(ld, 5)
+    uops = to_uops_list([w])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.LOAD: assert u.src[1].arg==5
+
+  def test_where_on_gated_load_folds_swapped_branches(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    ld = d0.index(ridx0, (ridx0<50).logical_not()).load()
+    w = (ridx0<50).where(5, ld)
+    uops = to_uops_list([w])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.LOAD: assert u.src[1].arg==5
+
+  def test_where_in_store_becomes_gate(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    idx = d0.index(ridx0)
+    ld = idx.load()
+    val = (ridx0<50).where(5, ld)
+    st = idx.store(val, ridx0)
+    uops = to_uops_list([st])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.STORE: assert u.src[1].arg==5
+
   def test_load_idx_becomes_int(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)

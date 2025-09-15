@@ -7,12 +7,13 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, RANGEIFY
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
 
 class AxisType(Enum):
+  def __repr__(self): return f"AxisType.{self.name}"
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto()
 
@@ -162,6 +163,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
+    if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
@@ -296,12 +298,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=() if src is None else (src,))
-    if shape is not None:
-      from tinygrad.shape.shapetracker import ShapeTracker
-      ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(shape, (0,)*len(shape))),))
-    if device is not None:
-      if shape is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
-      else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+    if RANGEIFY:
+      # VIEW on const is no longer supported in RANGEIFY
+      if device is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+      if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
+    else:
+      if shape is not None:
+        from tinygrad.shape.shapetracker import ShapeTracker
+        ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(shape, (0,)*len(shape))),))
+      if device is not None:
+        if shape is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+        else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
     return ret
   @staticmethod
   def range(end:sint, *arg):

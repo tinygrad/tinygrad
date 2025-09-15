@@ -18,8 +18,8 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
-from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 @dataclass
 class RewriteStep:
@@ -62,7 +62,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    ret.append(RewriteStep(sym, name="initial symbolic"))
+    ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
@@ -76,7 +76,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
 
   # add locals
-  ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
+  ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce

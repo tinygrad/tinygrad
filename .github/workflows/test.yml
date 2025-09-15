@@ -148,18 +148,28 @@ jobs:
     - name: Test some torch tests (expect failure)
       run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
-  tc:
-    name: Tensor Core tests
+  bepython:
+    name: Python Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: uops-minimal
+        key: be-minimal
         deps: testing_minimal
+    - name: Test dtype with Python emulator
+      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+    - name: Test ops with Python emulator
+      run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
+    - name: Test uops with Python emulator
+      run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
+    - name: Test symbolic with Python emulator
+      run: PYTHON=1 python3 test/test_symbolic_ops.py
+    - name: test_renderer_failures with Python emulator
+      run: PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
     - name: Test IMAGE=2 support
       run: |
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
@@ -205,29 +215,6 @@ jobs:
         DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
-
-  bepython:
-    name: Python Backend
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: be-minimal
-        deps: testing_minimal
-    - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
-    - name: Test ops with Python emulator
-      run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
-    - name: Test uops with Python emulator
-      run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
-    - name: Test symbolic with Python emulator
-      run: PYTHON=1 python3 test/test_symbolic_ops.py
-    - name: test_renderer_failures with Python emulator
-      run: PYTHON=1 python3 -m pytest -rA test/test_renderer_failures.py::TestRendererFailures
 
   linter:
     name: Linters
@@ -528,6 +515,7 @@ jobs:
       with:
         key: rangeify-minimal-llvm
         deps: testing_minimal
+        opencl: 'true'
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
@@ -538,6 +526,10 @@ jobs:
           -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
+    - name: Test multitensor
+      run: RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
+    - name: Test GPU=1 RANGEIFY=1
+      run: GPU=1 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test CPU=1 RANGEIFY=2
       run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
