@@ -52,6 +52,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),), name="a").f(Ops.CONTIGUOUS, name="b"), lambda a,b: a.replace(tag=a.tag+b.tag)),
 ])
 
 # *****************
@@ -574,7 +575,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if x.op is Ops.BUFFERIZE and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op is Ops.BUFFER) and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
