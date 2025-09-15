@@ -308,7 +308,7 @@ if __name__ == "__main__":
 
   ctxs = get_metadata(load_pickle(args.kernels))
 
-  profile_ret = get_profile(profile:=load_pickle(args.profile))
+  profile_ret = get_profile(load_pickle(args.profile))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
