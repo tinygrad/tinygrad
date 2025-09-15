@@ -356,6 +356,7 @@
             const DECODER_OUTPUTS_LOGITS = true;
             const NO_TIMESTAMPS = true;
             const NO_CONTEXT = true;
+            const SUPPRESS_NONSPEECH_TOKENS = true;
 
             const TOK_EOS = 50256;
             const TOK_BEGIN_TRANSCRIPTION = 50257;
@@ -436,6 +437,11 @@
                         nextTokens = decoder_output;
                     } else {
                         if (DECODER_OUTPUTS_LOGITS) {
+                            if (SUPPRESS_NONSPEECH_TOKENS) {
+                                for (let token_index of suppress) {
+                                    decoder_output[token_index] = -Infinity;
+                                }
+                            }
                             if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
                             [nextLogprobs, max] = logSoftmax(decoder_output);
                         } else {
