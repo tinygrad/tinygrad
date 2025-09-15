@@ -1,6 +1,7 @@
 import socket, uuid, json, asyncio, os
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
+from tinygrad.tensor import Tensor
 
 TINYFS_ENDPOINT = getenv("TINYFS_ENDPOINT", "localhost:6767")
 
@@ -85,11 +86,11 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
           break
         i, loc = item
         if loc not in conns:
-          addr = src.device.node_info[loc][0]
+          addr = src.device.node_info[loc][-1]
           conns[loc] = await asyncio.open_connection(*addr.rsplit(":", 1))
 
-        ptr = i*1024*1024
-        size = min(len(dest[ptr:ptr+1024*1024]), 1024*1024)
+        ptr = i * Tensor.CHUNK_SIZE
+        size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
 
         conns[loc][1].write(f"CHUNK_OUT {size}\r\n".encode())
         conns[loc][1].write(src.src[i*16:(i+1)*16])
