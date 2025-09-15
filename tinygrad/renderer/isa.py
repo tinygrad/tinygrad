@@ -689,7 +689,7 @@ def arm64_load_consts(x:UOp) -> UOp|None:
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
-a64_extra_matcher = PatternMatcher([
+a64_extra_matcher = base_extra_matcher + PatternMatcher([
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), arm64_load_consts),
   # some ops can't take imm in srcs
@@ -697,29 +697,6 @@ a64_extra_matcher = PatternMatcher([
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
    lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
-  # *** INDEX/LOAD/STORE ***
-  # loading from register is a noop
-  #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
-  # rewrite index with gate to cmove
-  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
-  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
-  # move mask from INDEX to the load/store
-  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
-   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
-  (UPat.var("buf").index(UPat.var("idx"), UPat(dtype=dtypes.bool)).store(UPat.var("val"), UPat.var("gate"), allow_any_len=True),
-   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
-  # TODO: if lea just adds disp it's a noop and disp goes to load/store
-  # fold displacement into load/store
-  (UPat(Ops.LOAD, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted()),), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,x: x.replace(src=(buf.index(idx), disp) + x.src[1:])),
-  (UPat(Ops.STORE, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted(),), UPat.var("a")), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx), a, disp) + x.src[2:])),
-  # displacement of 0 if there isn't any
-  (UPat(Ops.INDEX, name="idx").load(allow_any_len=True, name="x"),
-   lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or \
-    len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
-  (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
-   lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
 ])
 #https://developer.arm.com/documentation/ddi0602/2025-06/SIMD-FP-Instructions
 a64_vec_lowerer = PatternMatcher([
@@ -969,6 +946,7 @@ class A64Renderer(ISARenderer):
   lowerer = a64_lowerer
   # TODO: shift immediate is weird
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  reg_pool = list(MUOpA64.GPR + MUOpA64.VEC)
 
   def load(self, dest:Register, src:Memory): return MUOpA64.load(dest, src)
   def store(self, dest:Memory, src:Register): return MUOpA64.store(dest, src)
