@@ -3,7 +3,6 @@ import math, struct, sys
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
-from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
@@ -198,7 +197,8 @@ barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.b
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
-llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
+# llvm.log2/llvm.exp2 don't support double
+llvm_intrinsics = {Ops.SQRT: "sqrt"}
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
@@ -217,9 +217,6 @@ class AMDLLVMRenderer(LLVMRenderer):
       lambda x, y: UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
     (UPat(Ops.CAST, name="x", dtype=dtypes.half.vec(8), src=UPat.var("y", dtypes.half.vec(16))),
       lambda x, y: UOp(Ops.VECTORIZE, dtypes.half.vec(8), tuple(y.gep(i * 2) for i in range(8)))),
-    # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
-    (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
-    (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
   ])
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
