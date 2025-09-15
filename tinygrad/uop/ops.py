@@ -1052,7 +1052,8 @@ pm_lower_index_dtype = PatternMatcher([
   # comparison ops might now have different dtypes in their sources
   (UPat(GroupOp.Comparison, name="u", src=(UPat.var("x",dtypes.ints), UPat.var("y", dtypes.ints))), lambda u,x,y:
     x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)).alu(u.op, y.cast(dt)) if x.dtype!=y.dtype else None),
-  (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y")), name="u"), lambda cond,u,x,y:
+  (UPat(Ops.WHERE, dtypes.index, src=(UPat(), UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), name="u"), lambda u,x: u.replace(dtype=x.dtype)),
+  (UPat(Ops.WHERE, dtypes.index, src=(UPat.var("cond"), UPat.var("x"), UPat.var("y"))), lambda cond,x,y:
     cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt))),
   (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u))),
   (UPat((Ops.RANGE,), dtype=dtypes.index, src=(UPat.var("end")), name="r"), lambda ctx,r,end:
