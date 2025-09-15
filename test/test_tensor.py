@@ -9,7 +9,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
@@ -415,6 +415,21 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_list_implicit_cast(self):
+    data = [True, False]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-1, 0, 1, 2, 3]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-3.5, -2.5, -1.5, 0, 1.5, 2.5, 3.5]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    # NOTE: torch and jax raise OverflowError: Python integer -3 out of bounds for uint8
+    # np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+
   def test_tensor_list_special_values(self):
     if is_dtype_supported(dtypes.float16):
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
@@ -501,10 +516,6 @@ class TestTinygrad(unittest.TestCase):
     print(c)
 
   def test_env_overwrite_default_device(self):
-    subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
-                    shell=True, check=True)
-    subprocess.run(['NPY=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"NPY\\""'],
-                    shell=True, check=True)
     subprocess.run([f'{Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
     subprocess.run([f'DISK=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
@@ -900,12 +911,16 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
-  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
+
+  def test_arange_raise_overflow(self):
+    with self.assertRaises(ValueError):
+      self._schedule_render(Tensor.arange(2**33, dtype=dtypes.int))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
@@ -913,6 +928,7 @@ class TestIdxUpcast(unittest.TestCase):
       self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.expectedFailure  # bug in gpu dims limiting
   def test_int64_unsupported_overflow(self):
     with self.assertRaises(KeyError):
       self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)

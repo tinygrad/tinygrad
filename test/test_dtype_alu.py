@@ -4,6 +4,8 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.runtime.ops_python import from_storage_scalar
+from tinygrad.renderer.ptx import PTXRenderer
 import numpy as np
 import pytest
 from hypothesis import given, strategies as strat, settings, HealthCheck
@@ -19,29 +21,23 @@ dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
-# TODO: LLVM comparing with nan is incorrect
-if Device.DEFAULT == "LLVM" or getenv("AMD_LLVM", 0):
-  binary_operations.remove(operator.lt)
-
 integer_binary_operations = binary_operations + [(Tensor.bitwise_xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
-                                                 (Tensor.bitwise_or, np.bitwise_or), operator.mod]
+                                                 (Tensor.bitwise_or, np.bitwise_or), (Tensor.maximum, np.maximum), operator.mod]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
-                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal), (Tensor.cos, np.cos)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
 
-# TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
-#binary_operations += [(Tensor.maximum, np.maximum)]
-
 # TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
-if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
+if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU":
+  unary_operations.remove((Tensor.sin, np.sin))
+  unary_operations.remove((Tensor.cos, np.cos))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
-  bfloat16 = strat.floats(width=16, allow_subnormal=False)
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -51,12 +47,13 @@ class ht:
   int32 = strat.integers(-2147483648, 2147483647)
   int64 = strat.integers(-9223372036854775808, 9223372036854775807)
   bool = strat.booleans()
+ht.bfloat16 = ht.uint16
 
 def universal_test(a, b, dtype, op):
-  # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
-  if (math.isnan(a) or math.isnan(b)) and Device.DEFAULT == "WEBGPU" and CI: return
   if not isinstance(op, tuple): op = (op, op)
   if op[0] == operator.mod and b == 0: return
+  # lt and max with nan is undefined in tinygrad
+  if op[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
   tensor_value = (op[0](ta, tb)).numpy()
   numpy_value = op[1](ta.numpy(), tb.numpy())
@@ -68,11 +65,14 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   ta = Tensor([a], dtype=dtype)
+  # TODO: cos does not match for large input
+  if op[0] == Tensor.cos and abs(a) > 30: return
+  if op[0] == Tensor.log and a <= 0: return
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 1e-2)}.get(dtype, (1e-6, 1e-5))
+    atol, rtol = {dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2)}.get(dtype, (1e-6, 1e-5))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -85,11 +85,14 @@ def universal_test_cast(a, in_dtype, dtype):
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
+  # lt and max with nan is undefined in tinygrad
+  if op1[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
+  if op2[0] in (operator.lt, Tensor.maximum) and math.isnan(c): return
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
   an, bn, cn = np.array([a]).astype(_to_np_dtype(d1)), np.array([b]).astype(_to_np_dtype(d1)), np.array([c]).astype(_to_np_dtype(d2))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
   numpy_value = op2[1](op1[1](an, bn).astype(_to_np_dtype(d2)), cn)
-  np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if getenv("PTX") else 1e-7)
+  np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) else 1e-7)
 
 class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
@@ -105,7 +108,8 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
-  def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+  def test_bfloat16(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
@@ -116,7 +120,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
+  def test_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)

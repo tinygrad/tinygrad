@@ -100,7 +100,7 @@ class GraphComputeItem:
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
-  fixedvars: dict[Variable, int]
+  fixedvars: dict[str, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -111,7 +111,7 @@ class GraphAlloc(RemoteRequest):
   graph_num: int
   jit_cache: tuple[GraphComputeItem|Transfer, ...]
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
 
 @dataclass(frozen=True)
 class GraphFree(RemoteRequest):
@@ -121,7 +121,7 @@ class GraphFree(RemoteRequest):
 class GraphExec(RemoteRequest):
   graph_num: int
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
   wait: bool
 
 # for safe deserialization
@@ -471,10 +471,11 @@ class RemoteDevice(Compiled):
     if not renderer[0].startswith("tinygrad.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
     renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
-    renderer_instance = renderer_class(*renderer[2])
-    renderer_instance.device = device
+
     graph = fromimport('tinygrad.runtime.graph.remote', "RemoteGraph") if self.properties.graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph, id(self.conn))
+    compilers = [(functools.partial(renderer_class, *renderer[2]), Compiler)]
+    super().__init__(device, RemoteAllocator(self), compilers, functools.partial(RemoteProgram, self), graph, id(self.conn))
+    self.renderer.device = device
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)

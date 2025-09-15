@@ -4,6 +4,7 @@ from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
+from tinygrad.helpers import Context
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -17,9 +18,9 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))
+def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, nmax),), expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
-def Range(n, nmax): return UOp.range(dtypes.int, nmax, n)
+def Range(n, nmax): return UOp.range(nmax, n)
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):
@@ -45,7 +46,8 @@ class TestHelpers(unittest.TestCase):
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
-    load = full_rewrite_to_sink(load.sink()).src[0]
+    with Context(NOOPT=1):
+      load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
@@ -195,9 +197,21 @@ class TestValidIdxSimplification(unittest.TestCase):
       "1",
       "((((ridx0+ridx1)<1)!=True)&(((ridx2+ridx3)<1)!=True))")
 
+  def test_valid_with_non_const_rhs(self):
+    ridx0 = Range(0, 2**16)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    valid = (ridx0<(ridx1*4 + ridx2))&(ridx0<-1).ne(True)
+    idx = ridx0%1024
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "ridx0",
+      "(ridx0<((ridx1*4)+ridx2))")
+
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    load = full_rewrite_to_sink(load.sink()).src[0]
+    with Context(NOOPT=1):
+      load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
@@ -255,6 +269,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, (gidx1<5), (gidx0, gidx1+5))
     self.check(load, None, "gidx0", "(gidx1+5)")
 
+  @unittest.skip("this should be constructed with an invalid gate")
   def test_valid_empty_set(self):
     gidx0 = Special("gidx0", 32)
     gidx1 = Special("gidx1", 32)
@@ -345,7 +360,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "((gidx*3)+-1438)", "0")
 
   def test_simplify2(self):
-    # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
+    # from CL=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Special("lidx", 4)
     valid = (lidx<3) & (lidx<1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)

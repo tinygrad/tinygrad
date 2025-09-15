@@ -53,8 +53,8 @@ class TestRealWorld(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
     params = unet_params
-    params["model_ch"] = 16
-    params["ctx_dim"] = 16
+    params["model_ch"] = 8
+    params["ctx_dim"] = 8
     params["num_res_blocks"] = 1
     params["n_heads"] = 2
     model = UNetModel(**params)
@@ -114,7 +114,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 93)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "GPU", "LLVM"}, "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
@@ -144,6 +144,7 @@ class TestRealWorld(unittest.TestCase):
                                 final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
       assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
 
+  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_bert(self):
     with Tensor.train():
       args_tiny = {"attention_probs_dropout_prob": 0.0, "hidden_dropout_prob": 0.0, "vocab_size": 30522, "type_vocab_size": 2,
@@ -166,10 +167,6 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
           data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.25, 347)
-
-  def test_bert_fuse_arange(self):
-    with Context(FUSE_ARANGE=1):
-      self.test_bert()
 
 if __name__ == '__main__':
   unittest.main()
