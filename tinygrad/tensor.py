@@ -1168,6 +1168,8 @@ class Tensor(MathTrait):
           boundary, stride = [start, stop], step
           if all(isinstance(s, int) for s in (start,stop,step)):
             # handle int slicing
+            # if we're slicing a symbolic dimension into a int dimension, we can slice untill the bind size
+            if isinstance(size, UOp): size = size.infer_with_bound_value()
             *boundary, stride = index.indices(cast(SupportsIndex, size))
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
