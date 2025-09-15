@@ -3283,7 +3283,7 @@ class Tensor(MathTrait):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).abs().numpy())
     ```
     """
-    return self * self.sign()
+    return (self<0).where(-self, self)
 
   def reciprocal(self) -> Tensor:
     """
