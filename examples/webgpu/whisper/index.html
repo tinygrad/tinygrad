@@ -490,6 +490,10 @@
                     contexts.push(context.slice());
                 }
 
+                function tokensToText(tokens) {
+                    return tokens.map(j => mapping[j]).join('');
+                }
+
                 for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
                     let updated = false;
                     for (let idx = 0; idx < indices.length; ++idx) {
@@ -501,9 +505,9 @@
 
                         if (!updated) {
                             if (DECODER_OUTPUTS_TOKENS) {
-                                pendingText = contexts[idx].slice(offset).map(j => mapping[j]).join('');
+                                pendingText = tokensToText(contexts[idx].slice(offset));
                             } else {
-                                pendingText = format_text(contexts[idx].slice(offset).map(j => mapping[j]).join(''), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                                pendingText = format_text(tokensToText(contexts[idx].slice(offset)), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                             }
                             updated = true;
                         }
