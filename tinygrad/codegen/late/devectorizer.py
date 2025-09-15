@@ -183,19 +183,20 @@ def image_fixup(ls:UOp):
   if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
     idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.index.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
     idx = ls.src[0]
-    id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+    return functools.reduce(lambda ret, i: (x % 4).ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
 
   return None
 
