@@ -326,10 +326,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   @staticmethod
-  def invalid(): return UOp(Ops.CONST, dtypes.index, src=(), arg=Invalid)
-  def valid(self, cond): return cond.where(self, UOp.invalid())
+  def invalid(count=1): return UOp(Ops.CONST, dtypes.index.vec(count), src=(), arg=Invalid)
+  def valid(self, cond): return cond.where(self, UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
-    assert self.dtype is dtypes.index, "Can only call get_idx on index dtype"
+    assert self.dtype.scalar() is dtypes.index, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
     assert self.dtype is dtypes.index, "Can only call get_valid on index dtype"
