@@ -1,4 +1,4 @@
-import socket, uuid
+import socket, uuid, json, asyncio
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
 
@@ -9,10 +9,24 @@ class TinyFSDevice(Compiled):
     self.op = device[len("tinyfs:"):].upper()
     super().__init__(device, TinyFSAllocator(self), None, None, None)
 
+    # fetch node info
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
+    s.send(f"INFO\r\n".encode())
+    s.recv(16)
+
+    info = b""
+    while not info.endswith(b"\r\n"):
+      info += s.recv(1024)
+    self.node_info = json.loads(info[:-2])
+    print(self.node_info)
+
 class TinyFSBuffer:
-  def __init__(self, device:TinyFSDevice, size:int, offset=0, sock=None, request_id=None):
+  def __init__(self, device:TinyFSDevice, size:int, offset=0, sock=None, request_id=None, locs=None, src=None):
     self.device, self.size, self.offset = device, size, offset
     self.request_id: uuid.UUID|None = request_id
+    self.locs = locs or []
+    self.src: bytearray = src or bytearray()
     if sock is None:
       self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       self.sock.connect((TINYFS_ENDPOINT.split(":")[0], int(TINYFS_ENDPOINT.split(":")[1])))
@@ -38,17 +52,60 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
     dest.sock.sendall(src)
 
+    if dest.device.op == "LOAD":
+      locs = b""
+      while not locs.endswith(b"\r\n"):
+        locs += dest.sock.recv(1024)
+      dest.locs = json.loads(locs[:-2])
+      dest.src = bytearray(len(src))
+      dest.src[:] = src
+
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
     if DEBUG >= 2: print(f"Copying out {src.size} bytes from {src.device.op}")
-    src.sock.send(f"{src.device.op}_OUT {src.size} {src.request_id}\r\n".encode())
+    if src.device.op == "LOAD" and getenv("USE_ASYNC_COPYOUT"):
+      asyncio.run(self._copyout_async(dest, src))
+    else:
+      src.sock.send(f"{src.device.op}_OUT {src.size} {src.request_id}\r\n".encode())
+      src.request_id = uuid.UUID(bytes=src.sock.recv(16))
+      if DEBUG >= 2: print(f"Request ID: {src.request_id}")
+      recv = 0
+      while recv < src.size:
+        recv += src.sock.recv_into(dest[recv:], src.size - recv)
 
-    src.request_id = uuid.UUID(bytes=src.sock.recv(16))
-    if DEBUG >= 2: print(f"Request ID: {src.request_id}")
+  async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
+    print("using async copyout")
 
-    recv = 0
-    while recv < src.size:
-      recv += src.sock.recv_into(dest[recv:], src.size - recv)
+    # queue up requests
+    queue = asyncio.Queue()
+    for item in enumerate(src.locs): queue.put_nowait(item)
+    for _ in range(16): queue.put_nowait(None)
+
+    async def _worker():
+      while True:
+        if (item := await queue.get()) is None:
+          queue.task_done()
+          break
+        i, loc = item
+        addr = src.device.node_info[loc][0]
+        conn = await asyncio.open_connection(*addr.rsplit(":", 1))
+
+        ptr = i*1024*1024
+        size = min(len(dest[ptr:ptr+1024*1024]), 1024*1024)
+
+        conn[1].write(f"CHUNK_OUT {size}\r\n".encode())
+        conn[1].write(src.src[i*16:(i+1)*16])
+        await conn[1].drain()
+
+        chunk = await conn[0].readexactly(size)
+        dest[ptr:ptr+len(chunk)] = chunk
+
+        conn[1].close()
+        await conn[1].wait_closed()
+        queue.task_done()
+
+    workers = [asyncio.create_task(_worker()) for _ in range(16)]
+    await queue.join()
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
     assert offset == 0, f"only offset 0 supported, found offset {offset}"
-    return TinyFSBuffer(buf.device, size, offset, buf.sock, buf.request_id)
+    return TinyFSBuffer(buf.device, size, offset, buf.sock, buf.request_id, buf.locs, buf.src)
