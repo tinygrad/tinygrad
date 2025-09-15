@@ -232,8 +232,7 @@
             }
         }
 
-        let currentCancel = null;
-        async function transcribeAudio(audioFetcher, cancelToken) {
+        async function loadAndInitializeModels() {
             await window.moduleReady;
             if (!nets.encoder) {
                 const device = await getDevice();
@@ -252,7 +251,11 @@
 
                 loadingContainer.style.display = "none";
             }
+        }
 
+        let currentCancel = null;
+        async function transcribeAudio(audioFetcher, cancelToken) {
+            await loadAndInitializeModels();
             const { samples } = await audioFetcher();
 
             let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
@@ -610,8 +613,9 @@
             }
         });
 
-        currentCancel = { cancelled: false };
-        transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel);
+        // currentCancel = { cancelled: false };
+        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel);
+        loadAndInitializeModels();
     </script>
 </body>
 </html>
