@@ -326,7 +326,7 @@ def cpu_objdump(lib, objdump_tool='objdump'):
 
 def capstone_flatdump(lib: bytes):
   try: import capstone
-  except ImportError as e:
+  except ImportError:
     print("Disassembler Error: Capstone not installed.")
     return
   match platform.machine():
