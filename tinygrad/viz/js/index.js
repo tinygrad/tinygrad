@@ -721,7 +721,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
-document.addEventListener("keydown", async function(event) {
+document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
