@@ -116,10 +116,11 @@
 
         const BASE_URL = '.';
         // const AUDIO_PATH = 'RED_16k.wav';
-        const AUDIO_PATH = 'RED_60s.wav';
-        // const AUDIO_PATH = 'test.wav';
+        // const AUDIO_PATH = 'RED_60s.wav';
+        const AUDIO_PATH = 'test.wav';
         // const AUDIO_PATH = 'test2.wav';
         // const AUDIO_PATH = 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.mp3';
+        // const AUDIO_PATH = `${BASE_URL}/TINYCORP_MEETING_2025-08-25-KA0h9zmJtcs.mp3`;
 
         async function fetchMonoFloat32Array(url) {
             const response = await fetch(url);
@@ -356,7 +357,7 @@
                     context = [TOK_BEGIN_TRANSCRIPTION];
                     if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
                 }
-                console.log(context);
+                //console.log(context);
 
                 const offset = context.length;
                 if (offset > MAX_TOKENS_TO_DECODE) {
