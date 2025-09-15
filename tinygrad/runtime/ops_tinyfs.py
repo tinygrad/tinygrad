@@ -1,4 +1,4 @@
-import socket, uuid, json, asyncio
+import socket, uuid, json, asyncio, os
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
 
@@ -62,7 +62,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
     if DEBUG >= 2: print(f"Copying out {src.size} bytes from {src.device.op}")
-    if src.device.op == "LOAD" and getenv("USE_ASYNC_COPYOUT"):
+    if src.device.op == "LOAD" and getenv("USE_ASYNC_COPY", 1):
       asyncio.run(self._copyout_async(dest, src))
     else:
       src.sock.send(f"{src.device.op}_OUT {src.size} {src.request_id}\r\n".encode())
@@ -73,37 +73,37 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
         recv += src.sock.recv_into(dest[recv:], src.size - recv)
 
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
-    print("using async copyout")
-
-    # queue up requests
     queue = asyncio.Queue()
     for item in enumerate(src.locs): queue.put_nowait(item)
-    for _ in range(16): queue.put_nowait(None)
+    for _ in range(nw := (os.cpu_count() or getenv("ASYNC_COPY_WORKERS", 1))): queue.put_nowait(None)
 
     async def _worker():
+      conns = {}
       while True:
         if (item := await queue.get()) is None:
           queue.task_done()
           break
         i, loc = item
-        addr = src.device.node_info[loc][0]
-        conn = await asyncio.open_connection(*addr.rsplit(":", 1))
+        if loc not in conns:
+          addr = src.device.node_info[loc][0]
+          conns[loc] = await asyncio.open_connection(*addr.rsplit(":", 1))
 
         ptr = i*1024*1024
         size = min(len(dest[ptr:ptr+1024*1024]), 1024*1024)
 
-        conn[1].write(f"CHUNK_OUT {size}\r\n".encode())
-        conn[1].write(src.src[i*16:(i+1)*16])
-        await conn[1].drain()
+        conns[loc][1].write(f"CHUNK_OUT {size}\r\n".encode())
+        conns[loc][1].write(src.src[i*16:(i+1)*16])
+        await conns[loc][1].drain()
 
-        chunk = await conn[0].readexactly(size)
+        chunk = await conns[loc][0].readexactly(size)
         dest[ptr:ptr+len(chunk)] = chunk
 
-        conn[1].close()
-        await conn[1].wait_closed()
         queue.task_done()
+      for _, writer in conns.values():
+        writer.close()
+        await writer.wait_closed()
 
-    workers = [asyncio.create_task(_worker()) for _ in range(16)]
+    workers = [asyncio.create_task(_worker()) for _ in range(nw)]
     await queue.join()
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
