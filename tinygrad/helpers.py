@@ -325,7 +325,10 @@ def cpu_objdump(lib, objdump_tool='objdump'):
     print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
 def capstone_flatdump(lib: bytes):
-  import capstone
+  try: import capstone
+  except ImportError:
+    print("Disassembler Error: Capstone not installed.")
+    return
   match platform.machine():
     case 'x86_64' | 'AMD64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
