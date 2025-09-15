@@ -29,6 +29,18 @@ This short guide shows how to run the `hlb-cifar10` trainer using tinygrad backe
         ...
   ```
 
+  - `masked_select` caveat: in `batch_crop` the original approach builds a large boolean mask over the whole batch and then uses `masked_select` to pick the cropped pixels. On the tiny backend, `masked_select` is implemented using prefix‑sums and scatter under the hood; with large masks this can materialize big intermediates and lead to long stalls.
+    As a temporary workaround the example below does the crop on CPU with NumPy and moves the result back to the original device.
+
+  ```python
+  def batch_crop(inputs, crop_size):
+    with torch.no_grad():
+      crop_mask_batch = make_random_square_masks(inputs, crop_size)
+      crop_mask_batch = crop_mask_batch.expand((-1, 3, -1, -1)).cpu().numpy()
+      cropped_batch = torch.from_numpy(inputs.cpu().numpy()[crop_mask_batch]).view(inputs.shape[0], inputs.shape[1], crop_size, crop_size)
+      return cropped_batch.to(inputs.device)
+  ```
+
 No other code changes are required to run with tinygrad.
 
 ## Run with tinygrad
