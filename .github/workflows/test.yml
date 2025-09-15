@@ -519,13 +519,14 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # test_symbolic_arange_sym_step is passing now
       # test_threefry_doesnt_use_long is because there's a contig after the long now
+      # test_embedding issue with jit
+      # test_load_state_dict_sharded_model_dict_same_axis issue with multi
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
+          -k "not test_threefry_doesnt_use_long and not test_embedding and not test_load_state_dict_sharded_model_dict_same_axis" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
-          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
+          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py test/test_nn.py
     - name: Test multitensor
       run: CPU=1 RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
     - name: Test CPU=1 RANGEIFY=2
