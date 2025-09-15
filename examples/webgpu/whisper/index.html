@@ -518,7 +518,7 @@
                     currentTranscription.style.display = 'none';
                     return;
                 } else {
-                    if (avg_logprob < -1 || segment_cumlogprob > -2 || (context.length-offset) < 14) {
+                    if ((avg_logprob < -1) && temperature < 1) {
                         temperature += 0.2;
                         console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length-offset}`);
                         continue;
