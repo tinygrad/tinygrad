@@ -164,7 +164,7 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
@@ -175,7 +175,7 @@ def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
@@ -208,7 +208,7 @@ def divide_by_symbolic_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
@@ -219,7 +219,7 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and take out the quotient and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   x_no_const,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x_no_const.split_uop(Ops.ADD)])
   quotients, remainders = zip(*[divmod(f, c) for f in factors])
