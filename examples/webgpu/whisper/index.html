@@ -352,8 +352,6 @@
                 return probs.map(p => p / sum);
             }
 
-            const DECODER_OUTPUTS_TOKENS = false;
-            const DECODER_OUTPUTS_LOGITS = true;
             const NO_TIMESTAMPS = true;
             const NO_CONTEXT = true;
             const SUPPRESS_NONSPEECH_TOKENS = true;
@@ -433,22 +431,15 @@
                     let nextTokens;
                     let max;
 
-                    if (DECODER_OUTPUTS_TOKENS) {
-                        nextTokens = decoder_output;
-                    } else {
-                        if (DECODER_OUTPUTS_LOGITS) {
-                            if (SUPPRESS_NONSPEECH_TOKENS) {
-                                for (let token_index of suppress) {
-                                    decoder_output[token_index] = -Infinity;
-                                }
-                            }
-                            if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
-                            [nextLogprobs, max] = logSoftmax(decoder_output);
-                        } else {
-                            nextLogprobs = decoder_output;
+                    if (SUPPRESS_NONSPEECH_TOKENS) {
+                        for (let token_index of suppress) {
+                            decoder_output[token_index] = -Infinity;
                         }
-                        nextTokens = argsort(nextLogprobs);
                     }
+                    if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
+                    [nextLogprobs, max] = logSoftmax(decoder_output);
+                    nextTokens = argsort(nextLogprobs);
+
                     // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
                     nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
                     let nextTokenIndex = 0;
@@ -464,13 +455,9 @@
 
                     context.push(nextTokens[nextTokenIndex]);
 
-                    if (DECODER_OUTPUTS_TOKENS) {
-                        // pendingText = context.slice(offset).map(j => mapping[j]).join('');
-                    } else {
-                        avg_logprob = segment_cumlogprob / (i-offset+1);
-                        segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
-                        // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
-                    }
+                    avg_logprob = segment_cumlogprob / (i-offset+1);
+                    segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
+                    // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
 
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
                         return [false, context, avg_logprob, segment_cumlogprob];
@@ -510,11 +497,7 @@
                         [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx], last_eos_logprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature, last_eos_logprobs[idx]);
 
                         if (!updated) {
-                            if (DECODER_OUTPUTS_TOKENS) {
-                                pendingText = tokensToText(contexts[idx].slice(offset));
-                            } else {
-                                pendingText = format_text(tokensToText(contexts[idx].slice(offset)), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
-                            }
+                            pendingText = format_text(tokensToText(contexts[idx].slice(offset)), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                             updated = true;
                         }
 
@@ -562,11 +545,7 @@
 
                     const newChunk = document.createElement('div');
                     newChunk.className = 'transcription-chunk';
-                    if (!DECODER_OUTPUTS_TOKENS) {
-                        newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
-                    } else {
-                        newChunk.innerText = pendingText;
-                    }
+                    newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
                     transcriptionLog.appendChild(newChunk);
                     pendingText = '';
                     currentTranscription.innerText = '';
