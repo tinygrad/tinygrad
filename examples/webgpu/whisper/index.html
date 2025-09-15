@@ -92,6 +92,17 @@
     <div class="container">
         <h2>Whisper Tinygrad WebGPU (small.en)</h2>
         <h2 id="wgpu-error" style="display: none;">Error: WebGPU is not supported in this browser. See <a href="https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips">more</a>.</h2>
+
+        <form id="fetchForm">
+            <input size="100%" list="testFiles" id="urlInput" type="text" placeholder="Put media url here...">
+            <button type="submit">Fetch</button>
+        </form>
+        <datalist id="testFiles">
+            <option value="https://raw.githubusercontent.com/tinygrad/tinygrad/master/test/models/whisper/test.wav">test.wav</option>
+            <option value="https://raw.githubusercontent.com/tinygrad/tinygrad/master/test/models/whisper/test2.wav">test2.wav</option>
+            <option value="https://raw.githubusercontent.com/openai/whisper/master/tests/jfk.flac">jfk.flac</option>
+        </datalist>
+
         <div id="transcription-container">
             <div id="transcription-log"></div>
             <div id="current-transcription"></div>
@@ -105,6 +116,18 @@
     </div>
 
     <script>
+        document.getElementById("fetchForm").addEventListener("submit", async (e) => {
+            // prevent page refresh
+            e.preventDefault();
+            const url = document.getElementById("urlInput").value;
+            try {
+                currentCancel = { cancelled: false };
+                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel);
+            } catch (err) {
+                console.error("Fetch failed:", err);
+            }
+        });
+
         const wgpuError = document.getElementById('wgpu-error');
         const loadingContainer = document.getElementById('div-loading');
         const transcriptionLog = document.getElementById('transcription-log');
