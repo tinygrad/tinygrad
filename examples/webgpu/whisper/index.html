@@ -180,7 +180,7 @@
 
                 request.onupgradeneeded = (event) => {
                     db = event.target.result;
-                    if (event.oldVersion < 2) db.deleteObjectStore?.('tensors');
+                    if (event.oldVersion < 2 && db.objectStoreNames.contains("tensors")) db.deleteObjectStore?.('tensors');
                     if (!db.objectStoreNames.contains('tensors')) {
                         db.createObjectStore('tensors', { keyPath: 'id' });
                     }
