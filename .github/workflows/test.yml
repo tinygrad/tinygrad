@@ -30,8 +30,6 @@ jobs:
         key: llvm-speed
         deps: testing_minimal
         llvm: 'true'
-    - name: External Benchmark Schedule
-      run: python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
       run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
@@ -79,6 +77,8 @@ jobs:
       run: |
         python docs/abstractions2.py
         python docs/abstractions3.py
+    - name: Test README
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
     - name: Test DEBUG
@@ -261,8 +261,6 @@ jobs:
         key: unittest-12
         pydeps: "pillow"
         deps: testing_unit
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
     - name: Run unit tests
       run: python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
@@ -274,6 +272,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
+    - name: External Benchmark Schedule
+      run: python3 test/external/external_benchmark_schedule.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
@@ -310,7 +310,7 @@ jobs:
       run: python test/external/fuzz_shape_ops.py
 
   testopenclimage:
-    name: 'CL IMAGE Tests'
+    name: CL IMAGE Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -330,7 +330,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testgpumisc:
-    name: 'CL Misc tests'
+    name: CL Misc tests
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -355,7 +355,7 @@ jobs:
           path: /tmp/sops.gz
 
   testopenpilot:
-    name: 'openpilot Compile Tests'
+    name: openpilot Compile Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -387,7 +387,7 @@ jobs:
 # ****** ONNX Tests ******
 
   testonnxcpu:
-    name: 'ONNX (CPU) Tests'
+    name: ONNX (CPU) Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -415,7 +415,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopencl:
-    name: 'ONNX (GPU)+Optimization Tests'
+    name: ONNX (GPU)+Optimization Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
