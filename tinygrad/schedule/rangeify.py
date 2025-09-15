@@ -553,7 +553,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  tsink = graph_rewrite(tsink, sym, name="symbolic")  # this supports const folding
+  #tsink = graph_rewrite(tsink, sym, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
