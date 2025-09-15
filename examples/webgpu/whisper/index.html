@@ -392,7 +392,7 @@
                     return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
                 }
 
-                async function decodeOne(i, max_range, segment_cumlogprob, context, temperature) {
+                async function decodeOne(i, max_range, segment_cumlogprob, context, temperature, last_eos_logprob) {
                     let avg_logprob;
                     if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
 
@@ -422,15 +422,11 @@
                     if (temperature > 0) {
                         // let sortedSampledIndex = sample(normalize(nextLogprobs));
                         let dist = normalize(softmax(decoder_output));
-                        if (false) {
-                            let s = [];
-                            for (let i = 0; i < 2; ++i) {
-                                s.push(nextTokens.indexOf(sample(dist)));
-                            }
-                            nextTokenIndex = Math.min(...s);
-                        } else {
-                            nextTokenIndex = nextTokens.indexOf(sample(dist));
-                        }
+                        nextTokenIndex = nextTokens.indexOf(sample(dist));
+                    }
+
+                    if (nextTokens[nextTokenIndex] == TOK_EOS && Math.abs(last_eos_logprob) - Math.abs(nextLogprobs[TOK_EOS]) > 8) {
+                        ++nextTokenIndex;
                     }
 
                     context.push(nextTokens[nextTokenIndex]);
@@ -449,13 +445,13 @@
                         context[context.length-1] = TOK_EOS;
                     }
 
-                    return [true, context, avg_logprob, segment_cumlogprob];
+                    return [true, context, avg_logprob, segment_cumlogprob, nextLogprobs[TOK_EOS]];
                 }
 
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
 
                 let indices, max_ranges, cumlogprobs, avg_logprobs, contexts;
-                [indices, cumlogprobs, avg_logprobs, contexts] = [[], [], [], []];
+                [indices, cumlogprobs, avg_logprobs, contexts, last_eos_logprobs] = [[], [], [], [], []];
 
                 const BEST_OF = 5;
                 const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
@@ -463,9 +459,9 @@
                     indices.push(offset);
                     cumlogprobs.push(0);
                     avg_logprobs.push(0);
+                    last_eos_logprobs.push(-10);
                     contexts.push(context.slice());
                 }
-                // [indices, cumlogprobs, avg_logprobs, contexts] = [[offset], [0], [0], [context]];
 
                 for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
                     let updated = false;
@@ -474,7 +470,7 @@
                         if (cancelToken.cancelled) return;
 
                         let keep;
-                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature);
+                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx], last_eos_logprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature, last_eos_logprobs[idx]);
 
                         if (!updated) {
                             if (DECODER_OUTPUTS_TOKENS) {
