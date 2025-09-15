@@ -98,7 +98,8 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
-  for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+  for dim in reversed(axes):
+      mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
   # select from values for each True element in mask else select from target
