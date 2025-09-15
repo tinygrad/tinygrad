@@ -497,7 +497,7 @@
                 }
 
                 function tokensToText(tokens) {
-                    return tokens.map(j => mapping[j]).join('');
+                    return tokens.filter((t)=> ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
                 }
 
                 for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
