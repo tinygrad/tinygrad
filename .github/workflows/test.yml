@@ -528,6 +528,8 @@ jobs:
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
     - name: Test multitensor
       run: RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
+    - name: Test Fuse
+      run: RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
     - name: Test GPU=1 RANGEIFY=1
       run: GPU=1 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test CPU=1 RANGEIFY=2
