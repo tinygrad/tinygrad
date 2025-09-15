@@ -36,8 +36,6 @@ def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
       steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
                 "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
       ret.append(r:={"name":k.display_name, "steps":steps})
-      # use the first key to get runtime profiling data about this context
-      if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
       # program spec metadata
       if isinstance(k.ret, ProgramSpec):
         steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
@@ -201,13 +199,6 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
-def get_runtime_stats(key) -> list[dict]:
-  ret:list[dict] = []
-  for e in profile:
-    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
-  return ret
-
 # ** Assembly analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
@@ -304,7 +295,7 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -317,7 +308,7 @@ if __name__ == "__main__":
 
   ctxs = get_metadata(load_pickle(args.kernels))
 
-  profile_ret = get_profile(profile:=load_pickle(args.profile))
+  profile_ret = get_profile(load_pickle(args.profile))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

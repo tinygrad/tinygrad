@@ -102,10 +102,10 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  .highlight rect, .edgePath.highlight, g.port circle {
+  g.node.highlight rect, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }
-  .highlight.child rect, .edgePath.highlight.child {
+  g.highlight.child rect, .edgePath.highlight.child {
     stroke: #C888B0;
   }
   #edge-labels g.port.highlight {
@@ -133,17 +133,6 @@
   }
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
-  }
-  .stats-list > * + * {
-    margin-top: 8px;
-  }
-  .stats-list > p > * + * {
-    margin-top: 12px;
-  }
-  .stats-list {
-    width: 100%;
-    max-height: 240px;
-    overflow: auto;
   }
   .ctx-list > ul > * + * {
     margin-top: 4px;

@@ -3,7 +3,7 @@ import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
-from tinygrad.uop.symbolic import sym
+from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.multi import multi_pm
 
@@ -81,11 +81,15 @@ do_realize = PatternMatcher([
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
 
+
+class WrappedContig:
+  def __init__(self, x): self.x = x
+  def __repr__(self): return f"C({self.x})"
 add_contiguous = PatternMatcher([
   (UPat(GroupOp.All, name="x"),
-   lambda ctx,x: x.replace(tag=(x.tag,)).realize() if x in ctx and not isinstance(x.tag, tuple) else None),
+   lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx and not isinstance(x.tag, WrappedContig) else None),
 ])
-remove_tuple_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag[0]) if isinstance(x.tag, tuple) else None)])
+remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag.x) if isinstance(x.tag, WrappedContig) else None)])
 
 # *****************
 # 2. mark all children
@@ -204,7 +208,6 @@ class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
   device: str|tuple[str, ...]|int|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
-  tags: tuple[int, ...] = ()
 
 def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
@@ -228,7 +231,7 @@ def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
 def map_realize(ctx:RangeifyContext, x:UOp):
   if x.arg is not None: return None
   ranges = [ctx.new_range(s) for s in x.shape]
-  return x.src[0].index(*ranges).bufferize(*x.src[1:], *ranges, arg=BufferizeOpts(device=x.device, tags=(x.src[0].tag,)))
+  return x.src[0].index(*ranges).bufferize(*x.src[1:], *ranges, arg=BufferizeOpts(device=x.device), tag=x.src[0].tag)
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
@@ -319,6 +322,9 @@ pm_rangeify = pm_mops+PatternMatcher([
   # CONST (or DEFINE_VAR) can't have axes. remove srcs when we INDEX it
   (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
 
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat())), lambda c: c),
+
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
@@ -379,12 +385,14 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
-  #(UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
-  # lambda idx,b2: idx.src[0] if idx.src[1:] == b2.src[1:] else None),
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
+   lambda idx,b2: idx.src[0].replace(tag=nt if len(nt:=(idx.src[0].tag or ()) + (b2.tag or ())) else None) if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
-  #(UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
+  # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
+  (UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
 ])
 
 # *****************
@@ -415,7 +423,7 @@ def bufferize_to_store(x:UOp):
       mops.append((walk.op, walk.arg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
-    return ret.forced_reshape(shape).replace(tag=x.arg.tags)
+    return ret.forced_reshape(shape).replace(tag=x.tag)
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
@@ -424,7 +432,7 @@ def bufferize_to_store(x:UOp):
     ret = ret.forced_reshape(shape)
     # TODO: is this right? what if it's offset
     if shape is not sym_shape: ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
-    return ret.replace(tag=x.arg.tags)
+    return ret.replace(tag=x.tag)
 
   # handle locals
   tag = x.arg.device
@@ -450,6 +458,7 @@ class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
+  range:int = 0
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
@@ -469,6 +478,12 @@ def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
   ctx.map[buf] = assign
   return buf
 
+def renumber_range(ctx:LocalAddBufferContext, r:UOp):
+  if r.tag is not None: return None
+  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
+  ctx.range += 1
+  return ret
+
 to_define_global = PatternMatcher([
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
@@ -477,6 +492,9 @@ to_define_global = PatternMatcher([
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
   #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+
+  # renumber the ranges starting with 0 so that kernel deduping works
+  (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
 
 rangeify_codegen = PatternMatcher([
@@ -496,10 +514,6 @@ rangeify_codegen = PatternMatcher([
   (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
     lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
 
-  # copy on const is const
-  # TODO: this can be moved into codegen. this rule is probably in other places
-  (UPat(Ops.COPY, src=(UPat.cvar("c",), UPat())), lambda c: c),
-
   # TODO: hack for group for reduce
   (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
@@ -514,7 +528,7 @@ def split_store(ctx:list[UOp], x:UOp):
   ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # gather the metadata
-  metadatas = [ctx[x.tag].metadata for x in ret.sparents if x.tag is not None]
+  metadatas = [ctx[y].metadata for x in ret.sparents if x.tag is not None for y in x.tag]
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
@@ -529,7 +543,7 @@ split_kernels = PatternMatcher([
 def tag_uop(ctx:list[UOp], x:UOp):
   if x.tag is not None: return None
   ctx.append(x)
-  return x.replace(tag=len(ctx)-1)
+  return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}, name="x"), tag_uop),
@@ -549,17 +563,18 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
   tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
-  tsink = graph_rewrite(tsink, remove_tuple_tags, name="remove tuple tags")
+  tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  #tsink = graph_rewrite(tsink, symbolic_simple, bottom_up=True, name="symbolic")  # this supports const folding
+  # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
+  tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if x.op is Ops.BUFFERIZE and len(x.arg.tags)])
+  tsink = UOp.sink(*[x for x in tsink.parents if x.op is Ops.BUFFERIZE and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 

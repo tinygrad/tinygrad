@@ -354,9 +354,8 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    if not getenv("SQTT", 0):
-      from tinygrad.uop.ops import launch_viz
-      launch_viz(PROFILE, fn)
+    from tinygrad.uop.ops import launch_viz
+    launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":
   from tinygrad import Tensor, Device

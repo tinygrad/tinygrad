@@ -178,7 +178,7 @@ async function renderProfiler() {
   const u64 = () => { const ret = new Number(view.getBigUint64(offset, true)); offset += 8; return ret; }
   const f32 = () => { const ret = view.getFloat32(offset, true); offset += 4; return ret; }
   const optional = (i) => i === 0 ? null : i-1;
-  const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
+  const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
@@ -192,7 +192,7 @@ async function renderProfiler() {
   // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
-  const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
+  const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
@@ -268,7 +268,8 @@ async function renderProfiler() {
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
+        const dur = x.at(-1)-x[0];
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
@@ -656,28 +657,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  if (ctx.runtime_stats != null) {
-    const div = metadata.appendChild(document.createElement("div"));
-    div.className = "stats-list";
-    for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
-      const table = div.appendChild(document.createElement("table"));
-      const tbody = table.appendChild(document.createElement("tbody"));
-      for (const { name, value, unit, subunits } of s.data) {
-          const mainRow = appendRow(tbody, name, value, unit, "main-row");
-          if (!subunits?.length) continue;
-          const subunitRow = tbody.appendChild(document.createElement("tr"));
-          subunitRow.style.display = "none";
-          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
-          mainRow.style.cursor = "pointer";
-          const td = subunitRow.appendChild(document.createElement("td"));
-          td.colSpan = 2;
-          const table = td.appendChild(document.createElement("table"));
-          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
-      }
-    }
-  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -742,7 +721,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
-document.addEventListener("keydown", async function(event) {
+document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
