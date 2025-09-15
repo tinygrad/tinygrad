@@ -14,7 +14,9 @@ class HIPDevice(Compiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
-    super().__init__(device, HIPAllocator(self), HIPRenderer(self.arch), HIPCompiler(self.arch), functools.partial(HIPProgram, self))
+
+    compilers = [(functools.partial(HIPRenderer, self.arch), functools.partial(HIPCompiler, self.arch))]
+    super().__init__(device, HIPAllocator(self), compilers, functools.partial(HIPProgram, self))
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())

@@ -2,10 +2,10 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
@@ -84,8 +84,8 @@ class PythonProgram:
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
-          if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
-          elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
+          if arg[0] == 'g': ul[i] = [idxs[2-int(arg[-1])]] * warp_size
+          elif arg[0] == 'l': ul[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: ul[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
           ret:list = []
@@ -210,17 +210,21 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
-    if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", tc.metal
-    if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-    if getenv("EMULATE_AMD_MFMA"): self.device, self.tensor_cores = "AMD", tc.amd_cdna
-    if getenv("EMULATE_AMD_RDNA4"): self.device, self.tensor_cores = "AMD", tc.amd_rdna4
-    if getenv("EMULATE_CUDA"): self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
-    if getenv("EMULATE_CUDA_SM75"): self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
-    if getenv("EMULATE_INTEL"): self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
-    if getenv("EMULATE_AMX"): self.device, self.tensor_cores = "CPU", tc.amx
+    match cast(str, EMULATE.value):
+      case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
+      case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
+      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna
+      case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
+      case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
+      case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
+      case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
+      case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
+      case "": pass
+      case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
 
   def render(self, uops:list[UOp]) -> str:
-    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src], u.arg) for u in uops]
+    # the value of SPECIAL comes from local/global_size, not form its source
+    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
 class PythonCompiler(Compiler):
@@ -232,4 +236,4 @@ class PythonAllocator(Allocator['PythonDevice']):
   def _copyout(self, dest:memoryview, src): dest[:] = src
 
 class PythonDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, PythonAllocator(self), PythonRenderer(), PythonCompiler(), PythonProgram)
+  def __init__(self, device:str): super().__init__(device, PythonAllocator(self), [(PythonRenderer, PythonCompiler)], PythonProgram)

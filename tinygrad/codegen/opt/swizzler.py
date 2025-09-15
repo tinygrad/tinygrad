@@ -17,7 +17,7 @@ merge_views = PatternMatcher([
    lambda view: view.const_like(0) if (mask:=view.st.views[-1].mask) is not None and any((x[1]-x[0]) == 0 for x in mask) else None),
   # only unmaksed VIEW on CONST replaces the ShapeTracker
   (UPat(Ops.VIEW, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="x"),), name="view"),
-   lambda x,view: x.replace(src=(x.src[0].replace(arg=x.st+view.st),)) if all(v.mask is None for v in (x.st+view.st).views) else None),
+   lambda x,view: x.replace(src=(UOp(Ops.VIEW, x.dtype, x.src, view.arg),)) if all(v.mask is None for v in view.st.views) else None),
 ])
 
 def reduce_push_add_ones(src:UOp, r:UOp, view:UOp):

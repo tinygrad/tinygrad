@@ -1,9 +1,9 @@
 # this converts a lowerer program into a vectorized program
-
 import functools, itertools, operator
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType
+from tinygrad.schedule.rangeify import BufferizeOpts
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -143,7 +143,7 @@ def fix_group_for_reduce(x:UOp):
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
-  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=(AddrSpace.LOCAL, reduce_gfr[0].arg[0])).index(*upstream_locals, *reduce_loop)
+  buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # gate with an if on the store + do the final reduce
   buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
@@ -152,7 +152,7 @@ def fix_group_for_reduce(x:UOp):
 pm_pre_expander = PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+   lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),

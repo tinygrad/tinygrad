@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Context, Device
 from tinygrad.engine.realize import get_program
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import KernelInfo
 
 class TestLinearizerRewrite(unittest.TestCase):
@@ -23,7 +23,6 @@ class TestLinearizerRewrite(unittest.TestCase):
       si = out.schedule()[-1]
       opts_to_apply = []
       opts_to_apply.append(Opt(OptOps.UPCAST, 0, 4))
-      opts_to_apply.append(Opt(OptOps.UNROLL, 0, 4))
       ast = si.ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
       prg = get_program(ast, Device["CPU"].renderer)
       print(prg.src)

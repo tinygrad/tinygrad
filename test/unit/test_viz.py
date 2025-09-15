@@ -1,11 +1,12 @@
 import unittest, decimal, json, struct
 from dataclasses import dataclass
+from typing import Generator
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
 from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -19,6 +20,10 @@ from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewr
 traces = [(tracked_keys, tracked_ctxs, uop_fields)]
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
 def get_viz_list(): return get_metadata(traces)
+def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
+  lst = get_viz_list()
+  assert len(lst) > rewrite_idx, "only loaded {len(lst)} traces, expecting at least {idx}"
+  return get_details(tracked_ctxs[rewrite_idx][step])
 
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
@@ -65,7 +70,6 @@ class TestViz(BaseTestViz):
 
   def test_rewrite_location(self):
     def inner(sink): return graph_rewrite(sink, PatternMatcher([]))
-    @track_rewrites(name=True)
     def outer(sink): return inner(sink)
     outer(UOp.variable("a", 1, 10))
     lst = get_viz_list()
@@ -129,7 +133,7 @@ class TestViz(BaseTestViz):
       (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
-    graphs = flatten(x["graph"].values() for x in get_details(tracked_ctxs[0][0]))
+    graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
     # fallback to NOOP with the error message
@@ -138,12 +142,12 @@ class TestViz(BaseTestViz):
 
   def test_const_node_visibility(self):
     a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.int, 0)
+    z = UOp.const(dtypes.index, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()
     self.assertEqual(len(lst), 1)
-    graphs = [x["graph"] for x in get_details(tracked_ctxs[0][0])]
+    graphs = [x["graph"] for x in get_viz_details(0, 0)]
     # embed const in the parent node when possible
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
@@ -176,7 +180,6 @@ class TestVizTree(BaseTestViz):
     c = UOp.variable("c",0,10)
     d = UOp.variable("d",0,10)
     sink = UOp.sink(a+b, c+d)
-    @track_rewrites()
     def tree_rewrite(): return graph_rewrite(sink, root, name="root")
     tree_rewrite()
     lst = get_viz_list()
@@ -247,8 +250,45 @@ class TestVizIntegration(BaseTestViz):
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
       alu.kernelize()
-      graph = next(get_details(tracked_ctxs[0][0]))["graph"]
+      graph = next(get_viz_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
+
+  # tracing also works without a track_rewrites context
+  # all graph_rewrites get put into the default group
+  def test_default_tracing(self):
+    def test(root):
+      return graph_rewrite(root, sym)
+    test(c:=UOp.const(dtypes.int, 1))
+    test(c+1)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 1)
+    self.assertEqual(ls[0]["name"], "default graph_rewrite")
+
+  # using @track_rewrites organizes function calls into groups
+  # and nicely counts function calls.
+  def test_group_traces(self):
+    @track_rewrites()
+    def test(root):
+      return graph_rewrite(root, sym)
+    test(c:=UOp.const(dtypes.int, 1))
+    test(c+1)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 2)
+    for i in range(2): self.assertEqual(ls[i]["name"], f"test n{i+1}")
+
+  # @track_rewrites always starts a new group.
+  def test_group_combined(self):
+    def default_test(root): return graph_rewrite(root, sym)
+    tracked_test = track_rewrites()(default_test)
+    c = UOp.const(dtypes.int, 1)
+    default_test(c+1) # goes to the default group
+    tracked_test(c)   # all rewrites after this go inside the second group.
+    default_test(c+2)
+    ls = get_viz_list()
+    self.assertEqual(len(ls), 2)
+    self.assertEqual(list(next(get_viz_details(0, 0))["graph"]), [id(c+1)])
+    self.assertEqual(list(next(get_viz_details(1, 0))["graph"]), [id(c)])
+    self.assertEqual(list(next(get_viz_details(1, 1))["graph"]), [id(c+2)])
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -267,7 +307,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
   ret = get_profile(lst)
   u = TinyUnpacker(ret)
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes = json.loads(ret[u.offset:u.offset+index_len]).values()
+  strings, dtypes, markers = json.loads(ret[u.offset:u.offset+index_len]).values()
   u.offset += index_len
   layout:dict[str, dict] = {}
   for _ in range(layout_len):
@@ -286,7 +326,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
         else: v["events"].append({"event":"free", "ts":ts, "key":key})
-  return {"dur":total_dur, "peak":global_peak, "layout":layout}
+  return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
@@ -366,6 +406,21 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     with self.assertRaises(struct.error):
       get_profile(prof)
+
+  def test_python_marker(self):
+    with Context(VIZ=1):
+      a = Tensor.empty(1, device="NULL")
+      b = Tensor.empty(1, device="NULL")
+      (a+b).realize()
+      profile_marker("test 1")
+      (a*b).realize()
+      profile_marker("test 2")
+    profile_ret = load_profile(cpu_events)
+    markers = profile_ret["markers"]
+    kernels = profile_ret["layout"]["NULL"]["events"]
+    self.assertEqual(len(markers), 2)
+    assert kernels[0]["st"] <= markers[0]["ts"] <= kernels[1]["st"]
+    assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

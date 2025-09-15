@@ -1,11 +1,19 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import IMAGE, CI
+from tinygrad.helpers import IMAGE, CI, getenv
 
 class TestTiny(unittest.TestCase):
 
   # *** basic functionality ***
+
+  def test_const(self):
+    const = Tensor(2.0)
+    self.assertEqual(const.item(), 2.0)
+
+  def test_copy(self):
+    out = Tensor([1.,2,3])
+    self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
 
   def test_plus(self):
     out = Tensor([1.,2,3]) + Tensor([4.,5,6])
@@ -27,13 +35,21 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(256).contiguous().sum()
     self.assertEqual(out.item(), 256)
 
-  def test_gemm(self, N=64, out_dtype=dtypes.float):
+  def test_gemm(self, N=getenv("GEMM_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
         self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
+    if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
+
+  def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
+    a = Tensor.ones(1,N).contiguous()
+    b = Tensor.eye(N).contiguous()
+    lst = (out:=a@b).tolist()
+    for x in range(N):
+      self.assertEqual(lst[0][x], 1.0, msg=f"mismatch at {x}")
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***
@@ -91,7 +107,7 @@ class TestTiny(unittest.TestCase):
   # *** a model ***
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(IMAGE>0 or (CI and Device.DEFAULT == "DSP"), "failing because of make things that can't be images not images")
+  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
@@ -110,7 +126,7 @@ class TestTiny(unittest.TestCase):
     self.assertEqual(len(probs[0]), 10)
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(IMAGE>0 or (CI and Device.DEFAULT == "DSP"), "failing because of make things that can't be images not images")
+  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist_backward(self):
     # NOTE: we don't have the whole model here for speed
     layers = [
@@ -129,7 +145,7 @@ class TestTiny(unittest.TestCase):
 
   # *** image ***
 
-  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image(self):
     with Context(IMAGE=2): self.test_gemm(N=4, out_dtype=dtypes.imagef((4, 1, 4)))
 
