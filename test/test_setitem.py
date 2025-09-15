@@ -176,6 +176,15 @@ class TestSetitem(unittest.TestCase):
     n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
     np.testing.assert_allclose(t.numpy(), n)
 
+  def test_setitem_2d_tensor_indexing(self):
+    t = Tensor.zeros(2).contiguous()
+    index = Tensor([[0, 1], [1,0]])
+    v = Tensor.arange(2*2).reshape(2, 2).contiguous()
+    t[index] = v
+    n = np.zeros((2,))
+    n[index.numpy()] = v.numpy()
+    np.testing.assert_allclose(t.numpy(), n)
+
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
     z = Tensor.rand(8, 8)
