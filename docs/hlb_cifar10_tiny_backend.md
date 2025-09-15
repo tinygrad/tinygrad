@@ -27,7 +27,7 @@ This short guide shows how to run the `hlb-cifar10` trainer using tinygrad backe
         device = "tiny" if getenv("TINY_BACKEND") else "cuda"
         batch_permuted = torch.randperm(inputs.shape[0], device=device)
         ...
-    ```
+  ```
 
 No other code changes are required to run with tinygrad.
 
