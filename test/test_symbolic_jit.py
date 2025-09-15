@@ -16,6 +16,18 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  @unittest.expectedFailure # TODO: fix, this works without jit
+  def test_plus1_pad(self):
+    def f(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
+    jf = TinyJit(f)
+    a = Tensor.rand(3, 10)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = jf(a[:, :vi]).numpy()
+      expected = f(a[:, :i]).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    assert_jit_cache_len(jf, 1)
+
   def test_add(self):
     def f(a, b): return (a+b).realize()
     jf = TinyJit(f)

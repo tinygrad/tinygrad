@@ -527,9 +527,11 @@ jobs:
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
     - name: Test multitensor
-      run: RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
-    - name: Test GPU=1 RANGEIFY=1
-      run: GPU=1 RANGEIFY=1 pytest -n auto test/test_ops.py
+      run: CPU=1 RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
+    - name: Test Fuse
+      run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
+    - name: Test CL=1 RANGEIFY=1
+      run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test CPU=1 RANGEIFY=2
       run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
@@ -658,7 +660,7 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
         run: |
-          PROFILE=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
+          VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
