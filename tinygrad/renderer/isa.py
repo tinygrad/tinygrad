@@ -13,6 +13,7 @@ from tinygrad.helpers import DEBUG
 class ISARenderer(Renderer):
   lowerer = PatternMatcher([])
   callee_saved: tuple[str, ...] = ()
+  reg_pool: list[Register] = []
 
   def load(self, dest:Register, src:Memory): raise NotImplementedError("arch specific")
   def store(self, dest:Memory, src:Register): raise NotImplementedError("arch specific")
@@ -77,7 +78,7 @@ class ISARenderer(Renderer):
       if is_range(mu.out): ranges.pop()
 
     # allocate registers
-    reg_pool: list[Register] = [r for r in MUOpX86.GPR + MUOpX86.VEC if r not in (MUOpX86.RSP, MUOpX86.RBP)]
+    reg_pool = self.reg_pool.copy()
     callee_saved: list[Register] = []
     live: dict[Register, Register] = {}
     mem: dict[Register, Memory] = {}
@@ -172,40 +173,7 @@ class ISARenderer(Renderer):
   def setup(self, kernel:list[MUOp], callee_saved:list[Register]) -> list[MUOp]: raise NotImplementedError("arch specific")
   def render(self, uops:list[UOp]) -> list[MUOp]: return self.setup(*self.regalloc(self.lower(uops)))
 
-# **************** pattern matchers ****************
-
-x86_matcher = PatternMatcher([
-  # rewrite cast to bool to CMPNE 0
-  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
-  # can't cast from float16 to ints/float64 directly and vice versa
-  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
-  # can't cast from float to int8/16 directly and vice versa
-  (UPat.var("y", dtypes.floats).cast(dtypes.int8s+dtypes.int16s, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  (UPat.var("y", (dtypes.bool,)+dtypes.int8s+dtypes.int16s).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
-  # int/float casts only for signed int
-  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
-  # casting uint64 to float requires special handling if msb is 1
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
-   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
-                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
-  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
-  # mulacc only available for floats
-  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
-  # no int8 mul or cmove, cast to int16
-  (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
-  (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
-   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
-  # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
-   tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
-   lambda x,a,b: UOp(x.op, x.dtype, (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
-  # no cmpne for packed ints, y != x => !(y==x)
-  (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
-   lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
-])
+# **************** base matchers ****************
 
 def to_mask(dt:DType): return {1:dtypes.mask8, 2:dtypes.mask16, 4:dtypes.mask32, 8:dtypes.mask64}[dt.scalar().itemsize].vec(dt.count)
 def to_int(dt:DType): return {1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32, 8:dtypes.int64}[dt.scalar().itemsize].vec(dt.count)
@@ -243,6 +211,85 @@ mask_matcher = PatternMatcher([
    lambda a,b: a.store(b.bitcast(to_int(b.dtype)).mul(-1).cast(dtypes.int8).bitcast(dtypes.bool.vec(b.dtype.count)))),
   # mask is converted to bool in index
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("m", dtypes.masks)), lambda buf,idx,m: buf.index(idx, m.bitcast(to_int(m.dtype)).ne(0))),
+])
+
+# const loads, displacement folding and noops go in the extra_matcher
+base_extra_matcher = PatternMatcher([
+  # *** NOOP ***
+  # cast to/from pointer is a noop
+  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
+  (UPat.var("y").cast(name="x"), lambda y,x: x.replace(op=Ops.NOOP) if isinstance(y.dtype, PtrDType) else None),
+  # zero extending scalar 32bit int is a noop
+  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
+  # cast between signed and unsigned int is a noop
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
+   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
+  # bitcasts between scalar float/mask and scalar int are real, rest are noops
+  (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
+   (y.dtype in dtypes.ints and x.dtype in dtypes.floats+dtypes.masks) else x.replace(op=Ops.NOOP)),
+  # moving elements of a single register to another without shuffling is a noop
+  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
+   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
+  # *** INDEX/LOAD/STORE ***
+  # cast index to 64bit
+  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64))),
+  # loading from register is a noop
+  #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
+  # rewrite index with gate to cmove
+  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
+  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
+  # move mask from INDEX to the load/store
+  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
+   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
+  (UPat.var("buf").index(UPat.var("idx"), UPat(dtype=dtypes.bool)).store(UPat.var("val"), UPat.var("gate"), allow_any_len=True),
+   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
+  # TODO: if lea just adds disp it's a noop and disp goes to load/store
+  # fold displacement into load/store
+  (UPat(Ops.LOAD, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted()),), allow_any_len=True, name="x"),
+   lambda buf,idx,disp,x: x.replace(src=(buf.index(idx), disp) + x.src[1:])),
+  (UPat(Ops.STORE, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted(),), UPat.var("a")), allow_any_len=True, name="x"),
+   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx), a, disp) + x.src[2:])),
+  # displacement of 0 if there isn't any
+  (UPat(Ops.INDEX, name="idx").load(allow_any_len=True, name="x"),
+   lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or \
+    len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
+  (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
+   lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
+])
+
+# **************** x86 matchers ****************
+
+x86_matcher = PatternMatcher([
+  # rewrite cast to bool to CMPNE 0
+  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
+  # can't cast from float16 to ints/float64 directly and vice versa
+  (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
+  # can't cast from float to int8/16 directly and vice versa
+  (UPat.var("y", dtypes.floats).cast(dtypes.int8s+dtypes.int16s, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  (UPat.var("y", (dtypes.bool,)+dtypes.int8s+dtypes.int16s).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
+  # int/float casts only for signed int
+  (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
+  # casting uint64 to float requires special handling if msb is 1
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
+   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
+                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
+  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
+  # mulacc only available for floats
+  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+  # no int8 mul or cmove, cast to int16
+  (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
+  (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.dtype.count == 1 else None),
+  # float16 alus are done in float32
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.dtype.count),
+   tuple(s.cast(dtypes.float) if s.dtype not in dtypes.masks+(dtypes.bool,) else s for s in x.src)).cast(x.dtype)),
+  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
+   lambda x,a,b: UOp(x.op, x.dtype, (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
+  # no cmpne for packed ints, y != x => !(y==x)
+  (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
+   lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
 ])
 
 powers_of_two = {2**i:i for i in range(64)}
@@ -300,8 +347,7 @@ def x86_load_consts(x:UOp) -> UOp|None:
     nsrc.append(s)
   return x.replace(src=tuple(nsrc)) if tuple(nsrc) != x.src else None
 
-# const loads, displacement folding and noops go here
-x86_extra_matcher = PatternMatcher([
+x86_extra_matcher = base_extra_matcher + PatternMatcher([
   # some consts can't be immediates
   (UPat(GroupOp.All, name="x"), x86_load_consts),
   # some ops can't take imm in srcs
@@ -309,51 +355,12 @@ x86_extra_matcher = PatternMatcher([
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.load(dtype=s.dtype) if s.op is Ops.CONST else s for s in x.src)) != x.src else None),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.ADD, Ops.SUB), src=(UPat.cvar("c", dtypes.ints), UPat()), name="x"),
    lambda x,c: x.replace(src=(c.load(dtype=c.dtype), x.src[1]))),
-  # cast to/from pointer is a noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  (UPat.var("y").cast(name="x"), lambda y,x: x.replace(op=Ops.NOOP) if isinstance(y.dtype, PtrDType) else None),
   # cast to < scalar int is a noop
   (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
    lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize < y.dtype.itemsize and y.dtype.count == 1 else None),
-  # zero extending scalar 32bit int is a noop
-  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
-  # cast between ints of same size is a noop
-  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP) if x.dtype.itemsize == y.dtype.itemsize else None),
-  # bitcasts between scalar float/mask and scalar int are real, rest are noops
-  (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats+dtypes.masks and x.dtype in dtypes.ints) or \
-   (y.dtype in dtypes.ints and x.dtype in dtypes.floats+dtypes.masks) else x.replace(op=Ops.NOOP)),
-  # moving elements of a single register to another without shuffling is a noop
-  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
-   lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # a gep in a 32bit vectorize is a noop and its arg is part of the imm of the instruction
   (UPat(Ops.VECTORIZE, (dtypes.float32, dtypes.mask32)+dtypes.int32s, name="x"),
    lambda x: x.replace(src=nsrc) if (nsrc:=tuple(s.replace(op=Ops.NOOP) if s.op is Ops.GEP else s for s in x.src)) != x.src else None),
-  # cast index to 64bit
-  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64))),
-  # *** INDEX/LOAD/STORE ***
-  # loading from register is a noop
-  #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
-  # rewrite index with gate to cmove
-  #(UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)), lambda buf,idx,gate: gate.where(buf.index(idx), \
-  # UOp(Ops.DEFINE_LOCAL, buf.dtype.base.ptr(buf.dtype.count, AddrSpace.LOCAL)).index(UOp.const(dtypes.int32, 0)))),
-  # move mask from INDEX to the load/store
-  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate", dtypes.bool)).load(UPat.var("alt")),
-   lambda buf,idx,gate,alt: buf.index(idx).load(alt, gate, dtype=alt.dtype)),
-  (UPat.var("buf").index(UPat.var("idx"), UPat(dtype=dtypes.bool)).store(UPat.var("val"), UPat.var("gate"), allow_any_len=True),
-   lambda buf,idx,val,gate: buf.index(idx).store(val, gate)),
-  # TODO: if lea just adds disp it's a noop and disp goes to load/store
-  # fold displacement into load/store
-  (UPat(Ops.LOAD, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted()),), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,x: x.replace(src=(buf.index(idx), disp) + x.src[1:])),
-  (UPat(Ops.STORE, src=(UPat.var("buf").index((UPat.var("idx") + UPat.cvar("disp")).or_casted(),), UPat.var("a")), allow_any_len=True, name="x"),
-   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx), a, disp) + x.src[2:])),
-  # displacement of 0 if there isn't any
-  (UPat(Ops.INDEX, name="idx").load(allow_any_len=True, name="x"),
-   lambda idx,x: x.replace(src=(idx, UOp.const(dtypes.int32, 0)) + x.src[1:]) if len(x.src) == 1 or x.src[1].op is not Ops.CONST or \
-    len(x.src) > 2 and x.src[2].dtype is dtypes.bool and x.src[2].op != Ops.CONST else None),
-  (UPat.var("idx").store(UPat.var("a"), allow_any_len=True, name="x"),
-   lambda idx,a,x: x.replace(src=(idx, a, UOp.const(dtypes.int32, 0)) + x.src[2:]) if len(x.src) == 2 or x.src[2].op is not Ops.CONST else None),
 ])
 
 def gep_imm(s,d) -> int: return (s << 6) | (d << 4)
@@ -644,6 +651,7 @@ class X86Renderer(ISARenderer):
   lowerer = x86_lowerer
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   callee_saved = ("rbx", "rsi", "rdi", "r12", "r13", "r14", "r15") if sys.platform == "win32" else ()
+  reg_pool = [r for r in MUOpX86.GPR + MUOpX86.VEC if r not in (MUOpX86.RSP, MUOpX86.RBP)]
 
   def load(self, dest:Register, src:Memory): return MUOpX86.load(dest, src, dest in MUOpX86.VEC)
   def store(self, dest:Memory, src:Register): return MUOpX86.store(dest, src, src in MUOpX86.VEC)
