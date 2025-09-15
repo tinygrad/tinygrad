@@ -17,6 +17,15 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(a[:, :i]).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_plus1_pad(self):
+    def f(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
+    a = Tensor.rand(3, 10)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = f(a[:, :vi]).numpy()
+      expected = f(a[:, :i]).numpy()
+      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
   def test_add(self):
     def f(a, b): return (a+b).realize()
     a = Tensor.rand(3, 10)

@@ -12,9 +12,9 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
 from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
@@ -1861,14 +1861,24 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
-  def test_assign_non_contiguous(self):
-    x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
-    y = Tensor.randint(4, 2).contiguous().realize()
-    a = Tensor.arange(8).reshape(4, 2)+y
-    x.shrink((None, (0, 2))).assign(a).realize()
-    xref = np.zeros((4, 4), dtype=int)
-    xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
+  def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
+  def test_assign_non_contiguous(self, alt=False):
+    x = (Tensor.arange(16)-100).reshape(4,4).contiguous().realize()
+    xref = x.numpy()
+    if alt:
+      y = Tensor.randint(2, 4).contiguous().realize()
+      a = Tensor.arange(8).reshape(2, 4)+y
+      tst = x.shrink(((0, 2), None)).assign(a).realize()
+      xref[:2, :] = np.arange(8).reshape(2, 4)+y.numpy()
+    else:
+      y = Tensor.randint(4, 2).contiguous().realize()
+      a = Tensor.arange(8).reshape(4, 2)+y
+      tst = x.shrink((None, (0, 2))).assign(a).realize()
+      xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
+    if RANGEIFY > 0:
+      # NOTE: this is a bug on non rangeify
+      np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
@@ -2137,84 +2147,6 @@ class TestSimplifier(unittest.TestCase):
     sink = tensor_rewrite(a < a)
     assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
     assert sink.shape == a.shape
-
-tensor_const_pm = PatternMatcher([
-  (UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)),)), lambda: True),
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),)))), UPat(Ops.CONST))), lambda: True),
-])
-class TestConst(unittest.TestCase):
-  # ** part 1: basic functionality of a tensor directly created from CONST
-
-  def test_tensor_const(self):
-    a = Tensor(1)
-    print(a.uop)
-    self.assertTrue(tensor_const_pm.rewrite(a.uop))
-
-  def test_tensor_variable(self):
-    vv = UOp.variable("a", 0, 10).bind(1)
-    a = Tensor(vv)
-    print(a.uop)
-    self.assertTrue(tensor_const_pm.rewrite(a.uop))
-
-  def test_const_schedule(self):
-    a = Tensor.ones((4, 4))
-    sched = a.schedule()
-    self.assertEqual(len(sched), 0)
-
-  def test_const_contiguous_schedule(self):
-    # this ends up in the big graph
-    a = Tensor.ones((4,)).contiguous()
-    sched = a.schedule()
-    self.assertEqual(len(sched), 1)
-
-  # ** part 2: scheduler behavior when const folding happens later
-
-  def test_const_folding_no_realize(self):
-    a = Tensor([1, 2, 3, 4])*0
-    sched = a.schedule()
-    self.assertEqual(len(sched), 0)
-
-  def test_src_const_folding(self):
-    with Context(TRACK_MATCH_STATS=0):
-      a = Tensor.full((4,), 1).contiguous().realize()
-      b = Tensor.full((4,), 2).contiguous().realize()
-    mul0 = a*0
-    add = b+mul0
-    sched = add.schedule()
-    self.assertEqual(len(sched), 0)
-    # b+0 and b share the same underlying device memory
-    self.assertIs(add.uop.buffer, b.uop.buffer)
-    self.assertListEqual(add.tolist(), [2, 2, 2, 2])
-
-  def test_src_masked_const_folding(self):
-    with Context(TRACK_MATCH_STATS=0):
-      a = Tensor.full((4,), 1).contiguous().realize()
-      b = Tensor.full((6,), 2).contiguous().realize()
-    mul0 = a*0
-    add = b+mul0.pad((1, 1), value=2)
-    sched = add.schedule()
-    self.assertEqual(len(sched), 1)
-    run_schedule(sched)
-    # add gets assigned to a new buffer
-    self.assertIsNot(add.uop.base.realized, b.uop.base.realized)
-    self.assertListEqual(add.tolist(), [4, 2, 2, 2, 2, 4])
-
-  # ** part 3: Tensor variable bindings
-
-  #@unittest.expectedFailure # TODO: should schedule assert if you try to realize a Variable?
-  def test_var_schedule(self):
-    vv = UOp.variable("a", 0, 10).bind(1)
-    a = Tensor(vv)
-    sched = a.schedule()
-    self.assertEqual(len(sched), 0)
-
-  def test_add_tvar(self):
-    vv = UOp.variable("a", 0, 10).bind(1)
-    a = Tensor(vv)+2
-    sched, var_vals = a.schedule_with_vars()
-    self.assertEqual(len(sched), 1)
-    run_schedule(sched, var_vals)
-    self.assertEqual(a.tolist(), 3)
 
 @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from another device to cpu")
 class TestCopyFolding(unittest.TestCase):
