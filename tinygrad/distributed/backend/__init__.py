@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 try:
@@ -43,61 +43,41 @@ class DummyBackend(Backend):
   name: str = "dummy"
   rank: int = 0
   world_size: int = 1
-  _mailboxes: dict[tuple[int, int], Any] = field(default_factory=dict)
 
   def init(self, *, rank: int, world_size: int, **kwargs: Any) -> None:
     self.rank = rank
     self.world_size = world_size
     if world_size != 1:
       raise RuntimeError("dummy backend only supports a single rank")
-    self._mailboxes.clear()
 
   def finalize(self) -> None:
     return
 
   def all_reduce(self, value: Any, *, op: str = "sum") -> Any:
-    array = self._to_numpy(value)
-    if op != "sum":
-      raise NotImplementedError(f"dummy backend only supports sum reduction, got {op}")
-    return self._from_numpy(array, template=value)
+    return self._clone_value(value)
 
   def all_gather(self, value: Any, *, dim: int = 0) -> Any:
-    array = self._to_numpy(value)
-    # In single rank setups this is a no-op copy.
-    return self._from_numpy(array, template=value)
+    return self._clone_value(value)
 
   def broadcast(self, value: Any, *, src_rank: int = 0) -> Any:
-    return self._from_numpy(self._to_numpy(value), template=value)
+    return self._clone_value(value)
 
   def send(self, value: Any, *, dst_rank: int) -> None:
     if dst_rank != self.rank:
       raise RuntimeError("dummy backend cannot communicate across ranks")
-    self._mailboxes[(self.rank, dst_rank)] = self._to_numpy(value).copy()
 
   def recv(self, value: Any, *, src_rank: int) -> Any:
     if src_rank != self.rank:
       raise RuntimeError("dummy backend cannot communicate across ranks")
-    key = (src_rank, self.rank)
-    if key not in self._mailboxes:
-      raise RuntimeError("no message to receive for given ranks")
-    array = self._mailboxes.pop(key)
-    return self._from_numpy(array, template=value)
+    return self._clone_value(value)
 
   @staticmethod
-  def _to_numpy(value: Any) -> 'np.ndarray':
+  def _clone_value(value: Any) -> Any:
     if isinstance(value, Tensor):
-      return value.numpy()
-    if np is not None and isinstance(value, np.ndarray):
       return value
-    raise TypeError(f"unsupported value type {type(value)!r} for dummy backend")
-
-  @staticmethod
-  def _from_numpy(array: 'np.ndarray', *, template: Any) -> Any:
-    if isinstance(template, Tensor):
-      return Tensor(array.copy(), device="CPU")
-    if np is not None:
-      return array.copy()
-    raise TypeError("numpy is required for dummy backend conversions")
+    if np is not None and isinstance(value, np.ndarray):
+      return value.copy()
+    return value
 
 
 _current_backend: Optional[Backend] = None

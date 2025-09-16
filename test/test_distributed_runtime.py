@@ -3,8 +3,10 @@ import unittest
 
 import tinygrad.distributed as dist
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 
 
+@unittest.skipIf(Device.DEFAULT != "CPU", "dummy backend tests require CPU default device")
 class DistributedRuntimeTest(unittest.TestCase):
   def setUp(self) -> None:
     self._saved_env = {k: os.environ.get(k) for k in ("RANK", "WORLD_SIZE")}
