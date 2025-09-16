@@ -204,7 +204,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_simplify_padded_const(self):
     a = Tensor.empty(1022).cummax(axis=0)
-    sched = check_schedule(a, 5)
+    check_schedule(a, 5)
     # TODO: what is this testing?
     #ast = sched[0].ast
     #self.assertLessEqual(len([u for u in ast.toposort() if u.op is Ops.WHERE]), 6)
