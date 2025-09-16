@@ -147,7 +147,7 @@ def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=100
   alphas_cumprod = np.cumprod(alphas, axis=0)
   return Tensor(alphas_cumprod)
 
-default_unet_params: Dict[str,Any] = {
+unet_params: Dict[str,Any] = {
   "adm_in_ch": None,
   "in_ch": 4,
   "out_ch": 4,
@@ -169,11 +169,11 @@ class StableDiffusion:
 
     if not version:
       self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
-      unet_params = default_unet_params
+      unet_init_params = unet_params
     elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
-      unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
-                    "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                    "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
+      unet_init_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+                          "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                          "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
@@ -182,7 +182,7 @@ class StableDiffusion:
         weights["model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
         load_state_dict(model.cond_stage_model, weights)
 
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_init_params))
     if version == "v2-mlperf-train":
       # the mlperf reference inits certain weights as zeroes
       for bb in flatten(self.model.diffusion_model.input_blocks) + self.model.diffusion_model.middle_block + flatten(self.model.diffusion_model.output_blocks):
