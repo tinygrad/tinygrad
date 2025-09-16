@@ -534,8 +534,7 @@ def split_store(ctx:list[UOp], x:UOp):
   ret = ret.sink() if ret.src[1].op is not Ops.COPY else ret.src[1]
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None]))))
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
-  # preserve tag, this is important for the becomes_map
-  return x.as_buf().assign(kernel).replace(tag=x.tag)
+  return x.as_buf().assign(kernel)
 
 split_kernels = PatternMatcher([
   (UPat(Ops.STORE, name="x"), split_store),
