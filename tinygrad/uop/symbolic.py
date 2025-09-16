@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 from tinygrad.uop.decompositions import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -188,7 +188,7 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
   gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
   if gcd.op is Ops.CONST and gcd.arg==1: return None
-  ret = x.divide_exact(gcd).alu(d.op, y.divide_exact(gcd))
+  ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
   return ret*gcd if d.op is Ops.MOD else ret
 
 def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
@@ -200,7 +200,7 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   gcd = UOp.gcd(*x_no_const.split_uop(Ops.ADD), y).simplify()
   assert gcd.op is Ops.CONST
   if gcd.arg==1: return None
-  new_x = x_no_const.divide_exact(gcd).simplify() + (const%c)//gcd
+  new_x = unwrap(x_no_const.divide_exact(gcd)).simplify() + (const%c)//gcd
   if new_x.vmin<0: return None
   ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
