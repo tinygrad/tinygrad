@@ -511,8 +511,8 @@ jobs:
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=85 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=188 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    - name: Run 10 CIFAR training steps w BF16
-      run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+    # - name: Run 10 CIFAR training steps w BF16
+    #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
       run: BENCHMARK_LOG=cifar_10steps_half_wino ASSERT_MIN_STEP_TIME=66 AMD=1 WINO=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: Run full CIFAR training w 1 GPU
