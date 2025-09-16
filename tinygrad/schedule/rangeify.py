@@ -169,12 +169,12 @@ def map_expand(r:UOp, idx:UOp):
   non_ending_ranges = []
   for a,x,y in zip(idx.src[1:], r.src[0].shape, r.shape):
     axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
-    if resolve(x!=y, False):
-      ending_ranges.extend(axis_to_range)
-      new_rngs.append(a.const_like(0))
-    else:
+    if resolve(x==y, False):
       non_ending_ranges.extend(axis_to_range)
       new_rngs.append(a)
+    else:
+      ending_ranges.extend(axis_to_range)
+      new_rngs.append(a.const_like(0))
   ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
   if idx.arg is not None: ending_ranges.append(idx.arg)
   return r.src[0].index(*new_rngs, arg=min(ending_ranges) if ending_ranges else None)
