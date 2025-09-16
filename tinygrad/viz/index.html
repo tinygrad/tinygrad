@@ -90,11 +90,11 @@
   .label :is(text, p) {
     font-weight: 350;
   }
-  rect.node {
+  g.node rect {
     stroke-width: 1.4;
     stroke: #4a4b57;
   }
-  rect.overlay {
+  g.overlay rect {
     fill: rgba(26, 27, 38, 0.5);
   }
   .edgePath {
@@ -102,8 +102,11 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  .highlight rect, .edgePath.highlight, g.port circle {
+  g.node.highlight rect, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
+  }
+  g.highlight.child rect, .edgePath.highlight.child {
+    stroke: #C888B0;
   }
   #edge-labels g.port.highlight {
     display: block
@@ -130,17 +133,6 @@
   }
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
-  }
-  .stats-list > * + * {
-    margin-top: 8px;
-  }
-  .stats-list > p > * + * {
-    margin-top: 12px;
-  }
-  .stats-list {
-    width: 100%;
-    max-height: 240px;
-    overflow: auto;
   }
   .ctx-list > ul > * + * {
     margin-top: 4px;
@@ -252,7 +244,7 @@
   }
   #device-list > div {
     min-height: 32px;
-    max-width: 132px;
+    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -260,6 +252,9 @@
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  #device-list {
+    height: fit-content;
   }
   .raw-text {
     padding: 0 8px;

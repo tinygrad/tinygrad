@@ -82,9 +82,9 @@ class ProgramSpec:
         if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
+          if u.arg[0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
-          assert special_size is not None, f"special_size is None but found SPECIAL in uops {u}"
-          special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())  # TODO: the type here should be sint
+          if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self.ins = sorted(dedup(self.ins))
@@ -101,7 +101,7 @@ class ProgramSpec:
   def applied_opts(self) -> tuple[Opt, ...]|None: return self.uops[-1].arg.applied_opts if \
     self.uops is not None and self.uops[-1].op is Ops.SINK and self.uops[-1].arg is not None else None
 
-  def launch_dims(self, var_vals:dict[Variable, int]):
+  def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
@@ -112,6 +112,7 @@ class Renderer:
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
+  has_threads: bool = False
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now

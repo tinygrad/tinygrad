@@ -14,7 +14,8 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.renderer.ptx import PTXRenderer
 
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
@@ -130,9 +131,9 @@ class TestFloatUOps(TestUOps):
 class TestNonFloatUOps(TestUOps):
   def test_add_int32(self): self._test_bop_fxn(Ops.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
   def test_mul_int32(self): self._test_bop_fxn(Ops.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
-  @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "only ptx uses bitshifts")
   def test_shr_int32(self): self._test_bop_fxn(Ops.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
-  @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "only ptx uses bitshifts")
   def test_shl_int32(self): self._test_bop_fxn(Ops.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
     self._test_bop_fxn(Ops.IDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
@@ -370,7 +371,7 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
-@unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
@@ -476,7 +477,7 @@ class TestUOpMethod(unittest.TestCase):
     st_var = Tensor.empty((2, 10))[:, :a.bind(1)]
     _, var_vals = (uop_var+st_var).schedule_with_vars()
     self.assertEqual(len(var_vals), 1)
-    self.assertEqual(list(var_vals)[0], a)
+    self.assertEqual(list(var_vals)[0], a.expr)
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
@@ -512,7 +513,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(vec))) == str(vec)
 
   def test_device_arg(self):
-    device = UOp(Ops.DEVICE, arg="GPU")
+    device = UOp(Ops.DEVICE, arg="CL")
     assert str(eval(str(device))) == str(device)
 
   def test_reduceop_arg(self):

@@ -142,7 +142,7 @@ class TestViz(BaseTestViz):
 
   def test_const_node_visibility(self):
     a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.int, 0)
+    z = UOp.const(dtypes.index, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()
@@ -408,7 +408,7 @@ class TestVizProfiler(unittest.TestCase):
       get_profile(prof)
 
   def test_python_marker(self):
-    with Context(PROFILE=1):
+    with Context(VIZ=1):
       a = Tensor.empty(1, device="NULL")
       b = Tensor.empty(1, device="NULL")
       (a+b).realize()

@@ -217,7 +217,7 @@ class WebGpuDevice(Compiled):
     device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
     webgpu.WGPURequestDeviceStatus__enumvalues, 1, 2, adapter_res, dev_desc)
 
-    super().__init__(device, WebGpuAllocator(device_res), WGSLRenderer(), Compiler(),
+    super().__init__(device, WebGpuAllocator(device_res), [(WGSLRenderer, Compiler)],
       functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
 
   def synchronize(self):

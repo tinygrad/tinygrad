@@ -20,13 +20,14 @@ const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ show=true }) => {
+const updateProgress = ({ start }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
-  if (show) {
+  msg.style.display = "none";
+  if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  } else msg.style.display = "none";
+  }
 }
 
 // ** UOp graph
@@ -47,41 +48,39 @@ function addTags(root) {
 }
 
 let [workerUrl, worker] = [null, null];
-async function renderDag(graph, additions, recenter=false) {
+async function initWorker() {
+  const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
+  workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
+}
+
+function renderDag(graph, additions, recenter) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ show:true });
-  if (worker == null) {
-    const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
-    workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
-    worker = new Worker(workerUrl);
-  } else {
-    worker.terminate();
-    worker = new Worker(workerUrl);
-  }
-  worker.postMessage({graph, additions, ctxs});
+  updateProgress({ start:true });
+  if (worker != null) worker.terminate();
+  worker = new Worker(workerUrl);
+  worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
     displayGraph("graph");
-    updateProgress({ show:false });
+    updateProgress({ start:false });
     const g = dagre.graphlib.json.read(e.data);
     // draw nodes
     const STROKE_WIDTH = 1.4;
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
-        if (parents == null) return;
-        const src = [...parents, d.id];
-        nodes.classed("highlight", n => src.includes(n.id));
-        d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
-          const [v, w] = nodes[i].id.split("-");
-          return src.includes(v) && w===d.id;
-        });
+        const children = g.successors(d.id);
+        if (parents == null && children == null) return;
+        const src = [...parents, ...children, d.id];
+        nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
+        d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
@@ -125,7 +124,6 @@ async function renderDag(graph, additions, recenter=false) {
     }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-
 }
 
 // ** profiler graph
@@ -170,7 +168,7 @@ async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
   // layout once!
-  if (data != null) return;
+  if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
@@ -180,7 +178,7 @@ async function renderProfiler() {
   const u64 = () => { const ret = new Number(view.getBigUint64(offset, true)); offset += 8; return ret; }
   const f32 = () => { const ret = view.getFloat32(offset, true); offset += 4; return ret; }
   const optional = (i) => i === 0 ? null : i-1;
-  const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
+  const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
@@ -194,20 +192,20 @@ async function renderProfiler() {
   // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
-  const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
+  const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [];
+    const shapes = [], visible = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, offsetY });
+      data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -236,8 +234,6 @@ async function renderProfiler() {
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
-      const height = heightScale(peak);
-      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
       const timestamps = [];
@@ -268,12 +264,15 @@ async function renderProfiler() {
         v.y.push(v.y.at(-1));
       }
       timestamps.push(dur);
-      for (const [_, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+      const height = heightScale(peak);
+      const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
+      for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}`};
+        const dur = x.at(-1)-x[0];
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -288,57 +287,50 @@ async function renderProfiler() {
       });
     }
   }
-  updateProgress({ "show":false });
+  updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
-  const rectLst = [];
   function render(transform) {
     zoomLevel = transform;
-    rectLst.length = 0;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
-    const yscale = data.axes.y != null ? d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range) : null;
     // draw shapes
-    for (const [_, { offsetY, shapes }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+      visible.length = 0;
       for (const e of shapes) {
-        if (e.width == null) { start = e.x[0]; end = end = e.x[e.x.length-1]; }
-        else { start = e.x; end = e.x+e.width; }
-        if (start>visibleX[1] || end<visibleX[0]) continue;
-        ctx.fillStyle = e.fillColor;
         // generic polygon
         if (e.width == null) {
+          if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
-          p.moveTo(x[0], offsetY+e.y0[0]);
-          for (let i=1; i<x.length; i++) p.lineTo(x[i], offsetY+e.y0[i]);
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fill(p);
-          // NOTE: y coordinates are in reverse order
-          for (let i = 0; i < x.length - 1; i++) {
-            let tooltipText = e.arg.tooltipText;
-            if (yscale != null && ((yaxisVal=yscale.invert(offsetY+e.y1[i]))>0)) {
-              tooltipText += `\nTotal: ${formatUnit(yaxisVal, data.axes.y.fmt)}`;
-            }
-            rectLst.push({ x0:x[i], x1:x[i+1], y0:offsetY+e.y1[i], y1:offsetY+e.y0[i], arg:{...e.arg, tooltipText} });
+          ctx.beginPath();
+          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          for (let i=1; i<x.length; i++) {
+            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
           }
+          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
+          ctx.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill();
           continue;
         }
         // contiguous rect
-        const x = xscale(start);
-        const width = xscale(end)-x;
-        ctx.fillRect(x, offsetY+e.y, width, e.height);
-        rectLst.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        if (e.x>et || e.x+e.width<st) continue;
+        const x = xscale(e.x);
+        const y = offsetY+e.y;
+        const width = xscale(e.x+e.width)-x;
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
+        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        let [labelX, labelWidth] = [x+2, 0];
-        const labelY = offsetY+e.y+e.height/2;
+        let labelX = x+2, labelWidth = 0;
+        const labelY = y+e.height/2;
         for (const [i,l] of e.label.entries()) {
           if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
             if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
@@ -361,8 +353,9 @@ async function renderProfiler() {
       ctx.textBaseline = "top";
       ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
     }
-    if (yscale != null) {
-      drawLine(ctx, [0, 0], yscale.range());
+    if (data.axes.y != null) {
+      drawLine(ctx, [0, 0], data.axes.y.range);
+      const yscale = d3.scaleLinear().domain(data.axes.y.domain).range(data.axes.y.range);
       for (const tick of yscale.ticks()) {
         const y = yscale(tick);
         drawLine(ctx, [0, tickSize], [y, y]);
@@ -380,9 +373,9 @@ async function renderProfiler() {
 
   function resize() {
     const profiler = document.querySelector(".profiler");
-    // NOTE: use clientWidth to account for the scrollbar
-    let [width, height] = [profiler.clientWidth, profiler.scrollHeight];
-    width -= rect("#device-list").width+padding;
+    const sideRect = rect("#device-list");
+    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
@@ -395,14 +388,19 @@ async function renderProfiler() {
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  resize();
-  window.addEventListener("resize", resize);
+  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
+    let tid = null;
+    for (const k of data.tracks.keys()) {
+      const r = rect(document.getElementById(k));
+      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+    }
+    if (tid == null) return;
     const { top, left, width, height } = rect(canvas);
     const X = ((x-left) * (canvas.width/width))/dpr;
     const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of rectLst) {
+    for (const r of data.tracks.get(tid).visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
@@ -584,6 +582,7 @@ async function main() {
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
   if (ctx.name === "Profiler") return renderProfiler();
+  if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
@@ -653,33 +652,11 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes || [], recenter=currentRewrite === 0);
+  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  if (ctx.runtime_stats != null) {
-    const div = metadata.appendChild(document.createElement("div"));
-    div.className = "stats-list";
-    for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
-      const table = div.appendChild(document.createElement("table"));
-      const tbody = table.appendChild(document.createElement("tbody"));
-      for (const { name, value, unit, subunits } of s.data) {
-          const mainRow = appendRow(tbody, name, value, unit, "main-row");
-          if (!subunits?.length) continue;
-          const subunitRow = tbody.appendChild(document.createElement("tr"));
-          subunitRow.style.display = "none";
-          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
-          mainRow.style.cursor = "pointer";
-          const td = subunitRow.appendChild(document.createElement("td"));
-          td.colSpan = 2;
-          const table = td.appendChild(document.createElement("table"));
-          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
-      }
-    }
-  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -744,7 +721,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
-document.addEventListener("keydown", async function(event) {
+document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;

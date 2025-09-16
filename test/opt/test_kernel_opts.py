@@ -93,7 +93,7 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(8, N, 8, N)
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
-      # openCL / GPU=1 is 256 max threads
+      # openCL / CL=1 is 256 max threads
       [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
@@ -327,14 +327,29 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_arange_opts(self):
     a = Tensor.arange(128)
+    # NOTE: arange no longer has reduce ops available for opt
     helper_linearizer_opt(a, [
-      [Opt(OptOps.GROUP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
+      #[Opt(OptOps.GROUP, 0, 32)],
+      #[Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
+      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
+      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
     ])
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max is not None and
+                       Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
+  def test_thread_opts(self):
+    a = Tensor.rand(4, 4, 4, 4)
+    b = Tensor.rand(4, 4, 4)
+    r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.THREAD, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
+    ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
+      + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
 
 if __name__ == '__main__':
   unittest.main()
