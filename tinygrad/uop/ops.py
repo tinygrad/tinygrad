@@ -626,8 +626,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
-  def infer_with_bound_value(self): return self.sym_infer(merge_dicts([{v.src[0].expr:v.src[1].arg} for v in self.sparents if v.op is Ops.BIND]))
-
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
