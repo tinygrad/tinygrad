@@ -35,14 +35,32 @@ class DistributedRuntimeTest(unittest.TestCase):
 
   def test_dummy_backend_collective_operations_identity(self) -> None:
     dist.init_process_group(backend="dummy", rank=0, world_size=1)
-    tensor = Tensor([1, 2, 3], device="CPU").contiguous()
+    tensor = Tensor([1, 2, 3])
     tensor.realize()
-    self.assertEqual(dist.all_reduce(tensor).tolist(), [1, 2, 3])
-    self.assertEqual(dist.all_gather(tensor).tolist(), [1, 2, 3])
-    self.assertEqual(dist.broadcast(tensor, src_rank=0).tolist(), [1, 2, 3])
+
+    reduced = dist.all_reduce(tensor)
+    self.assertEqual(reduced.tolist(), [1, 2, 3])
+    self.assertIsNot(reduced, tensor)
+    self.assertEqual(reduced.device, "CPU")
+
+    gathered = dist.all_gather(tensor)
+    self.assertEqual(gathered.tolist(), [1, 2, 3])
+    self.assertIsNot(gathered, tensor)
+    self.assertEqual(gathered.device, "CPU")
+
+    broadcasted = dist.broadcast(tensor, src_rank=0)
+    self.assertEqual(broadcasted.tolist(), [1, 2, 3])
+    self.assertIsNot(broadcasted, tensor)
+    self.assertEqual(broadcasted.device, "CPU")
+
     dist.send(tensor, dst_rank=0)
     received = dist.recv(tensor, src_rank=0)
     self.assertEqual(received.tolist(), [1, 2, 3])
+    self.assertIsNot(received, tensor)
+    self.assertEqual(received.device, "CPU")
+
+    with self.assertRaises(RuntimeError):
+      dist.recv(tensor, src_rank=0)
 
 
 if __name__ == "__main__":
