@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, nn, Variable, UOp
-from tinygrad.helpers import RANGEIFY
 
 # outerworld range should support three things
 # 1. full optimizer steps (test_model_bound_range)
