@@ -28,7 +28,8 @@ class TestFusionOp(unittest.TestCase):
     sched = a.schedule()
     ei = lower_schedule_item(sched[-1])
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(ei.prg.p.src.splitlines()) < 250
+    src = ei.prg.p.src if isinstance(ei.prg.p.src, str) else "\n".join(str(mu) for mu in ei.prg.p.src)
+    assert len(src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

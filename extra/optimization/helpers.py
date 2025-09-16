@@ -11,7 +11,7 @@ inf, nan = float('inf'), float('nan')
 UOps = Ops
 
 # kernel unpacker
-from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.schedule.kernelize import Kernel
 def ast_str_to_ast(ast_str:str) -> UOp: return eval(ast_str)
 def ast_str_to_lin(ast_str:str, opts=None): return Kernel(ast_str_to_ast(ast_str), opts=opts)
 def kern_str_to_lin(kern_str:str, opts=None):
