@@ -450,6 +450,25 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_div_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
 
+  def test_div_symbolic_const_gcd(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((3*a+9*b)//(3*d), -40, 40, "((a+(b*3))//d)")
+
+  def test_symbolic_gcd(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    c = Variable("c", -10, 10)
+    d1 = Variable("d1", 1, 10)
+    d2 = Variable("d2", -10, -1)
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(d1*(a*b))")
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(d1*(a*b))")
+    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
+    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
+
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
 
