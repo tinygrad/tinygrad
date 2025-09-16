@@ -542,10 +542,8 @@ split_kernels = PatternMatcher([
 ])
 
 def tag_uop(ctx:list[UOp], x:UOp):
-  if x.tag is not None:
-    ctx.append(x)
-    return None
   ctx.append(x)
+  if x.tag is not None: return None
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
