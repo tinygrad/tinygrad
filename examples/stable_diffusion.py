@@ -14,6 +14,7 @@ from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
 from extra.models import unet
+from extra.models.unet import UNetModel
 from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module
 from extra.bench_log import BenchEvent, WallTimeEvent
 
@@ -161,13 +162,14 @@ default_unet_params: Dict[str,Any] = {
 }
 
 class StableDiffusion:
-  def __init__(self, version=""):
+  def __init__(self, version:str|None=None, pretrained:str|None=None):
     self.alphas_cumprod = get_alphas_cumprod()
+    if version != "v2-mlperf-train":
+      self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in mlperf training from preprocessed moments
+
     if not version:
       self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
       unet_params = default_unet_params
-    if version != "v2-mlperf-train":
-      self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in training
     elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
       unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
                     "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
@@ -175,8 +177,12 @@ class StableDiffusion:
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
+      if pretrained:
+        weights: dict[str,Tensor] = {k.replace("cond_stage_model.", ""):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
+        weights["model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+        load_state_dict(model.cond_stage_model, weights)
 
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = unet.UNetModel(**unet_params))
+    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
     if version == "v2-mlperf-train":
       # the mlperf reference inits certain weights as zeroes
       for bb in flatten(self.model.diffusion_model.input_blocks) + self.model.diffusion_model.middle_block + flatten(self.model.diffusion_model.output_blocks):

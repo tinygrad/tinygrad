@@ -1548,10 +1548,7 @@ def train_stable_diffusion():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = StableDiffusion(version="v2-mlperf-train")
-  weights: dict[str,Tensor] = torch_load(CKPTDIR / "sd" / "512-base-ema.ckpt")["state_dict"]
-  weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  load_state_dict(model.cond_stage_model, {k.replace("cond_stage_model.", ""):v for k,v in weights.items() if k.startswith("cond_stage_model.")})
+  model = StableDiffusion(version="v2-mlperf-train", pretrained=CKPTDIR / "sd" / "512-base-ema.ckpt")
   unet:UNetModel = model.model.diffusion_model
 
   # this seems to prevent a lot of memory use somehow, allowing bigger BS
