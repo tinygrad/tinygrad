@@ -90,7 +90,6 @@ class TestOuterworldRange(unittest.TestCase):
     self._compare(Tensor.stack(*losses).tolist())
 
   @Tensor.train()
-  @unittest.skipIf(RANGEIFY, "no idea")
   def test_model_scheduled_setitem(self):
     m, opt = get_model_and_opt()
     losses = Tensor.empty(self.STEPS)
