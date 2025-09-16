@@ -603,5 +603,5 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     assert s.tag is not None
     for a in s.tag:
       if a is None: continue
-      becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
+      becomes_map[uop_list[cast(int, a)]] = s
   return becomes_map
