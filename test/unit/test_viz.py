@@ -408,7 +408,7 @@ class TestVizProfiler(unittest.TestCase):
       get_profile(prof)
 
   def test_python_marker(self):
-    with Context(PROFILE=1):
+    with Context(VIZ=1):
       a = Tensor.empty(1, device="NULL")
       b = Tensor.empty(1, device="NULL")
       (a+b).realize()
