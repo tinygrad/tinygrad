@@ -112,7 +112,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
     self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
-    self.assertEqual((a).divide_exact(b), None)
+    self.assertEqual((((a*-2)+14)*b).divide_exact(((a*-2)+14)).simplify(), b)
 
   def test_divide_exact_not(self):
     a = Variable("a", 1, 8)
