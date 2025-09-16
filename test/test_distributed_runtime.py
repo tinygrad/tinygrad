@@ -35,7 +35,8 @@ class DistributedRuntimeTest(unittest.TestCase):
 
   def test_dummy_backend_collective_operations_identity(self) -> None:
     dist.init_process_group(backend="dummy", rank=0, world_size=1)
-    tensor = Tensor([1, 2, 3])
+    tensor = Tensor([1, 2, 3], device="CPU").contiguous()
+    tensor.realize()
     self.assertEqual(dist.all_reduce(tensor).tolist(), [1, 2, 3])
     self.assertEqual(dist.all_gather(tensor).tolist(), [1, 2, 3])
     self.assertEqual(dist.broadcast(tensor, src_rank=0).tolist(), [1, 2, 3])
