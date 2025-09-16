@@ -269,7 +269,6 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, (gidx1<5), (gidx0, gidx1+5))
     self.check(load, None, "gidx0", "(gidx1+5)")
 
-  # @unittest.skip("this should be constructed with an invalid gate")
   def test_valid_empty_set(self):
     gidx0 = Special("gidx0", 32)
     gidx1 = Special("gidx1", 32)
