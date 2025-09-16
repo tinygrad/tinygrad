@@ -4,6 +4,8 @@ from typing import Union
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
 from tinygrad.nn.state import get_parameters
+from extra.models.unet import UNetModel
+from examples.stable_diffusion import StableDiffusion
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -144,3 +146,19 @@ class AutocastConv2d(nn.Conv2d):
   def __call__(self, x:Tensor) -> Tensor:
     dtype = type(self).cast_dtype
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
+
+def init_stable_diffusion(version:str, pretrained:str) -> tuple[StableDiffusion, UNetModel, Tensor, Tensor]:
+  model = StableDiffusion(version=version, pretrained=pretrained)
+  unet:UNetModel = model.model.diffusion_model
+
+  # this seems to prevent a lot of memory use somehow, allowing bigger BS
+  Tensor.realize(*get_parameters(unet))
+  #load_state_dict(unet, get_state_dict(unet))
+
+  #safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
+  #load_state_dict(unet, safe_load(init_fn))
+  #Path(init_fn).unlink()
+
+  sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
+  sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
+  return model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod

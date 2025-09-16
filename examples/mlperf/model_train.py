@@ -1495,72 +1495,42 @@ def train_llama3():
 
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
-  from extra.models.clip import FrozenOpenClipEmbedder
-  from extra.models.clip import OpenClipEncoder
-  from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
-  from examples.stable_diffusion import StableDiffusion
-  from tinygrad.nn.state import load_state_dict, torch_load
+  from examples.mlperf.initializers import init_stable_diffusion
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state, load_training_state
-  import csv, PIL, pickle
+  import pickle
   import numpy as np
 
   config = {}
-
-  GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
-  print(f"training on {GPUS}")
-  for x in GPUS: Device[x]
-  seed = config["seed"] = getenv("SEED", 12345)
-
+  GPUS               = config["GPUS"]                   = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  seed               = config["seed"]                   = getenv("SEED", 12345)
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
   BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
-  lr = BS * BASE_LR
-  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
-
-  CONTEXT_BS          = config["CONTEXT_BS"]            = getenv("CONTEXT_BS", 1 * len(GPUS))
-  DENOISE_BS          = config["DENOISE_BS"]            = getenv("DENOISE_BS", 1 * len(GPUS))
-  DECODE_BS           = config["DECODE_BS"]             = getenv("DECODE_BS", 1 * len(GPUS))
-  INCEPTION_BS        = config["INCEPTION_BS"]          = getenv("INCEPTION_BS", 1 * len(GPUS))
-  CLIP_BS             = config["CLIP_BS"]               = getenv("CLIP_BS", 1 * len(GPUS))
-
   # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
   CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
-  print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
-
-  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
   RESUME_CKPTDIR     = config["RESUME_CKPTDIR"]         = getenv("RESUME_CKPTDIR", "")
   RESUME_ITR         = config["RESUME_ITR"]             = getenv("RESUME_ITR", 0)
   if RESUME_ITR or RESUME_CKPTDIR: assert RESUME_ITR and RESUME_CKPTDIR
 
-  # ** init wandb **
-  WANDB = getenv("WANDB")
-  if WANDB:
+  print(f"training on {GPUS}")
+  lr = BS * BASE_LR
+  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
+  print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
+  for x in GPUS: Device[x]
+  if (WANDB := getenv("WANDB", "")):
     import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-Stable-Diffusion")
+    wandb.init(config=config, project="MLPerf-Stable-Diffusion")
 
   Tensor.manual_seed(seed)  # seed for weight initialization
-
-  model = StableDiffusion(version="v2-mlperf-train", pretrained=CKPTDIR / "sd" / "512-base-ema.ckpt")
-  unet:UNetModel = model.model.diffusion_model
-
-  # this seems to prevent a lot of memory use somehow, allowing bigger BS
-  Tensor.realize(*get_parameters(unet))
-  #load_state_dict(unet, get_state_dict(unet))
-
-  #safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
-  #load_state_dict(unet, safe_load(init_fn))
-  #Path(init_fn).unlink()
-
-  sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
-  sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
+  model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-train", CKPTDIR / "sd" / "512-base-ema.ckpt")
 
   if len(GPUS) > 1:
     to_move = get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
@@ -1569,13 +1539,9 @@ def train_stable_diffusion():
     with Context(BEAM=0):
       Tensor.realize(*to_move)
 
-  if not getenv("EVAL_ONLY", ""):
-    optimizer = AdamW(get_parameters(unet))
-    lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
-    lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
-    # this is most but not all of the tensors that are used only in training, we will offload them to free up memory for eval
-    #train_only_tensors = get_parameters([model.cond_stage_model]) + optimizer.m + optimizer.v
-    train_only_tensors = optimizer.m + optimizer.v
+  optimizer = AdamW(get_parameters(unet))
+  lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
+  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
 
   @TinyJit
   def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
@@ -1608,193 +1574,8 @@ def train_stable_diffusion():
     loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
     Tensor.realize(loss, out_lr)
     return loss, out_lr
-
-  if getenv("RUN_EVAL", ""):
-    if not getenv("EVAL_OVERFIT_SET", ""):
-      # load prompts for generating images for validation; 2 MB of data total
-      with open(DATADIR / "coco2014" / "val2014_30k.tsv") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        eval_inputs:list[dict] = [{"image_id": int(row["image_id"]), "id": int(row["id"]), "caption": row["caption"]} for row in reader]
-      assert len(eval_inputs) == 30_000
-    else:
-      with open("/home/hooved/stable_diffusion/checkpoints/overfit_set.pickle", "rb") as f:
-        eval_inputs = pickle.load(f)
-      eval_inputs = [{"caption": txt, "mean_logvar": npy} for txt,npy in zip(eval_inputs["txt"], eval_inputs["npy"])]
-
-    # NOTE: the clip weights are the same between model.cond_stage_model and clip_encoder
-    eval_timesteps = list(reversed(range(1, 1000, 20)))
-
-    original_device = Device.DEFAULT
-    Device.DEFAULT="CPU" # init eval models on CPU to prevent OOM when doing combined training + eval
-    # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
-    #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
-    eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
-
-    inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-
-    vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
-    text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
-    clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
-    loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
-    loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-    load_state_dict(clip_encoder, loaded)
-    Device.DEFAULT=original_device
-    
-    # Workaround because x.cat(x) doesn't work on multi: https://raw.githubusercontent.com/hooved/train-sd/refs/heads/master/multi_bug_2.txt
-    @TinyJit
-    def denoise_step(x:Tensor, x_x:Tensor, t_t:Tensor, uc_c:Tensor, sqrt_alphas_cumprod_t:Tensor, sqrt_one_minus_alphas_cumprod_t:Tensor,
-                     alpha_prev:Tensor, unet:UNetModel, GPUS) -> Tensor:
-      out_uncond, out = unet(x_x, t_t, uc_c).to("CPU").reshape(-1, 2, 4, 64, 64).chunk(2, dim=1)
-      out_uncond = out_uncond.squeeze(1).shard(GPUS,axis=0)
-      out = out.squeeze(1).shard(GPUS,axis=0)
-      v_t = out_uncond + 8.0 * (out - out_uncond)
-      e_t = sqrt_alphas_cumprod_t * v_t + sqrt_one_minus_alphas_cumprod_t * x
-      pred_x0 = sqrt_alphas_cumprod_t * x - sqrt_one_minus_alphas_cumprod_t * v_t
-      dir_xt = (1. - alpha_prev).sqrt() * e_t
-      x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
-      return x_prev.realize()
-
-    @TinyJit
-    def decode(x:Tensor) -> Tensor:
-        x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
-        x = model.first_stage_model.decoder(x)
-        x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
-        return x
-
-    def shard_tensor(t:Tensor, in_place=False) -> Tensor:
-      if len(GPUS) > 1:
-        ret = t.shard(GPUS, axis=0) if not in_place else t.shard_(GPUS, axis=0)
-      else:
-        ret = t.to(GPUS[0]) if not in_place else t.to_(GPUS[0])
-      return ret
-
-    def get_batch(whole:Tensor, i:int, bs:int) -> tuple[Tensor, int]:
-      batch = whole[i: i + bs].to("CPU")
-      if (unpadded_bs:=batch.shape[0]) < bs:
-        batch = batch.cat(batch[-1:].expand(bs - unpadded_bs, *batch[-1].shape))
-      return batch, unpadded_bs 
-
-    @Tensor.train(mode=False)
-    def eval_unet(eval_inputs:list[dict], unet:UNetModel, cond_stage:FrozenOpenClipEmbedder, first_stage:AutoencoderKL,
-                  inception:FidInceptionV3, clip:OpenClipEncoder) -> tuple[float, float]:
-      # Eval is divided into 5 jits, one per model
-      # It doesn't make sense to merge these jits, e.g. unet repeats 50 times in isolation; images fork to separate inception/clip
-      # We're generating and scoring 30,000 images per eval, and all the data can flow through one jit at a time
-      # To maximize throughput for each jit, we have only one model/jit on the GPU at a time, and pool outputs from each jit on CPU
-      for model in (unet, first_stage, inception, clip):
-        Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
-
-      uc_written = False
-      models = (cond_stage, unet, first_stage, inception, clip)
-      jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, decode, jit_inception:=TinyJit(inception), jit_clip:=TinyJit(clip.get_clip_score))
-      all_bs = (CONTEXT_BS, DENOISE_BS, DECODE_BS, INCEPTION_BS, CLIP_BS)
-      if (limit_eval_samples:=getenv("LIMIT_EVAL_SAMPLES", len(eval_inputs))):
-        eval_inputs = eval_inputs[0:limit_eval_samples]
-      output_shapes = [(ns:=len(eval_inputs),77), (ns,77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
-      # Writing progress to disk lets us resume eval if we crash
-      stages = ["tokens", "embeds", "latents", "imgs", "inception", "clip"]
-      disk_tensor_names, disk_tensor_shapes = stages + ["end", "uc"], output_shapes + [(6,), (1,77,1024)]
-      if not all(os.path.exists(f"{EVAL_CKPT_DIR}/{name}.bytes") for name in disk_tensor_names):
-        for name, shape in zip(disk_tensor_names, disk_tensor_shapes):
-          file = Path(f"{EVAL_CKPT_DIR}/{name}.bytes")
-          file.unlink(missing_ok=True)
-          with file.open("wb") as f: f.truncate(prod(shape) * 4)
-      progress = {name: Tensor.empty(*shape, device=f"disk:{EVAL_CKPT_DIR}/{name}.bytes", dtype=dtypes.int if name in {"tokens", "end"} else dtypes.float)
-                  for name, shape in zip(disk_tensor_names, disk_tensor_shapes)}
-
-      def embed_tokens(tokens:Tensor) -> Tensor:
-        nonlocal uc_written
-        if not uc_written:
-          with Context(BEAM=0): progress["uc"].assign(cond_stage.embed_tokens(cond_stage.tokenize("").to(GPUS)).to("CPU").realize()).realize()
-          uc_written = True
-        return jit_context(shard_tensor(tokens))
-
-      def generate_latents(embeds:Tensor) -> Tensor:
-        uc_c = Tensor.stack(progress["uc"].to("CPU").expand(bs, 77, 1024), embeds, dim=1).reshape(-1, 77, 1024)
-        uc_c = shard_tensor(uc_c)
-        x = shard_tensor(Tensor.randn(bs,4,64,64))
-        for step_idx, timestep in enumerate(tqdm(eval_timesteps)):
-          reversed_idx = Tensor([50 - step_idx - 1], device=GPUS)
-          alpha_prev = eval_alphas_prev[reversed_idx]
-          ts = Tensor.full(bs, fill_value=timestep, dtype=dtypes.int, device="CPU")
-          ts_ts = shard_tensor(ts.cat(ts))
-          ts = shard_tensor(ts)
-          sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[ts].reshape(bs, 1, 1, 1)
-          sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[ts].reshape(bs, 1, 1, 1)
-          x_x = shard_tensor(Tensor.stack(x.to("CPU"), x.to("CPU"), dim=1).reshape(-1, 4, 64, 64))
-          x.assign(denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)).realize()
-        return x
-
-      def decode_latents(latents:Tensor) -> Tensor: return decode(shard_tensor(latents))
-      def generate_inception(imgs:Tensor) -> Tensor: return jit_inception(shard_tensor(imgs))[:,:,0,0]
-
-      def calc_clip_scores(batch:Tensor, batch_tokens:Tensor) -> Tensor:
-        # Tensor.interpolate does not yet support bicubic, so we use PIL
-        batch = (batch.to(GPUS[0]).permute(0,2,3,1) * 255).clip(0, 255).cast(dtypes.uint8).numpy()
-        batch = [np.array(PIL.Image.fromarray(batch[i]).resize((224,224), PIL.Image.BICUBIC)) for i in range(bs)]
-        #batch = shard_tensor(Tensor.stack(*[Tensor(x, device="CPU") for x in batch], dim=0).permute(0,3,1,2))
-        batch = shard_tensor(Tensor(np.stack(batch, axis=0).transpose(0,3,1,2), device="CPU").realize())
-        batch = batch.cast(dtypes.float) / 255
-        batch = (batch - model.mean) / model.std
-        batch = jit_clip(shard_tensor(batch_tokens), batch)
-        return batch
-
-      callbacks = (embed_tokens, generate_latents, decode_latents, generate_inception, calc_clip_scores)
-
-      # save every forward pass output to disk; NOTE: this needs ~100 GB disk space because 30k images are large
-      def stage_progress(stage_idx:int) -> int: return progress["end"].to("CPU")[stage_idx].item()
-      if stage_progress(0) < len(eval_inputs):
-        tokens = []
-        for i in tqdm(range(0, len(eval_inputs), CONTEXT_BS)):
-          subset = [cond_stage.tokenize(row["caption"], device="CPU") for row in eval_inputs[i: i+CONTEXT_BS]]
-          tokens.append(Tensor.cat(*subset, dim=0).realize())
-        progress["tokens"].assign(Tensor.cat(*tokens, dim=0).realize()).realize()
-        progress["end"][0:1].assign(Tensor([len(eval_inputs)], dtype=dtypes.int)).realize()
-      prev_stage = "tokens"
-      tokens = progress["tokens"]
-
-      # wrapper code for every model
-      for stage_idx, model, jit, bs, callback in zip(range(1,6), models, jits, all_bs, callbacks):
-        stage = stages[stage_idx]
-        if stage_progress(stage_idx) >= len(eval_inputs):
-          prev_stage = stage
-          continue # use cache
-        t0 = time.perf_counter()
-        print(f"starting eval with model: {model}")
-        if stage_idx == 1: inputs = tokens
-        elif stage_idx == 5: inputs = progress["imgs"]
-        else: inputs = progress[prev_stage]
-
-        Tensor.realize(*[p.to_(GPUS) for p in get_parameters(model)])
-        for batch_idx in tqdm(range(stage_progress(stage_idx), inputs.shape[0], bs)):
-          t1 = time.perf_counter()
-          batch, unpadded_bs = get_batch(inputs, batch_idx, bs)
-          if isinstance(model, OpenClipEncoder): batch = callback(batch, get_batch(tokens, batch_idx, bs)[0].realize())
-          else: batch = callback(batch)
-          # to(GPUS[0]) is necessary for this to work, without that the result is still on GPUS, probably due to a bug
-          batch = batch.to(GPUS[0]).to("CPU")[0:unpadded_bs].realize()
-          progress[stage][batch_idx: batch_idx + bs].assign(batch).realize()
-          # keep track of what our last output was, so we can resume from there if we crash in this loop
-          progress["end"][stage_idx: stage_idx + 1].assign(Tensor([batch_idx + bs], dtype=dtypes.int)).realize()
-          print(f"model: {model}, batch_idx: {batch_idx}, elapsed: {(time.perf_counter() - t1):.2f}")
-        del batch
-        
-        jit.reset()
-        Tensor.realize(*[p.to_("CPU") for p in get_parameters(model)])
-        print(f"done with model: {model}, elapsed: {(time.perf_counter() - t0):.2f}")
-        prev_stage = stage
-
-      inception_stats_fn = str(DATADIR / "coco2014" / "val2014_30k_stats.npz")
-      fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
-      clip_score = progress["clip"].to(GPUS[0]).mean().item()
-      if not getenv("KEEP_EVAL_CACHE", ""):
-        for name in disk_tensor_names:
-          Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
-      return clip_score, fid_score
     
   BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", CKPT_STEP_INTERVAL)
-  RUN_EVAL=getenv("RUN_EVAL", "")
-  if WANDB: wandb_run=wandb.run
   TOTAL_CKPTS=getenv("TOTAL_CKPTS", 0)
 
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
@@ -1808,148 +1589,103 @@ def train_stable_diffusion():
     Tensor.realize(*[v for v in ckpt.values()])
     return ckpt
 
-  if not getenv("EVAL_ONLY", ""):
-    # training loop
-    if RESUME_CKPTDIR:
-      with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
-    else: seen_keys = []
-    dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
-    t0 = t6 = time.perf_counter()
-    for i, batch in enumerate(dl, start=1):
-      loop_time = time.perf_counter() - t0
-      t0 = time.perf_counter()
-      dl_time = t0 - t6
-      i = RESUME_ITR + i
-      GlobalCounters.reset()
-      seen_keys += batch["__key__"]
+  # training loop
+  if RESUME_CKPTDIR:
+    with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
+  else: seen_keys = []
+  dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
 
-      mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
-      mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-      tokens = []
-      for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
-      tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
+  t0 = t6 = time.perf_counter()
+  for i, batch in enumerate(dl, start=1):
+    loop_time = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    dl_time = t0 - t6
+    i = RESUME_ITR + i
+    GlobalCounters.reset()
+    seen_keys += batch["__key__"]
 
-      if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
-        Tensor.realize(mean, logvar, tokens)
-        for _ in range(3):
-          arg0, arg1, arg2 = mean.clone(), logvar.clone(), tokens.clone()
-          loss, lr = train_step(arg0, arg1, arg2, unet, optimizer, lr_scheduler)
-          loss_item, lr_item = loss.item(), lr.item()
-        load_training_state(unet, optimizer, lr_scheduler, safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors"), realize=False, use_assign=True)
-        print("realizing load_training_state")
-        t_sd = time.perf_counter()
-        Tensor.realize(*get_parameters(lr_scheduler))
-        print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
+    mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+    mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
+    tokens = []
+    for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+    tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
-      t1 = time.perf_counter()
-      loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
-      loss_item, lr_item = loss.item(), lr.item()
-      t2 = time.perf_counter()
+    if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
+      Tensor.realize(mean, logvar, tokens)
+      for _ in range(3):
+        arg0, arg1, arg2 = mean.clone(), logvar.clone(), tokens.clone()
+        loss, lr = train_step(arg0, arg1, arg2, unet, optimizer, lr_scheduler)
+        loss_item, lr_item = loss.item(), lr.item()
+      load_training_state(unet, optimizer, lr_scheduler, safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors"), realize=False, use_assign=True)
+      print("realizing load_training_state")
+      t_sd = time.perf_counter()
+      Tensor.realize(*get_parameters(lr_scheduler))
+      print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
 
-      if i - RESUME_ITR == 3:
-        for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
+    t1 = time.perf_counter()
+    loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+    loss_item, lr_item = loss.item(), lr.item()
+    t2 = time.perf_counter()
+
+    if i - RESUME_ITR == 3:
+      for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
       
-      if WANDB:
-        wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
-                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
-                     "train/train_step_time": t2-t1}
+    if WANDB:
+      wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
+                    "train/train_step_time": t2-t1}
 
-        if i == 1 and wandb_run is not None:
-          with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
-            f.write(f"wandb.run.id = {wandb.run.id}")
+      if i == 1 and wandb.run is not None:
+        with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
+          f.write(f"wandb.run.id = {wandb.run.id}")
 
-      if WANDB: wandb_log["train/loss"] = loss_item
-      if WANDB: wandb_log["train/lr"] = lr_item
+    if WANDB: wandb_log["train/loss"] = loss_item
+    if WANDB: wandb_log["train/lr"] = lr_item
 
-      # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
-      #if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
-      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
-        prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
-        prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
-        # seen keys from dataset
-        prev_keys = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("keys_")]
-        prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
-        fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
-        print(f"saving training state backup at {fn}")
-        safe_save(ckpt_to_cpu(), fn)
-        with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
-          pickle.dump(seen_keys, f)
-        # delete all except above backup, and penultimate backup (prev[-1]):
-        for prev in (prev_ckpt, prev_keys):
-          for to_delete in prev[:-1]:
-            print(f"deleting {to_delete.name}")
-            to_delete.unlink()
+    # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
+    if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
+      prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
+      prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
+      # seen keys from dataset
+      prev_keys = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("keys_")]
+      prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
+      fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
+      print(f"saving training state backup at {fn}")
+      safe_save(ckpt_to_cpu(), fn)
+      with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
+        pickle.dump(seen_keys, f)
+      # delete all except above backup, and penultimate backup (prev[-1]):
+      for prev in (prev_ckpt, prev_keys):
+        for to_delete in prev[:-1]:
+          print(f"deleting {to_delete.name}")
+          to_delete.unlink()
 
-      # because we can't resume from later checkpoints, limit power for more stability
-      #if i == 2_500_000 // BS:
-        #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
-        #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    # because we can't resume from later checkpoints, limit power for more stability
+    #if i == 2_500_000 // BS:
+      #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
+      #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
-      if i % CKPT_STEP_INTERVAL == 0:
-        # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
-        # "evaluation is done offline, the time is not counted towards the submission time."
-        fn = f"{UNET_CKPTDIR}/{i}.safetensors"
-        print(f"saving unet checkpoint at {fn}")
-        safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
-        if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
-          import sys
-          print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
-          sys.exit()
+    if i % CKPT_STEP_INTERVAL == 0:
+      # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+      # "evaluation is done offline, the time is not counted towards the submission time."
+      fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+      print(f"saving unet checkpoint at {fn}")
+      safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
+      if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
+        import sys
+        print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
+        sys.exit()
 
-      if RUN_EVAL:
-        EVAL_INTERVAL = getenv("EVAL_INTERVAL", math.ceil(512_000 / BS))
-        if i % EVAL_INTERVAL == 0:
-          # prevent OOM
-          train_step.reset()
-          Tensor.realize(*[t.to_("CPU") for t in train_only_tensors])
-
-          clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
-          print(f"step {i}: clip score: {clip}, fid score:{fid}")
-          if WANDB:
-            wandb_log.update({"eval/step": i, "eval/clip_score": clip, "eval/fid_score": fid})
-
-          Tensor.realize(*[t.to_(GPUS) for t in train_only_tensors])
-
-      t3 = time.perf_counter()
-      if WANDB: wandb.log(wandb_log)
-      #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
-      t5 = time.perf_counter()
-      print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
-    loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
-    t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
-    """)
-      #print("rocm-smi output:\n" + rocm_out + "\n")
-
-      t6 = time.perf_counter()
-
-  else:
-    EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
-    assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
-    print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
-
-    for p in Path(EVAL_CKPT_DIR).iterdir():
-      if p.name.startswith("wandb_run_id_"):
-        if WANDB:
-          wandb_run_id = p.name.split("wandb_run_id_")
-          if len(wandb_run_id) > 0:
-            wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
-      elif p.name.endswith(".safetensors"):
-        ckpt_iteration = p.name.split(".safetensors")[0]
-        if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
-        if ckpt_iteration.isdigit(): ckpt_iteration = int(ckpt_iteration)
-        #unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
-        unet_ckpt = safe_load(p)
-        if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
-          unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
-        elif "model.diffusion_model.out.2.bias" in unet_ckpt:
-          unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
-        load_state_dict(unet, unet_ckpt)
-        clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
-        print(f"eval results for {p.name}:")
-        print(f"clip score: {clip}")
-        print(f"fid score: {fid}")
-        if WANDB:
-          wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip, "eval/fid_score": fid})
+    t3 = time.perf_counter()
+    if WANDB: wandb.log(wandb_log)
+    #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
+    t5 = time.perf_counter()
+    print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+  loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
+  t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
+  """)
+    #print("rocm-smi output:\n" + rocm_out + "\n")
+    t6 = time.perf_counter()
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
