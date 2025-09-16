@@ -178,7 +178,7 @@ class StableDiffusion:
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
       if pretrained:
-        weights: dict[str,Tensor] = {k.replace("cond_stage_model.", ""):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
+        weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
         weights["model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
         load_state_dict(model.cond_stage_model, weights)
 

@@ -5,7 +5,6 @@ from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
 from tinygrad.nn.state import get_parameters
 from extra.models.unet import UNetModel
-from examples.stable_diffusion import StableDiffusion
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -147,7 +146,8 @@ class AutocastConv2d(nn.Conv2d):
     dtype = type(self).cast_dtype
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
 
-def init_stable_diffusion(version:str, pretrained:str) -> tuple[StableDiffusion, UNetModel, Tensor, Tensor]:
+def init_stable_diffusion(version:str, pretrained:str):
+  from examples.stable_diffusion import StableDiffusion
   model = StableDiffusion(version=version, pretrained=pretrained)
   unet:UNetModel = model.model.diffusion_model
 
