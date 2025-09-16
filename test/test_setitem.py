@@ -1,4 +1,6 @@
 import unittest
+import random
+from os import getenv
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import Context
 import numpy as np
@@ -184,6 +186,20 @@ class TestSetitem(unittest.TestCase):
     n = np.zeros((2,))
     n[index.numpy()] = v.numpy()
     np.testing.assert_allclose(t.numpy(), n)
+
+  def test_setitem_tensor_indexing_fuzz(self):
+    random.seed(getenv("SEED", 42))
+    for _ in range(getenv("ITERS", 100)):
+      size = random.randint(5, 10)
+      d0, d1, d2 = random.randint(1,5), random.randint(1,5), random.randint(1,5)
+      t = Tensor.zeros(size).contiguous()
+      n = np.zeros((size,))
+      index = Tensor.randint((d0, d1, d2), low=0, high=size)
+      v = Tensor.arange(d0*d1*d2).reshape(d0, d1, d2)
+      t[index] = v
+      n[index.numpy()] = v.numpy()
+      np.testing.assert_allclose(t.numpy(), n, err_msg=f"failed with index={index.numpy().tolist()} and v={v.numpy().tolist()}")
+
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
