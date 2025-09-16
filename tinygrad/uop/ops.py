@@ -163,8 +163,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
-    if self.op is Ops.STORE and self.dtype is not dtypes.void: return ShapeTracker.from_shape((self.src[0].dtype.size,))
-    #if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
+    if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
     if self.op in GroupOp.Buffer: return views[0] if (views:=[x.st for x in self.src if x.op is Ops.VIEW]) else None
@@ -419,9 +418,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
-  def forced_reshape(self, arg:tuple[sint, ...], **kwargs):
-    #return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
-    return self.reshape(arg) #.replace(dtype=kwargs.pop("dtype", self.dtype))
+  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return self.reshape(arg)
 
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
