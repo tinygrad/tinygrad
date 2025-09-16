@@ -1608,8 +1608,6 @@ def train_stable_diffusion():
     optimizer = AdamW(get_parameters(unet))
     lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
     lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
-    # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
-    lr_scheduler.step()
     # this is most but not all of the tensors that are used only in training, we will offload them to free up memory for eval
     #train_only_tensors = get_parameters([model.cond_stage_model]) + optimizer.m + optimizer.v
     train_only_tensors = optimizer.m + optimizer.v
