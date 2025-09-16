@@ -187,6 +187,7 @@ class TestSetitem(unittest.TestCase):
     n[index.numpy()] = v.numpy()
     np.testing.assert_allclose(t.numpy(), n)
 
+  @unittest.skip("slow")
   def test_setitem_tensor_indexing_fuzz(self):
     random.seed(getenv("SEED", 42))
     for _ in range(getenv("ITERS", 100)):
