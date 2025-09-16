@@ -93,6 +93,26 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 is not idx2
     assert idx1*idx2 is not idx2*idx1
 
+  def test_uop_gcd_method(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.assertEqual(UOp.gcd(a, a*b, a*3).simplify(), a)
+    self.assertEqual(UOp.gcd(a*a*a, a*b*a, a*3*a).simplify(), a*a)
+    self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
+    self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), a.const_like(5))
+    self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
+
+  def test_divides_exact(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
+    self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
+    self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
+    self.assertEqual((a*a*3).divide_exact(a*a.const_like(-3)).simplify(), a*-1)
+    self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
+    self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
+    self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
+
   def test_factorize(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
@@ -462,8 +482,8 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", -10, 10)
     d1 = Variable("d1", 1, 10)
     d2 = Variable("d2", -10, -1)
-    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(d1*(a*b))")
-    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(d1*(a*b))")
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))")
     self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
     self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
     self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
