@@ -550,7 +550,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  def pop_const(self, op=Ops.ADD) -> tuple[UOp, int]:
+  def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
   def gcd(*uops: UOp) -> UOp:
