@@ -487,6 +487,7 @@ def eval_stable_diffusion():
     return clip_score, fid_score
 
   for p in Path(EVAL_CKPT_DIR).iterdir():
+    eval_queue:list[tuple[int, Path]] = []
     if p.name.startswith("wandb_run_id_"):
       if WANDB:
         wandb_run_id = p.name.split("wandb_run_id_")
@@ -495,19 +496,23 @@ def eval_stable_diffusion():
     elif p.name.endswith(".safetensors"):
       ckpt_iteration = p.name.split(".safetensors")[0]
       if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
-      if ckpt_iteration.isdigit(): ckpt_iteration = int(ckpt_iteration)
-      #unet_ckpt = {k.replace("model.", ""):v for k,v in safe_load(p).items() if k.startswith("model.")}
-      unet_ckpt = safe_load(p)
-      if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
-        unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
-      elif "model.diffusion_model.out.2.bias" in unet_ckpt:
-        unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
-      load_state_dict(unet, unet_ckpt)
-      clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
-      converged = "true" if clip >= 0.15 and fid <= 90 else "false"
-      print(f"eval results for {EVAL_CKPT_DIR}/{p.name}: clip={clip}, fid={fid}, converged={converged}")
-      if WANDB:
-        wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip, "eval/fid_score": fid})
+      assert ckpt_iteration.isdigit(), f"invalid checkpoint name: {p.name}, expected <digits>.safetensors or backup_<digits>.safetensors"
+      eval_queue.append((int(ckpt_iteration), p))
+  assert len(eval_queue), f'no files ending with ".safetensors" were found in {EVAL_CKPT_DIR}'
+
+  # evaluate checkpoints in reverse chronological order
+  for ckpt_iteration, p in sorted(eval_queue, reverse=True):
+    unet_ckpt = safe_load(p)
+    if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
+      unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
+    elif "model.diffusion_model.out.2.bias" in unet_ckpt:
+      unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
+    load_state_dict(unet, unet_ckpt)
+    clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
+    converged = "true" if clip >= 0.15 and fid <= 90 else "false"
+    print(f"eval results for {EVAL_CKPT_DIR}/{p.name}: clip={clip}, fid={fid}, converged={converged}")
+    if WANDB:
+      wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip, "eval/fid_score": fid})
 
 if __name__ == "__main__":
   # inference only
