@@ -16,6 +16,7 @@ from .communication import (  # noqa: F401
   send,
   recv,
 )
+from .parallel import ZeroOptimizer  # noqa: F401
 
 __all__ = [
   "init_process_group",
@@ -28,4 +29,5 @@ __all__ = [
   "broadcast",
   "send",
   "recv",
+  "ZeroOptimizer",
 ]
