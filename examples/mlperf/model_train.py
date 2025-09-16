@@ -1505,7 +1505,7 @@ def train_stable_diffusion():
   from tinygrad.nn.state import load_state_dict, torch_load
   from collections import namedtuple
   from tinygrad.helpers import Context
-  from examples.mlperf.helpers import get_training_state
+  from examples.mlperf.helpers import get_training_state, load_training_state
   import csv, PIL, pickle, subprocess
   import numpy as np
 
@@ -1534,7 +1534,6 @@ def train_stable_diffusion():
   CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
   print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
 
-  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "./"))
   CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
@@ -1611,14 +1610,6 @@ def train_stable_diffusion():
     lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
     # The first call to lr_scheduler.step() will initialize optimizer.lr to the correct value of lr * 1e-6
     lr_scheduler.step()
-    if RESUME_CKPTDIR:
-      ckpt = safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors")
-      for (obj, pat) in [(unet, "model."), (optimizer, "optimizer."), (lr_scheduler, "scheduler.")]:
-        sd = {k.split(pat)[1]: v for k,v in ckpt.items() if k.startswith(pat)}
-        with Context(DEBUG=1):
-          print(f"loading {pat}")
-          load_state_dict(obj, sd, strict=False)
-
     # this is most but not all of the tensors that are used only in training, we will offload them to free up memory for eval
     #train_only_tensors = get_parameters([model.cond_stage_model]) + optimizer.m + optimizer.v
     train_only_tensors = optimizer.m + optimizer.v
@@ -1875,6 +1866,18 @@ def train_stable_diffusion():
       for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
       tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
+      if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
+        Tensor.realize(mean, logvar, tokens)
+        for _ in range(3):
+          arg0, arg1, arg2 = mean.clone(), logvar.clone(), tokens.clone()
+          loss, lr = train_step(arg0, arg1, arg2, unet, optimizer, lr_scheduler)
+          loss_item, lr_item = loss.item(), lr.item()
+        load_training_state(unet, optimizer, lr_scheduler, safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors"), realize=False, use_assign=True)
+        print("realizing load_training_state")
+        t_sd = time.perf_counter()
+        Tensor.realize(*get_parameters(lr_scheduler))
+        print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
+
       t1 = time.perf_counter()
       loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
       loss_item, lr_item = loss.item(), lr.item()
@@ -1896,7 +1899,8 @@ def train_stable_diffusion():
       if WANDB: wandb_log["train/lr"] = lr_item
 
       # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
-      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
+      #if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
+      if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0:
         prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
         prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
         # seen keys from dataset
@@ -1914,9 +1918,9 @@ def train_stable_diffusion():
             to_delete.unlink()
 
       # because we can't resume from later checkpoints, limit power for more stability
-      if i == 2_500_000 // BS:
-        cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
-        res = subprocess.run(cmd, check=True, capture_output=True, text=True)
+      #if i == 2_500_000 // BS:
+        #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
+        #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
       if i % CKPT_STEP_INTERVAL == 0:
         # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
@@ -1958,6 +1962,7 @@ def train_stable_diffusion():
   else:
     EVAL_CKPT_DIR=getenv("EVAL_CKPT_DIR", "")
     assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
+    print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
 
     for p in Path(EVAL_CKPT_DIR).iterdir():
       if p.name.startswith("wandb_run_id_"):

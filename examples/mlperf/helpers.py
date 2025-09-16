@@ -19,7 +19,7 @@ def get_training_state(model, optimizer, scheduler):
   # readable and can be loaded as a model for eval
   train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
   return dedup_dict(state.get_state_dict(train_state))
-def load_training_state(model, optimizer, scheduler, state_dict):
+def load_training_state(model, optimizer, scheduler, state_dict, realize=True, use_assign=False):
   # use fresh model to restore duplicate keys
   train_state = {'model': model, 'optimizer': optimizer, 'scheduler': scheduler}
   big_dict = state.get_state_dict(train_state)
@@ -32,7 +32,7 @@ def load_training_state(model, optimizer, scheduler, state_dict):
     state_dict[k] = state_dict[dupe_names[v]]
   # scheduler contains optimizer and all params, load each weight only once
   scheduler_state = {'scheduler': scheduler}
-  state.load_state_dict(scheduler_state, state_dict)
+  state.load_state_dict(scheduler_state, state_dict, realize=realize, use_assign=use_assign)
 
 def gaussian_kernel(n, std):
   from scipy import signal
