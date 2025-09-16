@@ -98,7 +98,8 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
-  for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+  for dim in reversed(axes):
+    mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
   for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
   # select from values for each True element in mask else select from target
@@ -1065,6 +1066,7 @@ class Tensor(MathTrait):
     print(t.shrink((((0, 2), (0, 2)))).numpy())
     ```
     """
+    if self.ndim != len(arg): raise ValueError(f"{self.ndim=} != {len(arg)=}")
     if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
     return self._apply_uop(UOp.shrink, arg=tuple(shrink_arg))
 
@@ -1130,6 +1132,10 @@ class Tensor(MathTrait):
         xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
       X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+
+  # convenience
+  def pad_to(self, shape, *args): return self.pad(tuple([(0, ns-s) for s,ns in itertools.zip_longest(self.shape, argfix(shape, *args))]))
+  def shrink_to(self, shape, *args): return self.shrink(tuple([(0, ns) for ns in argfix(shape, *args)]))
 
   # ***** movement high level ops *****
 

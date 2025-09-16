@@ -30,8 +30,6 @@ jobs:
         key: llvm-speed
         deps: testing_minimal
         llvm: 'true'
-    - name: External Benchmark Schedule
-      run: python3 test/external/external_benchmark_schedule.py
     - name: Speed Test
       run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
@@ -48,7 +46,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
-        pydeps: "capstone"
+        pydeps: "capstone torch"
     - name: Build wheel and show size
       run: |
         pip install build
@@ -79,6 +77,8 @@ jobs:
       run: |
         python docs/abstractions2.py
         python docs/abstractions3.py
+    - name: Test README
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
     - name: Test DEBUG
@@ -261,8 +261,6 @@ jobs:
         key: unittest-12
         pydeps: "pillow"
         deps: testing_unit
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
     - name: Run unit tests
       run: python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
@@ -274,6 +272,8 @@ jobs:
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
+    - name: External Benchmark Schedule
+      run: python3 test/external/external_benchmark_schedule.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
@@ -310,7 +310,7 @@ jobs:
       run: python test/external/fuzz_shape_ops.py
 
   testopenclimage:
-    name: 'CL IMAGE Tests'
+    name: CL IMAGE Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -330,7 +330,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testgpumisc:
-    name: 'CL Misc tests'
+    name: CL Misc tests
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -355,7 +355,7 @@ jobs:
           path: /tmp/sops.gz
 
   testopenpilot:
-    name: 'openpilot Compile Tests'
+    name: openpilot Compile Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -387,7 +387,7 @@ jobs:
 # ****** ONNX Tests ******
 
   testonnxcpu:
-    name: 'ONNX (CPU) Tests'
+    name: ONNX (CPU) Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -415,7 +415,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopencl:
-    name: 'ONNX (GPU)+Optimization Tests'
+    name: ONNX (GPU)+Optimization Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -519,15 +519,19 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # test_symbolic_arange_sym_step is passing now
       # test_threefry_doesnt_use_long is because there's a contig after the long now
+      # test_embedding issue with jit
+      # test_load_state_dict_sharded_model_dict_same_axis issue with multi
+      # test_instancenorm_3d is very slow
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_symbolic_arange_sym_step and not test_threefry_doesnt_use_long" \
+          -k "not test_threefry_doesnt_use_long and not test_embedding and not test_load_state_dict_sharded_model_dict_same_axis and not test_instancenorm_3d" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
-          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py
+          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py test/test_nn.py
+    - name: Test const folding
+      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
     - name: Test multitensor
-      run: CPU=1 RANGEIFY=1 PYTHONPATH="." python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
+      run: CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
     - name: Test CPU=1 RANGEIFY=2
       run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
