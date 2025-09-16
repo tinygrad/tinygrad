@@ -514,7 +514,6 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
 # stable diffusion callbacks to match mlperf ref; declared here because they're pickled
 def filter_dataset(sample:dict): return {k:v for k,v in sample.items() if k in {'npy', 'txt'}}
 def collate(batch:list[dict]):
-  # mlperf ref uses torch.utils.data.default_collate
   ret = {"npy": [], "txt": [], "__key__": []}
   for sample in batch:
     for k,v in sample.items():
@@ -525,7 +524,6 @@ def collate_fn(batch): return batch
 # Reference (code): https://github.com/mlcommons/training/blob/2f4a93fb4888180755a8ef55f4b977ef8f60a89e/stable_diffusion/ldm/data/webdatasets.py, Line 55
 # Reference (params): https://github.com/mlcommons/training/blob/ab4ae1ca718d7fe62c369710a316dff18768d04b/stable_diffusion/configs/train_01x08x08.yaml, Line 107
 def batch_load_train_stable_diffusion(urls:str, BS:int):
-  # webdataset depends on torch.utils.data.DataLoader
   import webdataset
   dataset = webdataset.WebDataset(urls=urls, resampled=True, cache_size=-1, cache_dir=None)
   dataset = dataset.shuffle(size=1000)
