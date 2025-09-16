@@ -2,7 +2,7 @@
 from typing import cast
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, resolve
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
 from tinygrad.uop.decompositions import xpow
@@ -186,25 +186,10 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
-  if (gcd := math.gcd(y.const_factor(), *factors)) == 1: return None
-  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, (y//gcd).simplify())
+  gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
+  if gcd.op is Ops.CONST and gcd.arg==1: return None
+  ret = x.divide_exact(gcd).alu(d.op, y.divide_exact(gcd))
   return ret*gcd if d.op is Ops.MOD else ret
-
-def divide_by_symbolic_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  if y.op is Ops.CONST: return None  # handled by divide_by_gcd
-  div_factors = list(y.split_uop(Ops.MUL))
-  all_factors = [list(f.split_uop(Ops.MUL)) for f in x.split_uop(Ops.ADD)]
-  removed_factors = []
-  for f in div_factors.copy():
-    if f.op is Ops.CONST: continue
-    if all(f in factors for factors in all_factors):
-      removed_factors.append(f)
-      for factors in all_factors: factors.remove(f)
-      div_factors.remove(f)
-  if not removed_factors: return None
-  ret = sum(math.prod(factors) for factors in all_factors).alu(d.op, y.ufix(math.prod(div_factors)))
-  return ret*math.prod(removed_factors) if d.op is Ops.MOD else ret
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
@@ -353,7 +338,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_gcd),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_symbolic_gcd),
   (UPat(Ops.MOD, dtypes.index, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat((Ops.IDIV), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
