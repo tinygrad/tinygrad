@@ -103,8 +103,8 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
 
   def test_divides_exact(self):
-    a = Variable("a", 0, 8)
-    b = Variable("b", 0, 8)
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
     self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
     self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
     self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
@@ -112,6 +112,17 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
     self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
+    self.assertEqual((a).divide_exact(b), None)
+
+  def test_divide_exact_not(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
+    x = Variable("x", -20, 0)
+    self.assertEqual((a).divide_exact(b), None)
+    self.assertEqual((a+2).divide_exact(a), None)
+    self.assertEqual((x*-1).divide_exact(a), None)
+    self.assertEqual((a*5).divide_exact(a*10), None)
+    self.assertEqual((a*10-1).divide_exact(a*10), None)
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
@@ -476,7 +487,7 @@ class TestSymbolic(unittest.TestCase):
     d = Variable("d", 1, 10)
     self.helper_test_variable((3*a+9*b)//(3*d), -40, 40, "((a+(b*3))//d)")
 
-  def test_symbolic_gcd(self):
+  def test_symbolic_gcd_div(self):
     a = Variable("a", -10, 10)
     b = Variable("b", -10, 10)
     c = Variable("c", -10, 10)
@@ -488,6 +499,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
     self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
     self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
+
+  def test_symbolic_factor_remainder_div(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((d*a+b)//d, 0, 20, "(a+(b//d))")
+    self.helper_test_variable((d*a*20+b)//(5*d), 0, 42, "((a*4)+(b//(d*5)))")
+    self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "((b+(a*4))+(2//d))")
 
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
