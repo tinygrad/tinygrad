@@ -1494,19 +1494,17 @@ def train_llama3():
         break
 
 def train_stable_diffusion():
-  from extra.models.unet import UNetModel, ResBlock, SpatialTransformer
-  from extra.models import unet as unet_module
+  from extra.models.unet import UNetModel
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
   from extra.models.inception import FidInceptionV3
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
-  from examples.stable_diffusion import get_alphas_cumprod, AutoencoderKL
+  from examples.stable_diffusion import StableDiffusion
   from tinygrad.nn.state import load_state_dict, torch_load
-  from collections import namedtuple
   from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state, load_training_state
-  import csv, PIL, pickle, subprocess
+  import csv, PIL, pickle
   import numpy as np
 
   config = {}
@@ -1550,52 +1548,22 @@ def train_stable_diffusion():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
-                 "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                 "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
-
-  class StableDiffusion:
-    def __init__(self):
-      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
-                                                        "clip_tokenizer_version": "sd_mlperf_v5_0"})
-
-      # only needed for decoding denoised latents in eval
-      original_device, Device.DEFAULT = Device.DEFAULT, "CPU"
-      self.first_stage_model = AutoencoderKL() if getenv("RUN_EVAL") else None
-      Device.DEFAULT = original_device
-      self.model=None
-
-
-  model = StableDiffusion()
+  model = StableDiffusion(version="v2-mlperf-train")
   weights: dict[str,Tensor] = torch_load(CKPTDIR / "sd" / "512-base-ema.ckpt")["state_dict"]
   weights["cond_stage_model.model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-  load_state_dict(model, weights)
-  unet_module.linear = unet_module.AutocastLinear
-  unet_module.conv2d = unet_module.AutocastConv2d
-  model.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
+  load_state_dict(model.cond_stage_model, {k.replace("cond_stage_model.", ""):v for k,v in weights.items() if k.startswith("cond_stage_model.")})
   unet:UNetModel = model.model.diffusion_model
-
-  def zero_module(module):
-    for p in get_parameters(module):
-      p.assign(Tensor.zeros_like(p))
-
-  # the mlperf reference inits certain weights as zeroes
-  for bb in flatten(unet.input_blocks) + unet.middle_block + flatten(unet.output_blocks):
-    if isinstance(bb, ResBlock):
-      zero_module(bb.out_layers[3])
-    elif isinstance(bb, SpatialTransformer):
-      zero_module(bb.proj_out)
-  zero_module(unet.out[2])
 
   # this seems to prevent a lot of memory use somehow, allowing bigger BS
   Tensor.realize(*get_parameters(unet))
-  safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
-  load_state_dict(unet, safe_load(init_fn))
-  if not getenv("KEEP_INIT_MODEL", ""): Path(init_fn).unlink()
+  #load_state_dict(unet, get_state_dict(unet))
 
-  alphas_cumprod = get_alphas_cumprod()
-  sqrt_alphas_cumprod = alphas_cumprod.sqrt().realize()
-  sqrt_one_minus_alphas_cumprod = (1 - alphas_cumprod).sqrt().realize()
+  #safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
+  #load_state_dict(unet, safe_load(init_fn))
+  #Path(init_fn).unlink()
+
+  sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
+  sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
 
   if len(GPUS) > 1:
     to_move = get_parameters(unet) + get_parameters(model.cond_stage_model) + [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
@@ -1616,7 +1584,7 @@ def train_stable_diffusion():
   def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
-    timestep = Tensor.randint(BS, low=0, high=alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    timestep = Tensor.randint(BS, low=0, high=model.alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
     latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
     noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
@@ -1663,7 +1631,7 @@ def train_stable_diffusion():
     Device.DEFAULT="CPU" # init eval models on CPU to prevent OOM when doing combined training + eval
     # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
     #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
-    eval_alphas_prev = alphas_cumprod[0:1].cat(alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
+    eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
 
     inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
 

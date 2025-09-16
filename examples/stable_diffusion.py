@@ -9,11 +9,12 @@ from typing import Dict, Any
 from PIL import Image
 import numpy as np
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flatten
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from extra.models.clip import Closed, Tokenizer
-from extra.models.unet import UNetModel
+from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
+from extra.models import unet
+from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 class AttnBlock:
@@ -145,7 +146,7 @@ def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=100
   alphas_cumprod = np.cumprod(alphas, axis=0)
   return Tensor(alphas_cumprod)
 
-unet_params: Dict[str,Any] = {
+default_unet_params: Dict[str,Any] = {
   "adm_in_ch": None,
   "in_ch": 4,
   "out_ch": 4,
@@ -160,11 +161,30 @@ unet_params: Dict[str,Any] = {
 }
 
 class StableDiffusion:
-  def __init__(self):
+  def __init__(self, version=""):
     self.alphas_cumprod = get_alphas_cumprod()
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-    self.first_stage_model = AutoencoderKL()
-    self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
+    if not version:
+      self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
+      unet_params = default_unet_params
+    if version != "v2-mlperf-train":
+      self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in training
+    elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
+      unet_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+                    "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                    "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
+                                                        "clip_tokenizer_version": "sd_mlperf_v5_0"})
+      unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
+
+    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = unet.UNetModel(**unet_params))
+    if version == "v2-mlperf-train":
+      # the mlperf reference inits certain weights as zeroes
+      for bb in flatten(self.model.diffusion_model.input_blocks) + self.model.diffusion_model.middle_block + flatten(self.model.diffusion_model.output_blocks):
+        if isinstance(bb, unet.ResBlock):
+          zero_module(bb.out_layers[3])
+        elif isinstance(bb, unet.SpatialTransformer):
+          zero_module(bb.proj_out)
+      zero_module(self.model.diffusion_model.out[2])
 
   def get_x_prev_and_pred_x0(self, x, e_t, a_t, a_prev):
     temperature = 1

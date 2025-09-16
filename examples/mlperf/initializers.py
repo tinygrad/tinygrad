@@ -3,6 +3,7 @@ from typing import Union
 
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.helpers import prod, argfix
+from tinygrad.nn.state import get_parameters
 
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
@@ -16,6 +17,9 @@ def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
 def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
   std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
   return std * rand_truncn(*shape, **kwargs)
+
+def zero_module(module):
+  for p in get_parameters(module): p.assign(Tensor.zeros_like(p).contiguous())
 
 class Conv2dHeNormal(nn.Conv2d):
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
@@ -127,3 +131,16 @@ class Conv2dRetinaNet(nn.Conv2d):
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight.cast(dtypes.default_float), self.bias.cast(dtypes.default_float) if self.bias is not None else None,
                     groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
+
+# copy torch AMP: isolate mixed precision to just the below autocast ops, instead of using dtypes.default_float which affects all new Tensors
+class AutocastLinear(nn.Linear):
+  cast_dtype=dtypes.bfloat16 # enable monkeypatching of the mixed precision dtype
+  def __call__(self, x:Tensor) -> Tensor:
+    dtype = type(self).cast_dtype
+    return x.cast(dtype).linear(self.weight.cast(dtype).transpose(), self.bias.cast(dtype) if self.bias is not None else None)
+
+class AutocastConv2d(nn.Conv2d):
+  cast_dtype=dtypes.bfloat16
+  def __call__(self, x:Tensor) -> Tensor:
+    dtype = type(self).cast_dtype
+    return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)

@@ -1,5 +1,5 @@
-from tinygrad import Tensor, dtypes
-from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
+from tinygrad import Tensor, dtypes, nn
+from tinygrad.nn import GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
 #def is_dtype_supported(dtype): return False
 from tinygrad.dtype import DTypeLike
@@ -7,21 +7,8 @@ from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 
-# NOTE: key differences for mlperf training v5.0 Stable Diffusion UNet:
-# - ResBlocks and unet.out[0] use GroupNorm with 16 groups instead of 32
-# - uses epsilon of 1e-6 for GroupNorm in SpatialTransformer, instead of 1e-5
-# - following torch automatic mixed precision: upcasts norm and softmax input to f32, everything else is autocast to fp16
-# - uses erf for gelu instead of the default tanh approximation
-
-class AutocastLinear(Linear):
-  def __call__(self, x:Tensor, dtype=dtypes.bfloat16) -> Tensor:
-    return x.cast(dtype).linear(self.weight.cast(dtype).transpose(), self.bias.cast(dtype) if self.bias is not None else None)
-
-class AutocastConv2d(Conv2d):
-  def __call__(self, x:Tensor, dtype=dtypes.bfloat16) -> Tensor:
-    return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
-
-linear, conv2d = Linear, Conv2d
+# allow for monkeypatching
+Linear, Conv2d = nn.Linear, nn.Conv2d
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -36,19 +23,19 @@ class ResBlock:
     self.in_layers = [
       GroupNorm(num_groups, channels),
       Tensor.silu,
-      conv2d(channels, out_channels, 3, padding=1),
+      Conv2d(channels, out_channels, 3, padding=1),
     ]
     self.emb_layers = [
       Tensor.silu,
-      linear(emb_channels, out_channels),
+      Linear(emb_channels, out_channels),
     ]
     self.out_layers = [
       GroupNorm(num_groups, out_channels),
       Tensor.silu,
       lambda x: x,  # needed for weights loading code to work
-      conv2d(out_channels, out_channels, 3, padding=1),
+      Conv2d(out_channels, out_channels, 3, padding=1),
     ]
-    self.skip_connection = conv2d(channels, out_channels, 1) if channels != out_channels else (lambda x: x)
+    self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else (lambda x: x)
 
   def __call__(self, x:Tensor, emb:Tensor) -> Tensor:
     h = x.cast(self.in_layers[0].weight.dtype).sequential(self.in_layers)
@@ -59,12 +46,12 @@ class ResBlock:
 
 class CrossAttention:
   def __init__(self, query_dim:int, ctx_dim:int, n_heads:int, d_head:int):
-    self.to_q = linear(query_dim, n_heads*d_head, bias=False)
-    self.to_k = linear(ctx_dim,   n_heads*d_head, bias=False)
-    self.to_v = linear(ctx_dim,   n_heads*d_head, bias=False)
+    self.to_q = Linear(query_dim, n_heads*d_head, bias=False)
+    self.to_k = Linear(ctx_dim,   n_heads*d_head, bias=False)
+    self.to_v = Linear(ctx_dim,   n_heads*d_head, bias=False)
     self.num_heads = n_heads
     self.head_size = d_head
-    self.to_out = [linear(n_heads*d_head, query_dim)]
+    self.to_out = [Linear(n_heads*d_head, query_dim)]
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
     ctx = x if ctx is None else ctx
@@ -76,7 +63,7 @@ class CrossAttention:
 
 class GEGLU:
   def __init__(self, dim_in:int, dim_out:int, gelu_approx:str="tanh"):
-    self.proj = linear(dim_in, dim_out * 2)
+    self.proj = Linear(dim_in, dim_out * 2)
     assert gelu_approx in {"tanh", "erf"}
     self.gelu = Tensor.gelu if gelu_approx == "tanh" else gelu_erf
     self.dim_out = dim_out
@@ -87,10 +74,10 @@ class GEGLU:
 
 class FeedForward:
   def __init__(self, dim:int, mult:int=4, gelu_approx:str="tanh"):
-    self.net: tuple[GEGLU, Callable, Linear|AutocastLinear] = (
+    self.net: tuple[GEGLU, Callable, nn.Linear|AutocastLinear] = (
       GEGLU(dim, dim*mult, gelu_approx=gelu_approx),
       lambda x: x,  # needed for weights loading code to work
-      linear(dim*mult, dim)
+      Linear(dim*mult, dim)
     )
 
   def __call__(self, x:Tensor) -> Tensor:
@@ -121,9 +108,9 @@ class SpatialTransformer:
       assert isinstance(ctx_dim, list) and depth == len(ctx_dim)
     self.norm = GroupNorm(32, channels, eps=norm_eps)
     assert channels == n_heads * d_head
-    self.proj_in  = linear(channels, channels) if use_linear else conv2d(channels, channels, 1)
+    self.proj_in  = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head, gelu_approx) for d in range(depth)]
-    self.proj_out = linear(channels, channels) if use_linear else conv2d(channels, channels, 1)
+    self.proj_out = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.use_linear = use_linear
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
@@ -140,14 +127,14 @@ class SpatialTransformer:
 
 class Downsample:
   def __init__(self, channels:int):
-    self.op = conv2d(channels, channels, 3, stride=2, padding=1)
+    self.op = Conv2d(channels, channels, 3, stride=2, padding=1)
 
   def __call__(self, x:Tensor) -> Tensor:
     return self.op(x)
 
 class Upsample:
   def __init__(self, channels:int):
-    self.conv = conv2d(channels, channels, 3, padding=1)
+    self.conv = Conv2d(channels, channels, 3, padding=1)
 
   def __call__(self, x:Tensor) -> Tensor:
     bs,c,py,px = x.shape
@@ -176,22 +163,22 @@ class UNetModel:
 
     time_embed_dim = model_ch * 4
     self.time_embed = [
-      linear(model_ch, time_embed_dim),
+      Linear(model_ch, time_embed_dim),
       Tensor.silu,
-      linear(time_embed_dim, time_embed_dim),
+      Linear(time_embed_dim, time_embed_dim),
     ]
 
     if adm_in_ch is not None:
       self.label_emb = [
         [
-          linear(adm_in_ch, time_embed_dim),
+          Linear(adm_in_ch, time_embed_dim),
           Tensor.silu,
-          linear(time_embed_dim, time_embed_dim),
+          Linear(time_embed_dim, time_embed_dim),
         ]
       ]
 
     self.input_blocks: List[Any] = [
-      [conv2d(in_ch, model_ch, 3, padding=1)]
+      [Conv2d(in_ch, model_ch, 3, padding=1)]
     ]
     input_block_channels = [model_ch]
     ch = model_ch
@@ -247,7 +234,7 @@ class UNetModel:
     self.out = [
       GroupNorm(num_groups, ch),
       Tensor.silu,
-      conv2d(model_ch, out_ch, 3, padding=1),
+      Conv2d(model_ch, out_ch, 3, padding=1),
     ]
 
   def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
