@@ -148,16 +148,20 @@ class AutocastConv2d(nn.Conv2d):
 
 def init_stable_diffusion(version:str, pretrained:str):
   from examples.stable_diffusion import StableDiffusion
+  from tinygrad.helpers import getenv
+  from tinygrad.nn.state import safe_load, safe_save, load_state_dict, get_state_dict
+  from pathlib import Path
   model = StableDiffusion(version=version, pretrained=pretrained)
   unet:UNetModel = model.model.diffusion_model
+  UNET_CKPTDIR = getenv("UNET_CKPTDIR", "./")
 
   # this seems to prevent a lot of memory use somehow, allowing bigger BS
   Tensor.realize(*get_parameters(unet))
   #load_state_dict(unet, get_state_dict(unet))
 
-  #safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
-  #load_state_dict(unet, safe_load(init_fn))
-  #Path(init_fn).unlink()
+  safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
+  load_state_dict(unet, safe_load(init_fn))
+  Path(init_fn).unlink()
 
   sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
