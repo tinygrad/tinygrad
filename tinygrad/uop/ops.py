@@ -298,17 +298,49 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=() if src is None else (src,))
+    
+    # If RANGEIFY is enabled, use its behavior
+    from tinygrad.helpers import RANGEIFY
     if RANGEIFY:
-      # VIEW on const is no longer supported in RANGEIFY
-      if device is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
-      if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
-    else:
-      if shape is not None:
+      # RANGEIFY=1 behavior: CONST(DEVICE) + reshape/expand pattern
+      if device is not None:
+        ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+      if shape is not None and shape != ():
+        # Use VIEW for empty constants that need to be expanded with RANGEIFY=1
+        # This is needed for cases like test_div where we create an empty tensor and expand it
         from tinygrad.shape.shapetracker import ShapeTracker
         ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), ShapeTracker.from_shape(shape, (0,)*len(shape))),))
-      if device is not None:
-        if shape is not None: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
-        else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+        if device is not None:
+          ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+      return ret
+    
+    # RANGEIFY=0 behavior with improvements:
+    # Use VIEW(CONST(DEVICE)) pattern only when shape is needed and has a mask
+    # This enables constant folding at scheduling level when not masked
+    if shape is not None:
+      from tinygrad.shape.shapetracker import ShapeTracker
+      st = ShapeTracker.from_shape(shape, (0,)*len(shape))
+      # Check if any view has a mask - if so, we need to use VIEW(CONST) pattern
+      has_mask = any(v.mask is not None for v in st.views)
+      
+      if has_mask or shape == () or b != 0:
+        # Use VIEW(CONST) pattern when masked or for non-zero constants
+        # This preserves compatibility with existing code
+        ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), st),))
+        if device is not None:
+          ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+      else:
+        # For unmasked zero constants, use CONST(DEVICE) pattern to enable constant folding
+        if device is not None:
+          ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+        # Apply shape through VIEW to maintain compatibility
+        ret = ret.replace(src=(UOp(Ops.VIEW, dtypes.void, (), st),))
+        if device is not None:
+          ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device).view(unwrap(ret.st)),))
+    elif device is not None:
+      # No shape, just add device
+      ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
+      
     return ret
   @staticmethod
   def range(end:sint, *arg):

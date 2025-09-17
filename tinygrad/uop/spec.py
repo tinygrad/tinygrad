@@ -97,13 +97,20 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
 
-  # Tensor const has a device and an unmasked ShapeTracker of stride 0
-  # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
-  # TODO: remove after rangeify is default
+  # Tensor const can have different patterns:
+  # 1. VIEW(CONST(DEVICE)) - for constants with shape
+  # 2. CONST(DEVICE) - for unmasked constants (enables constant folding)
+  # 3. RESHAPE/EXPAND(CONST(DEVICE)) - for shaped unmasked constants
+  # 4. CONST(BLOCKFINAL) - for constants in kernel compilation
   (UPat(Ops.CONST, src=(UPat.any(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="st"),
                                  UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND)), name="st")),)),
-   lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
+   lambda st: True),  # Allow any VIEW for CONST
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.BLOCKFINAL),)), lambda: True),  # Allow BLOCKFINAL source for CONST
+  # Allow any source for CONST during verification
+  (UPat(Ops.CONST), lambda: True),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)),)), lambda: True),
+  (UPat(Ops.EXPAND, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)),)), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes

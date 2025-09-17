@@ -63,6 +63,9 @@ kernelize_sym = symbolic_simple+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
   # COPY(CONST) creates a new CONST on the destination device
   (UPat(Ops.COPY, name="root", src=(UPat.cvar("x"), UPat(Ops.DEVICE))), lambda root,x: root.const_like(x.arg)),
+  # Handle RESHAPE/EXPAND of CONST patterns
+  (UPat(Ops.COPY, name="root", src=(UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat.cvar("x"),), name="shape"), UPat(Ops.DEVICE))),
+   lambda root,shape,x: root.const_like(x.arg).reshape(shape.arg) if shape.op is Ops.RESHAPE else root.const_like(x.arg).expand(shape.arg)),
   # non device changing COPY is a NOOP
   (UPat(Ops.COPY, name="c", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda c,x: x if c.device == x.device else None),
   # store a shrink before COPY, otherwise view after the COPY
@@ -302,7 +305,8 @@ def limit_bufs(root:UOp):
     return root.replace(src=tuple(s if s.base in bufs else s.replace(tag=1).contiguous() for s in root.src))
 
 def view_add_srcs(x:UOp):
-  if len(avars:=x.arg.vars()) and len(x.src) == 1:
+  # Only add variable sources to VIEW operations
+  if x.op is Ops.VIEW and len(avars:=x.arg.vars()) and len(x.src) == 1:
     return x.replace(src=x.src+tuple(avars))
   return None
 

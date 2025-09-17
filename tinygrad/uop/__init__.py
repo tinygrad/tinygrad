@@ -34,7 +34,7 @@ class Ops(FastEnum):
   # view is what all movement ops become
   VIEW = auto()
 
-  # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
+  # Used for validating views
   VALID = auto()
 
   # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
