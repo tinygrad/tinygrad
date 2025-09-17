@@ -241,7 +241,7 @@ class NIRRenderer(Renderer):
     nir.glsl_type_singleton_init_or_ref() # TODO: call glsl_type_singleton_decref somewhere
     self.b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
 
-  def render(self, uops:list[UOp]) -> str:
+  def render(self, uops:list[UOp]):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r, self.param_idx, ranges = {}, 0, []
@@ -315,6 +315,6 @@ class LVPRenderer(NIRRenderer):
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
     # TODO: does this do anything?
-    self.paramsz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
+    self.paramsz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
     nir.nir_variable_create(self.b.shader, nir.nir_var_mem_ubo, glsl_type(dtypes.uchar.ptr(self.paramsz)), s("kernel_input"))
 
