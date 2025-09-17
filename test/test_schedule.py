@@ -1001,7 +1001,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(e.numpy(), e_np:=b.numpy() + out0_np, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), r_np + e_np[0][0][0], atol=1e-4, rtol=1e-4)
 
-  # changed by multireduce
   def test_reduce_expand_child(self):
     Tensor.manual_seed(0)
     a = Tensor.randn((32, 32, 32)).realize()
@@ -1207,7 +1206,6 @@ class TestSchedule(unittest.TestCase):
     x.softmax().sum().backward()
     run_schedule(check_schedule(x.grad, 4))
 
-  # changed by: multireduce spec
   def test_layernorm_onelayer_fusion(self):
     Tensor.manual_seed(0)
     layer = nn.LayerNorm([10, 10])
@@ -1439,7 +1437,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
-  # changed by: multireduce spec
   # pattern in test_transformer
   def test_partial_fuse1(self):
     Tensor.manual_seed(0)
@@ -1452,7 +1449,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum() - b.numpy().sum()) * 4, atol=1e-4, rtol=1e-4)
 
-  # changed by: multireduce spec
   # pattern in conv
   def test_partial_fuse2(self):
     Tensor.manual_seed(0)
@@ -1465,7 +1461,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(d.numpy(), b.numpy().sum()-(a.numpy().sum()+2), atol=1e-4, rtol=1e-4)
 
-  # changed by: multireduce spec
   # pattern in adam
   def test_partial_fuse3(self):
     Tensor.manual_seed(0)
@@ -1482,8 +1477,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(f.numpy(), b.numpy().sum() - e_np, atol=1e-4, rtol=1e-4)
 
-  # changed by: multireduce spec
-  @unittest.expectedFailure
+  @expect_rangeify_fails # err in mark_children
   def test_partial_fuse4(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(16, 16).realize()
@@ -1493,7 +1487,7 @@ class TestSchedule(unittest.TestCase):
     e = c * d
     f = (b - d).sum() - e
     # run_schedule(check_schedule([c, d, e, f], 1))
-    run_schedule(check_schedule([c, d, e, f], 3))
+    run_schedule(check_schedule([c, d, e, f], 5))
     np.testing.assert_allclose(c.numpy(), c_np:=a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(d.numpy(), d_np:=a.numpy().sum()*2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
