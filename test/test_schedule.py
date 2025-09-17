@@ -801,6 +801,14 @@ class TestSchedule(unittest.TestCase):
     out = x + 1
     check_schedule(out, 0, filter_sink=False)
 
+  @expect_rangeify_fails
+  def test_zero_size_assign(self):
+    f = Tensor.full((2,), 0.).contiguous().realize()
+    a = f.shrink_to((0,))
+    a.assign(Tensor.ones_like(a))
+    check_schedule(a, 0)
+    self.assertEqual(a.tolist(), [])
+
   def test_reduce_permute_nofuse(self):
     x = Tensor.empty(32, 32, 32)
     y = Tensor.empty(32, 32)
