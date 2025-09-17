@@ -320,7 +320,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
 
   # CONST (or DEFINE_VAR) can't have axes. remove srcs when we INDEX it
-  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
+  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(tag=None)),
 
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat())), lambda c: c),
@@ -328,16 +328,12 @@ pm_rangeify = pm_mops+PatternMatcher([
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
+  # handle size 0
   (UPat(Ops.INDEX, name="x"), lambda x: x.replace(src=(x.const_like(0),)+x.src[1:]) if x.st is not None and x.size == 0 else None),
 
   # handle assign
   (UPat(Ops.INDEX, src=(UPat(Ops.ASSIGN, name="assign"),), allow_any_len=True, name="x"),
     lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],))),
-
-  # post assign version, is assign a promise to user like contiguous?
-  #(UPat(Ops.ASSIGN).f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
-  # lambda b: b.replace(src=(b.const_like(0),)+b.src[1:]) if b.size == 0 else None),
-  #(UPat(Ops.INDEX, name="x"), lambda x: x.replace(src=(x.const_like(0),)+x.src[1:]) if x.st is not None and x.size == 0 else None),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
@@ -397,9 +393,10 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
-  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape)),
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
+   lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
-  (UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
+  #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
 ])
 
 # *****************
@@ -498,7 +495,7 @@ to_define_global = PatternMatcher([
 
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
-  #(UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=(), tag=None) if len(c.src) else None),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
@@ -581,7 +578,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if x.op is Ops.BUFFERIZE and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST}) and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
