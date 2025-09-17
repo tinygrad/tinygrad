@@ -801,6 +801,13 @@ class TestSchedule(unittest.TestCase):
     out = x + 1
     check_schedule(out, 0, filter_sink=False)
 
+  def test_zero_size_assign(self):
+    f = Tensor.full((2,), 0.).contiguous().realize()
+    a = f.shrink_to((0,))
+    a.assign(Tensor.ones_like(a))
+    check_schedule(a, 0)
+    self.assertEqual(a.tolist(), [])
+
   def test_reduce_permute_nofuse(self):
     x = Tensor.empty(32, 32, 32)
     y = Tensor.empty(32, 32)
@@ -2428,7 +2435,6 @@ class TestUOpBecome(unittest.TestCase):
     late_add = noop+2
     late_add.realize()
 
-  @expect_rangeify_fails
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
     b = a*0
@@ -2447,7 +2453,6 @@ class TestUOpBecome(unittest.TestCase):
     # the base is untouched.
     assert UPat(Ops.ADD).match(add.uop, {})
 
-  @expect_rangeify_fails
   def test_become_const_from_const(self):
     const_add = Tensor(1)+Tensor(2)
     assert UPat(Ops.ADD).match(const_add.uop, {})
