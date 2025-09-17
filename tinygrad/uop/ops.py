@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
@@ -549,7 +549,23 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  def pop_const(self) -> tuple[UOp, int]: return (self.src[0], self.src[1].arg) if self.op is Ops.ADD and self.src[1].op is Ops.CONST else (self, 0)
+  def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
+    return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
+  @staticmethod
+  def gcd(*uops: UOp) -> UOp:
+    terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in uops])
+    count = functools.reduce(operator.and_, [collections.Counter(term.split_uop(Ops.MUL)) for term in terms])
+    return math.prod([*count.elements(), terms[0].const_like(math.gcd(*factors))])  # put the const at the top
+  def divide_exact(self, v:UOp) -> UOp|None:
+    if self is v: return self.const_like(1)
+    if self.op is Ops.ADD: return None if (s0:=self.src[0].divide_exact(v)) is None or (s1:=self.src[1].divide_exact(v)) is None else s0+s1
+    if v.op is Ops.CONST: return self.divides(v.arg)
+    if self.op is Ops.MUL:
+      (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
+      new_count = collections.Counter(fac.split_uop(Ops.MUL))
+      new_count.subtract(div_fac.split_uop(Ops.MUL))
+      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod([*new_count.elements(), self.const_like(const//div_const)])
+    return None # generic None if we aren't sure
   @property
   def vmin(self) -> ConstType: return self._min_max[0]
   @property
