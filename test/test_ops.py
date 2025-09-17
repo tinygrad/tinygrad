@@ -1408,6 +1408,11 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[False, True]])
     helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[True, False]])
 
+  def test_const_reduce(self):
+    helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).sum(), lambda x: (x.full_like(2)).sum(), forward_only=True)
+    helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).prod(), lambda x: (x.full_like(2)).prod(), forward_only=True)
+    helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).max(), lambda x: (x.full_like(2)).max(), forward_only=True)
+
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_any(self):
     helper_test_op([(3,4,5,6)], lambda x: x.any(), forward_only=True)
