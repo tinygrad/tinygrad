@@ -13,7 +13,6 @@ class TestSymbolic(unittest.TestCase):
     assert st.shape == (x, 3)
     assert st.real_strides() == (3, 1)
 
-  @unittest.expectedFailure
   def test_real_strides_0(self):
     st = ShapeTracker(views=(View(shape=(2, (Variable('start_pos', 1, 8)+1), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (Variable('start_pos', 1, 8)+1)), strides=((Variable('start_pos', 1, 8)+1), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
     self.assertEqual(st.real_strides(), (8, None))

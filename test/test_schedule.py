@@ -386,7 +386,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_dedup_assign(self):
     a = Tensor.ones(4).contiguous().realize()
-    b = Tensor.full((4,), 2.).contiguous().realize()
+    b = Tensor.full((4,), 2.).contiguous()
     first = a.assign(b)
     second = a.assign(b)
     check_schedule([first, second], 1)
