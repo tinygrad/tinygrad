@@ -19,6 +19,7 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   rela = [(sh, sh.name[5:], _to_carray(sh, libc.Elf64_Rela)) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
+  progbits.sort(key=lambda sh: sh.name != ".ltext") # LLVM 20 ORCJIT puts .ltext after .rodata
 
   # Prealloc image for all fixed addresses.
   image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
@@ -31,6 +32,7 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   # Relocations
   relocs = []
   for sh, trgt_sh_name, c_rels in rel + rela:
+    if trgt_sh_name not in [sh.name for sh in progbits]: continue
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
     for roff, sym, r_type_, r_addend in rels:

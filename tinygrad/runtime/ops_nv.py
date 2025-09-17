@@ -17,7 +17,7 @@ from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 if (NIR := getenv("NIR")):
-  from tinygrad.renderer.nir import NIRRenderer
+  from tinygrad.renderer.nir import NAKRenderer
   from tinygrad.runtime.support.nak import NAKCompiler, parse_nak_shader
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -538,7 +538,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
     cc = NAKCompiler(self) if NIR else ((PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler))(self.arch)
-    rr = PTXRenderer(self.arch, device="NV") if PTX else (NIRRenderer(self) if NIR else NVRenderer(self.arch))
+    rr = PTXRenderer(self.arch, device="NV") if PTX else (NAKRenderer(self) if NIR else NVRenderer(self.arch))
     super().__init__(device, NVAllocator(self), rr, cc, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()

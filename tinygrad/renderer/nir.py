@@ -119,12 +119,12 @@ def nlid(b:nir.nir_builder) -> nir.nir_def:
 def nreg_idx(b:nir.nir_builder, reg:nir.nir_variable, idx:nir.nir_def) -> nir.nir_def:
   parent = nir.nir_deref_instr_create(b.shader, nir.nir_deref_type_var)
   parent.contents.modes, parent.contents.type, parent.contents.var = reg.data.mode, reg.type, ctypes.pointer(reg)
-  nir.nir_def_init(parent.contents.instr, d(parent), 1, 64)
+  nir.nir_def_init(parent.contents.instr, d(parent), 1, 32)
   nir.nir_builder_instr_insert(b, parent.contents.instr)
   deref = nir.nir_deref_instr_create(b.shader, nir.nir_deref_type_array)
   deref.contents.modes, deref.contents.type = reg.data.mode, nir.glsl_get_array_element(reg.type)
   deref.contents.parent, deref.contents.arr.index = nir_src_for_ssa(d(parent)), nir_src_for_ssa(idx)
-  nir.nir_def_init(deref.contents.instr, d(deref), 1, 64)
+  nir.nir_def_init(deref.contents.instr, d(deref), 1, 32)
   nir.nir_builder_instr_insert(b, deref.contents.instr)
   return d(deref)
 
@@ -208,21 +208,12 @@ class NIRRenderer(Renderer):
      lambda buf,idx,val,gate: UOp.store(buf.index(idx), val, gate)),
   ])
 
-  def nv_param(self, dtype:DType, sz:int) -> nir.nir_def:
-    intrin = nir.nir_intrinsic_instr_create(self.b.shader, nir.nir_intrinsic_ldc_nv)
-    intrin.contents.num_components = 1
-    nir.nir_def_init(intrin.contents.instr, d(intrin), 1, sz * 8)
-    arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
-    arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, self.param_idx, dtypes.int))
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, sz)
-    nir.nir_builder_instr_insert(self.b, intrin.contents.instr)
-    self.param_idx += sz
-    return d(intrin)
+  def param(self, dtype:DType, sz:int) -> nir.nir_def: raise NotImplementedError("needs param")
 
   def_rewrite = PatternMatcher([
     (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
-    (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: ctx.nv_param(x.dtype, 8)),
-    (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.nv_param(x.dtype, 4)),
+    (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: ctx.param(x.dtype, 8)),
+    (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.param(x.dtype, 4)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, ngid(ctx.b) if x.arg[0] == 'g' else nlid(ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat.var("loc"), UPat.var("val")), allow_any_len=True, name="x"),
      lambda ctx,x,loc,val: nstore(ctx.b, AddrSpace(x.arg), ctx.r[loc], ctx.r[val], val.dtype)),
@@ -244,20 +235,22 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(nir.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __init__(self, dev, device="NV"): self.device, self.dev = device, dev
+  def __init__(self, dev, device): self.device, self.dev = device, dev
+
+  def prerender(self, uops:list[UOp]):
+    nir.glsl_type_singleton_init_or_ref() # TODO: call glsl_type_singleton_decref somewhere
+    self.b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
 
   def render(self, uops:list[UOp]) -> str:
-    self.b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
+    self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
-    self.r, self.param_idx = {}, 0
-    ranges: list[Tuple[nir.nir_loop, nir.nir_phi_instr]] = []
+    self.r, self.param_idx, ranges = {}, 0, []
 
     # import os
     # input(f"pid: {os.getpid()}")
-    nir.glsl_type_singleton_init_or_ref() # TODO: call glsl_type_singleton_decref somewhere
     for u in uops:
       # print(u)
-      # nir.nir_print_shader(b.shader, stdout)
+      # nir.nir_print_shader(self.b.shader, stdout)
       if u.op == Ops.NOOP: pass
       elif u.op == Ops.SINK:
         # why do we care about setting this?
@@ -283,4 +276,45 @@ class NIRRenderer(Renderer):
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         self.r[u] = cast(nir.nir_def, d)
     nir.nir_print_shader(self.b.shader, stdout)
-    return self.b.shader.contents
+    blob = nir.struct_blob()
+    nir.nir_serialize(blob, self.b.shader, False)
+    return ctypes.string_at(blob.data, blob.size)
+
+class NAKRenderer(NIRRenderer):
+  def __init__(self, dev, device="NV"): super().__init__(dev, device)
+
+  def param(self, dtype:DType, sz:int) -> nir.nir_def:
+    intrin = nir.nir_intrinsic_instr_create(self.b.shader, nir.nir_intrinsic_ldc_nv)
+    intrin.contents.num_components = 1
+    nir.nir_def_init(intrin.contents.instr, d(intrin), 1, sz * 8)
+    arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
+    arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, self.param_idx, dtypes.int))
+    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, sz)
+    nir.nir_builder_instr_insert(self.b, intrin.contents.instr)
+    self.param_idx += sz
+    return d(intrin)
+
+class LVPRenderer(NIRRenderer):
+  has_local = False
+  global_max = (1, 0, 0)
+
+  def __init__(self, dev, device="CPU"): super().__init__(dev, device)
+
+  def param(self, dtype:DType, sz:int) -> nir.nir_def:
+    intrin = nir.nir_intrinsic_instr_create(self.b.shader, nir.nir_intrinsic_load_ubo)
+    intrin.contents.num_components = 1
+    nir.nir_def_init(intrin.contents.instr, d(intrin), 1, sz * 8)
+    arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
+    arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, self.param_idx, dtypes.int))
+    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, sz)
+    nir_intrinsic_set(nir.NIR_INTRINSIC_RANGE, intrin, self.paramsz)
+    nir.nir_builder_instr_insert(self.b, intrin.contents.instr)
+    self.param_idx += sz
+    return d(intrin)
+
+  def prerender(self, uops:list[UOp]):
+    super().prerender(uops)
+    # TODO: does this do anything?
+    self.paramsz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
+    nir.nir_variable_create(self.b.shader, nir.nir_var_mem_ubo, glsl_type(dtypes.uchar.ptr(self.paramsz)), s("kernel_input"))
+

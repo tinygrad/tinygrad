@@ -135,7 +135,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['FIXME_STUB'] = ctypes.CDLL(os.getenv('MESA_PATH', '/usr/')+'/lib/x86_64-linux-gnu/libvulkan_nouveau.so') #  ctypes.CDLL('FIXME_STUB')
+_libraries['FIXME_STUB'] = ctypes.CDLL(os.getenv('MESA_PATH', '/usr')+'/lib/x86_64-linux-gnu/libvulkan_lvp.so') #  ctypes.CDLL('FIXME_STUB')
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
@@ -14729,6 +14729,30 @@ try:
     nir_call_serialized.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.c_uint32), size_t, ctypes.POINTER(ctypes.POINTER(struct_nir_def))]
 except AttributeError:
     pass
+try:
+    nir_serialize = _libraries['FIXME_STUB'].nir_serialize
+    nir_serialize.restype = None
+    nir_serialize.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
+except AttributeError:
+    pass
+try:
+    nir_deserialize = _libraries['FIXME_STUB'].nir_deserialize
+    nir_deserialize.restype = ctypes.POINTER(struct_nir_shader)
+    nir_deserialize.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
+except AttributeError:
+    pass
+try:
+    nir_serialize_function = _libraries['FIXME_STUB'].nir_serialize_function
+    nir_serialize_function.restype = None
+    nir_serialize_function.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_function)]
+except AttributeError:
+    pass
+try:
+    nir_deserialize_function = _libraries['FIXME_STUB'].nir_deserialize_function
+    nir_deserialize_function.restype = ctypes.POINTER(struct_nir_function)
+    nir_deserialize_function.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
+except AttributeError:
+    pass
 __all__ = \
     ['ACCESS_CAN_REORDER', 'ACCESS_CAN_SPECULATE', 'ACCESS_COHERENT',
     'ACCESS_CP_GE_COHERENT_AMD', 'ACCESS_FMASK_LOWERED_AMD',
@@ -15510,7 +15534,8 @@ __all__ = \
     'nir_deref_type__enumvalues', 'nir_deref_type_array',
     'nir_deref_type_array_wildcard', 'nir_deref_type_cast',
     'nir_deref_type_ptr_as_array', 'nir_deref_type_struct',
-    'nir_deref_type_var', 'nir_discard', 'nir_discard_if',
+    'nir_deref_type_var', 'nir_deserialize',
+    'nir_deserialize_function', 'nir_discard', 'nir_discard_if',
     'nir_divergence_analysis', 'nir_divergence_analysis_impl',
     'nir_divergence_ignore_undef_if_phi_srcs',
     'nir_divergence_multiple_workgroup_per_compute_subgroup',
@@ -16811,7 +16836,8 @@ __all__ = \
     'nir_selection_control_divergent_always_taken',
     'nir_selection_control_dont_flatten',
     'nir_selection_control_flatten', 'nir_selection_control_none',
-    'nir_shader', 'nir_shader_add_variable', 'nir_shader_alu_pass',
+    'nir_serialize', 'nir_serialize_function', 'nir_shader',
+    'nir_shader_add_variable', 'nir_shader_alu_pass',
     'nir_shader_as_str', 'nir_shader_as_str_annotated',
     'nir_shader_clear_pass_flags', 'nir_shader_clone',
     'nir_shader_compiler_options', 'nir_shader_create',
