@@ -526,7 +526,7 @@ jobs:
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
           -k "not test_threefry_doesnt_use_long and not test_embedding and not test_load_state_dict_sharded_model_dict_same_axis and not test_instancenorm_3d" \
-          test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
+          test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_sample.py test/test_randomness.py test/test_nn.py test/test_arange.py
     - name: Test const folding
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
