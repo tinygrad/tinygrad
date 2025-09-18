@@ -233,7 +233,7 @@ def sum_acc_dtype(dt:DType):
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
 
-def truncate_fp16(x):
+def float_to_fp16(x):
   try: return struct.unpack('e', struct.pack('e', float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
@@ -310,7 +310,7 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   return float(float32_val)
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  dtypes.float16: truncate_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
+  dtypes.float16: float_to_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
