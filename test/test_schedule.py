@@ -2195,6 +2195,12 @@ class TestCopyFolding(unittest.TestCase):
     add.kernelize()
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
 
+  def test_alu_before_copy(self):
+    buf = Tensor.ones(1).contiguous().realize()
+    a = buf+1
+    b = a.to("CPU")
+    self.assertListEqual(b.tolist(), [2.])
+
   def test_copy_to_same_device(self):
     a = Tensor.empty(4).uop
     b = a.copy_to_device(a.device)
