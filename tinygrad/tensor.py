@@ -1179,7 +1179,7 @@ class Tensor(MathTrait):
             # handle int slicing
             # if we're slicing a symbolic dimension into a int dimension, we can slice untill the bind size
             # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
-            if isinstance(size, UOp): size = size.vmax
+            if isinstance(size, UOp): size = int(size.vmax)
             *boundary, stride = index.indices(cast(SupportsIndex, size))
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]

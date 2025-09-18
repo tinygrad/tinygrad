@@ -171,8 +171,8 @@ replace_buffers = PatternMatcher([
   # STORE (except for meta ops)
   # we have to shrink the buffer back to the symbolic shape
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
-   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).reshape(tuple(
-    d.vmax if isinstance(d, UOp) else d for d in s.shape)).shrink(tuple((0, d) for d in s.shape)),s) for i,x in enumerate(sink.src)], arg=sink.arg)),
+   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).reshape(tuple(int(d.vmax)
+     if isinstance(d, UOp) else d for d in s.shape)).shrink(tuple((0, d) for d in s.shape)),s) for i,x in enumerate(sink.src)], arg=sink.arg)),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
