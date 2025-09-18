@@ -322,9 +322,6 @@ pm_rangeify = pm_mops+PatternMatcher([
   # CONST (or DEFINE_VAR) can't have axes. remove srcs when we INDEX it
   (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(tag=None)),
 
-  # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat())), lambda c: c),
-
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
@@ -398,6 +395,8 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
    lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
 ])
 
 # *****************
