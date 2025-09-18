@@ -322,9 +322,6 @@ pm_rangeify = pm_mops+PatternMatcher([
   # CONST (or DEFINE_VAR) can't have axes. remove srcs when we INDEX it
   (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(tag=None)),
 
-  # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat())), lambda c: c),
-
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
@@ -365,12 +362,10 @@ def cleanup_dead_axes(b:UOp):
 
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
-def remove_bufferize(ctx:set[UOp], src:UOp, buf:UOp, idx:UOp):
+def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
   assert len(buf.src) == len(idx.src), "index on wrong bufferize"
   assert all(x.op is Ops.RANGE for x in buf.src[1:])
-
-  if src in ctx: return None
 
   # if it's user contiguous, we never remove it
   if src.op is Ops.CONTIGUOUS: return None
@@ -394,13 +389,15 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
    lambda idx,b2: idx.src[0].replace(tag=nt if len(nt:=(idx.src[0].tag or ()) + (b2.tag or ())) else None) if idx.src[1:] == b2.src[1:] else None),
   # remove reindexing with cost function
-  (UPat.var("op").f(Ops.BUFFERIZE, allow_any_len=True).f(Ops.INDEX, allow_any_len=True).f(Ops.COPY,allow_any_len=True), lambda ctx,op: ctx.add(op)),
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
    lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
+
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat()), name="copy"), lambda copy,c: copy.const_like(c.arg)),
 ])
 
 # *****************
@@ -578,7 +575,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
-  tsink = graph_rewrite(tsink, pm_cleanups, ctx=set(), bottom_up=True, name="remove costly buffers")
+  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
