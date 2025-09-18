@@ -1,10 +1,10 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic_flat, sym
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
+  off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
   new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
@@ -17,7 +17,7 @@ pm_flatten_range = PatternMatcher([
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  i = 2 if u.op is Ops.STORE else 1
+  i = range_start[u.op]
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
     # check same type
