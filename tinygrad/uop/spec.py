@@ -10,8 +10,12 @@ try:
 
   # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
+  def z3_xor(a,b):
+    if isinstance(a, z3.BoolRef): return a^b
+    assert a==-1 or b==-1, "xor can only be used in indexing if one of the aruments is -1"
+    return -a-1 if b==-1 else -b-1
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
-    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If,
+    Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor,
     Ops.MAX: lambda a,b: z3.If(a<b, b, a), Ops.TRUNC: lambda a: a if a.is_int() else z3.ToReal(z3.If(a >= 0, z3.ToInt(a), -z3.ToInt(-a)))}
   def create_bounded(name:str, vmin, vmax, solver:z3.Solver) -> z3.ArithRef:
     s = z3.Int(name, ctx=solver.ctx)
@@ -38,8 +42,6 @@ try:
       UOp(Ops.NOOP, arg=(ctx[0], create_bounded(f"cast{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0])))),
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x,ctx:
       UOp(Ops.NOOP, arg=(ctx[0], z3.Bool(f"cast{ctx[1].setdefault(x, len(ctx[1]))}",ctx=ctx[0].ctx)))),
-    (UPat(Ops.XOR, dtype=dtypes.ints+(dtypes.bool, ), src=UPat(Ops.NOOP), name="x"),
-      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], z3.BV2Int(z3_alu[x.op](*(z3.Int2BV(s.arg[1], x.dtype.itemsize*8) for s in x.src)))))),
     (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], z3_alu[x.op](*(s.arg[1] for s in x.src))))),
     # A comparison between floats introduces a new bool variable
     (UPat(GroupOp.Comparison, src=UPat(dtype=dtypes.floats), name="x"), lambda x,ctx:
