@@ -153,7 +153,7 @@ def add_stores(ctx, sink: UOp):
   stores = []
   for i,x in enumerate(sink.src):
     gbl = UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i)
-    if x.op is Ops.ASSIGN: stores.append(UOp.store(gbl.view(s.st), s))
+    if x.op is Ops.ASSIGN: stores.append(UOp.store(gbl.view(unwrap(s.st)), s))
     else: stores.append(
       UOp.store(gbl.reshape(tuple(int(d.vmax) if isinstance(d,UOp) else d for d in s.shape)).shrink(tuple((0,d) for d in s.shape)),s))
   return UOp.sink(*stores, arg=sink.arg)
