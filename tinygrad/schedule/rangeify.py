@@ -345,6 +345,12 @@ pm_rangeify = pm_mops+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
+class BufferizeTag:
+  def __init__(self, x): self.x = x
+  def __repr__(self): return f"B({self.x})"
+def tag_bufferize(x:UOp): return x if isinstance(x.tag, BufferizeTag) else x.replace(tag=BufferizeTag(x.tag))
+remove_bufferize_tag = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), lambda x:x.replace(tag=x.tag.x) if isinstance(x.tag,BufferizeTag) else None),])
+
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
   new_rng = []
@@ -369,6 +375,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # if it's user contiguous, we never remove it
   if src.op is Ops.CONTIGUOUS: return None
+  if isinstance(buf.tag, BufferizeTag): return None
 
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
@@ -381,10 +388,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
-
-def pre_bufferize(b:UOp, x:UOp, copy:UOp):
-  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
-  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -401,8 +404,8 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                       .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  (UPat(Ops.COPY, src=(UPat(Ops.BUFFERIZE, name="b").f(Ops.INDEX, allow_any_len=True, name="idx"), UPat()), name="copy"),
+   lambda copy,idx,b: copy.replace(src=(idx.replace(src=(tag_bufferize(b),)+idx.src[1:]), copy.src[1]))),
 ])
 
 # *****************
@@ -589,7 +592,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, remove_bufferize_tag+pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
