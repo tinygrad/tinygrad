@@ -1,6 +1,6 @@
 import unittest, math, operator, subprocess, struct
 from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
+from tinygrad.dtype import DType, DTYPES_DICT, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, CI, DEBUG
 from hypothesis import given, settings, strategies as strat
@@ -106,16 +106,16 @@ class TestHelpers(unittest.TestCase):
       self.assertEqual(dt.min, dt.vec(4).min)
       self.assertEqual(dt.max, dt.vec(4).max)
 
-  def test_truncate_fp16(self):
-    self.assertEqual(truncate_fp16(1), 1)
-    self.assertEqual(truncate_fp16(65504), 65504)
-    self.assertEqual(truncate_fp16(65519.999), 65504)
-    self.assertEqual(truncate_fp16(65520), math.inf)
-    self.assertEqual(truncate_fp16(1e-8), 0.0)
-    self.assertEqual(truncate_fp16(-65504), -65504)
-    self.assertEqual(truncate_fp16(-65519.999), -65504)
-    self.assertEqual(truncate_fp16(-65520), -math.inf)
-    self.assertTrue(math.isnan(truncate_fp16(math.nan)))
+  def test_float_to_fp16(self):
+    self.assertEqual(float_to_fp16(1), 1)
+    self.assertEqual(float_to_fp16(65504), 65504)
+    self.assertEqual(float_to_fp16(65519.999), 65504)
+    self.assertEqual(float_to_fp16(65520), math.inf)
+    self.assertEqual(float_to_fp16(1e-8), 0.0)
+    self.assertEqual(float_to_fp16(-65504), -65504)
+    self.assertEqual(float_to_fp16(-65519.999), -65504)
+    self.assertEqual(float_to_fp16(-65520), -math.inf)
+    self.assertTrue(math.isnan(float_to_fp16(math.nan)))
 
   def test_float_to_bf16(self):
     # TODO: fuzz this better
