@@ -395,9 +395,8 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
    lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
-
   # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("c"), UPat()), name="copy"), lambda copy,c: copy.const_like(c.arg)),
+  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
 ])
 
 # *****************
