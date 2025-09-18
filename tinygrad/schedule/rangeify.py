@@ -345,11 +345,11 @@ pm_rangeify = pm_mops+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-class BufferizeTag:
+class RealizeTag:
   def __init__(self, x): self.x = x
-  def __repr__(self): return f"B({self.x})"
-def tag_bufferize(x:UOp): return x if isinstance(x.tag, BufferizeTag) else x.replace(tag=BufferizeTag(x.tag))
-remove_bufferize_tag = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), lambda x:x.replace(tag=x.tag.x) if isinstance(x.tag,BufferizeTag) else None),])
+  def __repr__(self): return f"R({self.x})"
+def tag_bufferize(x:UOp): return x if isinstance(x.tag, RealizeTag) else x.replace(tag=RealizeTag(x.tag))
+remove_realize_tag = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), lambda x:x.replace(tag=x.tag.x) if isinstance(x.tag,RealizeTag) else None),])
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -375,7 +375,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # if it's user contiguous, we never remove it
   if src.op is Ops.CONTIGUOUS: return None
-  if isinstance(buf.tag, BufferizeTag): return None
+  if isinstance(buf.tag, RealizeTag): return None
 
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
@@ -592,7 +592,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, remove_bufferize_tag+pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, remove_realize_tag+pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
