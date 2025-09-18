@@ -415,7 +415,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopencl:
-    name: ONNX (GPU)+Optimization Tests
+    name: ONNX (CL)+Optimization Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -548,14 +548,17 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: rangeify-minimal-llvm
-        deps: testing_minimal
+        key: rangeify-cl
+        deps: testing
         opencl: 'true'
         llvm: "true"
     - name: Test CL=1 RANGEIFY=1
       run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py test/test_schedule.py test/test_symbolic_ops.py --durations 20
     - name: Test Fuse
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
+    - name: Test ONNX
+      # test_resize_upsample_scales_cubic_align_corners_cpu timed out
+      run: CL=1 RANGEIFY=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py -k "not test_resize_upsample_scales_cubic_align_corners_cpu" --durations=20
 
   testdevectorize:
     name: Linux (devectorize)
