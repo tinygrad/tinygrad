@@ -417,6 +417,38 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_where_on_gated_load_fold(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    ld = d0.index(ridx0, ridx0<50).load()
+    w = (ridx0<50).where(ld, 5)
+    uops = to_uops_list([w])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.LOAD: assert u.src[1].arg==5
+
+  def test_where_on_gated_load_folds_swapped_branches(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    ld = d0.index(ridx0, (ridx0<50).logical_not()).load()
+    w = (ridx0<50).where(5, ld)
+    uops = to_uops_list([w])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.LOAD: assert u.src[1].arg==5
+
+  def test_where_in_store_becomes_gate(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
+    idx = d0.index(ridx0)
+    ld = idx.load()
+    val = (ridx0<50).where(5, ld)
+    st = idx.store(val, ridx0)
+    uops = to_uops_list([st])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.STORE: assert u.src[1].arg==5
+
   def test_load_idx_becomes_int(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)
@@ -560,7 +592,7 @@ class TestUOpGraph(unittest.TestCase):
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     glbl2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
-    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(idx, UOp.const(dtypes.bool, False)),))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(UOp.invalid()),))
     ld1 = UOp(Ops.LOAD, dtypes.int, (glbl2.index(idx, UOp.const(dtypes.bool, True)),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx), ld1+ld0))])
     ld0 = uops[-1].src[-1]
@@ -573,7 +605,7 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 16),), "lidx0")
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
-    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+1, UOp.const(dtypes.bool, False)), barrier))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(UOp.invalid()), barrier))
     ld1 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+2, UOp.const(dtypes.bool, True)), barrier))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx), ld1+ld0))])
 
@@ -586,7 +618,7 @@ class TestUOpGraph(unittest.TestCase):
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
-    st0 = glbl.index(idx0, UOp.const(dtypes.bool, False)).store(val)
+    st0 = glbl.index(UOp.invalid()).store(val)
     st1 = glbl.index(idx0, UOp.const(dtypes.bool, True)).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens

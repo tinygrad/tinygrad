@@ -1,51 +1,29 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import CI, Context, getenv
+from tinygrad.helpers import CI, Context, getenv, RANGEIFY
 from tinygrad.engine.realize import run_schedule
-from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
 
 class TestArange(unittest.TestCase):
-  def _get_flops(self, N, opts=None):
+  def _get_flops(self, N):
     GlobalCounters.reset()
     tt = Tensor.arange(N)
     sched = tt.schedule()
     self.assertEqual(len(sched), 1)
-    p = get_program(sched[-1].ast, opts=opts)
-    print(p.name)
-    #print(p.src)
+    p = get_program(sched[-1].ast)
     ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.estimates.ops
 
-  def test_complexity(self, opts=None, limit=None):
-    f1 = self._get_flops(256, opts)
-    f2 = self._get_flops(2560, opts)
-    print(f"{f1=}, {f2=}")
-    # add 1 to avoid divide by 0. arange is 0 flops now!
-    assert (f1 < 6000 and f2 < 6000) or ((f2+1) / (f1+1) < 16), f"bad complexity, flops {(f2+1) / (f1+1):.1f}X while inputs 10X"
-    if limit is not None and not getenv("PTX"):
-      # PTX counts index ALU in flops
-      assert f1 <= limit, f"{f1=}, {limit=}"
+  def test_complexity(self):
+    self.assertEqual(self._get_flops(256), 0)
+    self.assertEqual(self._get_flops(2560), 0)
 
-  def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=0)
-  def test_complexity_w_unroll2(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 2)], limit=0)
-  def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=0)
-  def test_complexity_w_unroll8(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 8)], limit=0)
-  def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=0)
-
-  if Device.default.renderer.has_local:
-    # TODO: fix limit
-    def test_complexity_w_group(self): return self.test_complexity([Opt(OptOps.GROUP, 0, 16)], limit=81920)
-    def test_complexity_w_group_top(self): return self.test_complexity([Opt(OptOps.GROUPTOP, 0, 16)], limit=106496)
-
-    def test_complexity_w_local(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16)], limit=0)
-    @unittest.skip("doesn't work yet. TODO: this absolutely should work")
-    def test_complexity_w_local_unroll4(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UNROLL, 0, 4)], limit=0)
-    @unittest.skip("doesn't work yet")
-    def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.PADTO, axis=1, arg=32)])
+  def test_arange_cat(self):
+    t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
+    self.assertEqual(t.cat(t).tolist(), [3, 4, 3, 4])
 
 class TestRand(unittest.TestCase):
   def test_fused_rand_less_ops(self, noopt=1):
@@ -133,7 +111,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       sched = X.schedule()
-      self.assertEqual(len(sched), 2)
+      self.assertEqual(len(sched), 1 if RANGEIFY else 2)
       run_schedule(sched)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())

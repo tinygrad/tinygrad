@@ -10,7 +10,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, cast_folding
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
@@ -18,8 +18,8 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
-from tinygrad.codegen.simplify import pm_simplify_ranges
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 @dataclass
 class RewriteStep:
@@ -62,10 +62,11 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    ret.append(RewriteStep(sym, name="initial symbolic"))
+    ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
+    ret.append(RewriteStep(pm_reduce_simplify, name="simplify reduces"))
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
@@ -75,7 +76,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
 
   # add locals
-  ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
+  ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
@@ -94,7 +95,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
   # lower the index dtype to a concrete int
-  ret.append(RewriteStep(pm_lower_index_dtype+cast_folding+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
+  ret.append(RewriteStep(pm_lower_index_dtype+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
 
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))

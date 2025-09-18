@@ -253,8 +253,13 @@ runs:
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF \
-          -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+        CMAKE_ARGS="-Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        if [[ "${{ runner.os }}" == "macOS" ]]; then
+          CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
+        fi
+
+        cmake .. $CMAKE_ARGS
         ninja
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'

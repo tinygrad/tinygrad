@@ -2,14 +2,15 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
-from tinygrad.schedule.rangeify import remove_tags
+
+remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
 axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
@@ -166,7 +167,8 @@ class Scheduler:
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
@@ -179,11 +181,10 @@ class Scheduler:
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
+      valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
-        if rng in b.src[1].sparents:
-          valid = replaced_rng < rng.vmax+1
-          if len(b.src) > 2: valid = b.src[2] & valid
-          replaces[b] = b.replace(src=b.src[0:2]+(valid,))
+        if rng in (i:=b.src[1].get_idx()).sparents:
+          replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
@@ -315,18 +316,17 @@ def apply_opts(ctx:Renderer, ast:UOp):
   if ast.tag is not None: return None
   k = Scheduler(ast, ctx)
   k.convert_loop_to_global()
-  if BEAM >= 1:
+  if ast.arg is not None and ast.arg.opts_to_apply is not None:
+    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
+  elif BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ctx.device)
     k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-  elif ast.arg is not None and ast.arg.opts_to_apply is not None:
-    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if all(len(u.src) == 1 for u in ast.parents if u.op is Ops.LOAD):
-      # TODO: why is the returned k from hand_coded_optimizations different than this?
-      for opt in hand_coded_optimizations(k).applied_opts: k.apply_opt(opt)
+      k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 pm_postrange_opt = PatternMatcher([

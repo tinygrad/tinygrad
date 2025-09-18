@@ -9,7 +9,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
@@ -516,10 +516,6 @@ class TestTinygrad(unittest.TestCase):
     print(c)
 
   def test_env_overwrite_default_device(self):
-    subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
-                    shell=True, check=True)
-    subprocess.run(['NPY=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"NPY\\""'],
-                    shell=True, check=True)
     subprocess.run([f'{Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
     subprocess.run([f'DISK=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
@@ -554,6 +550,11 @@ class TestTinygrad(unittest.TestCase):
   def test_shrink(self):
     t = Tensor.arange(32).contiguous().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
+    self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
+    t = t.reshape(4, 8).contiguous().realize()
+    self.assertListEqual(t.shrink_to(2, 2).tolist(), [[0, 1], [8, 9]])
+    with self.assertRaises(ValueError): t.shrink_to(2)
+    with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
 
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
@@ -648,16 +649,21 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_pad(self):
     t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), value=1)
-    assert t.shape == (3, 2, 2)
+    self.assertEqual(t.shape, (3, 2, 2))
     np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
 
     t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), value=1)
-    assert t.shape == (3, 4, 0)
+    self.assertEqual(t.shape, (3, 4, 0))
     np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
 
     t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), value=1)
-    assert t.shape == (5, 2, 0)
+    self.assertEqual(t.shape, (5, 2, 0))
     np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
+
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(4).numpy(), [1, 2, 0, 0])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
+    with self.assertRaises(TypeError): Tensor([1, 2]).pad_to(2, 3)
+    with self.assertRaises(TypeError): Tensor([[1, 2]]).pad_to(3)
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -915,12 +921,16 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
-  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX always convert Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
+
+  def test_arange_raise_overflow(self):
+    with self.assertRaises(ValueError):
+      self._schedule_render(Tensor.arange(2**33, dtype=dtypes.int))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
