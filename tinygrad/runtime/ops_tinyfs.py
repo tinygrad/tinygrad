@@ -20,7 +20,6 @@ class TinyFSDevice(Compiled):
     while not info.endswith(b"\r\n"):
       info += s.recv(1024)
     self.node_info = json.loads(info[:-2])
-    print(self.node_info)
 
 class TinyFSBuffer:
   def __init__(self, device:TinyFSDevice, size:int, offset=0, sock=None, request_id=None, locs=None, src=None):
