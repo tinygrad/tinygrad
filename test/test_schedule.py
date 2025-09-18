@@ -2180,13 +2180,13 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
-  @expect_rangeify_fails
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU")
     run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
+    self.assertEqual(b.device, "CPU")
 
   def test_alu_after_copy(self):
     a = Tensor.ones((4,)).to("CPU")
