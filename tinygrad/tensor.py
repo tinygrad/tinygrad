@@ -460,9 +460,11 @@ class Tensor(MathTrait):
     base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
     tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
 
+    to_device = "CPU" if self.device.startswith("DISK") else self.device
+
     level_chunks = base_chunks
     for _ in range(tree_depth + 1):
-      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(self.device)
+      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
       if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
       level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
 
