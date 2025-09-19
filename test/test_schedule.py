@@ -425,7 +425,6 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.full((4, 4), 1.).contiguous().realize()
     check_schedule([a+b, a+b], 1)
 
-  @expect_rangeify_fails
   def test_const_realize(self):
     t = Tensor.ones(2)
     check_schedule(t[0], 0)

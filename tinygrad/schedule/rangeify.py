@@ -306,6 +306,10 @@ def might_end_axis(idx:UOp):
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
+def unprocessed_mop(x:UOp):
+  assert x.src[0].op in GroupOp.Movement.union({*ALWAYS_CONTIGUOUS, Ops.REALIZE, Ops.BUFFERIZE}), f"unprocessed movement op on {x.src[0]}"
+  return x.replace(tag=None)
+
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
@@ -340,6 +344,9 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # assert if there's any index we didn't process
   (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
+
+  # if any movement ops make it here they didn't get INDEX, remove tags
+  (UPat(GroupOp.Movement, name="x"), unprocessed_mop),
 ])
 
 # *****************
