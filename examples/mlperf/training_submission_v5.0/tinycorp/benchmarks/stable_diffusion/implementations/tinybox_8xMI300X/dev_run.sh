@@ -9,7 +9,8 @@ source venv/bin/activate
 pip list
 apt list --installed | grep amdgpu
 
-export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 IGNORE_JIT_FIRST_BEAM=1 HCQDEV_WAIT_TIMEOUT_MS=300000
+#export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 IGNORE_JIT_FIRST_BEAM=1 HCQDEV_WAIT_TIMEOUT_MS=300000
+HCQDEV_WAIT_TIMEOUT_MS=300000
 export AMD_LLVM=0 # bf16 seems to require this
 
 export DATADIR="/raid/datasets/stable_diffusion"
@@ -30,7 +31,7 @@ mkdir -p $UNET_CKPTDIR
 
 for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
 sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750
-EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09100305/run_eval_15240" python3 examples/mlperf/model_eval.py
+RUNMLPERF=1 python3 examples/mlperf/model_train.py
 
 #for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
 #sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 450

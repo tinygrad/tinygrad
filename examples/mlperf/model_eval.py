@@ -335,14 +335,7 @@ def eval_stable_diffusion():
   print(eval_queue)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
-  model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-eval", CKPTDIR / "sd" / "512-base-ema.ckpt")
-
-  if len(GPUS) > 1:
-    to_move = [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
-    for p in to_move:
-      p.to_(GPUS)
-    with Context(BEAM=0):
-      Tensor.realize(*to_move)
+  model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-eval", CKPTDIR / "sd" / "512-base-ema.ckpt", GPUS)
 
   # load prompts for generating images for validation; 2 MB of data total
   with open(DATADIR / "coco2014" / "val2014_30k.tsv") as f:

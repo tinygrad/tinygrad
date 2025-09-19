@@ -2,7 +2,7 @@ import math
 from typing import Union
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix
+from tinygrad.helpers import prod, argfix, Context, BEAM
 from tinygrad.nn.state import get_parameters
 from extra.models.unet import UNetModel
 
@@ -146,7 +146,7 @@ class AutocastConv2d(nn.Conv2d):
     dtype = type(self).cast_dtype
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
 
-def init_stable_diffusion(version:str, pretrained:str):
+def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
   from examples.stable_diffusion import StableDiffusion
   from tinygrad.helpers import getenv
   from tinygrad.nn.state import safe_load, safe_save, load_state_dict, get_state_dict
@@ -165,4 +165,13 @@ def init_stable_diffusion(version:str, pretrained:str):
 
   sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
+
+  if len(GPUS) > 1:
+    to_move = [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
+    if version == "v2-mlperf-train": to_move += get_parameters(unet) + get_parameters(model.cond_stage_model)
+    for p in to_move:
+      p.to_(GPUS)
+    with Context(BEAM=0):
+      Tensor.realize(*to_move)
+
   return model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod
