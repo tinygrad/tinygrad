@@ -426,11 +426,10 @@ class TestSchedule(unittest.TestCase):
     check_schedule([a+b, a+b], 1)
 
   @expect_rangeify_fails
-  def test_const_folding_sym(self):
-    t = Tensor.ones(10)
-    for i in range(1, 3):
-      vi = UOp.variable("i", 1, 10).bind(i)
-      t[:vi].realize()
+  def test_const_realize(self):
+    t = Tensor.ones(2)
+    check_schedule(t[0], 0)
+    check_schedule(t[1], 0)
 
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
