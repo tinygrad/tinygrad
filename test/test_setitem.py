@@ -34,9 +34,11 @@ class TestSetitem(unittest.TestCase):
     self.assertListEqual(t.tolist(), [0, 1, 11, 3, 11, 5, 6, 7, 8, 9])
 
   def test_setitem_inplace_mul(self):
-    t = Tensor.arange(10).realize()
-    t[:3] *= 10
-    self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
+    # This test fails without RANGEIFY
+    with Context(RANGEIFY=1):
+      t = Tensor.arange(10).realize()
+      t[:3] *= 10
+      self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
   def test_setitem_into_unrealized(self):
     t = Tensor.arange(4).reshape(2, 2)
