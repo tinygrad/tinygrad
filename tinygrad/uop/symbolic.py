@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 from tinygrad.uop.decompositions import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -164,7 +164,7 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
@@ -175,7 +175,7 @@ def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
@@ -186,14 +186,28 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
-  if (gcd := math.gcd(y.arg, *factors)) == 1: return None
-  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
+  gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
+  if gcd.op is Ops.CONST and gcd.arg==1: return None
+  ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
   return ret*gcd if d.op is Ops.MOD else ret
+
+def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
+  # (gcd*x+r)//(gcd*d) -> (x+(r%d)//gcd)//d + r//(gcd*d)
+  # (gcd*x+r)%(gcd*d) -> gcd*(x+(r%d)//gcd)%d + r%gcd
+  # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
+  if ((c := y.arg) < 0) or x.vmin<0: return None
+  x_no_const, const = x.pop_const()
+  gcd = UOp.gcd(*x_no_const.split_uop(Ops.ADD), y).simplify()
+  assert gcd.op is Ops.CONST
+  if gcd.arg==1: return None
+  new_x = unwrap(x_no_const.divide_exact(gcd)).simplify() + (const%c)//gcd
+  if new_x.vmin<0: return None
+  ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
+  return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
   # div is the smallest factor of the denominator (greater than 1) out of all "factors"
   # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
@@ -202,27 +216,22 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
   return None
 
-def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and take out the quotient and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  x_no_const,const = x.pop_const()
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x_no_const.split_uop(Ops.ADD)])
-  quotients, remainders = zip(*[divmod(f, c) for f in factors])
-  gcd = math.gcd(c, *remainders)  # gcd without const!
-  if const%c==const and gcd==1 and not any(r==0 or (r!=f and d.op is Ops.MOD) for r,f in zip(remainders, factors)): return None
-
-  quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
-  for q,r,f,v in zip(quotients, remainders, factors, terms):
-    if d.op is Ops.IDIV and r!=0:
-      rem += f//gcd * v
-    else:
-      rem += r//gcd * v
-      quo += q * v
-
-  # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
-  if d.op is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
-  return rem//(c//gcd)+quo
+def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
+  # for mod we go further and take the remainder of all factors to reduce their size
+  # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
+  if y.vmin<0 or x.vmin<0: return None
+  quo, rem = [], []
+  for u in x.split_uop(Ops.ADD):
+    if (q:=u.divide_exact(y)) is not None: quo.append(q)
+    # if this is mod and y is a const, we can make the remainder factor sm
+    elif d.op is Ops.MOD and y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
+      rem.append(u.divides(c)*(c%y.arg))
+      quo.append(u.const_like(0))  # we append this so we can check if something changed
+    else: rem.append(u)
+  new_x = sum(rem)+x.const_like(0)
+  if len(quo)==0 or new_x.vmin<0: return None
+  return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -334,20 +343,23 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
+  (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), gcd_with_remainder),
   (UPat(Ops.MOD, dtypes.index, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat((Ops.IDIV), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
-  (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
-  (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), factor_remainder),
+  (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax<=0 else None),
+  ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
+    lambda x,c,n,d: ((x+c.arg%d.arg)//d + c.arg//d.arg) if c.arg%d.arg!=c.arg and x.vmin>=0 and n.vmin>=0 and d.arg>0 else None),
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
   # ** mod **
   # mod folding
-  (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
-  (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
+  (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
+  (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) else None),
