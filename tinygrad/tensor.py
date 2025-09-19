@@ -1317,8 +1317,6 @@ class Tensor(MathTrait):
       tdims.append(dim)
     tensors = [i for i in indices if isinstance(i, Tensor)]
     tshape = _broadcast_shape(*(t.shape for t in tensors)) if tensors else ()
-    print(f"3. {tdims=}, {tshape=}")
-    print(f"3. {indices=}")
 
     # 4-1. indexed_shape computation
     indexed_shape: list[sint] = []
@@ -1331,7 +1329,6 @@ class Tensor(MathTrait):
           if (stop - start) * step < 0: return # indexed shape is empty! No need to assign any value
           indexed_shape.append((abs(stop - start) + abs(step) - 1) // abs(step))
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-    print(f"4-1. {indexed_shape=}")
 
     # 4-2. Handling tensor indexing
     permuted = False
@@ -1341,7 +1338,6 @@ class Tensor(MathTrait):
       if len(tdims) > 1 and tuple(tdims) != tuple(range(first, last+1)): permuted, first = True, 0
       indexed_shape = indexed_shape[:first] + list(tshape) + indexed_shape[first:]
       axes = tuple(range(first, first + len(tshape)))
-    print(f"4-2. {indexed_shape=}, {permuted=}, {axes=}")
 
     # 5. mask generation
     masks = []
@@ -1361,9 +1357,7 @@ class Tensor(MathTrait):
         case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
       extra = x.ndim - dim - 1
       if len(tdims) > 0 and not permuted and dim < tdims[0]: extra += len(tshape)
-      print(f"5-1a. {dim=}, {size=}, {index=}, {mask.shape=}, {extra=}")
       mask = mask.reshape((size,) + (1,)*extra)
-      print(f"5-1b. {mask.shape=}")
       masks.append(mask)
 
     # 5-2. mask for tensor indices
@@ -1373,9 +1367,7 @@ class Tensor(MathTrait):
       except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
       if permuted: mask = mask.reshape(tshape + (1,)*(x.ndim)) # (2,3,4) + (1,1,1,1,1)
       else: mask = mask.reshape(tshape + (1,)*(x.ndim - tdims[0])) # (2,3,4) + (1,1,1,1)
-      print(f"5-2a. {dim=}, {t.shape=}, {mask.shape=}")
       mask = mask._one_hot_along_dim(num_classes=x.shape[dim], dim=dim - x.ndim)
-      print(f"5-2b. {mask.shape=}")
       masks.append(mask)
 
     # 5-3. combine all masks
@@ -1383,24 +1375,18 @@ class Tensor(MathTrait):
       self.assign(v._broadcast_to(x.shape))
       return # no need to do anymore
     combined_mask = functools.reduce(lambda x,y: x.mul(y), masks)
-    print(f"5-3. {combined_mask.shape=}")
 
     # 6. broadcast and pad values
-    print(f"6-0. {v.shape=}")
     v = v.squeeze()._broadcast_to(tuple(sh for sh in indexed_shape if sh != 1)).reshape(indexed_shape)
-    print(f"6-1. {v.shape=} (After broadcast)")
     for dim in tdims:
       v = v.unsqueeze(dim + len(tshape))
     v = v.expand(tuple(x.shape[i-len(tshape)] if len(tshape) < i <= len(tshape) + len(tdims) else None for i,dim in enumerate(v.shape)))
-    print(f"6-1a. {v.shape=} (After unsqueeze)")
     for dim, (size, index) in enumerate(zip(x.shape, nont_indices)):
       if not isinstance(index, slice): continue
-      print(f"6-1b. {dim=}, {size=}, {index=}, {v.shape=}")
       # process slice for padding
       start, _, step = index.indices(cast(SupportsIndex, size))
       # modify dim to be dim in indexed_shape
       if len(tdims) > 0 and (permuted or dim >= tdims[0]): dim += len(tshape)
-      print(f"6-1c. {dim=}, {start=}, {step=}")
       if step < 0: v = v.flip(dim)
       if abs(step) > 1: v = v.repeat_interleave(abs(step), dim=dim)
       # calculate padding
@@ -1413,7 +1399,6 @@ class Tensor(MathTrait):
       # apply padding
       pad_spec = (None,) * dim + ((left_pad, right_pad),) + (None,) * (v.ndim - dim - 1)
       v = v.pad(pad_spec)
-      print(f"6-1d. {pad_spec=}, {v.shape=}")
 
     # 7. Assign the masked value
     res = _masked_setitem(x, v, combined_mask, axes)
