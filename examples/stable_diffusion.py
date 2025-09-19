@@ -178,9 +178,15 @@ class StableDiffusion:
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
       if pretrained:
+        print("loading text encoder")
         weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
         weights["model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
-        load_state_dict(model.cond_stage_model, weights)
+        load_state_dict(self.cond_stage_model, weights)
+        # only the eval model needs the decoder
+        if version == "v2-mlperf-eval":
+          print("loading image latent encoder")
+          weights = {k.replace("first_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("first_stage_model.")}
+          load_state_dict(self.first_stage_model, weights)
 
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_init_params))
     if version == "v2-mlperf-train":

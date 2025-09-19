@@ -1,18 +1,11 @@
 #!/bin/bash
-for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
-sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 450
 
+source venv/bin/activate
 # dependencies
-#pip install tqdm
-#pip install numpy
-#pip install ftfy
-#pip install regex
-#pip install pillow
-#pip install scipy
+#pip install tqdm, numpy, ftfy, regex, pillow, scipy, wandb
 # webdataset depends on torch.utils.data.DataLoader
 #pip install --index-url https://download.pytorch.org/whl/cpu torch
 #pip install webdataset
-source venv/bin/activate
 pip list
 apt list --installed | grep amdgpu
 
@@ -26,18 +19,22 @@ export MODEL="stable_diffusion" PYTHONPATH="."
 export GPUS=8 BS=304
 export CONTEXT_BS=816 DENOISE_BS=600 DECODE_BS=384 INCEPTION_BS=560 CLIP_BS=240
 export WANDB=1
-export PARALLEL=0
+export PARALLEL=4
 
 DATETIME=$(date "+%m%d%H%M")
 #LOGFILE="sd_mi300x_${DATETIME}.log"
 export UNET_CKPTDIR="$HOME/stable_diffusion/checkpoints/training_checkpoints/${DATETIME}"
 mkdir -p $UNET_CKPTDIR
-
 #export RESUME_CKPTDIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09100305"
 #export RESUME_ITR=15240
-RUNMLPERF=1 python3 examples/mlperf/model_train.py
-TOTAL_CKPTS=6 LEARNING_RATE="2.5e-7" RUNMLPERF=1 python3 examples/mlperf/model_train.py && \
-mkdir -p $UNET_CKPTDIR/run_eval && \
-ln -s "${UNET_CKPTDIR}/10110.safetensors" "${UNET_CKPTDIR}/run_eval/10110.safetensors" && \
-ln -s "${UNET_CKPTDIR}/8425.safetensors" "${UNET_CKPTDIR}/run_eval/8425.safetensors" && \
-EVAL_CKPT_DIR="$UNET_CKPTDIR/run_eval" RUN_EVAL=1 EVAL_ONLY=1 RUNMLPERF=1 python3 examples/mlperf/model_train.py
+
+for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
+sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750
+EVAL_CKPT_DIR="/home/hooved/stable_diffusion/checkpoints/training_checkpoints/09100305/run_eval_15240" python3 examples/mlperf/model_eval.py
+
+#for i in {0..7}; do sudo rocm-smi -d $i --setperfdeterminism 1500; done
+#sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 450
+#TOTAL_CKPTS=10 LEARNING_RATE="2.5e-7" RUNMLPERF=1 python3 examples/mlperf/model_train.py
+#TOTAL_CKPTS=10 LEARNING_RATE="2.5e-7" RUNMLPERF=1 python3 examples/mlperf/model_train.py && \
+#sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750 && \
+#EVAL_CKPT_DIR=$UNET_CKPTDIR python3 examples/mlperf/model_eval.py

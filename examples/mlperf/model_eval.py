@@ -312,14 +312,37 @@ def eval_stable_diffusion():
   CLIP_BS            = config["CLIP_BS"]                = getenv("CLIP_BS", 1 * len(GPUS))
   EVAL_CKPT_DIR      = config["EVAL_CKPT_DIR"]          = getenv("EVAL_CKPT_DIR", "")
 
-  assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
-  print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
   if (WANDB := getenv("WANDB", "")):
     import wandb
     wandb.init(config=config, project="MLPerf-Stable-Diffusion")
 
+  assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
+  print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
+  eval_queue:list[tuple[int, Path]] = []
+  for p in Path(EVAL_CKPT_DIR).iterdir():
+    if p.name.startswith("wandb_run_id_"):
+      if WANDB:
+        wandb_run_id = p.name.split("wandb_run_id_")
+        if len(wandb_run_id) > 0:
+          wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
+    elif p.name.endswith(".safetensors"):
+      ckpt_iteration = p.name.split(".safetensors")[0]
+      #if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
+      if ckpt_iteration.startswith("backup_"): continue
+      assert ckpt_iteration.isdigit(), f"invalid checkpoint name: {p.name}, expected <digits>.safetensors or backup_<digits>.safetensors"
+      eval_queue.append((int(ckpt_iteration), p))
+  assert len(eval_queue), f'no files ending with ".safetensors" were found in {EVAL_CKPT_DIR}'
+  print(eval_queue)
+
   Tensor.manual_seed(seed)  # seed for weight initialization
   model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-eval", CKPTDIR / "sd" / "512-base-ema.ckpt")
+
+  if len(GPUS) > 1:
+    to_move = [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
+    for p in to_move:
+      p.to_(GPUS)
+    with Context(BEAM=0):
+      Tensor.realize(*to_move)
 
   # load prompts for generating images for validation; 2 MB of data total
   with open(DATADIR / "coco2014" / "val2014_30k.tsv") as f:
@@ -485,20 +508,6 @@ def eval_stable_diffusion():
       for name in disk_tensor_names:
         Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
     return clip_score, fid_score
-
-  for p in Path(EVAL_CKPT_DIR).iterdir():
-    eval_queue:list[tuple[int, Path]] = []
-    if p.name.startswith("wandb_run_id_"):
-      if WANDB:
-        wandb_run_id = p.name.split("wandb_run_id_")
-        if len(wandb_run_id) > 0:
-          wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
-    elif p.name.endswith(".safetensors"):
-      ckpt_iteration = p.name.split(".safetensors")[0]
-      if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
-      assert ckpt_iteration.isdigit(), f"invalid checkpoint name: {p.name}, expected <digits>.safetensors or backup_<digits>.safetensors"
-      eval_queue.append((int(ckpt_iteration), p))
-  assert len(eval_queue), f'no files ending with ".safetensors" were found in {EVAL_CKPT_DIR}'
 
   # evaluate checkpoints in reverse chronological order
   for ckpt_iteration, p in sorted(eval_queue, reverse=True):
