@@ -425,6 +425,11 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.full((4, 4), 1.).contiguous().realize()
     check_schedule([a+b, a+b], 1)
 
+  def test_const_realize(self):
+    t = Tensor.ones(2)
+    check_schedule(t[0], 0)
+    check_schedule(t[1], 0)
+
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
     out = y.sum(keepdim=True).sqrt().neg()
