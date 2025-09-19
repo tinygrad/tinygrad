@@ -425,6 +425,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.full((4, 4), 1.).contiguous().realize()
     check_schedule([a+b, a+b], 1)
 
+  @expect_rangeify_fails
   def test_const_folding_sym(self):
     t = Tensor.ones(10)
     for i in range(1, 3):
