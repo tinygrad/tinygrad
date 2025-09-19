@@ -13,7 +13,7 @@ class TinyFSDevice(Compiled):
     # fetch node info
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
-    s.send(f"INFO\r\n".encode())
+    s.send("INFO\r\n".encode())
     s.recv(16)
 
     info = b""
@@ -105,6 +105,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
     workers = [asyncio.create_task(_worker()) for _ in range(nw)]
     await queue.join()
+    await asyncio.gather(*workers)
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
     assert offset == 0, f"only offset 0 supported, found offset {offset}"
