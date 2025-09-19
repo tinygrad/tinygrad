@@ -2,7 +2,7 @@ import math
 from typing import Union
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix, Context, BEAM
+from tinygrad.helpers import prod, argfix, Context
 from tinygrad.nn.state import get_parameters
 from extra.models.unet import UNetModel
 

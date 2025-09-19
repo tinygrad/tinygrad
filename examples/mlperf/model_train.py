@@ -1507,7 +1507,7 @@ def train_stable_diffusion():
   seed               = config["seed"]                   = getenv("SEED", 12345)
   # ** hyperparameters **
   BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
-  BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 1.25e-7)
+  BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 2.5e-7)
   # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
@@ -1621,6 +1621,7 @@ def train_stable_diffusion():
 
     if i - RESUME_ITR == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
+      print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       
     if WANDB:
       wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,

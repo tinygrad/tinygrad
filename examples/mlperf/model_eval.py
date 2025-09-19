@@ -399,8 +399,8 @@ def eval_stable_diffusion():
     models = (cond_stage, unet, first_stage, inception, clip)
     jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, decode, jit_inception:=TinyJit(inception), jit_clip:=TinyJit(clip.get_clip_score))
     all_bs = (CONTEXT_BS, DENOISE_BS, DECODE_BS, INCEPTION_BS, CLIP_BS)
-    if (limit_eval_samples:=getenv("LIMIT_EVAL_SAMPLES", len(eval_inputs))):
-      eval_inputs = eval_inputs[0:limit_eval_samples]
+    if (BEAM_EVAL_SAMPLES:=getenv("BEAM_EVAL_SAMPLES", 0)) and BEAM_EVAL_SAMPLES > 0:
+      eval_inputs = eval_inputs[0:BEAM_EVAL_SAMPLES]
     output_shapes = [(ns:=len(eval_inputs),77), (ns,77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
     # Writing progress to disk lets us resume eval if we crash
     stages = ["tokens", "embeds", "latents", "imgs", "inception", "clip"]
@@ -500,6 +500,12 @@ def eval_stable_diffusion():
     if not getenv("KEEP_EVAL_CACHE", ""):
       for name in disk_tensor_names:
         Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
+    
+    if BEAM_EVAL_SAMPLES:
+      print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
+      import sys
+      sys.exit() # Don't eval additional models; we don't care about clip/fid scores when running BEAM on eval sample subset
+
     return clip_score, fid_score
 
   # evaluate checkpoints in reverse chronological order
