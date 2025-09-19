@@ -1498,7 +1498,6 @@ def train_stable_diffusion():
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   from examples.mlperf.initializers import init_stable_diffusion
-  from tinygrad.helpers import Context
   from examples.mlperf.helpers import get_training_state, load_training_state
   import pickle
   import numpy as np
@@ -1619,14 +1618,6 @@ def train_stable_diffusion():
     loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
     loss_item, lr_item = loss.item(), lr.item()
     t2 = time.perf_counter()
-    #if i - RESUME_ITR == 1 or t2-t1 > 3.0:
-      #if i - RESUME_ITR == 1: print("testing reset")
-      #else: print("attempting reset")
-      #for x in GPUS:
-        ##Device[x].synchronize()
-        #Tensor.zeros(2,2, device=x).contiguous().realize().to("CPU").realize()
-      #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setperfdeterminism", "1500",]
-      #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
     if i - RESUME_ITR == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
@@ -1661,11 +1652,6 @@ def train_stable_diffusion():
           print(f"deleting {to_delete.name}")
           to_delete.unlink()
 
-    # because we can't resume from later checkpoints, limit power for more stability
-    #if i == 2_500_000 // BS:
-      #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setpoweroverdrive", "450",]
-      #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
-
     if i % CKPT_STEP_INTERVAL == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
       # "evaluation is done offline, the time is not counted towards the submission time."
@@ -1679,13 +1665,11 @@ def train_stable_diffusion():
 
     t3 = time.perf_counter()
     if WANDB: wandb.log(wandb_log)
-    #rocm_out = subprocess.check_output(["rocm-smi"], text=True)
     t5 = time.perf_counter()
     print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
   loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
   t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
   """)
-    #print("rocm-smi output:\n" + rocm_out + "\n")
     t6 = time.perf_counter()
 
 if __name__ == "__main__":

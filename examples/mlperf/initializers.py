@@ -157,8 +157,6 @@ def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
 
   # this seems to prevent a lot of memory use somehow, allowing bigger BS
   Tensor.realize(*get_parameters(unet))
-  #load_state_dict(unet, get_state_dict(unet))
-
   safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
   load_state_dict(unet, safe_load(init_fn))
   Path(init_fn).unlink()
