@@ -153,7 +153,9 @@ def add_stores(ctx, sink: UOp):
   stores = []
   for i,x in enumerate(sink.src):
     gbl = UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i)
+    # if this is an assign then we already have a buffer with a view that should be the target of the store
     if x.op is Ops.ASSIGN: stores.append(UOp.store(gbl.view(unwrap(s.st)), s))
+    # otherwise we have to create the shapetracker and shrink it to the correct symbolic shape
     else: stores.append(
       UOp.store(gbl.reshape(tuple(int(d.vmax) if isinstance(d,UOp) else d for d in s.shape)).shrink(tuple((0,d) for d in s.shape)),s))
   return UOp.sink(*stores, arg=sink.arg)
@@ -177,7 +179,6 @@ replace_buffers = PatternMatcher([
   # no SINK for meta ops
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
   # STORE (except for meta ops)
-  # we have to shrink the buffer back to the symbolic shape
   (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), add_stores),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
