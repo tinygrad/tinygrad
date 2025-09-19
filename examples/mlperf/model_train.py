@@ -1,4 +1,3 @@
-import globvars as gv
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
@@ -1522,8 +1521,7 @@ def train_stable_diffusion():
   if RESUME_ITR or RESUME_CKPTDIR: assert RESUME_ITR and RESUME_CKPTDIR
 
   print(f"training on {GPUS}")
-  #lr = BS * BASE_LR
-  lr = BASE_LR
+  lr = BS * BASE_LR
   print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
   print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
   for x in GPUS: Device[x]
@@ -1533,26 +1531,23 @@ def train_stable_diffusion():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
   model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-train", CKPTDIR / "sd" / "512-base-ema.ckpt", GPUS)
-  load_state_dict(unet, gv.unet)
 
   optimizer = AdamW(get_parameters(unet))
   lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
   lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
 
   @TinyJit
-  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, timestep, latent_randn, noise, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
-  #def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
     optimizer.zero_grad()
 
-    #timestep = Tensor.randint(BS, low=0, high=model.alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
-    #latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
-    #noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    timestep = Tensor.randint(BS, low=0, high=model.alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
     for t in (mean, logvar, tokens, timestep, latent_randn, noise):
       t.shard_(GPUS, axis=0)
 
     std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
-    latent = (mean + std * latent_randn).cast(dtypes.bfloat16) * 0.18215
-    #latent = (mean + std * latent_randn) * 0.18215
+    latent = (mean + std * latent_randn) * 0.18215
 
     sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
     sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
@@ -1595,10 +1590,6 @@ def train_stable_diffusion():
 
   t0 = t6 = time.perf_counter()
   for i, batch in enumerate(dl, start=1):
-    if i == 1:
-      # in ref: first sample generates non-finite grad with fp16/loss scaler, which skips the opt step, but not lr_scheduler.step
-      lr_scheduler.step()
-      continue
     loop_time = time.perf_counter() - t0
     t0 = time.perf_counter()
     dl_time = t0 - t6
@@ -1606,26 +1597,11 @@ def train_stable_diffusion():
     GlobalCounters.reset()
     seen_keys += batch["__key__"]
 
-    #mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
-    #mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-    mean_logvar = [gv.data["mean_logvar"][i-1:i].numpy()] * BS
-    mean, logvar = np.split(np.concatenate(mean_logvar, axis=0), 2, axis=1)
+    mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
     mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
-
-    #tokens = []
-    #for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
-    #tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
-    tokens = model.cond_stage_model.tokenizer.encode(gv.prompts[i-1], pad_with_zeros=True) * BS
+    tokens = []
+    for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
     tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
-
-    timestep = gv.data["timestep"][i-1:i]
-    timestep = Tensor.cat(*([timestep] * BS)).cast(dtypes.int).to(GPUS[0])
-
-    latent_randn = gv.data['latent_randn'][i-1:i]
-    latent_randn = Tensor.cat(*([latent_randn] * BS)).to(GPUS[0])
-
-    noise = gv.data["noise"][i-1:i]
-    noise = Tensor.cat(*([noise] * BS)).to(GPUS[0])
 
     if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
       Tensor.realize(mean, logvar, tokens)
@@ -1640,10 +1616,17 @@ def train_stable_diffusion():
       print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
 
     t1 = time.perf_counter()
-    #loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
-    loss, lr = train_step(mean, logvar, tokens, timestep, latent_randn, noise, unet, optimizer, lr_scheduler)
+    loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
     loss_item, lr_item = loss.item(), lr.item()
     t2 = time.perf_counter()
+    #if i - RESUME_ITR == 1 or t2-t1 > 3.0:
+      #if i - RESUME_ITR == 1: print("testing reset")
+      #else: print("attempting reset")
+      #for x in GPUS:
+        ##Device[x].synchronize()
+        #Tensor.zeros(2,2, device=x).contiguous().realize().to("CPU").realize()
+      #cmd = ["sudo", "rocm-smi", "-d", "0", "1", "2", "3", "4", "5", "6", "7", "--setperfdeterminism", "1500",]
+      #res = subprocess.run(cmd, check=True, capture_output=True, text=True)
 
     if i - RESUME_ITR == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
@@ -1703,23 +1686,6 @@ def train_stable_diffusion():
   t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
   """)
     #print("rocm-smi output:\n" + rocm_out + "\n")
-
-    if i == 20:
-      print("out.2.weight")
-      gv.md(gv.data["out.2.weight"].to(GPUS), unet.out[2].weight)
-      # diff.abs().mean(): 3.35857834599107e-11
-      # a.abs().mean(): 1.2747265465407054e-08
-      # diff.abs().max(): 5.038442996152526e-10
-
-      print("out.2.bias")
-      gv.md(gv.data["out.2.bias"].to(GPUS), unet.out[2].bias)
-      # diff.abs().mean(): 2.6685320619890263e-12
-      # a.abs().mean(): 1.6649142509095327e-08
-      # diff.abs().max(): 5.149658477421326e-12
-
-      import sys
-      sys.exit()
-
     t6 = time.perf_counter()
 
 if __name__ == "__main__":
