@@ -620,7 +620,7 @@ class TestJitFree(unittest.TestCase):
     fxn.captured.free_intermediates()
     savings_after_free = pre_free - GlobalCounters.mem_used
 
-    expected_savings = (len(inp) * dtypes.float32.itemsize * 2) + dtypes.float32.itemsize # (t1 and t2) + out
+    expected_savings = (len(inp) * inp.dtype.itemsize * 2) + dtypes.float32.itemsize # (t1 and t2) + out
 
     self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
