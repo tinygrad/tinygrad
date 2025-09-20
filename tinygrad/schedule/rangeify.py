@@ -35,11 +35,12 @@ earliest_rewrites = double_reshape+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
   # copy reorder
+  # this breaks the JIT
   # TODO: this is causing many copies wih the replace tag None
   # RESHAPE after COPY
-  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # TODO: this should be BUFFER_VIEW
-  (UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
+  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
@@ -65,7 +66,7 @@ def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
-    if s.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+    if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
