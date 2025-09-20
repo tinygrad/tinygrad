@@ -836,6 +836,8 @@ jobs:
         llvm: 'true'
     - name: Run unit tests
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: RANGEIFY=1
+      run: RANGEIFY=1 DEBUG=2 METAL=1 python3 -m pytest -s test/test_ops.py::TestOps::test_bias_conv_transpose2d
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
