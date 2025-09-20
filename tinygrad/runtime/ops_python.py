@@ -5,7 +5,7 @@
 from typing import Any, TYPE_CHECKING, cast
 import pickle, base64, itertools, time, struct, sys
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16, float_to_fp8, fp8_to_float
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE, cpu_profile
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
@@ -38,8 +38,13 @@ def _store(m, i, v, dtype: DType):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
+    self.name = name
     self.uops: list[tuple[Ops, DType|None, list[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, **kwargs):
+    with cpu_profile(self.name, "PYTHON"):
+      tm = self.run(*args, **kwargs)
+    return tm
+  def run(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
