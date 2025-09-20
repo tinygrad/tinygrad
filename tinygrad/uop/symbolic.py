@@ -4,7 +4,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap, cpu_profile
 from tinygrad.uop.decompositions import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -206,15 +206,16 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
-  # div is the smallest factor of the denominator (greater than 1) out of all "factors"
-  # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
-  # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
-  return None
+  with cpu_profile("nest_div_by_smallest_factor", "TINY", display=False): # set to true to see the full flamegraph, looks like it's breaking here
+    # we try and nest the div and see if it allows the numerator to be simplified
+    if ((c := y.arg) < 0): return None
+    factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
+    # div is the smallest factor of the denominator (greater than 1) out of all "factors"
+    # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
+    # TODO: add same optimization for mod
+    div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
+    if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
+    return None
 
 def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
