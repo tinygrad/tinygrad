@@ -553,7 +553,7 @@ jobs:
         opencl: 'true'
         llvm: "true"
     - name: Test CL=1 RANGEIFY=1
-      run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py test/test_schedule.py test/test_symbolic_ops.py test/test_jit.py test/unit/test_disk_tensor.py test/models/test_mnist.py --durations 20
+      run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py test/test_schedule.py test/test_symbolic_ops.py test/test_jit.py test/unit/test_disk_tensor.py test/models/test_mnist.py test/unit/test_mnist_dataset.py --durations 20
     - name: Test Fuse
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
     - name: Test ONNX

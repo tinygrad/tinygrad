@@ -35,12 +35,13 @@ earliest_rewrites = double_reshape+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
   # copy reorder
-  # this breaks the JIT
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
+   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
+  # the next two rules breaks the JIT
   # TODO: this is causing many copies wih the replace tag None
   # RESHAPE after COPY
   #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # this becomes BUFFER_VIEW on disk
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
