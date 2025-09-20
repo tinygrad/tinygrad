@@ -177,13 +177,14 @@ def ioctl(fd, request, argp):
       for i in range(s.numcmds):
         cmd = get_struct(s.cmdlist+ctypes.sizeof(msm_kgsl.struct_kgsl_command_object)*i, msm_kgsl.struct_kgsl_command_object)
         if IOCTL > 0: print(f"cmd {i}:", format_struct(cmd))
-        parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
+        #parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
       for i in range(s.numobjs):
         obj = get_struct(s.objlist+s.objsize*i, msm_kgsl.struct_kgsl_command_object)
         if IOCTL > 0:
           print(f"obj {i}:", format_struct(obj))
-          print(format_struct(msm_kgsl.struct_kgsl_cmdbatch_profiling_buffer.from_buffer_copy(get_mem(obj.gpuaddr, obj.size))))
+          #print(format_struct(msm_kgsl.struct_kgsl_cmdbatch_profiling_buffer.from_buffer_copy(get_mem(obj.gpuaddr, obj.size))))
         #hexdump(get_mem(obj.gpuaddr, obj.size))
+        pass
   else:
     #print(f"ioctl({fd=}, (dir:{idir}, size:0x{size:3X}, type:{itype:d}, nr:0x{nr:2X}), {argp=:X}) = {ret=}")
     pass
