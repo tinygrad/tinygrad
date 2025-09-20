@@ -39,11 +39,8 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # TODO: this is causing many copies wih the replace tag None
   # RESHAPE after COPY
   #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
-  # TODO: this should be BUFFER_VIEW
-  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
-
-  # disk
-  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"), UPat.var("d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d))),
+  # this becomes BUFFER_VIEW on disk
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.src[0].size else None),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
