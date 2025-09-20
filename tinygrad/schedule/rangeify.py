@@ -40,7 +40,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # RESHAPE after COPY
   #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
   # this becomes BUFFER_VIEW on disk
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.src[0].size else None),
+  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
