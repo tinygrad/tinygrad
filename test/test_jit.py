@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
-from tinygrad.helpers import Context, JIT, RANGEIFY, GlobalCounters, getenv
+from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -605,26 +605,26 @@ class TestJitPrune(unittest.TestCase):
     assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
 
 class TestJitFree(unittest.TestCase):
-  @unittest.skipIf(RANGEIFY, "needs a rewrite")
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit
     def fxn(x:Tensor):
-      out = (x*2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
-      return out.sum()
+      t1 = (x * 2).contiguous().realize()
+      t2 = (t1 + ext_tensor).contiguous().realize()
+      out = (t2.sum()).contiguous().realize()
+      return out
     for i in range(5):
-      out = fxn(Tensor([i,1,2,3,4]))
-      self.assertEqual(out.item(), 11400+200*i)
+      out = fxn(inp:=Tensor([i,1,2,3,4]))
+      self.assertEqual(out.item(), 114+2*i)
     pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
     savings_after_free = pre_free - GlobalCounters.mem_used
 
-    # Different allocator implementations have different savings.
-    expected_savings = 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024
+    expected_savings = (len(inp) * inp.dtype.itemsize * 2) + dtypes.float32.itemsize # (t1 and t2) + out
 
     self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
+    self.assertEqual(out.item(), 136)
 
     # Try one more time...
     pre_free = GlobalCounters.mem_used
@@ -634,7 +634,7 @@ class TestJitFree(unittest.TestCase):
 
     self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
+    self.assertEqual(out.item(), 136)
 
   def test_updated_not_freed(self):
     x = Tensor([1]).realize()
