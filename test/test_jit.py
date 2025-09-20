@@ -605,7 +605,6 @@ class TestJitPrune(unittest.TestCase):
     assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
 
 class TestJitFree(unittest.TestCase):
-  @unittest.skipIf(RANGEIFY, "needs a rewrite")
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit
