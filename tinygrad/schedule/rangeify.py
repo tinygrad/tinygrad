@@ -42,6 +42,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # TODO: this should be BUFFER_VIEW
   #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).shrink(r.arg)),
 
+  # disk
+  #(UPat(Ops.COPY, src=(UPat(Ops.SHRINK, name="r"), UPat.var("d")), name="c"), lambda c,r,d: c.replace(src=(r.contiguous(), d))),
+
   # const hacks
   #(UPat(Ops.CONST, name="x"), lambda x:
   # x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
