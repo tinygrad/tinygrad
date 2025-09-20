@@ -40,23 +40,13 @@ pm_simplify_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
-def reduce_rangeless(red:UOp):
-  # TODO: share code with reduce_unparented
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
-  ret = red.src[0]
-  if red.arg is Ops.ADD:
-    for r in red.src[1:]:
-      ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
+  # TODO: test for this. test_pad_circular_mode
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
   # lift x+y out of reduce on ne
@@ -64,11 +54,9 @@ pm_reduce_collapse = PatternMatcher([
   # fold the range
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
+  # TODO: test for this. test_scatter_mul
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
    lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  # REDUCE on ADD
-  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-   lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast().or_broadcasted(name="b")),
    lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
@@ -81,11 +69,10 @@ pm_reduce_collapse = PatternMatcher([
   (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
    lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
   # AND on WHERE
+  # TODO: test for this. test_scatter_mul
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
-  # remove REDUCEs that no longer have a RANGE in the src
-  (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
 ])+sym
 
 def reduce_collapse(red:UOp):
