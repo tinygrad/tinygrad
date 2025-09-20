@@ -1493,6 +1493,186 @@ def train_llama3():
           safe_save(get_state_dict(model), fn)
         break
 
+def train_stable_diffusion():
+  from extra.models.unet import UNetModel
+  from examples.mlperf.dataloader import batch_load_train_stable_diffusion
+  from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  from examples.mlperf.initializers import init_stable_diffusion
+  from examples.mlperf.helpers import get_training_state, load_training_state
+  import pickle
+  import numpy as np
+
+  config = {}
+  GPUS               = config["GPUS"]                   = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  seed               = config["seed"]                   = getenv("SEED", 12345)
+  # ** hyperparameters **
+  BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
+  BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 2.5e-7)
+  # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
+  # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
+  # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
+  DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
+  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+  RESUME_CKPTDIR     = config["RESUME_CKPTDIR"]         = getenv("RESUME_CKPTDIR", "")
+  RESUME_ITR         = config["RESUME_ITR"]             = getenv("RESUME_ITR", 0)
+  if RESUME_ITR or RESUME_CKPTDIR: assert RESUME_ITR and RESUME_CKPTDIR
+
+  print(f"training on {GPUS}")
+  lr = BS * BASE_LR
+  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
+  print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
+  for x in GPUS: Device[x]
+  if (WANDB := getenv("WANDB", "")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-Stable-Diffusion")
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
+  model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-train", CKPTDIR / "sd" / "512-base-ema.ckpt", GPUS)
+
+  optimizer = AdamW(get_parameters(unet))
+  lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
+  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
+
+  @TinyJit
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+    optimizer.zero_grad()
+
+    timestep = Tensor.randint(BS, low=0, high=model.alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    for t in (mean, logvar, tokens, timestep, latent_randn, noise):
+      t.shard_(GPUS, axis=0)
+
+    std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+    latent = (mean + std * latent_randn) * 0.18215
+
+    sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    latent_with_noise = sqrt_alphas_cumprod_t * latent + sqrt_one_minus_alphas_cumprod_t * noise
+    v_true = sqrt_alphas_cumprod_t * noise - sqrt_one_minus_alphas_cumprod_t * latent
+
+    context = model.cond_stage_model.embed_tokens(tokens)
+
+    out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
+    loss = ((out - v_true) ** 2).mean()
+    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
+    del out, v_true, context, latent_randn, tokens, timestep
+    loss.backward()
+
+    optimizer.step()
+    lr_scheduler.step()
+    loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
+    Tensor.realize(loss, out_lr)
+    return loss, out_lr
+    
+  BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", CKPT_STEP_INTERVAL)
+  TOTAL_CKPTS=getenv("TOTAL_CKPTS", 0)
+
+  # checkpointing takes ~9 minutes without this, and ~1 minute with this
+  @TinyJit
+  def ckpt_to_cpu():
+    ckpt = get_training_state(unet, optimizer, lr_scheduler)
+    # move to CPU first so more GPU bufs aren't created (can trigger OOM)
+    for k,v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
+    Tensor.realize(*[v for v in ckpt.values()])
+    for k,v in ckpt.items(): ckpt[k] = v.cast(v.dtype.base).contiguous()
+    Tensor.realize(*[v for v in ckpt.values()])
+    return ckpt
+
+  # training loop
+  if RESUME_CKPTDIR:
+    with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
+  else: seen_keys = []
+  dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
+
+  t0 = t6 = time.perf_counter()
+  for i, batch in enumerate(dl, start=1):
+    loop_time = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    dl_time = t0 - t6
+    i = RESUME_ITR + i
+    GlobalCounters.reset()
+    seen_keys += batch["__key__"]
+
+    mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+    mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
+    tokens = []
+    for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+    tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
+
+    if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
+      Tensor.realize(mean, logvar, tokens)
+      for _ in range(3):
+        arg0, arg1, arg2 = mean.clone(), logvar.clone(), tokens.clone()
+        loss, lr = train_step(arg0, arg1, arg2, unet, optimizer, lr_scheduler)
+        loss_item, lr_item = loss.item(), lr.item()
+      load_training_state(unet, optimizer, lr_scheduler, safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors"), realize=False, use_assign=True)
+      print("realizing load_training_state")
+      t_sd = time.perf_counter()
+      Tensor.realize(*get_parameters(lr_scheduler))
+      print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
+
+    t1 = time.perf_counter()
+    loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+    loss_item, lr_item = loss.item(), lr.item()
+    t2 = time.perf_counter()
+
+    if i - RESUME_ITR == 3:
+      for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
+      print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
+      
+    if WANDB:
+      wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
+                    "train/train_step_time": t2-t1}
+
+      if i == 1 and wandb.run is not None:
+        with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
+          f.write(f"wandb.run.id = {wandb.run.id}")
+
+    if WANDB: wandb_log["train/loss"] = loss_item
+    if WANDB: wandb_log["train/lr"] = lr_item
+
+    # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
+    if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
+      prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
+      prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
+      # seen keys from dataset
+      prev_keys = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("keys_")]
+      prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
+      fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
+      print(f"saving training state backup at {fn}")
+      safe_save(ckpt_to_cpu(), fn)
+      with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
+        pickle.dump(seen_keys, f)
+      # delete all except above backup, and penultimate backup (prev[-1]):
+      for prev in (prev_ckpt, prev_keys):
+        for to_delete in prev[:-1]:
+          print(f"deleting {to_delete.name}")
+          to_delete.unlink()
+
+    if i % CKPT_STEP_INTERVAL == 0:
+      # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+      # "evaluation is done offline, the time is not counted towards the submission time."
+      fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+      print(f"saving unet checkpoint at {fn}")
+      safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
+      if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
+        import sys
+        print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
+        sys.exit()
+
+    t3 = time.perf_counter()
+    if WANDB: wandb.log(wandb_log)
+    t5 = time.perf_counter()
+    print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+  loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
+  t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
+  """)
+    t6 = time.perf_counter()
+
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
 
@@ -1501,7 +1681,7 @@ if __name__ == "__main__":
   else: bench_log_manager = contextlib.nullcontext()
 
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
