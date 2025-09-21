@@ -132,8 +132,14 @@ mstack_view_reordering = PatternMatcher([
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
-# this doesn't use movement ops
-if not RANGEIFY: replace_allreduce += mstack_view_reordering
+def mselect_shrink(src:UOp, ms:UOp, r:UOp, s:UOp):
+  return src.mselect(ms.arg).reshape(r.arg).shrink(s.arg)
+
+pm_multi_mops = PatternMatcher([
+  (UPat(Ops.MSELECT, src=(UPat(Ops.CONTIGUOUS, name="src").f(Ops.RESHAPE, name="r").f(Ops.SHRINK, name="s"),), name="ms"), mselect_shrink),
+])
+
+replace_allreduce += (pm_multi_mops if RANGEIFY else mstack_view_reordering)
 
 # ***** multi functions *****
 

@@ -198,6 +198,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_allreduce_ring(self):
     with Context(RING=2):
       a,b = _test_allreduce(Tensor.rand(256, 256))
+      print(b.uop) # it never realizes it...
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   def test_copy_jit(self):
