@@ -320,12 +320,7 @@ def eval_stable_diffusion():
   print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
   eval_queue:list[tuple[int, Path]] = []
   for p in Path(EVAL_CKPT_DIR).iterdir():
-    if p.name.startswith("wandb_run_id_"):
-      if WANDB:
-        wandb_run_id = p.name.split("wandb_run_id_")
-        if len(wandb_run_id) > 0:
-          wandb.config.update({"ckpts_from_wandb_training_run_id": wandb_run_id[1]})
-    elif p.name.endswith(".safetensors"):
+    if p.name.endswith(".safetensors"):
       ckpt_iteration = p.name.split(".safetensors")[0]
       #if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
       if ckpt_iteration.startswith("backup_"): continue
