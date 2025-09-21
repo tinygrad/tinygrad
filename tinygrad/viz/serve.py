@@ -71,6 +71,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+("" if v.offset == 0 else f" / {srender(v.offset)}")+
                           (f"\nMASK {mask_to_str(v.mask)}" if v.mask is not None else "") for v in unwrap(u.st).views]))
+    if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.arg)
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
