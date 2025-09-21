@@ -312,8 +312,10 @@ def might_end_axis(idx:UOp):
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
+# TODO: remove this, tags shouldn't keep existing like this
 def unprocessed_mop(x:UOp):
   assert x.src[0].op in GroupOp.Movement.union({*ALWAYS_CONTIGUOUS, Ops.REALIZE, Ops.BUFFERIZE}), f"unprocessed movement op on {x.src[0]}"
+  if x.src[0].op in {Ops.REALIZE, Ops.BUFFERIZE}: return
   return x.replace(tag=None)
 
 pm_rangeify = pm_mops+PatternMatcher([
@@ -598,7 +600,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op in {Ops.BUFFERIZE, Ops.MSTACK} or x.base.op in {Ops.CONST}) and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.base.op in {Ops.BUFFERIZE, Ops.MSTACK} or x.base.op in {Ops.CONST}) and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
