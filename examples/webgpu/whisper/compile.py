@@ -114,11 +114,25 @@ class TextDecoder:
     pos = Variable("self_attn_cache_len", 1, self.max_self_attn_cache_len-1).bind(pos) if pos else 0
     return self.getjitted[x.shape](x, pos, encoded_audio)
 
-  def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
-    seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
-    for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
-    return self.output_tok(x)
+  if False:
+    def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
+      seqlen = x.shape[-1]
+      x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
+      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
+      return self.output_tok(x)
+  else:
+    def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
+      seqlen = x.shape[-1]
+      x = self.token_embedding(x)
+      x += self.positional_embedding.shrink(((0, seqlen), None, None))
+      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
+      # NOTE(irwin): wrong output size w/o contiguous. TODO: check on latest tinygrad
+      logits = self.output_tok(x)[:, ctx-1].contiguous()
+      # return logits.log_softmax(axis=-1).reshape(-1, 1)
+      # return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[0, :]
+      # return logits.softmax(axis=-1).argmax()
+      # print(logits.shape)
+      return logits
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T).realize()
@@ -224,19 +238,6 @@ if __name__ == '__main__':
 
   def export_decoder_2():
     reload(model.decoder, change_sd=change_sd)
-    def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
-      seqlen = x.shape[-1]
-      x = self.token_embedding(x)
-      x += self.positional_embedding.shrink(((0, seqlen), None, None))
-      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
-      # NOTE(irwin): wrong output size w/o contiguous. TODO: check on latest tinygrad
-      logits = self.output_tok(x)[:, ctx-1].contiguous()
-      # return logits.log_softmax(axis=-1).reshape(-1, 1)
-      # return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[0, :]
-      # return logits.softmax(axis=-1).argmax()
-      # print(logits.shape)
-      return logits
-    model.decoder.forward = forward.__get__(model.decoder, TextDecoder)
 
     embedding_dims = model.decoder.positional_embedding.shape[1]
     x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
