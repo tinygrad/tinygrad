@@ -1,6 +1,6 @@
 from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap, RANGEIFY
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
 from tinygrad.device import Device
 
@@ -120,6 +120,9 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
+])
+
+mstack_view_reordering = PatternMatcher([
   # MSELECT must select a base, if there are views apply them after selecting the base
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), lambda ms, view, base:
     base.mselect(ms.arg).view(_replace_dnum(unwrap(view.st), ms.arg))),
@@ -128,6 +131,9 @@ replace_allreduce = PatternMatcher([
   # move shrink before MSTACK
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
+
+# this doesn't use movement ops
+if not RANGEIFY: replace_allreduce += mstack_view_reordering
 
 # ***** multi functions *****
 
