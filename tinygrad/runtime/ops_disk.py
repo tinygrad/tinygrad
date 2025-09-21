@@ -39,7 +39,9 @@ class DiskDevice(Compiled):
   def _might_close(self):
     self.count -= 1
     if self.count == 0:
-      if self.fd is not None: os.close(self.fd)
+      if self.fd is not None:
+        os.close(self.fd)
+      if hasattr(self, "mem"): self.mem.close()
       self.size = None
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True

@@ -12,7 +12,6 @@ from tinygrad.engine.realize import get_program
 from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizerFailure(unittest.TestCase):
-  @unittest.expectedFailure
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
   def test_failure_beam_mnist(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(4014080), arg=0, src=())

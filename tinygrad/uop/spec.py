@@ -1,7 +1,7 @@
 from typing import cast, Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context
+from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
@@ -138,11 +138,12 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   solver = z3.Solver(ctx=z3.Context())
   z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
   solver.add(z3_mask)
-  if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
-    print(f"idx={idx.src[1].render(simplify=False)}")
-    print(f"mask & gate={mask.render(simplify=False)}")
-    print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
-    return False
+  with cpu_profile("validate index with z3", "TINY"):
+    if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
+      print(f"idx={idx.src[1].render(simplify=False)}")
+      print(f"mask & gate={mask.render(simplify=False)}")
+      print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
+      return False
   return True
 
 def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
@@ -162,7 +163,8 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple)),
+  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) == 2 and \
+     isinstance(rng.arg[0], int) and isinstance(rng.arg[1], AxisType)),
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
   (UPat(Ops.VIEW, dtypes.void, src=(), name="x"), lambda x: isinstance(x.arg, ShapeTracker)),
