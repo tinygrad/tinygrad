@@ -137,6 +137,7 @@ def mselect_shrink(src:UOp, ms:UOp, r:UOp, s:UOp):
 
 pm_multi_mops = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(Ops.CONTIGUOUS, name="src").f(Ops.RESHAPE, name="r").f(Ops.SHRINK, name="s"),), name="ms"), mselect_shrink),
+  #(UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"), name="sh"), mstack_early_shrink),
 ])
 
 replace_allreduce += (pm_multi_mops if RANGEIFY else mstack_view_reordering)
