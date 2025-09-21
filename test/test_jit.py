@@ -609,21 +609,22 @@ class TestJitFree(unittest.TestCase):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit
     def fxn(x:Tensor):
-      out = (x*2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
-      return out.sum()
+      t1 = (x * 2).contiguous().realize()
+      t2 = (t1 + ext_tensor).contiguous().realize()
+      out = (t2.sum()).contiguous().realize()
+      return out
     for i in range(5):
-      out = fxn(Tensor([i,1,2,3,4]))
-      self.assertEqual(out.item(), 11400+200*i)
+      out = fxn(inp:=Tensor([i,1,2,3,4]))
+      self.assertEqual(out.item(), 114+2*i)
     pre_free = GlobalCounters.mem_used
     fxn.captured.free_intermediates()
     savings_after_free = pre_free - GlobalCounters.mem_used
 
-    # Different allocator implementations have different savings.
-    expected_savings = 8196 if hasattr(Device[Device.DEFAULT].allocator, '_offset') else 2024
+    expected_savings = (len(inp) * inp.dtype.itemsize * 2) + dtypes.float32.itemsize # (t1 and t2) + out
 
     self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
+    self.assertEqual(out.item(), 136)
 
     # Try one more time...
     pre_free = GlobalCounters.mem_used
@@ -633,7 +634,7 @@ class TestJitFree(unittest.TestCase):
 
     self.assertEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
+    self.assertEqual(out.item(), 136)
 
   def test_updated_not_freed(self):
     x = Tensor([1]).realize()
