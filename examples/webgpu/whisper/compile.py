@@ -30,15 +30,16 @@ class MultiHeadAttention:
 
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
     if self.kv_caching == 'cross':
-      if xa is not None:
-        k, v = self.key(xa), self.value(xa)
-        if not hasattr(self, 'cache_k'):
-          self.cache_k, self.cache_v = k, v
-        else:
-          self.cache_k.assign(k).realize()
-          self.cache_v.assign(v).realize()
-      else:
-        k, v = self.cache_k, self.cache_v
+      k, v = self.key(xa), self.value(xa)
+      # if xa is not None:
+      #   k, v = self.key(xa), self.value(xa)
+      #   if not hasattr(self, 'cache_k'):
+      #     self.cache_k, self.cache_v = k, v
+      #   else:
+      #     self.cache_k.assign(k).realize()
+      #     self.cache_v.assign(v).realize()
+      # else:
+      #   k, v = self.cache_k, self.cache_v
     else:
       k, v = self.key(x), self.value(x)
       if self.kv_caching == 'self':
