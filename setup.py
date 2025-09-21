@@ -9,12 +9,12 @@ with open(directory / 'README.md', encoding='utf-8') as f:
 
 testing_minimal = [
   "numpy",
-  "torch==2.7.1",
+  "torch==2.8.0",
   "pytest",
   "pytest-xdist",
+  "pytest-timeout",
   "hypothesis",
   "z3-solver",
-  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
@@ -59,11 +59,12 @@ setup(name='tinygrad',
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
             "pylint",
-            "mypy==1.13.0",
+            "mypy==1.18.1",
             "typing-extensions",
             "pre-commit",
             "ruff",
             "numpy",
+            "typeguard",
         ],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3"],
         'testing_minimal': testing_minimal,
@@ -86,6 +87,7 @@ setup(name='tinygrad',
             "tiktoken",
             "blobfile",
             "librosa",
+            "numba>=0.55",  # librosa needs numba but uv ignores python upper bounds and some numba versions require <python3.10
             "networkx",
             "nibabel",
             "bottle",

@@ -165,7 +165,7 @@ class PCIIfaceBase:
   def map(self, b:HCQBuffer):
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(cast(int, b.va_addr), b.size)
-      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, False
+      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, True
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
       paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
       snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
