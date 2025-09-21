@@ -61,7 +61,7 @@ run_retry(){ local try=0 max=5 code tmp py pgid kids
 
 # Power limiting to 400W is only needed if GPUs fall out of sync (causing 2.2x increased train time) at higher power, which has been observed at 450W
 sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 400 && \
-run_retry TOTAL_CKPTS=7 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
+run_retry TOTAL_CKPTS=10 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
 sleep 90
 
 # Eval collected checkpoints in reverse chronological order, even if above training crashed early
