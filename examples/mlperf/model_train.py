@@ -1587,6 +1587,7 @@ def train_stable_diffusion():
   else: seen_keys = []
   dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
 
+  train_start_time = time.perf_counter()
   t0 = t6 = time.perf_counter()
   for i, batch in enumerate(dl, start=1):
     loop_time = time.perf_counter() - t0
@@ -1623,17 +1624,15 @@ def train_stable_diffusion():
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       
+    total_train_time = time.perf_counter() - train_start_time
     if WANDB:
-      wandb_log = {"train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+      wandb_log = {"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
-                    "train/train_step_time": t2-t1}
+                    "train/train_step_time": t2-t1, "train/total_time": total_train_time}
 
       if i == 1 and wandb.run is not None:
         with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
           f.write(f"wandb.run.id = {wandb.run.id}")
-
-    if WANDB: wandb_log["train/loss"] = loss_item
-    if WANDB: wandb_log["train/lr"] = lr_item
 
     # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
     if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
@@ -1666,10 +1665,9 @@ def train_stable_diffusion():
 
     t3 = time.perf_counter()
     if WANDB: wandb.log(wandb_log)
-    t5 = time.perf_counter()
     print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
   loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
-  t3-t2: {t3-t2:.4f}, wandb_log_time: {t5-t3:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}
+  t3-t2: {t3-t2:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}, total_train_time:{total_train_time:.2f}
   """)
     t6 = time.perf_counter()
 

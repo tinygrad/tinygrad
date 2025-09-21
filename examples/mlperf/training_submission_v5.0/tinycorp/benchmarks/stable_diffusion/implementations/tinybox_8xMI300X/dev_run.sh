@@ -7,7 +7,8 @@ mkdir -p "${HOME}/logs" "$UNET_CKPTDIR"
 
 # run this script in isolation when using the --bg flag
 if [[ "${1:-}" == "--bg" ]]; then
-  echo "$LOGFILE"
+  echo "logging output to $LOGFILE"
+  echo "saving UNet checkpoints to $UNET_CKPTDIR"
   script_path="$(readlink -f "${BASH_SOURCE[0]}")"
   nohup bash "$script_path" run "$DATETIME" >"$LOGFILE" 2>&1 & disown $!
   exit 0
