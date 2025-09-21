@@ -122,12 +122,16 @@ class TextDecoder:
       return self.output_tok(x)
   else:
     def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
-      seqlen = x.shape[-1]
+      # seqlen = x.shape[-1]
+      seqlen = 1
       x = self.token_embedding(x)
-      x += self.positional_embedding.shrink(((0, seqlen), None, None))
-      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=0)
+      x += self.positional_embedding.shrink(((ctx, ctx+seqlen), None, None))
+      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=ctx)
       # NOTE(irwin): wrong output size w/o contiguous. TODO: check on latest tinygrad
-      logits = self.output_tok(x)[:, ctx-1].contiguous()
+      # logits = self.output_tok(x)[:, ctx-1].contiguous()
+      # logits = self.output_tok(x)[:, ctx].contiguous()
+      logits = self.output_tok(x).shrink((None, (ctx, ctx+seqlen), None))
+      # logits = self.output_tok(x)
       # return logits.log_softmax(axis=-1).reshape(-1, 1)
       # return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[0, :]
       # return logits.softmax(axis=-1).argmax()
@@ -240,9 +244,16 @@ if __name__ == '__main__':
     reload(model.decoder, change_sd=change_sd)
 
     embedding_dims = model.decoder.positional_embedding.shape[1]
-    x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
-    prg, inp_sizes, out_sizes, state = export_model(model.decoder, Device.DEFAULT.lower(),
-      x, Tensor.rand(1, 1500, embedding_dims), Variable("ctx", 1, model.decoder.max_tokens_to_sample*2-1).bind(2), model_name="decoder")
+    # x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
+    x = Tensor.randint(1, low=0, high=50256).to("WEBGPU").reshape(1, -1)
+    prg, inp_sizes, out_sizes, state = export_model(
+      model.decoder,
+      Device.DEFAULT.lower(),
+      x,
+      Tensor.rand(1, 1500, embedding_dims),
+      Variable("ctx", 0, model.decoder.max_tokens_to_sample*2-1).bind(1),
+      model_name="decoder"
+    )
     # print(out_sizes)
     (dirname / 'decoder.js').write_text(prg)
     safe_save(state, (dirname / 'decoder.safetensors'))
