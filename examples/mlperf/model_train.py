@@ -1498,8 +1498,7 @@ def train_stable_diffusion():
   from examples.mlperf.dataloader import batch_load_train_stable_diffusion
   from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
   from examples.mlperf.initializers import init_stable_diffusion
-  from examples.mlperf.helpers import get_training_state, load_training_state
-  import pickle
+  from examples.mlperf.helpers import get_training_state
   import numpy as np
 
   config = {}
@@ -1515,9 +1514,6 @@ def train_stable_diffusion():
   CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
-  RESUME_CKPTDIR     = config["RESUME_CKPTDIR"]         = getenv("RESUME_CKPTDIR", "")
-  RESUME_ITR         = config["RESUME_ITR"]             = getenv("RESUME_ITR", 0)
-  if RESUME_ITR or RESUME_CKPTDIR: assert RESUME_ITR and RESUME_CKPTDIR
 
   print(f"training on {GPUS}")
   lr = BS * BASE_LR
@@ -1567,7 +1563,6 @@ def train_stable_diffusion():
     Tensor.realize(loss, out_lr)
     return loss, out_lr
     
-  BACKUP_INTERVAL=getenv("BACKUP_INTERVAL", CKPT_STEP_INTERVAL)
   TOTAL_CKPTS=getenv("TOTAL_CKPTS", 0)
 
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
@@ -1582,9 +1577,6 @@ def train_stable_diffusion():
     return ckpt
 
   # training loop
-  if RESUME_CKPTDIR:
-    with open(f"{RESUME_CKPTDIR}/keys_{RESUME_ITR}.pickle", "rb") as f: seen_keys = pickle.load(f)
-  else: seen_keys = []
   dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
 
   train_start_time = time.perf_counter()
@@ -1593,9 +1585,7 @@ def train_stable_diffusion():
     loop_time = time.perf_counter() - t0
     t0 = time.perf_counter()
     dl_time = t0 - t6
-    i = RESUME_ITR + i
     GlobalCounters.reset()
-    seen_keys += batch["__key__"]
 
     mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
     mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
@@ -1603,24 +1593,12 @@ def train_stable_diffusion():
     for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
     tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
 
-    if i - RESUME_ITR == 1 and RESUME_CKPTDIR:
-      Tensor.realize(mean, logvar, tokens)
-      for _ in range(3):
-        arg0, arg1, arg2 = mean.clone(), logvar.clone(), tokens.clone()
-        loss, lr = train_step(arg0, arg1, arg2, unet, optimizer, lr_scheduler)
-        loss_item, lr_item = loss.item(), lr.item()
-      load_training_state(unet, optimizer, lr_scheduler, safe_load(f"{RESUME_CKPTDIR}/backup_{RESUME_ITR}.safetensors"), realize=False, use_assign=True)
-      print("realizing load_training_state")
-      t_sd = time.perf_counter()
-      Tensor.realize(*get_parameters(lr_scheduler))
-      print(f"elapsed loading state_dicts: {time.perf_counter()-t_sd:.2f}")
-
     t1 = time.perf_counter()
     loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
     loss_item, lr_item = loss.item(), lr.item()
     t2 = time.perf_counter()
 
-    if i - RESUME_ITR == 3:
+    if i == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       
@@ -1633,24 +1611,6 @@ def train_stable_diffusion():
       if i == 1 and wandb.run is not None:
         with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
           f.write(f"wandb.run.id = {wandb.run.id}")
-
-    # resuming from checkpoints somewhere between 1.8-3M images causes loss explosion, so stop collecting ckpts after 2.5M images
-    if BACKUP_INTERVAL and i % BACKUP_INTERVAL == 0 and i < 2_500_000 // BS:
-      prev_ckpt = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("backup_")]
-      prev_ckpt = sorted(prev_ckpt, key=lambda x: int(x.name.split("backup_")[1].split(".safetensors")[0]))
-      # seen keys from dataset
-      prev_keys = [file for file in Path(UNET_CKPTDIR).iterdir() if file.is_file() and file.name.startswith("keys_")]
-      prev_keys = sorted(prev_keys, key=lambda x: int(x.name.split("keys_")[1].split(".pickle")[0]))
-      fn = f"{UNET_CKPTDIR}/backup_{i}.safetensors"
-      print(f"saving training state backup at {fn}")
-      safe_save(ckpt_to_cpu(), fn)
-      with open(f"{UNET_CKPTDIR}/keys_{i}.pickle", "wb") as f:
-        pickle.dump(seen_keys, f)
-      # delete all except above backup, and penultimate backup (prev[-1]):
-      for prev in (prev_ckpt, prev_keys):
-        for to_delete in prev[:-1]:
-          print(f"deleting {to_delete.name}")
-          to_delete.unlink()
 
     if i % CKPT_STEP_INTERVAL == 0:
       # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
