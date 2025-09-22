@@ -419,9 +419,18 @@
                 }
 
                 let last_index;
-                async function decodeOne(i, max_range, segment_cumlogprob, context, temperature, last_eos_logprob) {
-                    let avg_logprob;
-                    if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
+                async function decodeOne(decode_sequence, temperature) {
+                    const {i, max_range, last_eos_logprob} = decode_sequence;
+                    let {context} = decode_sequence;
+                    let result = {
+                        keep: false,
+                        context,
+                        avg_logprob: undefined,
+                        segment_cumlogprob: decode_sequence.segment_cumlogprob,
+                        last_eos_logprob: undefined
+                    }
+                    // if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
+                    if (i >= max_range) return result;
 
                     let token_count = context.length - offset;
                     let last_token_index = i;
@@ -464,17 +473,21 @@
 
                     context.push(nextTokens[nextTokenIndex]);
 
-                    avg_logprob = segment_cumlogprob / (i-offset+1);
-                    segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
+                    result.avg_logprob = result.segment_cumlogprob / (i-offset+1);
+                    result.segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
                     // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                    result.last_eos_logprob = nextLogprobs[TOK_EOS];
 
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
-                        return [false, context, avg_logprob, segment_cumlogprob];
+                        // return [false, context, avg_logprob, segment_cumlogprob];
+                        return result;
                     } else if (i + 1 >= max_range) {
                         context[context.length-1] = TOK_EOS;
                     }
 
-                    return [true, context, avg_logprob, segment_cumlogprob, nextLogprobs[TOK_EOS]];
+                    // return [true, context, avg_logprob, segment_cumlogprob, nextLogprobs[TOK_EOS]];
+                    result.keep = true;
+                    return result;
                 }
 
                 let max_range = offset + MAX_TOKENS_TO_DECODE;
@@ -503,7 +516,20 @@
                         if (cancelToken.cancelled) return;
 
                         let keep;
-                        [keep, contexts[idx], avg_logprobs[idx], cumlogprobs[idx], last_eos_logprobs[idx]] = await decodeOne(indices[idx], max_range, cumlogprobs[idx], contexts[idx], temperature, last_eos_logprobs[idx]);
+                        let decode_sequence = {
+                            i: indices[idx],
+                            max_range,
+                            segment_cumlogprob: cumlogprobs[idx],
+                            context: contexts[idx],
+                            last_eos_logprob: last_eos_logprobs[idx]
+                        };
+
+                        let decode_result = await decodeOne(decode_sequence, temperature);
+                        keep = decode_result.keep;
+                        contexts[idx] = decode_result.context;
+                        avg_logprobs[idx] = decode_result.avg_logprob;
+                        cumlogprobs[idx] = decode_result.segment_cumlogprob;
+                        last_eos_logprobs[idx] = decode_result.last_eos_logprob;
 
                         if (!updated) {
                             pendingText = format_text(tokensToText(contexts[idx].slice(offset)), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
