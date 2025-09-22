@@ -122,7 +122,7 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
 ])
 
-mstack_view_reordering = PatternMatcher([
+multi_view_reordering = PatternMatcher([
   # MSELECT must select a base, if there are views apply them after selecting the base
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), lambda ms, view, base:
     base.mselect(ms.arg).view(_replace_dnum(unwrap(view.st), ms.arg))),
@@ -135,12 +135,28 @@ mstack_view_reordering = PatternMatcher([
 def mselect_shrink(src:UOp, ms:UOp, r:UOp, s:UOp):
   return src.mselect(ms.arg).reshape(r.arg).shrink(s.arg)
 
-pm_multi_mops = PatternMatcher([
-  (UPat(Ops.MSELECT, src=(UPat(Ops.CONTIGUOUS, name="src").f(Ops.RESHAPE, name="r").f(Ops.SHRINK, name="s"),), name="ms"), mselect_shrink),
-  #(UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"), name="sh"), mstack_early_shrink),
+def _rep_dnum(x:sint, dnum:int): return _replace_dnum(x, dnum) if isinstance(x, UOp) else x
+def walk_mops(ms:UOp, mop:UOp):
+  mops = []
+  walk = mop
+  ret = mop.base.mselect(dnum:=ms.arg)
+  while walk is not mop.base:
+    m = walk.arg
+    if m: m = tuple(tuple(_rep_dnum(v, dnum) for v in s) for s in m) if isinstance(m[0], tuple) else tuple(_rep_dnum(v, dnum) for v in m)
+    mops.append((walk.op, m))
+    walk = walk.src[0]
+  for m in mops[::-1]: ret = ret._mop(*m)
+  return ret
+
+multi_mop_reordering = PatternMatcher([
+  (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, name="mop"),), name="ms"), walk_mops),
+  # move view through MSTACK
+  #(UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
+  # move shrink before MSTACK
+  #(UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
-replace_allreduce += (pm_multi_mops if RANGEIFY else mstack_view_reordering)
+replace_allreduce += (multi_mop_reordering if RANGEIFY else multi_view_reordering)
 
 # ***** multi functions *****
 
