@@ -11,7 +11,7 @@ import re, gzip
 
 from examples.mlperf.helpers import gelu_erf
 
-# to match tokenizer used in mlperf reference of stable diffusion training
+# to match behavior of mlperf v5.0 Stable Diffusion training clip tokenizer
 try:
   import ftfy, html, regex
   # from open_clip.tokenizer:
@@ -74,8 +74,6 @@ class Tokenizer:
       vocab = vocab + [v+'</w>' for v in vocab]
       for merge in merges:
         vocab.append(''.join(merge))
-      # used for mlperf training v5.0 Stable Diffusion
-      # TODO: identify specific clip versions (if they exist) that these settings correspond to
       if self.version == "sd_mlperf_v5_0":
         vocab.extend(['<start_of_text>', '<end_of_text>'])
         self.cache = {'<start_of_text>': '<start_of_text>', '<end_of_text>': '<end_of_text>'}
@@ -473,7 +471,6 @@ class OpenClipEncoder:
     x = x + self.positional_embedding
     x = self.transformer(x, attn_mask=self.attn_mask)
     x = self.ln_final(x)
-    #x = x[:, tokens.argmax(axis=-1)]
     x = x[Tensor.arange(x.shape[0], device=x.device), tokens.argmax(axis=-1), :]
     x = x @ self.text_projection
     return x
