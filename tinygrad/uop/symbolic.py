@@ -208,11 +208,8 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if ((c := y.arg) < 0): return None
-  factors = sorted([abs(u.const_factor()) for u in x.pop_const()[0].split_uop(Ops.ADD)], reverse=True)  # from large to small on absolute value
-  div = y.arg
-  for f in factors:
-    if math.gcd(f, div) != 1: div = math.gcd(f, div)
-    else: break
+  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
+  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
   if div==y.arg or (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is None or x.vmin<0 or newx.vmin<0: return None
   return newxs//(c//div)
 
