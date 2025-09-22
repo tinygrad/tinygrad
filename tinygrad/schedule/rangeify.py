@@ -386,6 +386,12 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
 
+# wrapped bufs jump to the outer world through MSTACK
+class WrappedBuf:
+  def __init__(self, x): self.x = x
+  def __repr__(self): return f"B({self.x})"
+remove_mbuf_tags = PatternMatcher([(UPat(Ops.BUFFERIZE, name="v"), lambda v: v.rtag(None) if isinstance(v.tag, WrappedBuf) else None)])
+
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
@@ -408,6 +414,9 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # tag the bufferizes of MSTACK, only mstack jumps to the outerworld.
+  (UPat(Ops.MSTACK, name="m"),
+   lambda m: m.replace(src=tuple(s.rtag(WrappedBuf(ms.tag)) if s.op is Ops.BUFFERIZE and not isinstance(s.tag, WrappedBuf) else s for s in m.src))),
 ])
 
 # *****************
@@ -462,7 +471,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
+   lambda m: m.replace(src=tuple([x.src[0] for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
 ])
 
 # *****************
@@ -590,11 +599,12 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST}) and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.op in {Ops.BUFFERIZE, Ops.MSTACK} or x.base.op in {Ops.CONST}) and isinstance(x.tag, tuple)])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
+  tsink = graph_rewrite(tsink, remove_mbuf_tags, bottom_up=True, name="remove mbuf tags")
   tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
