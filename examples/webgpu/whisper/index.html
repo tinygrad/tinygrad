@@ -520,6 +520,8 @@
                 return [avg_logprobs[idx], cumlogprobs[idx], contexts[idx], offset];
             }
 
+            console.log("begin new transcription");
+
             let previous_context = [];
             let temperature = 0;
             // for (let seek = 50 * MEL_SPEC_CHUNK_LENGTH; seek < 51*MEL_SPEC_CHUNK_LENGTH;) {
@@ -564,6 +566,8 @@
             }
             inferenceDone = true;
             currentTranscription.style.display = 'none';
+
+            console.log("end transcription");
         }
 
         const getDevice = async () => {
