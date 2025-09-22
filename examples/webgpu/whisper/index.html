@@ -418,9 +418,13 @@
                     return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
                 }
 
-                let last_index;
-                async function decodeOne(decode_sequence, temperature) {
+                let decoder_state = {
+                    last_index: undefined,
+                    context: undefined
+                };
+                async function decodeOne(decode_sequence, decoder_state, temperature) {
                     const {i, max_range, last_eos_logprob} = decode_sequence;
+                    const last_index = decoder_state.last_index;
                     let {context} = decode_sequence;
                     let result = {
                         keep: false,
@@ -429,7 +433,6 @@
                         segment_cumlogprob: decode_sequence.segment_cumlogprob,
                         last_eos_logprob: undefined
                     }
-                    // if (i >= max_range) return [false, context, avg_logprob, segment_cumlogprob];
                     if (i >= max_range) return result;
 
                     let token_count = context.length - offset;
@@ -437,14 +440,17 @@
                     let one_before_last_token_index = i - 1;
 
                     if (last_index !== i - 1) {
+                        // NOTE(irwin): rebuild self attention kv cache
                         for (let build_cache_index = 0; build_cache_index < offset-1; ++build_cache_index) {
                             await nets.decoder(context.slice(build_cache_index, build_cache_index+1), audio_features, [build_cache_index]);
-                            last_index = build_cache_index;
+                            decoder_state.last_index = build_cache_index;
+                            decoder_state.context = context;
                         }
                     }
 
                     let [decoder_output] = await nets.decoder(context.slice(i-1, i), audio_features, [i-1]);
-                    last_index = i;
+                    decoder_state.last_index = i;
+                    decoder_state.context = context;
                     let nextLogprobs;
                     let nextTokens;
                     let max;
@@ -479,13 +485,11 @@
                     result.last_eos_logprob = nextLogprobs[TOK_EOS];
 
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
-                        // return [false, context, avg_logprob, segment_cumlogprob];
                         return result;
                     } else if (i + 1 >= max_range) {
                         context[context.length-1] = TOK_EOS;
                     }
 
-                    // return [true, context, avg_logprob, segment_cumlogprob, nextLogprobs[TOK_EOS]];
                     result.keep = true;
                     return result;
                 }
@@ -515,7 +519,6 @@
                         if (contexts[idx].at(-1) === TOK_EOS) continue;
                         if (cancelToken.cancelled) return;
 
-                        let keep;
                         let decode_sequence = {
                             i: indices[idx],
                             max_range,
@@ -524,8 +527,8 @@
                             last_eos_logprob: last_eos_logprobs[idx]
                         };
 
-                        let decode_result = await decodeOne(decode_sequence, temperature);
-                        keep = decode_result.keep;
+                        let decode_result = await decodeOne(decode_sequence, decoder_state, temperature);
+                        let keep = decode_result.keep;
                         contexts[idx] = decode_result.context;
                         avg_logprobs[idx] = decode_result.avg_logprob;
                         cumlogprobs[idx] = decode_result.segment_cumlogprob;
