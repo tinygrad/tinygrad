@@ -416,7 +416,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
   # tag the bufferizes of MSTACK, only mstack jumps to the outerworld.
   (UPat(Ops.MSTACK, name="m"),
-   lambda m: m.replace(src=tuple(s.rtag(WrappedBuf(ms.tag)) if s.op is Ops.BUFFERIZE and not isinstance(s.tag, WrappedBuf) else s for s in m.src))),
+   lambda m: m.replace(src=tuple(s.rtag(WrappedBuf(m.tag)) if s.op is Ops.BUFFERIZE and not isinstance(s.tag, WrappedBuf) else s for s in m.src))),
 ])
 
 # *****************
