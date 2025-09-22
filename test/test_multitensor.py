@@ -202,6 +202,18 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_allreduce_twice(self):
+    t = Tensor.rand(256, 256)
+    ts = t.shard(devices_4, 0).realize()
+    ar = UOp.allreduce(ts.uop, Ops.ADD, ts.device)
+    b = Tensor(ar)
+    b2 = Tensor(ar)
+    b.realize()
+    GlobalCounters.reset()
+    kc = GlobalCounters.kernel_count
+    b2.realize()
+    self.assertEqual(GlobalCounters.kernel_count-kc, 0)
+
   def test_copy_jit(self):
     @TinyJit
     def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
