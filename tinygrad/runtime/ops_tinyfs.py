@@ -1,4 +1,4 @@
-import socket, uuid, json, asyncio, os
+import socket, uuid, json, asyncio
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import Tensor
