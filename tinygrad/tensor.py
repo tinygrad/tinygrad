@@ -463,7 +463,7 @@ class Tensor(MathTrait):
     base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
     tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
 
-    to_device = "CPU" if self.device.startswith("DISK") else self.device
+    to_device = "CPU" if isinstance(self.device, str) and self.device.startswith("DISK") else self.device
 
     level_chunks = base_chunks
     for _ in range(tree_depth + 1):
