@@ -26,7 +26,7 @@ apt list --installed | grep amdgpu
 rocm-smi --version
 modinfo amdgpu | grep version
 
-export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 IGNORE_JIT_FIRST_BEAM=1 HCQDEV_WAIT_TIMEOUT_MS=300000
+export BEAM=2 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 IGNORE_JIT_FIRST_BEAM=1 HCQDEV_WAIT_TIMEOUT_MS=300000
 export AMD_LLVM=0 # bf16 seems to require this
 export DATADIR="/raid/datasets/stable_diffusion"
 export CKPTDIR="/raid/weights/stable_diffusion"
@@ -60,11 +60,10 @@ run_retry(){ local try=0 max=5 code tmp py pgid kids
 }
 
 # Power limiting to 400W is only needed if GPUs fall out of sync (causing 2.2x increased train time) at higher power, which has been observed at 450W
-sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 400 && \
-run_retry TOTAL_CKPTS=10 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
+sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750 && \
+run_retry TOTAL_CKPTS=7 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
 sleep 90
 
 # Eval collected checkpoints in reverse chronological order, even if above training crashed early
-sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750 && \
 run_retry BEAM_EVAL_SAMPLES=600 EVAL_CKPT_DIR="$UNET_CKPTDIR" python3 examples/mlperf/model_eval.py; (( $? == 2 )) && { echo "eval failed before BEAM completion"; exit 2; }
 EVAL_CKPT_DIR="$UNET_CKPTDIR" python3 examples/mlperf/model_eval.py
