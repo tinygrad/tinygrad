@@ -1,7 +1,7 @@
 import random, os
 from tinygrad.helpers import Timing
 from tinygrad.runtime.ops_hip import compile_hip, HIPDevice
-from tinygrad.runtime.ops_gpu import compile_cl, CLDevice
+from tinygrad.runtime.ops_cl import compile_cl, CLDevice
 
 # OMP_NUM_THREADS=1 strace -tt -f -e trace=file python3 test/external/external_benchmark_hip_compile.py
 # AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1 python3 test/external/external_benchmark_hip_compile.py

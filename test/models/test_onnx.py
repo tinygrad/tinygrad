@@ -5,12 +5,8 @@ from tinygrad.frontend.onnx import OnnxRunner
 from tinygrad.device import Device
 from tinygrad.helpers import fetch, Context
 
-try:
-  from extra.onnx_helpers import validate
-  from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
-  HUGGINGFACE_AVAILABLE = True
-except ModuleNotFoundError:
-  HUGGINGFACE_AVAILABLE = False
+from extra.onnx_helpers import validate
+from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
@@ -62,7 +58,7 @@ class TestOnnxModel(unittest.TestCase):
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
 
-@unittest.skipUnless(HUGGINGFACE_AVAILABLE and Device.DEFAULT == "METAL", "only run on METAL")
+@unittest.skipUnless(Device.DEFAULT == "METAL", "only run on METAL")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   @classmethod
   def setUpClass(cls):

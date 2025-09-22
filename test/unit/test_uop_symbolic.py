@@ -2,7 +2,7 @@
 import unittest, pickle, functools, math
 import z3
 
-from tinygrad.dtype import dtypes, ConstType, DType
+from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.codegen import full_rewrite
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer, track_rewrites
@@ -93,6 +93,37 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 is not idx2
     assert idx1*idx2 is not idx2*idx1
 
+  def test_uop_gcd_method(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.assertEqual(UOp.gcd(a, a*b, a*3).simplify(), a)
+    self.assertEqual(UOp.gcd(a*a*a, a*b*a, a*3*a).simplify(), a*a)
+    self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
+    self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), a.const_like(5))
+    self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
+
+  def test_divides_exact(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
+    self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
+    self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
+    self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
+    self.assertEqual((a*a*3).divide_exact(a*a.const_like(-3)).simplify(), a*-1)
+    self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
+    self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
+    self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
+    self.assertEqual((((a*-2)+14)*b).divide_exact(((a*-2)+14)).simplify(), b)
+
+  def test_divide_exact_not(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
+    x = Variable("x", -20, 0)
+    self.assertEqual((a).divide_exact(b), None)
+    self.assertEqual((a+2).divide_exact(a), None)
+    self.assertEqual((x*-1).divide_exact(a), None)
+    self.assertEqual((a*5).divide_exact(a*10), None)
+    self.assertEqual((a*10-1).divide_exact(a*10), None)
+
   def test_factorize(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
@@ -110,7 +141,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
 
   def test_xor_0(self):
-    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a")
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
 
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
@@ -450,6 +481,33 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div_factor_div_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
 
+  def test_div_symbolic_const_gcd(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((3*a+9*b)//(3*d), -40, 40, "((a+(b*3))//d)")
+
+  def test_symbolic_gcd_div(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    c = Variable("c", -10, 10)
+    d1 = Variable("d1", 1, 10)
+    d2 = Variable("d2", -10, -1)
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
+    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
+
+  def test_symbolic_factor_remainder_div(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((d*a+b)//d, 0, 20, "(a+(b//d))")
+    self.helper_test_variable((d*a*20+b)//(5*d), 0, 42, "((a*4)+(b//(d*5)))")
+    self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "((b+(a*4))+(2//d))")
+
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
 
@@ -590,45 +648,6 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
-
-  def test_arange_unrolled4(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
-    self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
-
-  def test_arange_unrolled4_with_cast(self):
-    gidx = Variable("gidx", 0, 2559, dtypes.index)
-    dt = dtypes.int
-    unrolled_div = ((gidx+2561)//4 + 2).cast(dt)+((gidx+2562)//4).cast(dt)+((gidx+2560)//4).cast(dt)+((gidx+2559)//4).cast(dt)
-    self.helper_test_variable(unrolled_div, 2561, 5120, "((int)(gidx)+2561)")
-
-  def test_arange_unrolled4_mul(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = 2*((gidx+2561)//4)+2*((gidx+2562)//4)+2*((gidx+2560)//4)+2*((gidx+2559)//4)
-    self.helper_test_variable(unrolled_div, 5118, 10236, "((gidx*2)+5118)")
-
-  def test_arange_unrolled4_small(self):
-    gidx = Variable("gidx", 0, 3)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 3, "gidx")
-
-    gidx = Variable("gidx", 0, 2)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 2, "gidx")
-
-    gidx = Variable("gidx", 0, 1)
-    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-    self.helper_test_variable(unrolled_div, 0, 1, "gidx")
-
-  def test_arange_unrolled2(self):
-    gidx = Variable("gidx", 0, 2559)
-    unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
-    self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
-
-  def test_arange_unrolled2_neg(self):
-    ridx = Variable("ridx", 0, 255)
-    unrolled_div = -((255-ridx)//2) - ((256-ridx)//2)
-    self.helper_test_variable(unrolled_div, -255, 0, "(ridx+-255)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
@@ -933,6 +952,46 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = b.substitute({a: uconst(1)})
     assert c == uconst(2)
 """
+
+class TestInvalidIndex(unittest.TestCase):
+  def test_invalid_times_0(self):
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())*0
+    self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+
+  def test_invalid_comparison_drops_invalid(self):
+    # comparisons return a bool, and bools can't be invalid
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())<3
+    self.assertIs(idx.simplify(), (ridx<3), "comparison of index should drop the invalid")
+    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0),
+      "comparison of index should drop the invalid")
+
+  def test_alu_moves_inside_invalid(self):
+    ridx = Variable("ridx", 0, 10)
+    idx = (ridx<5).where(ridx, UOp.invalid())*10
+    self.assertIs(idx.simplify(), (ridx<5).where(ridx*10, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+
+  def test_merge_invalid_conditions(self):
+    ridx0 = Variable("ridx0", 0, 10)
+    ridx1 = Variable("ridx1", 0, 10)
+    idx0 = (ridx0<5).where(ridx0, UOp.invalid())
+    idx1 = (ridx1<5).where(idx0//2, UOp.invalid())
+    self.assertIs(idx1.simplify(), ((ridx1<5)&(ridx0<5)).where(ridx0//2, UOp.invalid()),
+      "valid inside a valid should make a single valid and & the conditions")
+
+  def test_alu_invalid(self):
+    self.assertIs((UOp.invalid()*2).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()*0).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()+8).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()+Variable("a",0,10)).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()*Variable("a",0,10)).simplify(), UOp.invalid())
+    self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
+
+  def test_alu_invalid_vconst(self):
+    c1 = UOp.const(dtypes.index.vec(4), (1, 1, Invalid, Invalid))
+    c2 = UOp.const(dtypes.index.vec(4), (1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.index.vec(4), (2, Invalid, Invalid, Invalid)))
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):

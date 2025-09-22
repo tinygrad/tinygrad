@@ -66,22 +66,21 @@ function renderDag(graph, additions, recenter) {
     // draw nodes
     const STROKE_WIDTH = 1.4;
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g")
+    const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
         if (d.ref != null) return setCtxWithHistory(d.ref);
         const parents = g.predecessors(d.id);
-        if (parents == null) return;
-        const src = [...parents, d.id];
-        nodes.classed("highlight", n => src.includes(n.id));
-        d3.select("#edges").selectAll("path.edgePath").classed("highlight", e => src.includes(e.v) && e.w===d.id);
-        d3.select("#edge-labels").selectAll("g.port").classed("highlight", (_, i, nodes) => {
-          const [v, w] = nodes[i].id.split("-");
-          return src.includes(v) && w===d.id;
-        });
+        const children = g.successors(d.id);
+        if (parents == null && children == null) return;
+        const src = [...parents, ...children, d.id];
+        nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
+        d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
       });
     nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-      .attr("x", d => -d.width/2).attr("y", d => -d.height/2).attr("class", d => d.className ?? "node");
+      .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
     nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
       const x = (d.width-d.padding*2)/2;
       const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
@@ -179,7 +178,7 @@ async function renderProfiler() {
   const u64 = () => { const ret = new Number(view.getBigUint64(offset, true)); offset += 8; return ret; }
   const f32 = () => { const ret = view.getFloat32(offset, true); offset += 4; return ret; }
   const optional = (i) => i === 0 ? null : i-1;
-  const dur = u32(), peak = u64(), indexLen = u32(), layoutsLen = u32();
+  const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
@@ -193,20 +192,20 @@ async function renderProfiler() {
   // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
-  const heightScale = d3.scaleLinear().domain([0, peak]).range([4,maxheight=100]);
+  const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
-    const shapes = [];
+    const shapes = [], visible = [];
     const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible:[], offsetY });
+      data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -218,8 +217,9 @@ async function renderProfiler() {
           levels.push(et);
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size));
-        const fillColor = d3.color(colorMap.get(colorKey)).brighter(depth).toString();
+        if (!colorMap.has(colorKey)) colorMap.set(colorKey, d3.rgb(cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size)));
+        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
+        const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         if (e.ref != null) ref = {ctx:e.ref, step:0};
         else if (ref != null) {
@@ -269,10 +269,11 @@ async function renderProfiler() {
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}`};
+        const dur = x.at(-1)-x[0];
+        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible:[], offsetY, height, peak, scaleFactor:maxheight*4/height });
+      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -321,15 +322,16 @@ async function renderProfiler() {
         // contiguous rect
         if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
+        const y = offsetY+e.y;
         const width = xscale(e.x+e.width)-x;
-        ctx.fillStyle = e.fillColor; ctx.fillRect(x, offsetY+e.y, width, e.height);
-        visible.push({ y0:offsetY+e.y, y1:offsetY+e.y+e.height, x0:x, x1:x+width, arg:e.arg });
+        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
+        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        let [labelX, labelWidth] = [x+2, 0];
-        const labelY = offsetY+e.y+e.height/2;
+        let labelX = x+2, labelWidth = 0;
+        const labelY = y+e.height/2;
         for (const [i,l] of e.label.entries()) {
           if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
             if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
@@ -656,28 +658,6 @@ async function main() {
   const metadata = document.querySelector(".metadata");
   const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
-  if (ctx.runtime_stats != null) {
-    const div = metadata.appendChild(document.createElement("div"));
-    div.className = "stats-list";
-    for (const [i, s] of ctx.runtime_stats.entries()) {
-      const p = div.appendChild(document.createElement("p"));
-      if (ctx.runtime_stats.length > 1) p.innerText = `Run ${i+1}/${ctx.runtime_stats.length}`;
-      const table = div.appendChild(document.createElement("table"));
-      const tbody = table.appendChild(document.createElement("tbody"));
-      for (const { name, value, unit, subunits } of s.data) {
-          const mainRow = appendRow(tbody, name, value, unit, "main-row");
-          if (!subunits?.length) continue;
-          const subunitRow = tbody.appendChild(document.createElement("tr"));
-          subunitRow.style.display = "none";
-          mainRow.onclick = () => subunitRow.style.display = subunitRow.style.display === "none" ? "table-row" : "none";
-          mainRow.style.cursor = "pointer";
-          const td = subunitRow.appendChild(document.createElement("td"));
-          td.colSpan = 2;
-          const table = td.appendChild(document.createElement("table"));
-          for (const u of subunits) appendRow(table, u.name, u.value, unit, "sub-row");
-      }
-    }
-  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -742,7 +722,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
-document.addEventListener("keydown", async function(event) {
+document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
