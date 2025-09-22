@@ -343,7 +343,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
 
   # if any movement ops make it here they didn't get INDEX, remove tags
-  (UPat(GroupOp.Movement, name="x"), unprocessed_mop),
+  # (UPat(GroupOp.Movement, name="x"), unprocessed_mop),
 ])
 
 # *****************
@@ -386,7 +386,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
 
-# wrapped bufs jump to the outer world through MSTACK
+# wrapped bufs jump to the outer world through children (MSTACK, RESHAPE, movement ops)
+# this might enable copy before expand too
 class WrappedBuf:
   def __init__(self, x): self.x = x
   def __repr__(self): return f"B({self.x})"
@@ -408,6 +409,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
    lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
+  (UPat(Ops.BUFFERIZE, allow_any_len=True, name="b").f(GroupOp.Movement, name="mop"), lambda b,mop: mop.replace(src=(b.rtag(WrappedBuf(mop.tag)),)) if b.tag is None else None),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
   # copy on CONST is CONST
@@ -599,7 +601,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op in {Ops.BUFFERIZE, Ops.MSTACK} or x.base.op in {Ops.CONST}) and isinstance(x.tag, tuple)])
+  # if tag isn't a tensor tag, it's out
+  # allreduce becomes COPY -> RESHAPE and the base doesn't have Tensor tags?
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.op in {Ops.BUFFERIZE, Ops.MSTACK} or x.base.op in {Ops.CONST, Ops.BUFFERIZE}) and isinstance(x.tag, tuple)])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
