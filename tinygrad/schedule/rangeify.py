@@ -401,6 +401,9 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+
+  # Cleanup symbolic simplifications
+  (UPat(Ops.WHERE, src=(UPat(Ops.CONST, dtype=dtypes.bool, arg=True), UPat.var("x"), UPat.var("y"))), lambda x,y: x),
 ])
 
 # *****************
@@ -421,7 +424,7 @@ def bufferize_to_store(x:UOp):
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
-    assert assign_target.op is Ops.INDEX
+    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
