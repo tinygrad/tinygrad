@@ -286,6 +286,8 @@
                 let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
                 if (chunk.length < SAMPLES_PER_SEGMENT) {
                     const padded = new Float32Array(SAMPLES_PER_SEGMENT);
+                    const pad_length = SAMPLES_PER_SEGMENT - chunk.length;
+                    console.log(`padding last chunk by ${pad_length} samples (${Math.round(pad_length / SAMPLES_PER_SEGMENT * 100)}%)`);
                     padded.set(chunk);
                     chunk = padded;
                 }
@@ -558,7 +560,10 @@
                 console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
                 let log_spec = log_specs_full.slice(seek, seek+MEL_SPEC_CHUNK_LENGTH);
                 if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
-                    console.log("must pad");
+                    let pad_length = seek + MEL_SPEC_CHUNK_LENGTH - log_specs_full.length;
+                    // TODO(irwin): possible double-pad, log_specs were already padded to multiple of MEL_SPEC_CHUNK_LENGTH
+                    // so this only triggers on custom seeks
+                    console.log(`must pad to ${pad_length}`);
                     let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
                     padded.set(log_specs_full.slice(seek));
                     log_spec = padded;
