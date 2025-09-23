@@ -2,6 +2,7 @@ from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Device
 
 # *** allreduce implementation ***
@@ -81,7 +82,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-def _replace_dnum(st, val):
+def _replace_dnum(st:ShapeTracker, val:int) -> ShapeTracker:
   # replace dnum in ShapeTracker with literal const for this mselect
   if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
@@ -94,10 +95,10 @@ def mstack_reorder_view(ms:UOp):
   return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
 
 def mstack_early_shrink(view:UOp, ms:UOp):
-  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(view.st, 0) == view.st: return None
+  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(unwrap(view.st), 0) == view.st: return None
   ret = []
   for i, x in enumerate(ms.src):
-    new_view = _replace_dnum(view.st, i)
+    new_view = _replace_dnum(unwrap(view.st), i)
     if x.op is Ops.COPY:
       # if src device doesn't have a renderer, we have to view after the copy
       # TODO: a way to understand this
