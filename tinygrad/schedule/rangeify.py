@@ -421,7 +421,7 @@ def bufferize_to_store(x:UOp):
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
-    assert assign_target.op is Ops.INDEX
+    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
