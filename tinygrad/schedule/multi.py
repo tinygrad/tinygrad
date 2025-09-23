@@ -1,8 +1,7 @@
-from typing import cast, TypeVar
+from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap, RANGEIFY
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Device
 
 # *** allreduce implementation ***
@@ -82,8 +81,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-T = TypeVar("T", bound=ShapeTracker|UOp)
-def _replace_dnum(st:T, val:int) -> T:
+def _replace_dnum(st, val):
   # replace dnum in ShapeTracker with literal const for this mselect
   if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
@@ -96,10 +94,10 @@ def mstack_reorder_view(ms:UOp):
   return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
 
 def mstack_early_shrink(view:UOp, ms:UOp):
-  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(unwrap(view.st), 0) == view.st: return None
+  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(view.st, 0) == view.st: return None
   ret = []
   for i, x in enumerate(ms.src):
-    new_view = _replace_dnum(unwrap(view.st), i)
+    new_view = _replace_dnum(view.st, i)
     if x.op is Ops.COPY:
       # if src device doesn't have a renderer, we have to view after the copy
       # TODO: a way to understand this
@@ -122,9 +120,6 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
-])
-
-multi_view_reordering = PatternMatcher([
   # MSELECT must select a base, if there are views apply them after selecting the base
   (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), lambda ms, view, base:
     base.mselect(ms.arg).view(_replace_dnum(unwrap(view.st), ms.arg))),
@@ -133,28 +128,6 @@ multi_view_reordering = PatternMatcher([
   # move shrink before MSTACK
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
-
-def mselect_shrink(src:UOp, ms:UOp, r:UOp, s:UOp):
-  return src.mselect(ms.arg).reshape(r.arg).shrink(s.arg)
-
-def _rep_dnum(x:sint, dnum:int): return _replace_dnum(x, dnum) if isinstance(x, UOp) else x
-def walk_mops(ms:UOp, mop:UOp):
-  mops = []
-  walk = mop
-  ret = mop.base.mselect(dnum:=ms.arg)
-  while walk is not mop.base:
-    m = walk.arg
-    if m: m = tuple(tuple(_rep_dnum(v, dnum) for v in s) for s in m) if isinstance(m[0], tuple) else tuple(_rep_dnum(v, dnum) for v in m)
-    mops.append((walk.op, m))
-    walk = walk.src[0]
-  for m in mops[::-1]: ret = ret._mop(*m)
-  return ret
-
-multi_mop_reordering = PatternMatcher([
-  (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, name="mop"),), name="ms"), walk_mops),
-])
-
-replace_allreduce += (multi_mop_reordering if RANGEIFY else multi_view_reordering)
 
 # ***** multi functions *****
 
