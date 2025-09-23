@@ -2108,7 +2108,6 @@ class TestView(unittest.TestCase):
   # a*VIEW(x), where VIEW(x) = 0
   # x+2
   # as long as one child realizes, x does not collapse
-  @expect_rangeify_fails
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
     b = Tensor.arange(3).contiguous()
