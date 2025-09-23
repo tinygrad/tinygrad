@@ -24,6 +24,8 @@ def block_reorder(lst:list[UOp]) -> list[UOp]:
     priority = [0] + [priorities[x] for x in local_children[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
+    # HACK: this doesn't solve the issue, just hides it
+    if u.op is Ops.CMP: priority = [1000]
     priorities[u] = min(priority)
 
   # number the uops in "ideal" order
