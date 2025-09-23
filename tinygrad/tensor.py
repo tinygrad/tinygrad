@@ -273,6 +273,7 @@ class Tensor(MathTrait):
 
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
+    print("Realize called!")
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
@@ -285,6 +286,7 @@ class Tensor(MathTrait):
     self.uop = x.uop
     return self
 
+  # ASSIGN 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
@@ -299,7 +301,10 @@ class Tensor(MathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
+    # print("self.uop", self.uop)
+    # print("x.uop", x.uop)
     self.uop = self.uop.assign(x.uop)
+    # print("self.uop after assign", self.uop)
     return self
 
   def detach(self) -> Tensor:
@@ -1285,7 +1290,9 @@ class Tensor(MathTrait):
     """
     return self._getitem(indices)
 
+# SETITEM
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
+    # print("self.uop in setitem", self.uop)
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
@@ -1295,13 +1302,19 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
+    # res = self.realize()._getitem(indices, v)
+    res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+      # self.assign(res).realize()
+      self.assign(res)
     else: # no copy, basic setitem
+      # res.assign(v).realize()
+      # self.assign(v)
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      assign_op = res.uop.assign(v.uop)
+      self.uop = self.uop.replace(src=self.uop.src + (assign_op,))
+      print("testing self assign", self.uop)
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
@@ -3556,6 +3569,7 @@ class Tensor(MathTrait):
     """
     return self / (1 + self.abs())
 
+  # Broadcast to
   # ***** broadcasted elementwise ops *****
   def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Tensor:
     if self.shape == new_shape: return self
