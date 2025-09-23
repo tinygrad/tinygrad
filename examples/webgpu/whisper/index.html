@@ -423,7 +423,7 @@
                     context: undefined
                 };
                 async function decodeOne(decode_sequence, decoder_state, temperature) {
-                    const {i, max_range, last_eos_logprob} = decode_sequence;
+                    const {index: i, max_range, last_eos_logprob} = decode_sequence;
                     const last_index = decoder_state.last_index;
                     let {context} = decode_sequence;
                     let result = {
@@ -494,59 +494,59 @@
                     return result;
                 }
 
-                let max_range = offset + MAX_TOKENS_TO_DECODE;
+                const max_range = offset + MAX_TOKENS_TO_DECODE;
 
-                let indices, max_ranges, cumlogprobs, avg_logprobs, contexts;
-                [indices, cumlogprobs, avg_logprobs, contexts, last_eos_logprobs] = [[], [], [], [], []];
+                let sequences = [];
+                const default_sequence = {
+                    index: 0,
+                    max_range: 0,
+                    segment_cumlogprob: 0,
+                    avg_logprob: 0,
+                    last_eos_logprob: -10,
+                    context: undefined
+                };
 
                 const BEST_OF = 5;
                 const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
                 for(let i = 0; i < SEQUENCE_COUNT; ++i) {
-                    indices.push(offset);
-                    cumlogprobs.push(0);
-                    avg_logprobs.push(0);
-                    last_eos_logprobs.push(-10);
-                    contexts.push(context.slice());
+                    let sequence = Object.create(default_sequence);
+                    sequence.index = offset;
+                    sequence.max_range = max_range;
+                    sequence.context = context.slice();
+                    sequences.push(sequence);
                 }
 
                 function tokensToText(tokens) {
                     return tokens.filter((t)=> ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
                 }
 
-                for(; contexts.some(c => c.at(-1) !== TOK_EOS);) {
+                for(; sequences.some(c => c.context.at(-1) !== TOK_EOS);) {
                     let updated = false;
-                    for (let idx = 0; idx < indices.length; ++idx) {
-                        if (contexts[idx].at(-1) === TOK_EOS) continue;
+                    for (let idx = 0; idx < sequences.length; ++idx) {
+                        if (sequences[idx].context.at(-1) === TOK_EOS) continue;
                         if (cancelToken.cancelled) return;
 
-                        let decode_sequence = {
-                            i: indices[idx],
-                            max_range,
-                            segment_cumlogprob: cumlogprobs[idx],
-                            context: contexts[idx],
-                            last_eos_logprob: last_eos_logprobs[idx]
-                        };
-
-                        let decode_result = await decodeOne(decode_sequence, decoder_state, temperature);
+                        let decode_result = await decodeOne(sequences[idx], decoder_state, temperature);
                         let keep = decode_result.keep;
-                        contexts[idx] = decode_result.context;
-                        avg_logprobs[idx] = decode_result.avg_logprob;
-                        cumlogprobs[idx] = decode_result.segment_cumlogprob;
-                        last_eos_logprobs[idx] = decode_result.last_eos_logprob;
+                        sequences[idx].context = decode_result.context;
+                        sequences[idx].avg_logprob = decode_result.avg_logprob;
+                        sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
+                        sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
                         if (!updated) {
-                            pendingText = format_text(tokensToText(contexts[idx].slice(offset)), avg_logprobs[idx], seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                            pendingText = format_text(tokensToText(sequences[idx].context.slice(offset)), sequences[idx].avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                             updated = true;
                         }
 
                         if (!keep) break;
-                        ++indices[idx];
+                        ++sequences[idx].index;
                     }
                 }
 
-                let idx = cumlogprobs.indexOf(Math.min.apply(null, cumlogprobs));
+                let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
+                let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
-                return [avg_logprobs[idx], cumlogprobs[idx], contexts[idx], offset];
+                return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset];
             }
 
             console.log("begin new transcription");
