@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, RANGEIFY
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 # TODO: write a clean version of this
@@ -350,6 +350,19 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
     ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
       + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
+
+  @unittest.skipUnless(RANGEIFY>=1, "Kernel only fuses with rangeify")
+  def test_double_sum_group(self):
+    a = Tensor.rand(4, 4, 4)
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 0, 16)],])
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
 
 if __name__ == '__main__':
   unittest.main()

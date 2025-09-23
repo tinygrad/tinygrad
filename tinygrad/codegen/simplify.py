@@ -1,10 +1,10 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic_flat, sym
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
+  off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
   new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
@@ -17,7 +17,7 @@ pm_flatten_range = PatternMatcher([
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  i = 2 if u.op is Ops.STORE else 1
+  i = range_start[u.op]
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
     # check same type
@@ -40,18 +40,18 @@ pm_simplify_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
   if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  if not no_range(red.src[0]): return None
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
       ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
-
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
@@ -98,16 +98,17 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
+  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
 
 def reduce_unparented(red:UOp):
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
+  if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  if red.arg is Ops.MUL:
+    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 pm_reduce_simplify = PatternMatcher([

@@ -167,3 +167,4 @@ class MathTrait:
   def log2(self): return self.alu(Ops.LOG2)
   def exp2(self): return self.alu(Ops.EXP2)
   def pow(self, x): return self.alu(Ops.POW, self.ufix(x))
+  def __pow__(self, x): return self.pow(x)

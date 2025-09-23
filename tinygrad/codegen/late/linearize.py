@@ -224,6 +224,8 @@ def remove_blockend(x:UOp):
       if late_ops[i].op is Ops.BARRIER and late_ops[i+1].op is Ops.BARRIER: late_ops[i+1] = UOp(Ops.NOOP)
     arg = BasicBlock(parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
+  # else the whole context ended by the blockend is already in this block and we can safely turn it into a block
+  return UOp(Ops.BLOCK, src=x.src, arg=BasicBlock(x.arg.lst, tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt))
 
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),
