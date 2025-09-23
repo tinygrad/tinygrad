@@ -482,7 +482,10 @@
                     context.push(nextTokens[nextTokenIndex]);
 
                     result.avg_logprob = result.segment_cumlogprob / (i-offset+1);
-                    result.segment_cumlogprob += nextLogprobs[nextTokens[nextTokenIndex]];
+                    let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
+                    decode_sequence.logprobs.push(nextLogprob);
+                    decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
+                    result.segment_cumlogprob += nextLogprob;
                     // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                     result.last_eos_logprob = nextLogprobs[TOK_EOS];
 
@@ -505,7 +508,9 @@
                     segment_cumlogprob: 0,
                     avg_logprob: 0,
                     last_eos_logprob: -10,
-                    context: undefined
+                    context: undefined,
+                    logprobs: undefined,
+                    eos_logprobs: undefined
                 };
 
                 const BEST_OF = 5;
@@ -515,6 +520,8 @@
                     sequence.index = offset;
                     sequence.max_range = max_range;
                     sequence.context = context.slice();
+                    sequence.logprobs = [];
+                    sequence.eos_logprobs = [-10];
                     sequences.push(sequence);
                 }
 
@@ -545,6 +552,13 @@
                     }
                 }
 
+                for (let seq of sequences) {
+                    console.log(seq.logprobs);
+                    console.log(seq.eos_logprobs);
+                    let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
+                    console.log(cumlogprob);
+                    console.log(cumlogprob / seq.logprobs.length);
+                }
                 let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
                 let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
