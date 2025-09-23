@@ -43,7 +43,7 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
+  @torch.compile if not getenv("CPU") else lambda f: f
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
