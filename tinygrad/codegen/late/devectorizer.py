@@ -158,7 +158,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
-  if must_divide: lengths = [x for x in lengths if idx.src[1].divides(x) is not None]
+  offset, mask = idx.src[1].get_idx(), idx.src[1].get_valid()
+  if must_divide: lengths = [x for x in lengths if offset.divides(x) is not None]
 
   # split based on the fold lengths
   global_offset = 0
@@ -167,7 +168,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
+      lidx = buf.index((offset + global_offset).valid(mask))
       if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
