@@ -132,11 +132,18 @@ class PTXRenderer(Renderer):
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
+  tc_sm89 = [x for x in tc.cuda_sm89 if x.dtype_in in [dtypes.half, dtypes.float, dtypes.fp8e4m3, dtypes.fp8e5m2]]
+  tc_sm90 = [x for x in tc.cuda_sm90 if x.dtype_in in [dtypes.half, dtypes.float, dtypes.fp8e4m3, dtypes.fp8e5m2]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
     self.device, self.arch = device, arch
-    self.tensor_cores = PTXRenderer.tc_sm80 if int(arch[3:]) >= 80 else tc.cuda_sm75 if int(arch[3:]) >= 75 else []
+    arch_num = int(arch[3:])
+    if arch_num >= 90: self.tensor_cores = PTXRenderer.tc_sm90
+    elif arch_num >= 89: self.tensor_cores = PTXRenderer.tc_sm89
+    elif arch_num >= 80: self.tensor_cores = PTXRenderer.tc_sm80
+    elif arch_num >= 75: self.tensor_cores = tc.cuda_sm75
+    else: self.tensor_cores = []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
@@ -148,9 +155,11 @@ class PTXRenderer(Renderer):
   # HACK: Use s16 and u16 for int8 and uint8 buffers. This can be wrong in cast.
   types: dict[DType, str] = { dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
                               dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
-                              dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred" }
+                              dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "pred",
+                              dtypes.fp8e4m3: "u8", dtypes.fp8e5m2: "u8" }
 
-  mem_types: dict[DType, str] = {**types, dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"}
+  mem_types: dict[DType, str] = {**types, dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16",
+                                 dtypes.fp8e4m3: "u8", dtypes.fp8e5m2: "u8"}
 
   def render_kernel(self, kernel, function_name, bufs, regs, uops) -> str:
     def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
