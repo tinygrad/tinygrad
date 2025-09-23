@@ -108,6 +108,9 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
+  # rewrite to backend specific ops
+  if opts.isel_matcher is not None: ret.append(RewriteStep(opts.isel_matcher, name="instruction selection", bottom_up=True))
+
   # return the list (with optional linearizer)
   return ret + (rewrites_for_linearizer if linearizer else [])
 

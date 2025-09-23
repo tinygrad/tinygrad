@@ -123,6 +123,7 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
+  isel_matcher: PatternMatcher|None = None
   extra_spec: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 

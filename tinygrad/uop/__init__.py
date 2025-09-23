@@ -83,6 +83,13 @@ class Ops(FastEnum):
   # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
   CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
+  # X86 specific ops
+  CMP = auto()
+  SETNE = auto(); SETE = auto(); SETL = auto(); SETB = auto() # noqa: E702
+  CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto() # noqa: E702
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto() # noqa: E702
+  VSHUFPS = auto(); VINSERTPS = auto() # noqa: E702
+
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,

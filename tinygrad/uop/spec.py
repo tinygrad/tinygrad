@@ -241,10 +241,19 @@ x86_spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.cvar(),)), lambda: True),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX), UPat.cvar()), allow_any_len=True), lambda: True),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX), UPat(), UPat.cvar()), allow_any_len=True), lambda: True),
+  # mask in cmove must have same size as cmove
   (UPat(Ops.WHERE, src=(UPat.var("m", dtypes.masks), UPat.var("a"), UPat.var("b")), name="x"),
    lambda m,a,b,x: a.dtype == b.dtype == x.dtype and m.dtype.itemsize == x.dtype.itemsize),
+  # mask comparison must have same size as srcs
   (UPat(GroupOp.Comparison, dtypes.masks, (UPat.var("a"), UPat.var("b")), name="x"),
    lambda a,b,x: a.dtype == b.dtype and x.dtype.itemsize == a.dtype.itemsize),
+  # x86 ops
+  (UPat(Ops.CMP, dtypes.bool, (UPat.var("a", dtypes.ints+(dtypes.bool,)), UPat.var("b", dtypes.ints+(dtypes.bool,)))), lambda a,b: a.dtype == b.dtype),
+  (UPat((Ops.SETB, Ops.SETL, Ops.SETNE, Ops.SETE), dtypes.bool, (UPat(Ops.CMP, dtypes.bool),)), lambda: True),
+  (UPat((Ops.CMOVB, Ops.CMOVL, Ops.CMOVE, Ops.CMOVNE), src=(UPat(Ops.CMP, dtypes.bool), UPat.var("a"), UPat.var("b")), name="x"),
+   lambda a,b,x: a.dtype == b.dtype == x.dtype),
+  (UPat(Ops.VSHUFPS), lambda: True),
+  (UPat(Ops.VINSERTPS), lambda: True),
 ])
 
 # *** this is the UOp AST spec ***
