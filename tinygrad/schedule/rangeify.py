@@ -18,6 +18,15 @@ double_reshape = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
 ])
 
+def multi_tagging(x:UOp, m:UOp):
+  if x.tag is None: return None
+  assert x.tag == m.tag, f"multi tag mistmatch {x.tag} != {m.tag}"
+  return m.replace(src=(x.rtag(None),))
+
+pm_multi_tag = PatternMatcher([
+  (UPat.var("x").f(Ops.MULTI, name="m"), multi_tagging),
+])
+
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
@@ -566,7 +575,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   msink = graph_rewrite_map(tsink, multi_pm, name="multi")
   tsink = msink[tsink].substitute({v:v.rtag(k.tag) for k,v in msink.items() if v.tag is None and k.tag is not None})
 
-  tsink = graph_rewrite(tsink, earliest_rewrites, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_multi_tag+earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
@@ -582,7 +591,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST}) and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST, Ops.BUFFERIZE}) and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
