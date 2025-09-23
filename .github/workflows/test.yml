@@ -537,6 +537,8 @@ jobs:
     # slow (and still wrong on beautiful_mnist)
     #- name: Test LLVM RANGEIFY=1 (slow tests)
     #  run: CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testrangeifycl:
     name: Linux (rangeify) CL
@@ -558,6 +560,8 @@ jobs:
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
     - name: Test ONNX
       run: CL=1 RANGEIFY=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testrangeifymacos:
     name: MacOS (rangeify)
@@ -573,6 +577,8 @@ jobs:
         deps: testing
     - name: Test METAL=1 RANGEIFY=1
       run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testdevectorize:
     name: Linux (devectorize)
