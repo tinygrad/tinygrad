@@ -155,10 +155,11 @@ def map_pad(idx:UOp, r:UOp):
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
-    with Context(TRACK_MATCH_STATS=0):
-      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
+    ret[i] = where.where(ret[i]-s, UOp.invalid())
+
   # PAD is with 0
-  return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
+  with Context(TRACK_MATCH_STATS=0):
+    return graph_rewrite(bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0)), sym)
 
 def map_expand(r:UOp, idx:UOp):
   new_rngs = []
@@ -401,9 +402,6 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
-
-  # Cleanup symbolic simplifications
-  (UPat(Ops.WHERE, src=(UPat(Ops.CONST, dtype=dtypes.bool, arg=True), UPat.var("x"), UPat.var("y"))), lambda x,y: x),
 ])
 
 # *****************
