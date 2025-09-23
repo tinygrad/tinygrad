@@ -220,7 +220,8 @@ def assign_multi(dest:UOp, src:UOp):
   return dest.src[0].assign(src.src[0]).multi(src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp):
-  return root.replace(src=(multi.src[0],)).multi(multi.axis)
+  # NOTE: replace has footguns with tag
+  return root.replace(src=(multi.src[0],), tag=None).multi(multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
