@@ -40,18 +40,18 @@ pm_simplify_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
   if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  if not no_range(red.src[0]): return None
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
       ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
-
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
@@ -98,8 +98,7 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
+  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
