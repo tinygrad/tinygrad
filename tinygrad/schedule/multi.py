@@ -150,10 +150,6 @@ def walk_mops(ms:UOp, mop:UOp):
 
 multi_mop_reordering = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, name="mop"),), name="ms"), walk_mops),
-  # move view through MSTACK
-  #(UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
-  # move shrink before MSTACK
-  #(UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
 replace_allreduce += (multi_mop_reordering if RANGEIFY else multi_view_reordering)
