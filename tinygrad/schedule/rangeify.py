@@ -155,7 +155,8 @@ def map_pad(idx:UOp, r:UOp):
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
-    ret[i] = where.where(ret[i]-s, UOp.invalid())
+    with Context(TRACK_MATCH_STATS=0):
+      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
 
   # PAD is with 0
   with Context(TRACK_MATCH_STATS=0):
