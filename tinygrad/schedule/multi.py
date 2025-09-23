@@ -128,6 +128,9 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
   # move shrink before MSTACK
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
+  # ** mostly ** copy the old VIEW pushing stuff
+  # mselect base, the rewrite loop walks back movement ops
+  (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, name="mov"),), name="sel"), lambda sel,mov: sel.replace(src=(mov.src[0],))._mop(mov.op, mov.arg)),
 ])
 
 # ***** multi functions *****
