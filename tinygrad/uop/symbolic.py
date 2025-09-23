@@ -113,7 +113,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # new decomp rules for threefry
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32, lambda x: x),
-  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0))
+  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0)),
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
