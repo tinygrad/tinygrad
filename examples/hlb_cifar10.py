@@ -3,6 +3,8 @@
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
 # https://siboehm.com/articles/22/CUDA-MMM
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import random, time
 import numpy as np
 from typing import Optional
