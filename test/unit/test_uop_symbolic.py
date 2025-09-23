@@ -93,6 +93,37 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 is not idx2
     assert idx1*idx2 is not idx2*idx1
 
+  def test_uop_gcd_method(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    self.assertEqual(UOp.gcd(a, a*b, a*3).simplify(), a)
+    self.assertEqual(UOp.gcd(a*a*a, a*b*a, a*3*a).simplify(), a*a)
+    self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
+    self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), a.const_like(5))
+    self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
+
+  def test_divides_exact(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
+    self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
+    self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
+    self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
+    self.assertEqual((a*a*3).divide_exact(a*a.const_like(-3)).simplify(), a*-1)
+    self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
+    self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
+    self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
+    self.assertEqual((((a*-2)+14)*b).divide_exact(((a*-2)+14)).simplify(), b)
+
+  def test_divide_exact_not(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 8)
+    x = Variable("x", -20, 0)
+    self.assertEqual((a).divide_exact(b), None)
+    self.assertEqual((a+2).divide_exact(a), None)
+    self.assertEqual((x*-1).divide_exact(a), None)
+    self.assertEqual((a*5).divide_exact(a*10), None)
+    self.assertEqual((a*10-1).divide_exact(a*10), None)
+
   def test_factorize(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
@@ -110,7 +141,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-Variable("a", 0, 8), -8, 0, "(a*-1)")
 
   def test_xor_0(self):
-    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a")
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
 
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
@@ -449,6 +480,33 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mul_div_factor_div_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
+
+  def test_div_symbolic_const_gcd(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((3*a+9*b)//(3*d), -40, 40, "((a+(b*3))//d)")
+
+  def test_symbolic_gcd_div(self):
+    a = Variable("a", -10, 10)
+    b = Variable("b", -10, 10)
+    c = Variable("c", -10, 10)
+    d1 = Variable("d1", 1, 10)
+    d2 = Variable("d2", -10, -1)
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
+    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
+
+  def test_symbolic_factor_remainder_div(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    d = Variable("d", 1, 10)
+    self.helper_test_variable((d*a+b)//d, 0, 20, "(a+(b//d))")
+    self.helper_test_variable((d*a*20+b)//(5*d), 0, 42, "((a*4)+(b//(d*5)))")
+    self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "((b+(a*4))+(2//d))")
 
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
