@@ -157,7 +157,6 @@ def map_pad(idx:UOp, r:UOp):
     bigwhere = bigwhere & where
     with Context(TRACK_MATCH_STATS=0):
       ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
-
   # PAD is with 0
   return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
 
