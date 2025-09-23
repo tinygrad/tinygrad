@@ -85,7 +85,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
     queue = asyncio.Queue()
     for item in src.copyout_queue: queue.put_nowait(item)
-    for _ in range(nw := getenv("ASYNC_COPY_WORKERS", 16)): queue.put_nowait(None)
+    for _ in range(nw := getenv("ASYNC_COPY_WORKERS", 4)): queue.put_nowait(None)
 
     async def _worker():
       conns = {}
