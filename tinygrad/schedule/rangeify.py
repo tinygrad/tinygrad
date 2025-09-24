@@ -336,7 +336,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # assert if there's any index we didn't process
-  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # *****************
@@ -421,7 +421,7 @@ def bufferize_to_store(x:UOp):
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
-    assert assign_target.op is Ops.INDEX
+    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
