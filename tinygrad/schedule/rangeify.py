@@ -41,6 +41,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
+  # copy only to different device
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
+
   # handle disk
   # TODO: this doesn't need to use st.views
   (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
