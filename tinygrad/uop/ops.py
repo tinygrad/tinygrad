@@ -449,6 +449,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     return next((x._device for x in self.src if x._device is not None), None)
   @property
