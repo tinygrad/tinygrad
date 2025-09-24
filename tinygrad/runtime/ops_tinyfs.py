@@ -59,9 +59,9 @@ class TinyFSDevice(Compiled):
       if loc not in self.conn_pools:
         self.conn_pools[loc] = asyncio.Queue(nw:=getenv("ASYNC_COPY_WORKERS", 4))
         conn_tasks = [asyncio.open_connection(*self.node_info[loc][-1].rsplit(":", 1)) for _ in range(nw)]
-        async for task in asyncio.as_completed(conn_tasks):
-          reader, writer = await task
-          self.conn_pools[loc].put_nowait((reader, writer))
+        connections = await asyncio.gather(*conn_tasks)
+        for reader, writer in connections: self.conn_pools[loc].put_nowait((reader, writer))
+      self.conn_pools_lock.release()
 
     reader, writer = await self.conn_pools[loc].get()
     try:
