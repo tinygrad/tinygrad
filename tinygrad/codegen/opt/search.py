@@ -11,7 +11,7 @@ from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.opt.postrange import Scheduler
 
-actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7] for axis in range(8)]
+actions = [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [0,2,3,4,5,7,8] for axis in range(8)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [0,4,7] for axis in range(5)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, arg=amt) for amt in [2,3,4,8,13,16,29] for axis in range(6)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, arg=amt) for amt in [13,16,28,29,32,49,64,256] for axis in range(3)]
@@ -126,6 +126,17 @@ def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=Tr
     return ret
 
   beam: list[tuple[Scheduler, float]] = [(lin, float("inf"))]
+  if lin.opts.device == "CPU":
+    for axis in lin.axes_of(AxisType.REDUCE):
+      shape = lin.full_shape[axis]
+      if isinstance(shape, int) and shape % 8 == 0:
+        try:
+          extra = lin.copy()
+          extra.apply_opt(Opt(OptOps.UPCAST, axis, 8))
+          beam.append((extra, float("inf")))
+        except KernelOptError:
+          pass
+        break
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if lin.opts.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0

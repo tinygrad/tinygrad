@@ -98,8 +98,10 @@ class Scheduler:
 
   # copied from kernel.py
   @property
-  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
+  def upcastable_dims(self) -> list[int]:
+    allowed_axes = [AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP]
+    if self.opts.device == "CPU": allowed_axes.append(AxisType.REDUCE)
+    return [i for i in self.axes_of(*allowed_axes) if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
   def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
@@ -146,7 +148,10 @@ class Scheduler:
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
         check((self.opts is not None and self.opts.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
+        allowed = {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}
+        if self.opts.device == "CPU": allowed.add(AxisType.REDUCE)
+        allowed_str = "/".join(sorted(str(a).split('.')[-1] for a in allowed))
+        check(rng.arg[-1] in allowed, f"upcast is for {allowed_str}, not {rng.arg[-1]}")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")

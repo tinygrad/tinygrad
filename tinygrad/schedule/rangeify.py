@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
 from tinygrad.uop.symbolic import sym, symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -235,11 +235,35 @@ def map_realize(ctx:RangeifyContext, x:UOp):
 
 def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
   rngs = list(idx.src[1:])
-  new_ranges = []
-  for i,s in enumerate(red.src[0].shape):
-    if i in red.arg[1]:
-      rngs[i] = ctx.new_range(s, axistype=AxisType.REDUCE)
-      new_ranges.append(rngs[i])
+  reduce_entries:list[tuple[int, UOp]] = []
+  for axis, size in enumerate(red.src[0].shape):
+    if axis in red.arg[1]:
+      rng = ctx.new_range(size, axistype=AxisType.REDUCE)
+      rngs[axis] = rng
+      reduce_entries.append((axis, rng))
+
+  if len(reduce_entries) > 1 and red.src[0].st is not None:
+    strides = unwrap(red.src[0].st).real_strides(ignore_valid=True)
+
+    def stride_priority(axis:int) -> float:
+      if strides is None or axis >= len(strides): return float('inf')
+      stride = strides[axis]
+      if stride is None: return float('inf')
+      if isinstance(stride, UOp):
+        if stride.op is Ops.CONST: stride = stride.arg
+        else: return float('inf')
+      try:
+        ival = int(stride)
+      except (TypeError, ValueError):
+        return float('inf')
+      if ival == 0: return float('inf')
+      return abs(ival)
+
+    # Prefer the stride-1 axis as the innermost reduce so the CPU kernel can vectorise
+    # and stay in a single launch. Avoids the global dim reorder work tracked in bounty #14.
+    reduce_entries.sort(key=lambda entry: (stride_priority(entry[0]), entry[0]), reverse=True)
+
+  new_ranges = [rng for _, rng in reduce_entries]
   return UOp(Ops.REDUCE, red.dtype, src=(red.src[0].index(*rngs),)+tuple(new_ranges), arg=red.arg[0], tag=red.tag)
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):

@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, AxisType
 from tinygrad.uop.symbolic import symbolic_flat, sym
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
@@ -22,6 +22,9 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
     r0, r1 = u.src[i], u.src[i+1]
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
+      if r0.arg[-1] == AxisType.REDUCE:
+        i += 1
+        continue
       s0, s1 = r0.src[0], r1.src[0]
       # do the merge
       new_range = r0.replace(src=(s0*s1,))

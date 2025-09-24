@@ -48,6 +48,24 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
+  if k.opts.device == "CPU":
+    for axis in k.axes_of(AxisType.REDUCE):
+      shape = k.full_shape[axis]
+      if isinstance(shape, int) and shape % 16 == 0:
+        try:
+          k.apply_opt(Opt(OptOps.UPCAST, axis, 16))
+          break
+        except KernelOptError:
+          if DEBUG >= 4: print("CPU upcast16 fail", axis)
+          continue
+      if isinstance(shape, int) and shape % 8 == 0:
+        try:
+          k.apply_opt(Opt(OptOps.UPCAST, axis, 8))
+          break
+        except KernelOptError:
+          if DEBUG >= 4: print("CPU upcast8 fail", axis)
+          continue
+
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
@@ -95,11 +113,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
+    if k.rngs[axis].arg[-1] == AxisType.REDUCE: continue
     is_masked = any(any(o is k.rngs[axis] for o in u.src[0].parents) for u in k.ast.parents if u.op is Ops.WHERE)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
-  for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
+  for axis in to_upcast[::-1]:
+    try:
+      k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
+    except KernelOptError:
+      if DEBUG >= 4: print("masked axis upcast fail", axis)
+      continue
 
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.opts is not None and k.opts.device == "DSP"
@@ -140,14 +164,14 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        for splits in [4]:
+        for splits in ([16,8,4] if k.opts.device == "CPU" else [4]):
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
   except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
-  for splits in [4]:
+  for splits in ([16,8,4] if k.opts.device == "CPU" else [4]):
     # TODO: somehow this never hits a reduce
     if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
       k.apply_opt(Opt(OptOps.UPCAST, k.upcastable_dims[-1], splits))
