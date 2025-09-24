@@ -30,6 +30,7 @@ export BEAM=2 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MI
 export AMD_LLVM=0 # bf16 seems to require this
 export DATADIR="/raid/datasets/stable_diffusion"
 export CKPTDIR="/raid/weights/stable_diffusion"
+export EVAL_CKPT_DIR=$UNET_CKPTDIR
 export MODEL="stable_diffusion" PYTHONPATH="."
 export GPUS=8 BS=304
 export CONTEXT_BS=816 DENOISE_BS=600 DECODE_BS=384 INCEPTION_BS=560 CLIP_BS=240
@@ -64,6 +65,7 @@ sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750 && \
 run_retry TOTAL_CKPTS=7 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
 sleep 90
 
-# Eval collected checkpoints in reverse chronological order, even if above training crashed early
-run_retry BEAM_EVAL_SAMPLES=600 EVAL_CKPT_DIR="$UNET_CKPTDIR" python3 examples/mlperf/model_eval.py; (( $? == 2 )) && { echo "eval failed before BEAM completion"; exit 2; }
-EVAL_CKPT_DIR="$UNET_CKPTDIR" python3 examples/mlperf/model_eval.py
+run_retry BEAM_EVAL_SAMPLES=600 python3 examples/mlperf/model_eval.py; (( $? == 2 )) && { echo "eval failed before BEAM completion"; exit 2; }
+# Checkpoints will be evaluated in reverse chronological order, even if above training crashed early
+# STOP_IF_CONVERGED=1: Stop the eval after the first time convergence is detected; no more checkpoints will be evaluated after that.
+STOP_IF_CONVERGED=1 python3 examples/mlperf/model_eval.py

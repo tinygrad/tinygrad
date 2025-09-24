@@ -288,7 +288,7 @@ def eval_llama3():
   print(f"Log Perplexity: {log_perplexity}")
 
 def eval_stable_diffusion():
-  import csv, PIL
+  import csv, PIL, sys
   from tqdm import tqdm
   from examples.mlperf.initializers import init_stable_diffusion
   from examples.stable_diffusion import AutoencoderKL
@@ -311,6 +311,7 @@ def eval_stable_diffusion():
   INCEPTION_BS       = config["INCEPTION_BS"]           = getenv("INCEPTION_BS", 1 * len(GPUS))
   CLIP_BS            = config["CLIP_BS"]                = getenv("CLIP_BS", 1 * len(GPUS))
   EVAL_CKPT_DIR      = config["EVAL_CKPT_DIR"]          = getenv("EVAL_CKPT_DIR", "")
+  STOP_IF_CONVERGED  = config["STOP_IF_CONVERGED"]      = getenv("STOP_IF_CONVERGED", 0)
 
   if (WANDB := getenv("WANDB", "")):
     import wandb
@@ -495,7 +496,6 @@ def eval_stable_diffusion():
     
     if BEAM_EVAL_SAMPLES:
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
-      import sys
       sys.exit() # Don't eval additional models; we don't care about clip/fid scores when running BEAM on eval sample subset
 
     return clip_score, fid_score
@@ -505,10 +505,13 @@ def eval_stable_diffusion():
     unet_ckpt = safe_load(p)
     load_state_dict(unet, unet_ckpt)
     clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
-    converged = "true" if clip >= 0.15 and fid <= 90 else "false"
+    converged = True if clip >= 0.15 and fid <= 90 else False
     print(f"eval results for {EVAL_CKPT_DIR}/{p.name}: clip={clip}, fid={fid}, converged={converged}")
     if WANDB:
       wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip, "eval/fid_score": fid})
+    if converged and STOP_IF_CONVERGED:
+      print(f"Convergence detected, exiting early before evaluating other checkpoints due to STOP_IF_CONVERGED={STOP_IF_CONVERGED}")
+      sys.exit()
 
 if __name__ == "__main__":
   # inference only
