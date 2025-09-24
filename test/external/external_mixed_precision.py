@@ -36,16 +36,23 @@ class CompareTorchCUDAMixedPrecision(unittest.TestCase):
     assert tiny_bf16.dtype is dtypes.bfloat16
 
     tiny_f32 = y.cast(dtypes.float32).softmax(-1)
+    tiny_f32_exp = y.softmax(-1, dtype=dtypes.float32)
+    assert y.dtype is dtypes.bfloat16
     assert tiny_f32.dtype is dtypes.float32
+    assert tiny_f32_exp.dtype is dtypes.float32
 
     torch_f32 = torch_f32.cpu().numpy()
     # here tinygrad casts bf16 to f32 for numpy compatibility, but the underlying numbers are unchanged
     tiny_bf16 = tiny_bf16.numpy()
     tiny_f32 = tiny_f32.numpy()
+    tiny_f32_exp = tiny_f32_exp.numpy()
 
-    # notice how different the softmax results are for bf16 versus f32
-    self.assertRaises(AssertionError, np.testing.assert_allclose, torch_f32, tiny_bf16, rtol=1e-3, atol=1e-5)
     np.testing.assert_allclose(torch_f32, tiny_f32, rtol=1e-6, atol=1e-8)
+    # notice how different the softmax results are for bf16 versus f32
+    self.assertRaises(AssertionError, np.testing.assert_allclose, torch_f32, tiny_bf16, rtol=1e-3, atol=1e-4)
+    # if allow the initial max/difference steps of softmax occur in bf16, the results are very different than f32
+    self.assertRaises(AssertionError, np.testing.assert_allclose, torch_f32, tiny_f32_exp, rtol=1e-3, atol=1e-4)
+    self.assertRaises(AssertionError, np.testing.assert_allclose, tiny_f32, tiny_f32_exp, rtol=1e-3, atol=1e-4)
 
 if __name__=="__main__":
   unittest.main()
