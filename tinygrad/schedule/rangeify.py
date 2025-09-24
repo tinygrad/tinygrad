@@ -336,7 +336,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # assert if there's any index we didn't process
-  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # *****************
