@@ -605,5 +605,24 @@ class TestNN(unittest.TestCase):
     assert layer.bias_hh is None
     assert layer.bias_ih is None
 
+  def test_linear_failure(self):
+    Tensor.manual_seed(1337)
+    layer = Linear(1024, 3*1024, bias=True)
+    with torch.no_grad():
+      # torch_layer = torch.nn.Linear(1024, 3*1024, bias=True)
+      # layer.weight.assign(torch_layer.weight.numpy())
+      # layer.bias.assign(torch_layer.bias.numpy())
+
+      Tensor.manual_seed(1337)
+      x = Tensor.randn((1, 13, 1024)).contiguous().realize()
+      y = Tensor.randn((1, 13, 1024)).contiguous().realize()
+      out = layer(x.contiguous().realize()).contiguous().realize()
+      out2 = layer(y.contiguous().realize()).contiguous().realize()
+      print(out.sum().numpy())
+      print(out2.sum().numpy())
+
+      # torch_out = torch_layer(torch.tensor(x.numpy()))
+      # np.testing.assert_allclose(out.numpy(), torch_out.numpy(), atol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()
