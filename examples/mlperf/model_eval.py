@@ -322,12 +322,10 @@ def eval_stable_diffusion():
   for p in Path(EVAL_CKPT_DIR).iterdir():
     if p.name.endswith(".safetensors"):
       ckpt_iteration = p.name.split(".safetensors")[0]
-      #if ckpt_iteration.startswith("backup_"): ckpt_iteration = ckpt_iteration.replace("backup_", "", 1)
-      if ckpt_iteration.startswith("backup_"): continue
-      assert ckpt_iteration.isdigit(), f"invalid checkpoint name: {p.name}, expected <digits>.safetensors or backup_<digits>.safetensors"
+      assert ckpt_iteration.isdigit(), f"invalid checkpoint name: {p.name}, expected <digits>.safetensors"
       eval_queue.append((int(ckpt_iteration), p))
   assert len(eval_queue), f'no files ending with ".safetensors" were found in {EVAL_CKPT_DIR}'
-  print(eval_queue)
+  print(sorted(eval_queue, reverse=True))
 
   Tensor.manual_seed(seed)  # seed for weight initialization
   model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-eval", CKPTDIR / "sd" / "512-base-ema.ckpt", GPUS)
@@ -492,9 +490,8 @@ def eval_stable_diffusion():
     inception_stats_fn = str(DATADIR / "coco2014" / "val2014_30k_stats.npz")
     fid_score = inception.compute_score(progress["inception"].to("CPU"), inception_stats_fn)
     clip_score = progress["clip"].to(GPUS[0]).mean().item()
-    if not getenv("KEEP_EVAL_CACHE", ""):
-      for name in disk_tensor_names:
-        Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
+    for name in disk_tensor_names:
+      Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
     
     if BEAM_EVAL_SAMPLES:
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
@@ -506,10 +503,6 @@ def eval_stable_diffusion():
   # evaluate checkpoints in reverse chronological order
   for ckpt_iteration, p in sorted(eval_queue, reverse=True):
     unet_ckpt = safe_load(p)
-    if "model.out.2.bias" in unet_ckpt: # if we loaded from a training state checkpoint (incl. optimizer, etc.)
-      unet_ckpt = {k.replace("model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.")}
-    elif "model.diffusion_model.out.2.bias" in unet_ckpt:
-      unet_ckpt = {k.replace("model.diffusion_model.", "", 1): v for k,v in unet_ckpt.items() if k.startswith("model.diffusion_model.")}
     load_state_dict(unet, unet_ckpt)
     clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
     converged = "true" if clip >= 0.15 and fid <= 90 else "false"

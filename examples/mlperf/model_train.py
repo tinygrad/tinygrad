@@ -1514,6 +1514,7 @@ def train_stable_diffusion():
   CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+  TOTAL_CKPTS        = config["TOTAL_CKPTS"]            = getenv("TOTAL_CKPTS", 0)
 
   print(f"training on {GPUS}")
   lr = BS * BASE_LR
@@ -1563,8 +1564,6 @@ def train_stable_diffusion():
     Tensor.realize(loss, out_lr)
     return loss, out_lr
     
-  TOTAL_CKPTS=getenv("TOTAL_CKPTS", 0)
-
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
   @TinyJit
   def ckpt_to_cpu():
