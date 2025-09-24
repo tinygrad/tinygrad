@@ -2216,6 +2216,15 @@ class TestCopyFolding(unittest.TestCase):
     b = schedule_graph_rewrite(b)
     self.assertIs(b.base, a.base)
 
+  def test_copy_to_same_device_sched(self):
+    a = Tensor.ones(4).contiguous().realize().uop.as_buf()
+    t = Tensor(a.copy_to_device(a.device))
+    sched = t.schedule()
+    assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
+    run_schedule(sched)
+    assert t.uop.is_realized, f"didn't realize Tensor {t}"
+    self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
+
   def test_clone(self):
     a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
