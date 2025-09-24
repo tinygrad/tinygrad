@@ -452,10 +452,10 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_idx_becomes_int(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)
-    l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),))
+    l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
     idx = l0 * 600
     valid = (l0<-1).ne(True)&(l0<3000)
-    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx, valid),))
+    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
     uops = to_uops_list([l1])
     for u in uops:
       if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)

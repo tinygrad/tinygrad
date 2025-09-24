@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, CPU_LLVM, AMD_LLVM, RANGEIFY, OSX
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, CPU_LLVM, AMD_LLVM, RANGEIFY
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -312,7 +312,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.nn.functional.pad(torch.ones(256,256), pad=(0,64,0,0)).sum(axis=1),
                        lambda: Tensor.ones(256,256).pad(((0,0), (0,64))).sum(axis=1), forward_only=True)
 
-  @unittest.skipUnless(OSX or Device.DEFAULT=="CPU", "TODO fail on some devices")
   def test_sum_twice(self):
     helper_test_op([(4, 4, 4)], lambda x: x.sum((0, 1)).sum())
     helper_test_op([(4, 4, 4)], lambda x: x.sum((0, 2)).sum())

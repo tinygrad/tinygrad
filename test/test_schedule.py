@@ -938,7 +938,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out0.numpy(), out0_np:=np.exp2(a.numpy().sum()), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+out0_np, atol=1e-4, rtol=1e-6)
 
-  @expect_rangeify_fails
   def test_multireduce_reduce_multiple_paths(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -967,7 +966,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out0.numpy(), a.numpy().sum()+b.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+b.numpy().sum()+4, atol=1e-4, rtol=1e-4)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midreduce(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -996,7 +994,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out1.numpy(), out1_np:=b.numpy().max() + out0_np*2, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out2.numpy(), a.numpy().sum() + out1_np, atol=1e-4, rtol=1e-6)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midexpand(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -1031,7 +1028,6 @@ class TestSchedule(unittest.TestCase):
     d = a.sum() + 2
     check_schedule([c, d], 1 if RANGEIFY else 3)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midshrink(self):
     a = Tensor.empty(4, 4)
     r = a.sum(axis=1)
@@ -1489,7 +1485,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(f.numpy(), b.numpy().sum() - e_np, atol=1e-4, rtol=1e-4)
 
-  @expect_rangeify_fails # err in mark_children
   def test_partial_fuse4(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(16, 16).realize()
@@ -2113,7 +2108,6 @@ class TestView(unittest.TestCase):
   # a*VIEW(x), where VIEW(x) = 0
   # x+2
   # as long as one child realizes, x does not collapse
-  @expect_rangeify_fails
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
     b = Tensor.arange(3).contiguous()

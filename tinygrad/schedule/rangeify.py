@@ -28,33 +28,24 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
   # preserve tags?
-  # UOp with size 0 is zero
-  #(UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: root.const_like(0) if root.base.st is not None and root.size == 0 else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
-  # copy reorder
+  # COPY and source size need to match
+  # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
-  # the next two rules breaks the JIT
-  # TODO: this is causing many copies wih the replace tag None
-  # RESHAPE after COPY
-  #(UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="r"),UPat(name="d")), name="c"), lambda c,r,d: c.replace(src=(r.src[0],d), tag=None).reshape(r.arg)),
-  # this becomes BUFFER_VIEW on disk
-
-  # const hacks
-  #(UPat(Ops.CONST, name="x"), lambda x:
-  # x.replace(src=(x.src[0].src[0],)).reshape((1,)*len(x.shape)).expand(x.shape) if \
-  #  len(x.src) and x.src[0].op is Ops.VIEW and not any(s == 0 for s in x.shape) else None),
 
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
   # handle disk
-  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), src=(UPat.var("x"),), name="t"), lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,),
-    (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  # TODO: this doesn't need to use st.views
+  (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
+   lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
+       and x.device.startswith("DISK") else None),
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
@@ -121,7 +112,7 @@ def mark_children(ctx:ChildrenContext, x:UOp):
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN}, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN, Ops.SINK}, name="x"), mark_children),
 ])
 
 # *****************
@@ -312,10 +303,6 @@ def might_end_axis(idx:UOp):
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
-def unprocessed_mop(x:UOp):
-  assert x.src[0].op in GroupOp.Movement.union({*ALWAYS_CONTIGUOUS, Ops.REALIZE, Ops.BUFFERIZE}), f"unprocessed movement op on {x.src[0]}"
-  return x.replace(tag=None)
-
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
@@ -349,10 +336,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # assert if there's any index we didn't process
-  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
-
-  # if any movement ops make it here they didn't get INDEX, remove tags
-  (UPat(GroupOp.Movement, name="x"), unprocessed_mop),
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # *****************
@@ -437,7 +421,7 @@ def bufferize_to_store(x:UOp):
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
-    assert assign_target.op is Ops.INDEX
+    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
@@ -515,7 +499,7 @@ to_define_global = PatternMatcher([
 
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=(), tag=None) if len(c.src) else None),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
@@ -570,7 +554,7 @@ def tag_uop(ctx:list[UOp], x:UOp):
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}, name="x"), tag_uop),
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}.union(GroupOp.Movement), name="x"), tag_uop),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
@@ -598,7 +582,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST}) and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if x.base.op in {Ops.BUFFERIZE, Ops.CONST} and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 

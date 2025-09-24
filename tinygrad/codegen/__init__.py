@@ -95,7 +95,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
   # lower the index dtype to a concrete int
-  ret.append(RewriteStep(pm_lower_index_dtype+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
+  ret.append(RewriteStep(load_store_indexing+pm_lower_index_dtype, lambda _: opts.device, name="lower all index dtypes"))
 
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
