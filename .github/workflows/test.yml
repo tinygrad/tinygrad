@@ -531,7 +531,8 @@ jobs:
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
     - name: Test multitensor
       run: |
-        CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W TestMultiTensor.test_simple_reduce
+        CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W TestMultiTensor.test_simple_reduce \
+        TestMultiTensor.test_elementwise_dtype TestMultiTensor.test_shard_no_recompile TestHandleData.test_copied_to_device TestMultiRamUsage
         CPU=1 RANGEIFY=1 python3 -m pytest test/test_multitensor.py::TestMultiAssign -k 'not (multi_assign_piece_noncontig or multi_assign_var_offset)'
     - name: Test allreduce
         CPU=1 RANGEIFY=1 python3 -m pytest test/test_multitensor.py::TestMultiTensor test/unit/test_allreduce.py -k 'not (const_folding or shard_no_recompile)'
