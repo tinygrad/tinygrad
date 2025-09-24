@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import socket, uuid, json, asyncio, threading
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
@@ -27,8 +28,19 @@ class TinyFSDevice(Compiled):
     self.t.start()
     self.start_event.wait()
 
+    # connection pools
+    self.conn_pools = {}
+    self.conn_pools_lock = asyncio.Lock()
+
   def finalize(self):
     self.sfile.close()
+
+    for pool in self.conn_pools.values():
+      while not pool.empty():
+        _, w = pool.get_nowait()
+        w.close()
+        asyncio.run_coroutine_threadsafe(w.wait_closed(), self.loop).result()
+
     if hasattr(self, "loop"):
       self.loop.call_soon_threadsafe(self.loop.stop)
     self.t.join()
@@ -39,6 +51,23 @@ class TinyFSDevice(Compiled):
     self.start_event.set()
     self.loop.run_forever()
     self.loop.close()
+
+  @asynccontextmanager
+  async def connection(self, loc):
+    if loc not in self.conn_pools:
+      await self.conn_pools_lock.acquire()
+      if loc not in self.conn_pools:
+        self.conn_pools[loc] = asyncio.Queue(nw:=getenv("ASYNC_COPY_WORKERS", 4))
+        conn_tasks = [asyncio.open_connection(*self.node_info[loc][-1].rsplit(":", 1)) for _ in range(nw)]
+        async for task in asyncio.as_completed(conn_tasks):
+          reader, writer = await task
+          self.conn_pools[loc].put_nowait((reader, writer))
+
+    reader, writer = await self.conn_pools[loc].get()
+    try:
+      yield reader, writer
+    finally:
+      await self.conn_pools[loc].put((reader, writer))
 
 class TinyFSBuffer:
   def __init__(self, device:TinyFSDevice, size:int, offset=0, request_id=None, copyout_queue=None):
@@ -52,7 +81,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     return TinyFSBuffer(self.dev, size)
 
   def _copyin(self, dest:TinyFSBuffer, src:memoryview):
-    if DEBUG >= 2: print(f"Copying in {dest.size} bytes to {dest.device.op}")
+    if DEBUG >= 2: print(f"Copying in {dest.size} bytes to TINYFS:{dest.device.op}")
     self.dev.sfile.write(f"{dest.device.op}_IN {dest.size}\r\n".encode())
     self.dev.sfile.flush()
 
@@ -72,7 +101,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
         dest.copyout_queue.append((i, loc, src[i*16:(i+1)*16]))
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
-    if DEBUG >= 2: print(f"Copying out {src.size} bytes from {src.device.op}")
+    if DEBUG >= 2: print(f"Copying out {src.size} bytes from TINYFS:{src.device.op}")
     if src.device.op == "LOAD":
       asyncio.run_coroutine_threadsafe(self._copyout_async(dest, src), src.device.loop).result()
     else:
@@ -83,40 +112,25 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
       self.dev.sfile.readinto(dest)
 
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
-    queue = asyncio.Queue()
-    for item in src.copyout_queue: queue.put_nowait(item)
-    for _ in range(nw := getenv("ASYNC_COPY_WORKERS", 4)): queue.put_nowait(None)
-
-    async def _worker():
-      conns = {}
-      loop = asyncio.get_running_loop()
-      while True:
-        if (item := await queue.get()) is None:
-          queue.task_done()
-          break
-        i, loc, h = item
-        if loc not in conns:
-          addr = src.device.node_info[loc][-1]
-          conns[loc] = await asyncio.open_connection(*addr.rsplit(":", 1))
+    async def _worker(item):
+      i, loc, h = item
+      async with self.dev.connection(loc) as (reader, writer):
+        loop = asyncio.get_running_loop()
 
         ptr = i * Tensor.CHUNK_SIZE
         size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
 
-        conns[loc][1].write(f"CHUNK_OUT {size}\r\n".encode())
-        conns[loc][1].write(h)
-        await conns[loc][1].drain()
+        writer.write(f"CHUNK_OUT {size}\r\n".encode())
+        writer.write(h)
+        await writer.drain()
 
-        chunk = await conns[loc][0].readexactly(size)
+        chunk = await reader.readexactly(size)
 
-        await loop.run_in_executor(None, lambda: dest[ptr:ptr+len(chunk)].__setitem__(slice(None), chunk))
+        view = dest[ptr:ptr+len(chunk)]
+        f = await loop.run_in_executor(None, lambda: view.__setitem__(slice(None), chunk))
+        del view, f
 
-        queue.task_done()
-      for _, writer in conns.values():
-        writer.close()
-        await writer.wait_closed()
-
-    workers = [asyncio.create_task(_worker()) for _ in range(nw)]
-    await queue.join()
+    workers = [asyncio.create_task(_worker(item)) for item in src.copyout_queue]
     await asyncio.gather(*workers)
     src.copyout_queue.clear()
 
