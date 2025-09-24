@@ -1,4 +1,4 @@
-from typing import cast, TypeVar
+from typing import cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
@@ -82,10 +82,9 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-T = TypeVar("T", bound=ShapeTracker|sint)
-def _replace_dnum(st:T, val:int) -> T:
+def _replace_dnum(st:ShapeTracker, val:int) -> ShapeTracker:
   # replace dnum in ShapeTracker with literal const for this mselect
-  if not isinstance(st, int) and (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
+  if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
     assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
     st = st.substitute({dnums[0]:dnums[0].const_like(val)})
   return st
@@ -111,11 +110,6 @@ def mstack_early_shrink(view:UOp, ms:UOp):
       ret.append(x.view(new_view).contiguous())
   return ms.replace(src=tuple(ret))
 
-def mselect_base(sel:UOp, mov:UOp):
-  if mov.arg and isinstance(mov.arg[0], tuple): arg = tuple(tuple(_replace_dnum(s, sel.arg) for s in v) for v in mov.arg)
-  else: arg = tuple(_replace_dnum(s, sel.arg) for s in mov.arg)
-  return sel.replace(src=(mov.src[0],))._mop(mov.op, arg)
-
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
@@ -134,9 +128,6 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
   # move shrink before MSTACK
   (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
-  # ** mostly ** copy the old VIEW pushing stuff
-  # mselect base, the rewrite loop walks back movement ops
-  (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, name="mov"),), name="sel"), mselect_base),
 ])
 
 # ***** multi functions *****

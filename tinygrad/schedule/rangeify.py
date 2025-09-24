@@ -18,24 +18,6 @@ double_reshape = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
 ])
 
-# this runs alongside symbolic
-# 1. pre  symbolic: to make ops that can be const const and symbolic happens
-# 2. post symbolic: to prune ops that symbolic made simplifiable
-
-def mstack_const(ms:UOp):
-  assert ms.src[0].base.op is Ops.CONST
-  return ms.const_like(ms.src[0].base.arg)
-
-more_sym = PatternMatcher([
-  # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  # remove mstack on CONST
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.BUFFERIZE}).f(Ops.MSTACK, name="ms", allow_any_len=True), mstack_const),
-
-  # CONST (or DEFINE_VAR) can't have axes. remove INDEX when we get here
-  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c),
-])
-
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
@@ -53,7 +35,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # COPY and source size need to match
   # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if (rb:=r.base).op is not Ops.CONST and r.size != rb.size else None),
+   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -347,9 +329,6 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.ASSIGN, name="assign"),), allow_any_len=True, name="x"),
     lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],))),
 
-  # handle mselect?
-  #(UPat(Ops.INDEX, src=(UPat(Ops.MSELECT, name="ms"),), allow_any_len=True, name="x"), index_mselect),
-
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
     {Ops.STORE, Ops.COPY, Ops.BUFFER_VIEW, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
@@ -404,7 +383,7 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
-pm_cleanups = double_reshape+more_sym+symbolic_simple+pm_mops+PatternMatcher([
+pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
@@ -416,10 +395,10 @@ pm_cleanups = double_reshape+more_sym+symbolic_simple+pm_mops+PatternMatcher([
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
    lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
-  # absolutely no way this goes through
-  (UPat(GroupOp.Movement, name="mov").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda mov,b: mov.replace(tag=b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
 ])
@@ -476,7 +455,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0] for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
 ])
 
 # *****************
@@ -598,12 +577,12 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-  tsink = graph_rewrite(tsink, more_sym+symbolic_simple, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST} and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if x.base.op in {Ops.BUFFERIZE, Ops.CONST} and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
