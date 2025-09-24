@@ -307,7 +307,7 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.bitcast(dtypes.uint16).to("CPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
-  @unittest.skipIf(OSX, "new LLVM has an issue on OSX")
+  @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, CL=1 gives the wrong output")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('dt_bf16_disk_write_read_f32')}").realize()

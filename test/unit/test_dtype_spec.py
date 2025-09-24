@@ -1,6 +1,6 @@
 import unittest, math, operator, subprocess, struct
 from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT, truncate, truncate_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
+from tinygrad.dtype import DType, DTYPES_DICT, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, CI, DEBUG
 from hypothesis import given, settings, strategies as strat
@@ -21,7 +21,9 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, tol_target_dtype))
+    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2,
+      dtypes.fp8e4m3:1e-1, dtypes.fp8e5m2:5e-1}.get(target_dtype, tol_target_dtype))
+
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -104,16 +106,16 @@ class TestHelpers(unittest.TestCase):
       self.assertEqual(dt.min, dt.vec(4).min)
       self.assertEqual(dt.max, dt.vec(4).max)
 
-  def test_truncate_fp16(self):
-    self.assertEqual(truncate_fp16(1), 1)
-    self.assertEqual(truncate_fp16(65504), 65504)
-    self.assertEqual(truncate_fp16(65519.999), 65504)
-    self.assertEqual(truncate_fp16(65520), math.inf)
-    self.assertEqual(truncate_fp16(1e-8), 0.0)
-    self.assertEqual(truncate_fp16(-65504), -65504)
-    self.assertEqual(truncate_fp16(-65519.999), -65504)
-    self.assertEqual(truncate_fp16(-65520), -math.inf)
-    self.assertTrue(math.isnan(truncate_fp16(math.nan)))
+  def test_float_to_fp16(self):
+    self.assertEqual(float_to_fp16(1), 1)
+    self.assertEqual(float_to_fp16(65504), 65504)
+    self.assertEqual(float_to_fp16(65519.999), 65504)
+    self.assertEqual(float_to_fp16(65520), math.inf)
+    self.assertEqual(float_to_fp16(1e-8), 0.0)
+    self.assertEqual(float_to_fp16(-65504), -65504)
+    self.assertEqual(float_to_fp16(-65519.999), -65504)
+    self.assertEqual(float_to_fp16(-65520), -math.inf)
+    self.assertTrue(math.isnan(float_to_fp16(math.nan)))
 
   def test_float_to_bf16(self):
     # TODO: fuzz this better
@@ -576,10 +578,10 @@ class TestAutoCastType(unittest.TestCase):
   def test_gradient_dtype(self):
     old_default_float = dtypes.default_float
 
-    for default_dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+    for default_dtype in dtypes.floats:
       if not is_dtype_supported(default_dtype): continue
       dtypes.default_float = default_dtype
-      for dtype in [dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]:
+      for dtype in  dtypes.floats:
         if not is_dtype_supported(dtype): continue
         if DEBUG >= 2:
           print(f"testing {default_dtype=}, {dtype=}")
