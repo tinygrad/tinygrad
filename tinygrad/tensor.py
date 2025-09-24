@@ -1302,13 +1302,11 @@ class Tensor(MathTrait):
     else: # no copy, basic setitem
       # Convert simple indices to tensors for scatter
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape))
-      
       if isinstance(indices, int):
-          indices = Tensor([indices], device=self.device, dtype=dtypes.int32)
+        indices = Tensor([indices], device=self.device, dtype=dtypes.int32)
       elif isinstance(indices, (list, tuple)) and all(isinstance(i, int) for i in indices):
-          indices = Tensor(indices, device=self.device, dtype=dtypes.int32)
+        indices = Tensor(indices, device=self.device, dtype=dtypes.int32)
       v = v._broadcast_to(indices.shape)
-
       # Use scatter for the assignment
       src, mask = self._pre_scatter(0, indices, v)
       self.uop = _masked_setitem(self, src, mask, (-1,)).uop
