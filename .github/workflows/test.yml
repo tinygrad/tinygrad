@@ -519,24 +519,27 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # test_embedding issue with jit
       # test_load_state_dict_sharded_model_dict_same_axis issue with multi
       # test_instancenorm_3d is very slow
-      # test_copy_from_disk issue with DISK
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_embedding and not test_load_state_dict_sharded_model_dict_same_axis and not test_instancenorm_3d and not test_copy_from_disk" \
+          -k "not test_load_state_dict_sharded_model_dict_same_axis and not test_instancenorm_3d" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
-          test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py
+          test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
+          test/test_setitem.py
     - name: Test const folding
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
     - name: Test multitensor
-      run: CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
+      run: |
+        CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W TestMultiTensor.test_simple_reduce
+        CPU=1 RANGEIFY=1 python3 -m pytest test/test_multitensor.py::TestMultiAssign -k 'not (multi_assign_piece_noncontig or multi_assign_var_offset)'
     - name: Test CPU=1 RANGEIFY=2
       run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
     #- name: Test LLVM RANGEIFY=1 (slow tests)
     #  run: CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testrangeifycl:
     name: Linux (rangeify) CL
@@ -558,6 +561,8 @@ jobs:
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
     - name: Test ONNX
       run: CL=1 RANGEIFY=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testrangeifymacos:
     name: MacOS (rangeify)
@@ -573,6 +578,8 @@ jobs:
         deps: testing
     - name: Test METAL=1 RANGEIFY=1
       run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testdevectorize:
     name: Linux (devectorize)
