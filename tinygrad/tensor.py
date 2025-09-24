@@ -97,6 +97,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
+# MASKED SETITEM
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
   for dim in reversed(axes):
@@ -273,7 +274,6 @@ class Tensor(MathTrait):
 
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    print("Realize called!")
     run_schedule(*self.schedule_with_vars(*lst), do_update_stats=do_update_stats)
     return self
 
@@ -1302,19 +1302,23 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    # res = self.realize()._getitem(indices, v)
     res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
-      # self.assign(res).realize()
-      self.assign(res)
+      self.assign(res).realize() # TODO remove realize here?
     else: # no copy, basic setitem
-      # res.assign(v).realize()
-      # self.assign(v)
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      assign_op = res.uop.assign(v.uop)
-      self.uop = self.uop.replace(src=self.uop.src + (assign_op,))
-      print("testing self assign", self.uop)
+      # Convert simple indices to tensors for scatter
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape))
+      
+      if isinstance(indices, int):
+          indices = Tensor([indices], device=self.device, dtype=dtypes.int32)
+      elif isinstance(indices, (list, tuple)) and all(isinstance(i, int) for i in indices):
+          indices = Tensor(indices, device=self.device, dtype=dtypes.int32)
+      v = v._broadcast_to(indices.shape)
+
+      # Use scatter for the assignment
+      src, mask = self._pre_scatter(0, indices, v)
+      self.uop = _masked_setitem(self, src, mask, (-1,)).uop
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
