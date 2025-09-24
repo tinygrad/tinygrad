@@ -14,7 +14,7 @@ class TestLRScheduler(unittest.TestCase):
     lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
     lrs = {}
 
-    # with above settings, optimizer.lr should warm up to lr over 1000 steps linearly.
+    # with above settings, optimizer.lr should warm up to lr over 1000 steps linearly
     for i in range(1200):
       lr_scheduler.step()
       if i in {0, 499, 998, 999, 1000, 1199}:
