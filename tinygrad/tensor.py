@@ -97,7 +97,6 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
-# MASKED SETITEM
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
   for dim in reversed(axes):
@@ -286,7 +285,6 @@ class Tensor(MathTrait):
     self.uop = x.uop
     return self
 
-  # ASSIGN 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
@@ -301,10 +299,7 @@ class Tensor(MathTrait):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    # print("self.uop", self.uop)
-    # print("x.uop", x.uop)
     self.uop = self.uop.assign(x.uop)
-    # print("self.uop after assign", self.uop)
     return self
 
   def detach(self) -> Tensor:
@@ -1290,9 +1285,7 @@ class Tensor(MathTrait):
     """
     return self._getitem(indices)
 
-# SETITEM
   def __setitem__(self, indices, v:Tensor|ConstType) -> None:
-    # print("self.uop in setitem", self.uop)
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
@@ -3573,7 +3566,6 @@ class Tensor(MathTrait):
     """
     return self / (1 + self.abs())
 
-  # Broadcast to
   # ***** broadcasted elementwise ops *****
   def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Tensor:
     if self.shape == new_shape: return self
