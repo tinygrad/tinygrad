@@ -13,11 +13,11 @@ class TinyFSDevice(Compiled):
 
     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self.sock.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
-    self.sock.send("INFO\r\n".encode())
-    self.sock.recv(16)
     self.sfile = self.sock.makefile("rwb")
 
     # fetch node info
+    self.sfile.write(b"INFO\r\n")
+    self.sfile.flush()
     info = self.sfile.readline()
     self.node_info = json.loads(info)
     if DEBUG >= 2: print(f"nodes: {self.node_info}")
@@ -83,11 +83,11 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
   def _copyin(self, dest:TinyFSBuffer, src:memoryview):
     if DEBUG >= 2: print(f"Copying in {dest.size} bytes to TINYFS:{dest.device.op}")
     self.dev.sfile.write(f"{dest.device.op}_IN {dest.size}\r\n".encode())
-    self.dev.sfile.flush()
 
-    # read the response uuid
-    dest.request_id = uuid.UUID(bytes=self.dev.sfile.read(16))
-    if DEBUG >= 2: print(f"Request ID: {dest.request_id}")
+    if dest.device.op == "STORE":
+      self.dev.sfile.flush()
+      dest.request_id = uuid.UUID(bytes=self.dev.sfile.read(16))
+      if DEBUG >= 2: print(f"Request ID: {dest.request_id}")
 
     self.dev.sfile.write(src)
     self.dev.sfile.flush()
