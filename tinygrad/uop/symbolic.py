@@ -229,7 +229,7 @@ def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
   if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
+  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
   div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
   newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
   if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
