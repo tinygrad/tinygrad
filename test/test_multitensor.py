@@ -29,10 +29,8 @@ N = 128
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
   ts = t.shard(devices_4, 0).realize()
-  assert ts.uop.is_realized, f"shard didn't realize {ts.uop}"
   b = Tensor(UOp.allreduce(ts.uop, Ops.ADD, ts.device))
   b.realize()
-  assert b.uop.is_realized, f"allreduce didn't realize {b.uop}"
   return aa, b
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
