@@ -205,14 +205,6 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if div==y.arg or (newxs:=fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))) is None or x.vmin<0 or newx.vmin<0: return None
-  return newxs//(c//div)
-
 def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
   # for mod we go further and take the remainder of all factors to reduce their size
@@ -229,6 +221,16 @@ def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   new_x = sum(rem)+x.const_like(0)
   if len(quo)==0 or new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
+
+def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # we try and nest the div and see if it allows the numerator to be simplified
+  if ((c := y.arg) < 0): return None
+  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
+  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
+  newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
+  if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
+  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
