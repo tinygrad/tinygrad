@@ -41,12 +41,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
-  # handle disk
-  # TODO: this doesn't need to use st.views
-  (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
-   lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
-       and x.device.startswith("DISK") else None),
-
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
 ])
@@ -403,6 +397,24 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
 ])
 
+def late_buffer_view(x, t, b):
+  rngs = b.src[1:]
+  size = prod(shape := [int(r.vmax+1) for r in rngs])
+  if len(shape) == 0: offset = x.src[1].arg
+  else:
+    idxs = x.src[1:]
+    offset = sum(idx.vmin for idx in idxs)
+    print(t.dtype, offset)
+
+  if isinstance(t.device, str) and t.device.startswith("DISK"):
+    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+  return b
+to_bufferview = PatternMatcher([
+  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
+  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(GroupOp.All).f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
+])
+
 # *****************
 # 4. put in buffers for bufferize
 # TODO: should BUFFERIZE look a lot more like STORE
@@ -579,6 +591,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+  tsink = graph_rewrite(tsink, to_bufferview, name="to bufferview")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # if it's not tagged by here, it's out
