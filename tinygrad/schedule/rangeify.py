@@ -18,6 +18,14 @@ double_reshape = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],), tag=(x.src[0].tag or ())+(x.tag or ()))),
 ])
 
+def clone_assign(assign:UOp, target:UOp):
+  if (buf:=target.base).tag == "clone": return None
+  assert buf.op is Ops.BUFFER, f"target to assign isn't buffer, it's {buf.op}"
+  # can also walk mops
+  # TODO: some more intelligent decision here
+  new = assign.src[1].substitute({buf:buf.rtag("clone").copy_to_device(buf.device).rtag("clone")})
+  return assign.replace(src=(target, new))
+
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
@@ -39,10 +47,15 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
-   lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
+   lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER and target.base.tag != "clone" else None),
+
+  # create a COPY of the target buffer in ASSIGN
+  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var()), name="assign"), clone_assign),
 
   # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device \
+      # TODO: this is really Ops.CLONE
+      and copy.tag != "clone" else None),
 
   # handle disk
   # TODO: this doesn't need to use st.views
@@ -90,6 +103,8 @@ add_contiguous = PatternMatcher([
    lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx and not isinstance(x.tag, WrappedContig) else None),
 ])
 remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag.x) if isinstance(x.tag, WrappedContig) else None)])
+# Ops.CLONE?
+remove_clone_tags = PatternMatcher([(UPat((Ops.COPY, Ops.BUFFER), name="x"), lambda x: x.replace(tag=None) if x.tag == "clone" else None),])
 
 # *****************
 # 2. mark all children
@@ -573,7 +588,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
   tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
-  tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
+  tsink = graph_rewrite(tsink, remove_contig_tags+remove_clone_tags, name="remove contiguous tags")
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
   # rangeify
