@@ -4,7 +4,7 @@ import contextlib
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp, RANGEIFY
+from tinygrad.helpers import temp, RANGEIFY, profile_marker
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -255,7 +255,7 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
-  # rangeify=1 is correct here
+  # rangeify=1 is (sometimes) correct here
   def assert_permuted_assign(self): return self.assertRaisesRegex(RuntimeError, "contiguous") if not RANGEIFY else contextlib.nullcontext()
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -280,14 +280,24 @@ class TestAssign(unittest.TestCase):
     #GlobalCounters.cache = []
     ba1 = a.uop.base.realized # noqa: F841
     bb1 = b.uop.base.realized # noqa: F841
+    #with self.assert_permuted_assign():
+    # TODO: rangeify is also wrong here, silently
     with self.assert_permuted_assign():
-      # note: rangeify is correct here
       a.assign(a.permute(1,0) + b)   # this should not work!
       a.realize()
       ba2 = a.uop.base.realized # noqa: F841
       # NOTE: don't test that it's assigned
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+
+  def test_post_permuted_assignment_alt(self):
+    a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    alu = a.permute(1, 0)+b
+    alu_np = alu.numpy()
+    del alu
+    a.assign(a.permute(1, 0)+b)
+    np.testing.assert_allclose(a.numpy(), alu_np)
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
@@ -370,6 +380,7 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
+    profile_marker("test_permuted_assignment_masked_view_not_contiguous")
     a = Tensor.ones(4, 4).contiguous().realize()
     with self.assert_permuted_assign():
       b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
