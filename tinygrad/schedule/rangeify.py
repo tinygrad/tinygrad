@@ -20,6 +20,7 @@ double_reshape = PatternMatcher([
 
 def clone_assign(assign:UOp, target:UOp):
   if (buf:=target.base).tag == "clone": return None
+  if isinstance(buf.device, tuple): return None # TODO: who owns multi?
   assert buf.op is Ops.BUFFER, f"target to assign isn't buffer, it's {buf.op}"
   # can also walk mops
   # TODO: some more intelligent decision here
