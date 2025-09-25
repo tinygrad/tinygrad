@@ -1956,9 +1956,10 @@ class TestSchedule(unittest.TestCase):
       bufs = [Tensor([1]*10).contiguous().realize() for i in range(N)]
 
     vi = Variable("i", 0, 9).bind(1)
-    root = bufs[0][vi]
-    for X in range(1,N): root = root + bufs[X][vi]
-    self.assertEqual(root.item(), N)
+    vj = Variable("j", 0, 9).bind(2)
+    root = bufs[0][vi] + bufs[0][vj]
+    for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
+    self.assertEqual(root.item(), N * 2)
 
 def swizzle_cnt(u:UOp) -> int:
   return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
