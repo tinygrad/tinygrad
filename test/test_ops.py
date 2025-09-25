@@ -3276,10 +3276,10 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     # current tinygrad softmax function runs max/subtract in original precision, only upcasting to the dtype arg before exponentiation
     tiny_exp = functools.partial(Tensor.softmax, dtype=dtypes.float32)
 
-    helper_test_op([(128,10)], torch_all, tiny_all, rtol=1e-6, atol=1e-8, dtype=dtypes.bfloat16)
+    helper_test_op([(128,10)], torch_all, tiny_all, rtol=1e-6, atol=1e-8, grad_rtol=1e-5, grad_atol=1e-7, dtype=dtypes.bfloat16)
     # upcasting only before exponentiation (after max/subtract) is not enough to replicate torch bf16 mixed precision softmax on CUDA
-    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-2, atol=1e-4, dtype=dtypes.bfloat16)
-    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-3, atol=1e-5, dtype=dtypes.bfloat16) # AssertionError
+    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-2, atol=1e-4, grad_rtol=1e-2, grad_atol=1e-4, dtype=dtypes.bfloat16)
+    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-3, atol=1e-5, grad_rtol=1e-2, grad_atol=1e-4, dtype=dtypes.bfloat16) # AssertionError
 
 if __name__ == '__main__':
   np.random.seed(1337)
