@@ -54,12 +54,16 @@ class CPUComputeQueue(HWQueue):
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
     if NIR:
       self.bind_args_state(args_state)
-      return self.cmd(self._exec, prg, 1, ctypes.cast((ctypes.c_int * 3)(*data64_le(args_state.buf.va_addr), 0xFF), ctypes.c_void_p).value)
+      return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
+
+class LVPArgsState(CLikeArgsState):
+  def __init__(self, buf:HCQBuffer, prg:CPUProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+    super().__init__(buf, prg, bufs, vals=vals, prefix=[*data64_le(buf.va_addr + 12), 0xFF])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -101,7 +105,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(CLikeArgsState if NIR else HCQArgsState, dev, name, kernargs_alloc_size=0)
+    super().__init__(LVPArgsState if NIR else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if NIR else 0)
 
   @suppress_finalizing
   def __del__(self):
