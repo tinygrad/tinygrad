@@ -296,8 +296,9 @@ class TestAssign(unittest.TestCase):
     alu = a.permute(1, 0)+b
     alu_np = alu.numpy()
     del alu
-    a.assign(a.permute(1, 0)+b)
-    np.testing.assert_allclose(a.numpy(), alu_np)
+    with self.assert_permuted_assign():
+      a.assign(a.permute(1, 0)+b)
+      np.testing.assert_allclose(a.numpy(), alu_np)
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
