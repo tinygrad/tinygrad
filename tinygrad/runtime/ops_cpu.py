@@ -1,18 +1,16 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue, struct
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, CPU_LLVM, suppress_finalizing, getenv, data64_le, i2u
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le, i2u
 from tinygrad.device import BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.runtime.support.compiler_cpu import HostLLVMCompiler, ClangJITCompiler
+from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
 from tinygrad.uop.ops import sint
-if (NIR := getenv("NIR")):
-  from tinygrad.renderer.nir import LVPRenderer
-  from tinygrad.runtime.support.lvp import LVPCompiler
-  from tinygrad.runtime.support.elf import elf_loader
-  import tinygrad.runtime.autogen.libc as libc
+from tinygrad.renderer.nir import LVPRenderer
+from tinygrad.runtime.support.lvp import LVPCompiler
+from tinygrad.runtime.support.elf import elf_loader
 
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_waiting_ms:int):
@@ -52,7 +50,7 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    if NIR:
+    if prg.LVP:
       self.bind_args_state(args_state)
       return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
@@ -69,9 +67,12 @@ class LVPArgsState(CLikeArgsState):
 MAP_JIT = 0x0800
 
 class CPUProgram(HCQProgram):
-  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
+  rt_lib = None
+  try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
+  except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
+    self.LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -86,8 +87,9 @@ class CPUProgram(HCQProgram):
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
-      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(False)
-      if NIR:
+      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
+      if self.LVP:
+        from tinygrad.runtime.autogen import libc
         (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for ploc,tgt,r_type,r_addend in relocs:
           match r_type:
@@ -95,17 +97,22 @@ class CPUProgram(HCQProgram):
             case _: raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
         self.mem.write(image)
       else: self.mem.write(lib)
-      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(True)
+      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      if CPUProgram.rt_lib is not None:
+        CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      else:
+        # msync should be a universal POSIX way to do this
+        from tinygrad.runtime.autogen import libc
+        libc.msync(ctypes.c_void_p(mv_address(self.mem)), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if NIR else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if NIR else 0)
+    super().__init__(LVPArgsState if self.LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if self.LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
@@ -136,5 +143,5 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    super().__init__(device, CPUAllocator(self), LLVMRenderer() if CPU_LLVM else (LVPRenderer(self) if NIR else ClangRenderer()), HostLLVMCompiler()
-                     if CPU_LLVM else (LVPCompiler() if NIR else ClangJITCompiler()), functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    compilers = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler), (functools.partial(LVPRenderer, self), LVPCompiler)]
+    super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

@@ -1,11 +1,10 @@
 from __future__ import annotations
-from typing import cast, Callable, Type, TypeVar, Generic, Any
+from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
-from tinygrad.renderer import Renderer
-from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
+from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 
@@ -359,12 +358,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   cpu_devices: list[HCQCompiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:Sequence[CompilerPairT], runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
-    super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
+    super().__init__(device, allocator, compilers, runtime, HCQGraph)
 
     # TODO: peer logic is determined based on device name.
     self.peer_group = device.split(":")[0]
@@ -441,14 +440,19 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
+  def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
+    # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
+    e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
+    if hasattr(e, "add_note"): e.add_note(errs + err_short)
+    return e
+
   def _select_iface(self, *ifaces:Type):
     errs, err_short = "", ""
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
     for iface_t in ifaces:
       try: return iface_t(self, self.device_id)
-      except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}"
-    raise RuntimeError(f"{errs}\nNo interface for {type(self).__name__[:-6]}:{self.device_id} is available:{err_short}\n" \
-                       f"\nForce an interface with {type(self).__name__[:-6].upper()}_IFACE={('|'.join(x.__name__[:-5] for x in ifaces))}.")
+      except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}."
+    raise self._make_no_iface_error(errs, err_short)
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 

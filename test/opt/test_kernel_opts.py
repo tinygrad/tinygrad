@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, RANGEIFY
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 # TODO: write a clean version of this
@@ -93,7 +93,7 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(8, N, 8, N)
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
-      # openCL / GPU=1 is 256 max threads
+      # openCL / CL=1 is 256 max threads
       [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
@@ -327,13 +327,14 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_arange_opts(self):
     a = Tensor.arange(128)
+    # NOTE: arange no longer has reduce ops available for opt
     helper_linearizer_opt(a, [
-      [Opt(OptOps.GROUP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
+      #[Opt(OptOps.GROUP, 0, 32)],
+      #[Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
-      [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
+      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
+      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
@@ -349,6 +350,19 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
     ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
       + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
+
+  @unittest.skipUnless(RANGEIFY>=1, "Kernel only fuses with rangeify")
+  def test_double_sum_group(self):
+    a = Tensor.rand(4, 4, 4)
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 0, 16)],])
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
+    r = a.sum((1, 2)).sum()
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
 
 if __name__ == '__main__':
   unittest.main()

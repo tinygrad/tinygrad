@@ -10,7 +10,6 @@ import tinygrad.runtime.autogen.libc as libc
 import ctypes, struct
 
 # FIXME: this is because clang2py produces bad output?
-nir_intrinsic_infos = nir.nir_intrinsic_infos.in_dll(nir._libraries['FIXME_STUB'], "nir_intrinsic_infos")
 assert libc._libraries['libc']
 stdout = ctypes.POINTER(nir.struct__IO_FILE).in_dll(libc._libraries['libc'], "stdout")
 s = nir.char_pointer_cast
@@ -48,7 +47,7 @@ def nimm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
 
 def nir_src_for_ssa(d:nir.nir_def) -> nir.nir_src: return nir.nir_src(ssa=ctypes.pointer(d))
 def nir_intrinsic_set(typ, instr:nir.nir_intrinsic_instr, val:int):
-  info = nir_intrinsic_infos[instr.contents.intrinsic]
+  info = nir.nir_intrinsic_infos.in_dll(nir._libraries['FIXME_STUB'], "nir_intrinsic_infos")[instr.contents.intrinsic]
   assert info.index_map[typ] > 0
   instr.contents.const_index[info.index_map[typ] - 1] = val
 
@@ -258,7 +257,7 @@ class NIRRenderer(Renderer):
           nir.nir_print_shader(self.b.shader, stdout)
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         self.r[u] = cast(nir.nir_def, d)
-    nir.nir_print_shader(self.b.shader, stdout)
+    # nir.nir_print_shader(self.b.shader, stdout)
     nir.nir_validate_shader(self.b.shader, b"after render")
     blob = nir.struct_blob()
     nir.nir_serialize(blob, self.b.shader, False)

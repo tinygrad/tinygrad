@@ -7,6 +7,14 @@ class TestTiny(unittest.TestCase):
 
   # *** basic functionality ***
 
+  def test_const(self):
+    const = Tensor(2.0)
+    self.assertEqual(const.item(), 2.0)
+
+  def test_copy(self):
+    out = Tensor([1.,2,3])
+    self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
+
   def test_plus(self):
     out = Tensor([1.,2,3]) + Tensor([4.,5,6])
     self.assertListEqual(out.tolist(), [5.0, 7.0, 9.0])
@@ -87,7 +95,7 @@ class TestTiny(unittest.TestCase):
     ones = Tensor.ones(10).contiguous()
     for s in [2,5]:
       ret = ones[:i.bind(s)] + 1
-      self.assertListEqual(ret.contiguous().reshape(s).tolist(), [2.0]*s)
+      self.assertListEqual(ret.contiguous()[:s].tolist(), [2.0]*s)
 
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)
@@ -137,7 +145,7 @@ class TestTiny(unittest.TestCase):
 
   # *** image ***
 
-  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image(self):
     with Context(IMAGE=2): self.test_gemm(N=4, out_dtype=dtypes.imagef((4, 1, 4)))
 

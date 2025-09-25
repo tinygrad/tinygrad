@@ -2,17 +2,17 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, cast_folding
-from tinygrad.helpers import getenv, flatten, AMX, prod, partition
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, invalid_gate
+from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
-  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
+  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
+  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid))
 
   # wait for it to be image indexed before running simplification
   if start_idx.dtype.count != 2: return None
@@ -43,7 +43,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx, new_valid)
+  return buf.index(idx.valid(new_valid) if new_valid is not None else idx)
 
 def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
   if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
@@ -52,12 +52,9 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
-  # index True is just Index
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat(Ops.CONST, arg=True))), lambda buf,start_idx: buf.index(start_idx)),
-  # remove hanging cast
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast()),), lambda buf,idx: buf.index(idx)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
+  # drop true gate
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
@@ -65,20 +62,21 @@ load_store_indexing = PatternMatcher([
 
 # ***** load/store grouping *****
 
-def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
-  if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
+def expand_index(buf:UOp, vec:UOp):
+  if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
+  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i)) for i in range(vec.dtype.count)]),
                        symbolic_flat+load_store_indexing, name=f"index_buf_{buf.arg}")
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx: Any = midx.src[i].src[1]
+    idx: Any = midx.src[i].src[1].get_idx()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
+    elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
+    root_src = (midx.src[i].src[1].get_valid(), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # then rewrite everything we can into groups
@@ -121,8 +119,6 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"),
-                        UPat.var("mask"))), expand_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
@@ -162,7 +158,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
-  if must_divide: lengths = [x for x in lengths if idx.src[1].divides(x) is not None]
+  offset, mask = idx.src[1].get_idx(), idx.src[1].get_valid()
+  if must_divide: lengths = [x for x in lengths if offset.divides(x) is not None]
 
   # split based on the fold lengths
   global_offset = 0
@@ -171,7 +168,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
+      lidx = buf.index((offset + global_offset).valid(mask))
       if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
@@ -187,19 +184,20 @@ def image_fixup(ls:UOp):
   if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
     idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.index.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
     idx = ls.src[0]
-    id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+    return functools.reduce(lambda ret, i: (x % 4).ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
 
   return None
 
@@ -226,6 +224,7 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
+  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
@@ -235,7 +234,7 @@ def no_vectorized_buf(buf:UOp):
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
-  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
+  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
@@ -255,7 +254,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
-   lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op is Ops.CUSTOM else None),
+    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
+      if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \
@@ -293,94 +293,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   return acc.load(acc.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
 
-def no_vectorized_reduce(inp:UOp, red:UOp):
-  if inp.dtype != red.dtype:
-    red = red.replace(src=(functools.reduce(lambda x,y: x.alu(red.arg, y), horizontal_reduce(inp, red.dtype)),)+red.src[1:])
-    if red.dtype.vcount == 1: return red
-  # no_vectorize_alu ignoring ranges
-  if red.dtype.vcount == 1: return None
-  alus = tuple(UOp(red.op, red.dtype.scalar(), (red.src[0].gep(i),)+red.src[1:], red.arg) for i in range(red.dtype.vcount))
-  return UOp(Ops.VECTORIZE, red.dtype, alus)
-
-def reduce_rangeless(red:UOp):
-  # TODO: share code with reduce_unparented
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
-  ret = red.src[0]
-  if red.arg is Ops.ADD:
-    for r in red.src[1:]:
-      ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
-
-pm_reduce_collapse = PatternMatcher([
-  # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
-  # lift x*y out of reduce
-  ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
-   lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
-  # lift x+y out of reduce on ne
-  ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
-  # fold the range
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  # REDUCE on ADD
-  ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-   lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
-  # MUL casted bool
-  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast().or_broadcasted(name="b")),
-   lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
-  # WHERE on LOAD (works on max too)
-  (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate).load()),
-  (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
-  # INDEX on RANGE / gated RANGE
-  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
-   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
-  # AND on WHERE
-  ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
-   .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
-  # remove REDUCEs that no longer have a RANGE in the src
-  (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
-  # devectorize REDUCE
-  (UPat(Ops.VECTORIZE, name="inp").reduce(name="red", allow_any_len=True), no_vectorized_reduce),
-  # index/load/where. TODO: this is more aggressive than needed
-  (UPat((Ops.INDEX, Ops.LOAD, Ops.WHERE), name="alu"), no_vectorized_alu),
-])+sym+cast_folding
-
-def reduce_collapse(red:UOp):
-  included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
-  if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
-  replaces: dict[UOp, UOp] = {}
-  for u in included:
-    for s in u.src:
-      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
-        replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
-  collapse_fxn = red.substitute(replaces)
-  sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
-
-def reduce_unparented(red:UOp):
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
-  if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
-  if red.arg is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
 pm_reduce = PatternMatcher([
-  # remove any ranges from a REDUCE that aren't referenced in the reduce source
-  (UPat(Ops.REDUCE, name="red"), reduce_unparented),
-  # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
   # REDUCE -> DEFINE_ACC+ASSIGN
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   # tensor core built in accumulate

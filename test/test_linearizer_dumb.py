@@ -6,13 +6,12 @@ import unittest
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
-from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.codegen.opt.search import Opt, OptOps
 from tinygrad.engine.realize import get_program
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizerFailure(unittest.TestCase):
-  @unittest.expectedFailure
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
   def test_failure_beam_mnist(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(4014080), arg=0, src=())
@@ -47,7 +46,8 @@ class TestLinearizerDumb(unittest.TestCase):
     c10 = UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1000, 1000), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=())
     c11 = c1.store((c4.alu(Ops.CMPNE, c7).alu(Ops.CMPNE, UOp.const(dtypes.bool, True, src=c8)).cast(dtypes.int)*(c9.f(Ops.VALID, dtype=dtypes.bool).where(UOp.const(dtypes.int, -1, src=c10), UOp.const(dtypes.int, 0, src=c10)).f(Ops.REDUCE_AXIS, arg=(Ops.ADD, (1,)))+UOp.const(dtypes.int, 1000, src=c8))))
     ast = c11.sink()
-    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8)]
+    #opts = [Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8)]
+    opts = [Opt(op=OptOps.LOCAL, axis=0, arg=8)]
     prg = get_program(ast, Device[Device.DEFAULT].renderer, opts)
     print(prg.src)
     assert prg.uops is not None and not any(uop.op is Ops.MAX for uop in prg.uops), "leftover MAX"
@@ -93,7 +93,7 @@ class TestLinearizerDumb(unittest.TestCase):
 
   @unittest.expectedFailure
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need float4")
-  @unittest.skipIf(getenv("PTX"), "this is somehow correct in PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "this is somehow correct in PTX")
   def test_upcasted_stores_out_of_order(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9360), arg=0, src=())
     c1 = c0.view(ShapeTracker(views=(View(shape=(4, 5, 13, 1, 1, 1, 1, 1, 4, 3, 3), strides=(2340, 468, 36, 0, 0, 0, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=True),)))

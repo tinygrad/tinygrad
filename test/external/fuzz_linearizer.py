@@ -16,7 +16,7 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
   try:
     import extra.qcom_gpu_driver.opencl_ioctl
     from tinygrad import Device
-    _, _ = Device["QCOM"], Device["GPU"]
+    _, _ = Device["QCOM"], Device["CL"]
   except Exception: pass
 
 from tinygrad import Tensor, Device, dtypes
@@ -42,9 +42,9 @@ if getenv("VALIDATE_HCQ"):
     on_linearizer_did_run = extra.nv_gpu_driver.nv_ioctl.collect_last_launch_state
     compare_states = extra.nv_gpu_driver.nv_ioctl.compare_launch_state
   elif Device.DEFAULT == "QCOM":
-    print("VALIDATE_HCQ: Comparing QCOM to GPU")
+    print("VALIDATE_HCQ: Comparing QCOM to CL")
     import extra.qcom_gpu_driver.opencl_ioctl
-    validate_device = Device["GPU"]
+    validate_device = Device["CL"]
     on_linearizer_will_run = extra.qcom_gpu_driver.opencl_ioctl.before_launch
     on_linearizer_did_run = extra.qcom_gpu_driver.opencl_ioctl.collect_last_launch_state
     compare_states = extra.qcom_gpu_driver.opencl_ioctl.compare_launch_state
@@ -302,7 +302,7 @@ if __name__ == "__main__":
     for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
       if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
       if getenv("FUZZ_IMAGEONLY") and "dtypes.image" not in ast: continue
-      if "dtypes.image" in ast and Device.DEFAULT not in {"GPU", "QCOM"}: continue  # IMAGE is only for GPU
+      if "dtypes.image" in ast and Device.DEFAULT not in {"CL", "QCOM"}: continue  # IMAGE is only for CL
       if ast in seen_ast_strs: continue
       seen_ast_strs.add(ast)
 

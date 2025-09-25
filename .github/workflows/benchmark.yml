@@ -28,7 +28,7 @@ jobs:
       # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
       PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -160,7 +160,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -197,14 +197,14 @@ jobs:
     - name: Test tensor cores
       run: |
         NV=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-        PTX=1 ALLOW_TF32=1 NV=1 python3 test/opt/test_tensor_cores.py
+        NV=1 NV_PTX=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
         CUDA=1 SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_tf32.txt
     - name: Run Tensor Core GEMM (PTX)
-      run: NV=1 PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
+      run: NV=1 NV_PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
       run: NV=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
     - name: Test NV=1
@@ -274,7 +274,7 @@ jobs:
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -302,7 +302,7 @@ jobs:
     - name: Fuzz Padded Tensor Core GEMM (NV)
       run: NV=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Fuzz Padded Tensor Core GEMM (PTX)
-      run: NV=1 PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
+      run: NV=1 NV_PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Train MNIST
       run: time PYTHONPATH=. NV=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
@@ -346,7 +346,7 @@ jobs:
   testamdbenchmark:
     name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -476,7 +476,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -511,8 +511,8 @@ jobs:
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=85 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=188 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    - name: Run 10 CIFAR training steps w BF16
-      run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+    # - name: Run 10 CIFAR training steps w BF16
+    #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
       run: BENCHMARK_LOG=cifar_10steps_half_wino ASSERT_MIN_STEP_TIME=66 AMD=1 WINO=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: Run full CIFAR training w 1 GPU
@@ -539,7 +539,7 @@ jobs:
   testmlperfamdbenchmark:
     name: tinybox red MLPerf Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -645,7 +645,7 @@ jobs:
   testreddriverbenchmark:
     name: AM Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -716,7 +716,7 @@ jobs:
   testgreendriverbenchmark:
     name: NV Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}

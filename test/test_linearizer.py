@@ -10,9 +10,10 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
-from tinygrad.helpers import Context, getenv, flatten, dedup, TC_SELECT, TC_OPT
+from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.codegen import apply_rewrites, rewrites_for_views
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -155,7 +156,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(getenv("PTX") or getenv("NIR"), "broken on ptx/nir because of indexing patterns")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -366,7 +367,7 @@ class TestLinearizer(unittest.TestCase):
     helper(Tensor.arange(255), max_ops=2)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(getenv("PTX") or getenv("NIR"), "broken on ptx/nir because of indexing patterns")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
   def test_grouped_store_phis(self):
     """
     float4 acc0 = float4(0.0,0.0,0.0,0.0);
@@ -420,7 +421,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(getenv("PTX") or getenv("NIR"), "broken on ptx/nir because of indexing patterns")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
   def test_grouped_store_local_only(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -481,7 +482,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
   # now all input buffers in s[-1] should be realized
   # create fresh buffers for the outputs
-  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
+  bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
   return push_views(s[-1].ast), bufs
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
@@ -503,7 +504,7 @@ def reset_bufs(bufs:list[Buffer]):
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
-  outbufs = [real_bufs[x.src[0].base.arg] for x in realized_ast.src]
+  outbufs = real_bufs[:len(realized_ast.src)]
   device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
 
