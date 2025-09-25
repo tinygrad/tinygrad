@@ -13,9 +13,6 @@ def fetch_file(item):
   path = raid_root / Path(path)
   path.parent.mkdir(parents=True, exist_ok=True)
 
-  if path.exists() and path.stat().st_size == size:
-    return
-
   try:
     pt = Tensor(bytes.fromhex(h), device="CPU").load(size).to(f"disk:{path.as_posix()}").realize()
   except Exception as e:
