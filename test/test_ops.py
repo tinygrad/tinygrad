@@ -21,7 +21,7 @@ def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
-                   forward_only=False, vals=None, low=-2, high=2, torch_device="cpu"):
+                   forward_only=False, vals=None, low=-2, high=2, torch_device=None):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   ts, tst = prepare_test_op(low, high, shps, vals, forward_only, torch_device)
 
@@ -75,7 +75,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
-def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device="cpu"):
+def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device=None):
   if shps is None:
     ts = [torch.tensor(x, requires_grad=(not forward_only), device=torch_device) for x in vals]
   else:
@@ -85,8 +85,10 @@ def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device="cpu
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor((x.detach().to(torch.float32) if x.dtype is torch.bfloat16 else x.detach()).cpu().numpy(),
-                requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
+  tst = [Tensor((x.detach().to(torch.float32) if x.dtype is torch.bfloat16 else x.detach()).cpu().numpy()) for x in ts]
+  for i, x in enumerate(tst):
+    if dtypes.default_float is dtypes.bfloat16: tst[i] = x.cast(dtypes.bfloat16)
+    x.requires_grad=(not forward_only and not FORWARD_ONLY)
   return ts, tst
 
 class TestOps(unittest.TestCase):
@@ -3247,17 +3249,19 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     torch.backends.cudnn.allow_tf32 = self.old_cudnn_allow_tf32
     torch.set_float32_matmul_precision(self.old_f32_matmul_precision)
 
-  def test_autocast_bf16_scaled_dot_product_attention(self):
-    assert False
-
   def test_autocast_bf16_softmax(self):
     dtypes.default_float=dtypes.bfloat16
     upcast_softmax = functools.partial(Tensor.sequential, ll=[functools.partial(Tensor.cast, dtype=dtypes.float32), Tensor.softmax])
-    #helper_test_op([(128,10)], torch.nn.Softmax(dim=1), upcast_softmax, rtol=1e-6, atol=1e-8, forward_only=True,
-                   #torch_device="cuda")
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-      helper_test_op([(128,10)], torch.nn.Softmax(dim=1), upcast_softmax, rtol=1e-6, atol=1e-8, forward_only=True,
-                     torch_device="cuda")
+      helper_test_op([(128,10)], torch.nn.Softmax(dim=1), Tensor.softmax, rtol=1e-6, atol=1e-8, forward_only=True, torch_device="cuda")
+      helper_test_op([(128,10)], torch.nn.Softmax(dim=1), upcast_softmax, rtol=1e-6, atol=1e-8, forward_only=True, torch_device="cuda")
+
+  @slow_test
+  def test_autocast_bf16_scaled_dot_product_attention(self):
+    dtypes.default_float=dtypes.bfloat16
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+      helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention,
+                     Tensor.scaled_dot_product_attention)
 
 if __name__ == '__main__':
   np.random.seed(1337)
