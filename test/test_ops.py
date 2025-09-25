@@ -85,8 +85,8 @@ def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device="cpu
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
-  tst = [Tensor(data).cast(dtypes.default_float) for data in np_data]
-  for t in tst: t.requires_grad=(not forward_only and not FORWARD_ONLY)
+  tst = [Tensor((x.detach().to(torch.float32) if x.dtype is torch.bfloat16 else x.detach()).cpu().numpy(),
+                requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
