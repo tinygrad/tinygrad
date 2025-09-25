@@ -3262,7 +3262,7 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     assert cuda_upcasted.dtype is torch.float32
     np.testing.assert_allclose(cuda_upcasted.cpu().numpy(), cpu_f32.cpu().numpy(), rtol=1e-6, atol=1e-8)
 
-  #@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Requires bf16")
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Requires bf16")
   def test_bf16_softmax_f32_upcast(self):
     class to_f32(torch.nn.Module):
       def forward(self, x:torch.Tensor) -> torch.Tensor: return x.to(torch.float32)
