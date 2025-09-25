@@ -48,6 +48,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
+  # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
+  for buf_index,buf in enumerate(k.bufs):
+    if isinstance(buf.src[0].dtype, ImageDType):
+      # part of real_strides
+      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
+        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      if len(unit_stride_axes_mul_4):
+        if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
+          k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
+        elif axis in k.unrollable_dims:
+          k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
@@ -72,18 +84,6 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
         break
       except KernelOptError: pass
-
-  # upcast float4 images
-  for buf_index,buf in enumerate(k.bufs):
-    if isinstance(buf.src[0].dtype, ImageDType):
-      # part of real_strides
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
-        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
-      if len(unit_stride_axes_mul_4):
-        if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
-          k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
-        elif axis in k.unrollable_dims:
-          k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k
