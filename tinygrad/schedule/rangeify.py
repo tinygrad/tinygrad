@@ -302,7 +302,7 @@ def might_end_axis(idx:UOp):
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
-def __too_many_bufs_limit_bufs(root:UOp) -> bool:
+def _too_many_bufs_limit_bufs(root:UOp) -> bool:
   DEVICE_MAX_BUFS = {"METAL":30, "WEBGPU":8} # TODO: METAL: 31 max - 1 for jit contsts?
 
   if root._device is None: return False
@@ -311,14 +311,14 @@ def __too_many_bufs_limit_bufs(root:UOp) -> bool:
 
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
-    if (is_load:=(u.op in {Ops.REALIZE, Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK, Ops.DEFINE_VAR})): bufs.add(u)
+    if (is_load:=(u.op in {Ops.REALIZE, Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
 
   return len(bufs) > MAX_BUFS - 1 # NOTE: this -1 is for the output buffer
 
 def limit_bufs(root:UOp):
-  if __too_many_bufs_limit_bufs(root):
+  if _too_many_bufs_limit_bufs(root):
     return root.replace(src=tuple(s.contiguous().realize() if s.op in set.union(GroupOp.Binary, GroupOp.Ternary) else s for s in root.src))
 
 pm_limit_bufs = PatternMatcher([
