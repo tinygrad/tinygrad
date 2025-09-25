@@ -21,13 +21,14 @@ def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
-                   forward_only=False, vals=None, low=-2, high=2, torch_device=None):
+                   forward_only=False, vals=None, low=-2, high=2, torch_device=None, dtype=None):
+  if dtype is None: dtype=dtypes.default_float
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
-  ts, tst = prepare_test_op(low, high, shps, vals, forward_only, torch_device)
+  ts, tst = prepare_test_op(low, high, shps, vals, forward_only, torch_device, dtype)
 
   st = time.monotonic()
   out = torch_fxn(*ts)
-  if dtypes.default_float is dtypes.bfloat16: out = out.to(torch.float32)
+  if dtype is dtypes.bfloat16: out = out.to(torch.float32)
   torch_fp = time.monotonic() - st
 
   # move inputs to a different device, test the device of intermediate tensors are correct
@@ -77,19 +78,19 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
-def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device=None):
+def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device=None, dtype=None):
   if shps is None:
     ts = [torch.tensor(x, requires_grad=(not forward_only), device=torch_device) for x in vals]
   else:
     np.random.seed(0)
-    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtypes.default_float)) for size in shps]
-    ts = [torch.tensor(data, requires_grad=(not forward_only), device=torch_device, dtype=_to_torch_dtype(dtypes.default_float)) for data in np_data]
+    np_data = [np.random.uniform(low=low, high=high, size=size).astype(_to_np_dtype(dtype)) for size in shps]
+    ts = [torch.tensor(data, requires_grad=(not forward_only), device=torch_device, dtype=_to_torch_dtype(dtype)) for data in np_data]
   for i in range(len(ts)):
     # NOTE: torch default int64 for python ints input
     if ts[i].dtype == torch.int64: ts[i] = ts[i].type(torch.int32)
   tst = [Tensor((x.detach().to(torch.float32) if x.dtype is torch.bfloat16 else x.detach()).cpu().numpy()) for x in ts]
   for i, x in enumerate(tst):
-    if dtypes.default_float is dtypes.bfloat16: tst[i] = x.cast(dtypes.bfloat16)
+    if dtype is dtypes.bfloat16: tst[i] = x.cast(dtypes.bfloat16)
     x.requires_grad=(not forward_only and not FORWARD_ONLY)
   return ts, tst
 
@@ -3261,9 +3262,8 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     assert cuda_upcasted.dtype is torch.float32
     np.testing.assert_allclose(cuda_upcasted.cpu().numpy(), cpu_f32.cpu().numpy(), rtol=1e-6, atol=1e-8)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Requires bf16")
+  #@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Requires bf16")
   def test_bf16_softmax_f32_upcast(self):
-    dtypes.default_float=dtypes.bfloat16
     class to_f32(torch.nn.Module):
       def forward(self, x:torch.Tensor) -> torch.Tensor: return x.to(torch.float32)
 
@@ -3276,10 +3276,10 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     # current tinygrad softmax function runs max/subtract in original precision, only upcasting to the dtype arg before exponentiation
     tiny_exp = functools.partial(Tensor.softmax, dtype=dtypes.float32)
 
-    helper_test_op([(128,10)], torch_all, tiny_all, rtol=1e-6, atol=1e-8)
+    helper_test_op([(128,10)], torch_all, tiny_all, rtol=1e-6, atol=1e-8, dtype=dtypes.bfloat16)
     # upcasting only before exponentiation (after max/subtract) is not enough to replicate torch bf16 mixed precision softmax on CUDA
-    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-2, atol=1e-4)
-    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-3, atol=1e-5) # AssertionError
+    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-2, atol=1e-4, dtype=dtypes.bfloat16)
+    helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-3, atol=1e-5, dtype=dtypes.bfloat16) # AssertionError
 
 if __name__ == '__main__':
   np.random.seed(1337)
