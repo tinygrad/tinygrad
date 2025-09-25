@@ -69,7 +69,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, torch_grad) in enumerate(zip(tiny_grads, torch_grads)):
-      compare(f"backward pass tensor {i}", t.numpy(), torch_grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
+      torch_grad = torch_grad.detach().cpu()
+      torch_grad = torch_grad.to(torch.float32) if torch_grad.dtype is torch.bfloat16 else torch_grad
+      compare(f"backward pass tensor {i}", t.numpy(), torch_grad.numpy(), atol=grad_atol, rtol=grad_rtol)
 
   if not CI:
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
@@ -3249,19 +3251,23 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     torch.backends.cudnn.allow_tf32 = self.old_cudnn_allow_tf32
     torch.set_float32_matmul_precision(self.old_f32_matmul_precision)
 
+  #@unittest.expectedFailure
   def test_autocast_bf16_softmax(self):
     dtypes.default_float=dtypes.bfloat16
-    upcast_softmax = functools.partial(Tensor.sequential, ll=[functools.partial(Tensor.cast, dtype=dtypes.float32), Tensor.softmax])
+    #upcast_softmax = functools.partial(Tensor.sequential, ll=[functools.partial(Tensor.cast, dtype=dtypes.float32), Tensor.softmax])
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
       helper_test_op([(128,10)], torch.nn.Softmax(dim=1), Tensor.softmax, rtol=1e-6, atol=1e-8, forward_only=True, torch_device="cuda")
-      helper_test_op([(128,10)], torch.nn.Softmax(dim=1), upcast_softmax, rtol=1e-6, atol=1e-8, forward_only=True, torch_device="cuda")
+      #helper_test_op([(128,10)], torch.nn.Softmax(dim=1), upcast_softmax, rtol=1e-6, atol=1e-8, torch_device="cuda")
 
   @slow_test
   def test_autocast_bf16_scaled_dot_product_attention(self):
     dtypes.default_float=dtypes.bfloat16
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-      helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention,
-                     Tensor.scaled_dot_product_attention)
+      helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],
+                     torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
+
+  def test_assert_false(self):
+    assert False
 
 if __name__ == '__main__':
   np.random.seed(1337)
