@@ -22,7 +22,6 @@ def slow_test(test_func):
 
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
                    forward_only=False, vals=None, low=-2, high=2, torch_device=None, dtype=None):
-  if dtype is None: dtype=dtypes.default_float
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   ts, tst = prepare_test_op(low, high, shps, vals, forward_only, torch_device, dtype)
 
@@ -79,6 +78,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
 def prepare_test_op(low, high, shps, vals, forward_only=False, torch_device=None, dtype=None):
+  if dtype is None: dtype=dtypes.default_float
   if shps is None:
     ts = [torch.tensor(x, requires_grad=(not forward_only), device=torch_device) for x in vals]
   else:
