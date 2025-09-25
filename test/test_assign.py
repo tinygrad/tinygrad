@@ -4,7 +4,7 @@ import contextlib
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp, RANGEIFY, profile_marker
+from tinygrad.helpers import temp, RANGEIFY
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -381,7 +381,6 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
-    profile_marker("test_permuted_assignment_masked_view_not_contiguous")
     a = Tensor.ones(4, 4).contiguous().realize()
     with self.assert_permuted_assign():
       b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
