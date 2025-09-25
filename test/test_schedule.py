@@ -425,6 +425,11 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.full((4, 4), 1.).contiguous().realize()
     check_schedule([a+b, a+b], 1)
 
+  def test_const_realize(self):
+    t = Tensor.ones(2)
+    check_schedule(t[0], 0)
+    check_schedule(t[1], 0)
+
   def test_fold_double_unary(self):
     y = Tensor.empty(2)
     out = y.sum(keepdim=True).sqrt().neg()
@@ -933,7 +938,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out0.numpy(), out0_np:=np.exp2(a.numpy().sum()), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+out0_np, atol=1e-4, rtol=1e-6)
 
-  @expect_rangeify_fails
   def test_multireduce_reduce_multiple_paths(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -962,7 +966,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out0.numpy(), a.numpy().sum()+b.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+b.numpy().sum()+4, atol=1e-4, rtol=1e-4)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midreduce(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -991,7 +994,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out1.numpy(), out1_np:=b.numpy().max() + out0_np*2, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out2.numpy(), a.numpy().sum() + out1_np, atol=1e-4, rtol=1e-6)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midexpand(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -1026,7 +1028,6 @@ class TestSchedule(unittest.TestCase):
     d = a.sum() + 2
     check_schedule([c, d], 1 if RANGEIFY else 3)
 
-  @expect_rangeify_fails
   def test_reduce_multiple_paths_midshrink(self):
     a = Tensor.empty(4, 4)
     r = a.sum(axis=1)
@@ -1484,7 +1485,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(f.numpy(), b.numpy().sum() - e_np, atol=1e-4, rtol=1e-4)
 
-  @expect_rangeify_fails # err in mark_children
   def test_partial_fuse4(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(16, 16).realize()
@@ -2108,7 +2108,6 @@ class TestView(unittest.TestCase):
   # a*VIEW(x), where VIEW(x) = 0
   # x+2
   # as long as one child realizes, x does not collapse
-  @expect_rangeify_fails
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
     b = Tensor.arange(3).contiguous()
@@ -2180,13 +2179,13 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
-  @expect_rangeify_fails
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU")
     run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
+    self.assertEqual(b.device, "CPU")
 
   def test_alu_after_copy(self):
     a = Tensor.ones((4,)).to("CPU")
@@ -2194,6 +2193,12 @@ class TestCopyFolding(unittest.TestCase):
     add = a+b
     add.kernelize()
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
+
+  def test_alu_before_copy(self):
+    buf = Tensor.ones(1).contiguous().realize()
+    a = buf+1
+    b = a.to("CPU")
+    self.assertListEqual(b.tolist(), [2.])
 
   def test_copy_to_same_device(self):
     a = Tensor.empty(4).uop
@@ -2210,6 +2215,15 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
     self.assertIs(b.base, a.base)
+
+  def test_copy_to_same_device_sched(self):
+    a = Tensor.ones(4).contiguous().realize().uop.as_buf()
+    t = Tensor(a.copy_to_device(a.device))
+    sched = t.schedule()
+    assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
+    run_schedule(sched)
+    assert t.uop.is_realized, f"didn't realize Tensor {t}"
+    self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
   def test_clone(self):
     a = Tensor.empty(4)
