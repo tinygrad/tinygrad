@@ -3232,7 +3232,7 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
 # https://docs.pytorch.org/docs/stable/amp#cuda-op-specific-behavior
-@unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV"} and torch.cuda.is_available() and not getenv("MOCKGPU"),
+@unittest.skipUnless(Device.DEFAULT in {"CUDA", "NV"} and torch.cuda.is_available(),
                      "This compares torch cuda behavior to tinygrad")
 class TestCUDAMixedPrecision(unittest.TestCase):
   def setUp(self):
