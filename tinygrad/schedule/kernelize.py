@@ -294,7 +294,7 @@ add_contiguous = PatternMatcher([(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN},
                                 lambda ctx,x: x.replace(tag=1).contiguous() if x in ctx and x.tag is None else None)])
 
 # TODO: get this from the device through GrouperOpts
-DEVICE_MAX_BUFS = {"METAL":32, "WEBGPU":8}
+DEVICE_MAX_BUFS = {"METAL":31, "WEBGPU":8}
 
 def limit_bufs(root:UOp):
   # check if backend has a buffer limit
