@@ -312,7 +312,7 @@ jobs:
   testopenclimage:
     name: CL IMAGE Tests
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -326,6 +326,10 @@ jobs:
         run: |
           CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+      - name: Test CL IMAGE=2 ops + training (rangeify)
+        run: |
+          RANGEIFY=1 CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
+          RANGEIFY=1 CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -559,8 +563,6 @@ jobs:
         llvm: "true"
     - name: Test CL=1 RANGEIFY=1
       run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py test/test_schedule.py test/test_symbolic_ops.py test/test_jit.py test/unit/test_disk_tensor.py test/models/test_mnist.py test/unit/test_mnist_dataset.py test/test_optim.py --durations 20
-    - name: Test CL=1 IMAGE=2 RANGEIFY=1
-      run: CL=1 IMAGE=2 RANGEIFY=1 pytest -n auto test/test_ops.py
     - name: Test Fuse
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
     - name: Test ONNX
