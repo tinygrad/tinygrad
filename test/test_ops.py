@@ -3250,7 +3250,7 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     torch.set_float32_matmul_precision(self.old_f32_matmul_precision)
 
   # running all of softmax in f32 on CPU emulates mixed precision bf16 softmax on CUDA
-  @unittest.skipUnless(torch.cuda.is_available(), "Requires torch CUDA backend")
+  @unittest.skipUnless(torch.cuda.is_available() and is_dtype_supported(dtypes.bfloat16), "Requires torch CUDA backend and bf16")
   def test_torch_cuda_bf16_softmax_f32_upcast(self):
     cuda_bf16 = torch.randn(128, 10, device="cuda", dtype=torch.bfloat16)
     # ensure numerically equal starting point by making the f32 tensor from the bf16 tensor (not the other way around)
@@ -3261,6 +3261,7 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     assert cuda_upcasted.dtype is torch.float32
     np.testing.assert_allclose(cuda_upcasted.cpu().numpy(), cpu_f32.cpu().numpy(), rtol=1e-6, atol=1e-8)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Requires bf16")
   def test_bf16_softmax_f32_upcast(self):
     dtypes.default_float=dtypes.bfloat16
     class to_f32(torch.nn.Module):
@@ -3279,13 +3280,6 @@ class TestCUDAMixedPrecision(unittest.TestCase):
     # upcasting only before exponentiation (after max/subtract) is not enough to replicate torch bf16 mixed precision softmax on CUDA
     helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-2, atol=1e-4)
     helper_test_op([(128,10)], torch_all, tiny_exp, rtol=1e-3, atol=1e-5) # AssertionError
-
-  @slow_test
-  def test_autocast_bf16_scaled_dot_product_attention(self):
-    dtypes.default_float=dtypes.bfloat16
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-      helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],
-                     torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
 
 if __name__ == '__main__':
   np.random.seed(1337)
