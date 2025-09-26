@@ -6,12 +6,8 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 import tinygrad.runtime.autogen.nir as nir
-import tinygrad.runtime.autogen.libc as libc
 import ctypes, struct
 
-# FIXME: this is because clang2py produces bad output?
-assert libc._libraries['libc']
-stdout = ctypes.POINTER(nir.struct__IO_FILE).in_dll(libc._libraries['libc'], "stdout")
 s = nir.char_pointer_cast
 def g(s:str): return getattr(nir, s)
 def d(i) -> nir.nir_def: return getattr(i.contents, "def")
@@ -254,7 +250,6 @@ class NIRRenderer(Renderer):
       elif u.op == Ops.INDEX: pass
       else:
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None:
-          nir.nir_print_shader(self.b.shader, stdout)
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         self.r[u] = cast(nir.nir_def, d)
     # nir.nir_print_shader(self.b.shader, stdout)
