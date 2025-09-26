@@ -340,7 +340,6 @@ runs:
       if: inputs.mesa == 'true' && steps.cache-build-mesa.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        # mesa
         git clone https://gitlab.freedesktop.org/mesa/mesa.git ${{ github.workspace }}/mesa
         cd ${{ github.workspace }}/mesa
         git checkout mesa-25.0.7

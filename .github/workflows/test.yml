@@ -764,7 +764,7 @@ jobs:
         with:
           key: ${{ matrix.backend }}-minimal
           deps: testing_minimal
-          pydeps: ${{ matrix.backend == 'lvp' && 'meson mako pyyaml' }}
+          pydeps: ${{ matrix.backend == 'lvp' && 'meson mako pyyaml' || '' }}
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
