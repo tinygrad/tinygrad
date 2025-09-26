@@ -164,6 +164,7 @@ class TestAssign(unittest.TestCase):
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
 
+  # TODO: like this is the simplest case it can fuse
   def test_double_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     a += 1
@@ -255,7 +256,7 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
-  # passing in RANGEIFY=1, it creates a copy of the target buffer
+  # passing in RANGEIFY=1, RANGEIFY=0 asserts permuted assigns it can't fuse
   def assert_permuted_assign(self): return self.assertRaisesRegex(RuntimeError, "contiguous") if not RANGEIFY else contextlib.nullcontext()
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
