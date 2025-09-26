@@ -38,7 +38,7 @@ class TestTrain(unittest.TestCase):
     expected_ckpt = pathlib.Path(f"{os.environ["UNET_CKPTDIR"]}/1685.safetensors")
     with Tensor.train():
       beam_complete, saved_ckpts = train_stable_diffusion()
-    assert beam_complete == True
+    assert beam_complete
     assert len(saved_ckpts) == 1 and str(pathlib.Path(saved_ckpts[0]).absolute()) == str(expected_ckpt.absolute())
     expected_ckpt.unlink()
 

@@ -1601,7 +1601,7 @@ def train_stable_diffusion():
 
     if i == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
-      beam_complete=True
+      beam_complete = True
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       
     total_train_time = time.perf_counter() - train_start_time
