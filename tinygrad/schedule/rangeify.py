@@ -15,7 +15,8 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],), tag=(x.src[0].tag or ())+(x.tag or ()))),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
+   lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
 
 earliest_rewrites = double_reshape+PatternMatcher([
