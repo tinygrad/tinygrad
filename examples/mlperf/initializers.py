@@ -146,6 +146,24 @@ class AutocastConv2d(nn.Conv2d):
     dtype = type(self).cast_dtype
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
 
+# copy torch AMP: upcast to float32 before GroupNorm and LayerNorm
+class AutocastGroupNorm(nn.GroupNorm):
+  cast_dtype=dtypes.float32
+  def __call__(self, x:Tensor) -> Tensor:
+    x = x.cast(type(self).cast_dtype).reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
+    if self.weight is None or self.bias is None: return x
+    return x * self.weight.reshape(1, -1, *[1] * (x.ndim-2)) + self.bias.reshape(1, -1, *[1] * (x.ndim-2))
+
+class AutocastLayerNorm(nn.LayerNorm):
+  cast_dtype=dtypes.float32
+  def __call__(self, x:Tensor) -> Tensor:
+    assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
+    x = x.cast(type(self).cast_dtype).layernorm(eps=self.eps, axis=self.axis)
+    if not self.elementwise_affine: return x
+    return x * self.weight + self.bias
+
+# Stable Diffusion mlperf reference doesn't call scaled_dot_product_attention
+# copy torch AMP: upcast to float32 before softmax on CUDA
 def attn_f32_softmax(q:Tensor, k:Tensor, v:Tensor) -> Tensor:
   return (q.matmul(k.transpose(-2,-1), dtype=dtypes.float32) / math.sqrt(q.shape[-1])).softmax(-1).cast(q.dtype) @ v
 

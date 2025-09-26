@@ -1,11 +1,11 @@
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.nn import GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
 from typing import Optional, Union, List, Any, Tuple, Callable
 import math
 
 # allow for monkeypatching
-Linear, Conv2d, attention, gelu, mixed_precision_dtype = nn.Linear, nn.Conv2d, Tensor.scaled_dot_product_attention, Tensor.gelu, dtypes.float16
+Linear, Conv2d, GroupNorm, LayerNorm = nn.Linear, nn.Conv2d, nn.GroupNorm, nn.LayerNorm
+attention, gelu, mixed_precision_dtype = Tensor.scaled_dot_product_attention, Tensor.gelu, dtypes.float16
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -35,10 +35,10 @@ class ResBlock:
     self.skip_connection = Conv2d(channels, out_channels, 1) if channels != out_channels else (lambda x: x)
 
   def __call__(self, x:Tensor, emb:Tensor) -> Tensor:
-    h = x.cast(self.in_layers[0].weight.dtype).sequential(self.in_layers)
+    h = x.sequential(self.in_layers)
     emb_out = emb.sequential(self.emb_layers)
     h = h + emb_out.reshape(*emb_out.shape, 1, 1)
-    h = h.cast(self.out_layers[0].weight.dtype).sequential(self.out_layers)
+    h = h.sequential(self.out_layers)
     return self.skip_connection(x) + h
 
 class CrossAttention:
@@ -90,9 +90,9 @@ class BasicTransformerBlock:
     self.norm3 = LayerNorm(dim)
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
-    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)))
-    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)), ctx=ctx)
-    x = x + self.ff(self.norm3(x.cast(self.norm3.weight.dtype)))
+    x = x + self.attn1(self.norm1(x))
+    x = x + self.attn2(self.norm2(x), ctx=ctx)
+    x = x + self.ff(self.norm3(x))
     return x
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
@@ -113,7 +113,7 @@ class SpatialTransformer:
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     b, c, h, w = x.shape
     x_in = x
-    x = self.norm(x.cast(self.norm.weight.dtype))
+    x = self.norm(x)
     ops = [ (lambda z: z.reshape(b, c, h*w).permute(0,2,1)), (lambda z: self.proj_in(z)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     for block in self.transformer_blocks:
@@ -260,4 +260,4 @@ class UNetModel:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
         x = run(x, bb)
-    return x.cast(self.out[0].weight.dtype).sequential(self.out)
+    return x.sequential(self.out)
