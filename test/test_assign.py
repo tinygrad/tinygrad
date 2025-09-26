@@ -296,6 +296,14 @@ class TestAssign(unittest.TestCase):
     a.assign(a.T+b)
     np.testing.assert_allclose(a.numpy(), new_a)
 
+  def test_post_reshape_assignment_fine(self):
+    a = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
+    rhs = a.reshape(-1).reshape(N, N)
+    new_a = (rhs+b).numpy()
+    a.assign(rhs+b)  # self-assign with reshape view is fine
+    np.testing.assert_allclose(a.numpy(), new_a)
+
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
     a = Tensor.randn(32, 32).realize()
