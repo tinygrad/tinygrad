@@ -766,7 +766,7 @@ jobs:
           deps: testing_minimal
           pydeps: ${{ matrix.backend == 'lvp' && 'meson mako pyyaml' }}
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
-          llvm: ${{ contains(['llvm', 'lvp'], matrix.backend) }}
+          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
