@@ -1,6 +1,7 @@
 from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
+from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
 from tinygrad.uop.symbolic import sym, symbolic_simple
@@ -96,7 +97,9 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 # 2. mark all children
 
 @dataclass
-class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
+class ChildrenContext:
+  children: dict[UOp, list[UOp]]|None = None
+  realize_roots: dict[UOp, list[UOp]]|None = None
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
   children_map = x.get_children_map()
@@ -107,16 +110,28 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     # NOTE: this gate shouldn't be here
     if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
       ctx.children[k] = non_sink_children
+  # if a node is in the toposort of multiple realizes, it will be indexed by different indices and we can bufferize early
+  realizes = [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]
+  ctx.realize_roots = defaultdict(list)
+  for r in realizes:
+    for u in r.toposort(gate=lambda x: x is not Ops.REALIZE):
+      if u not in ctx.children: continue
+      ctx.realize_roots[u].append(r)
 
 def mark_children(ctx:ChildrenContext, x:UOp):
   assert ctx.children is not None
-  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
-                   arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
+  new_srcs = []
+  for s in x.src:
+    if s in ctx.children:
+      if len(ctx.realize_roots[s])>1: new_srcs.append(s.realize())
+      else: new_srcs.append(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
+                       arg=(ctx.children[s].index(x), len(ctx.children[s]))))
+    else: new_srcs.append(s)
   return x.replace(src=tuple(new_srcs))
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN, Ops.SINK}, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILDREN, Ops.SINK, Ops.REALIZE}, name="x"), mark_children),
 ])
 
 # *****************
