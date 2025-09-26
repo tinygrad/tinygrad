@@ -178,6 +178,7 @@ class StableDiffusion:
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
       unet.Linear, unet.Conv2d, unet.attention, unet.gelu = AutocastLinear, AutocastConv2d, attn_f32_softmax, gelu_erf
+      unet.mixed_precision_dtype = dtypes.bfloat16
       if pretrained:
         print("loading text encoder")
         weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
