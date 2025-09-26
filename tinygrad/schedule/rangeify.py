@@ -51,7 +51,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
-  # create a COPY of the target buffer in ASSIGN
+  # create a clone of the target buffer if we're also loading it
   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("op")), name="assign"), clone_assign_buf),
 
   # copy only to different device
@@ -80,9 +80,6 @@ def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
-def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
-  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
-
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
@@ -90,8 +87,6 @@ do_realize = PatternMatcher([
   (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
-  # realize input to assign (might be optimized out)
-  (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
 
 
