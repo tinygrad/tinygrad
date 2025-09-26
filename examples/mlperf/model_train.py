@@ -1552,7 +1552,7 @@ def train_stable_diffusion():
 
     context = model.cond_stage_model.embed_tokens(tokens)
 
-    out = unet(latent_with_noise, timestep, context, softmax_dtype=dtypes.float32)
+    out = unet(latent_with_noise, timestep, context)
     loss = ((out - v_true) ** 2).mean()
     del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
     del out, v_true, context, latent_randn, tokens, timestep

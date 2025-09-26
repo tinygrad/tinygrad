@@ -15,7 +15,7 @@ from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
 from extra.models import unet
 from extra.models.unet import UNetModel
-from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module
+from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module, attn_f32_softmax
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 class AttnBlock:
@@ -176,7 +176,7 @@ class StableDiffusion:
                           "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
-      unet.Linear, unet.Conv2d = AutocastLinear, AutocastConv2d
+      unet.Linear, unet.Conv2d, unet.attention = AutocastLinear, AutocastConv2d, attn_f32_softmax
       if pretrained:
         print("loading text encoder")
         weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}

@@ -146,6 +146,9 @@ class AutocastConv2d(nn.Conv2d):
     dtype = type(self).cast_dtype
     return x.cast(dtype).conv2d(self.weight.cast(dtype), self.bias.cast(dtype), self.groups, self.stride, self.dilation, self.padding)
 
+def attn_f32_softmax(q:Tensor, k:Tensor, v:Tensor) -> Tensor:
+  return (q.matmul(k.transpose(-2,-1), dtype=dtypes.float32) / math.sqrt(q.shape[-1])).softmax(-1).cast(q.dtype) @ v
+
 def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
   from examples.stable_diffusion import StableDiffusion
   from tinygrad.helpers import getenv

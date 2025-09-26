@@ -1,14 +1,12 @@
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.nn import GroupNorm, LayerNorm
 from tinygrad.device import is_dtype_supported
-#def is_dtype_supported(dtype): return False
-from tinygrad.dtype import DTypeLike
 from typing import Optional, Union, List, Any, Tuple, Callable
 from examples.mlperf.helpers import gelu_erf
 import math
 
 # allow for monkeypatching
-Linear, Conv2d = nn.Linear, nn.Conv2d
+Linear, Conv2d, attention = nn.Linear, nn.Conv2d, Tensor.scaled_dot_product_attention
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -51,13 +49,14 @@ class CrossAttention:
     self.to_v = Linear(ctx_dim,   n_heads*d_head, bias=False)
     self.num_heads = n_heads
     self.head_size = d_head
+    self.attn = attention
     self.to_out = [Linear(n_heads*d_head, query_dim)]
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     ctx = x if ctx is None else ctx
     q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
     q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
-    attention = Tensor.scaled_dot_product_attention(q, k, v, softmax_dtype=softmax_dtype).transpose(1,2)
+    attention = self.attn(q, k, v).transpose(1,2)
     h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
     return h_.sequential(self.to_out)
 
@@ -74,7 +73,7 @@ class GEGLU:
 
 class FeedForward:
   def __init__(self, dim:int, mult:int=4, gelu_approx:str="tanh"):
-    self.net: tuple[GEGLU, Callable, nn.Linear|AutocastLinear] = (
+    self.net: tuple[GEGLU, Callable, nn.Linear] = (
       GEGLU(dim, dim*mult, gelu_approx=gelu_approx),
       lambda x: x,  # needed for weights loading code to work
       Linear(dim*mult, dim)
@@ -92,9 +91,9 @@ class BasicTransformerBlock:
     self.norm2 = LayerNorm(dim)
     self.norm3 = LayerNorm(dim)
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
-    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)), softmax_dtype=softmax_dtype)
-    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)), ctx=ctx, softmax_dtype=softmax_dtype)
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
+    x = x + self.attn1(self.norm1(x.cast(self.norm1.weight.dtype)))
+    x = x + self.attn2(self.norm2(x.cast(self.norm2.weight.dtype)), ctx=ctx)
     x = x + self.ff(self.norm3(x.cast(self.norm3.weight.dtype)))
     return x
 
@@ -113,14 +112,14 @@ class SpatialTransformer:
     self.proj_out = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.use_linear = use_linear
 
-  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
+  def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     b, c, h, w = x.shape
     x_in = x
     x = self.norm(x.cast(self.norm.weight.dtype))
     ops = [ (lambda z: z.reshape(b, c, h*w).permute(0,2,1)), (lambda z: self.proj_in(z)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     for block in self.transformer_blocks:
-      x = block(x, ctx=ctx, softmax_dtype=softmax_dtype)
+      x = block(x, ctx=ctx)
     ops = [ (lambda z: self.proj_out(z)), (lambda z: z.permute(0,2,1).reshape(b, c, h, w)) ]
     x = x.sequential(ops if self.use_linear else ops[::-1])
     return x + x_in
@@ -237,7 +236,7 @@ class UNetModel:
       Conv2d(model_ch, out_ch, 3, padding=1),
     ]
 
-  def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None, softmax_dtype:DTypeLike|None=None) -> Tensor:
+  def __call__(self, x:Tensor, tms:Tensor, ctx:Tensor, y:Optional[Tensor]=None) -> Tensor:
     t_emb = timestep_embedding(tms, self.model_ch)
     emb   = t_emb.sequential(self.time_embed)
 
@@ -250,21 +249,21 @@ class UNetModel:
       ctx = ctx.cast(dtypes.bfloat16)
       x   = x  .cast(dtypes.bfloat16)
 
-    def run(x:Tensor, bb, softmax_dtype:DTypeLike|None=None) -> Tensor:
+    def run(x:Tensor, bb) -> Tensor:
       if isinstance(bb, ResBlock): x = bb(x, emb)
-      elif isinstance(bb, SpatialTransformer): x = bb(x, ctx, softmax_dtype=softmax_dtype)
+      elif isinstance(bb, SpatialTransformer): x = bb(x, ctx)
       else: x = bb(x)
       return x
 
     saved_inputs = []
     for b in self.input_blocks:
       for bb in b:
-        x = run(x, bb, softmax_dtype=softmax_dtype)
+        x = run(x, bb)
       saved_inputs.append(x)
     for bb in self.middle_block:
-      x = run(x, bb, softmax_dtype=softmax_dtype)
+      x = run(x, bb)
     for b in self.output_blocks:
       x = x.cat(saved_inputs.pop(), dim=1)
       for bb in b:
-        x = run(x, bb, softmax_dtype=softmax_dtype)
+        x = run(x, bb)
     return x.cast(self.out[0].weight.dtype).sequential(self.out)
