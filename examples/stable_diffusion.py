@@ -13,9 +13,9 @@ from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flat
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
-from extra.models import unet
+from extra.models import unet, clip
 from extra.models.unet import UNetModel
-from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module, attn_f32_softmax
+from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, zero_module, attn_f32_softmax, gelu_erf
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 class AttnBlock:
@@ -173,10 +173,11 @@ class StableDiffusion:
     elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
       unet_init_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
                           "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                          "num_groups":16, "st_norm_eps":1e-6, "gelu_approx":"erf"}
+                          "num_groups":16, "st_norm_eps":1e-6}
+      clip.gelu = gelu_erf
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})
-      unet.Linear, unet.Conv2d, unet.attention = AutocastLinear, AutocastConv2d, attn_f32_softmax
+      unet.Linear, unet.Conv2d, unet.attention, unet.gelu = AutocastLinear, AutocastConv2d, attn_f32_softmax, gelu_erf
       if pretrained:
         print("loading text encoder")
         weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}

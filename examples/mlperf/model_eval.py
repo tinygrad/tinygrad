@@ -290,10 +290,11 @@ def eval_llama3():
 def eval_stable_diffusion():
   import csv, PIL, sys
   from tqdm import tqdm
-  from examples.mlperf.initializers import init_stable_diffusion
+  from examples.mlperf.initializers import init_stable_diffusion, gelu_erf
   from examples.stable_diffusion import AutoencoderKL
   from extra.models.unet import UNetModel
   from tinygrad.nn.state import load_state_dict, torch_load
+  from extra.models import clip
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
   from extra.models.inception import FidInceptionV3
@@ -346,6 +347,7 @@ def eval_stable_diffusion():
   inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
   vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
   text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+  clip.gelu = gelu_erf
   clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
   loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
   loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})

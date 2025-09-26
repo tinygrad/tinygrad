@@ -9,7 +9,8 @@ from PIL import Image
 import numpy as np
 import re, gzip
 
-from examples.mlperf.helpers import gelu_erf
+# Allow for monkeypatching for mlperf
+gelu = Tensor.gelu
 
 # to match behavior of mlperf v5.0 Stable Diffusion training clip tokenizer
 try:
@@ -286,8 +287,7 @@ class Open:
       self.c_proj = Linear(hidden_dims, dims)
 
     def __call__(self, x:Tensor) -> Tensor:
-      #return x.sequential([self.c_fc, Tensor.gelu, self.c_proj])
-      return x.sequential([self.c_fc, gelu_erf, self.c_proj])
+      return x.sequential([self.c_fc, gelu, self.c_proj])
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L210
   class ResidualAttentionBlock:

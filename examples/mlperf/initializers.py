@@ -149,6 +149,10 @@ class AutocastConv2d(nn.Conv2d):
 def attn_f32_softmax(q:Tensor, k:Tensor, v:Tensor) -> Tensor:
   return (q.matmul(k.transpose(-2,-1), dtype=dtypes.float32) / math.sqrt(q.shape[-1])).softmax(-1).cast(q.dtype) @ v
 
+# Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
+def gelu_erf(x:Tensor) -> Tensor:
+  return 0.5 * x * (1.0 + (x / 1.4142135623730951).erf())
+
 def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
   from examples.stable_diffusion import StableDiffusion
   from tinygrad.helpers import getenv
