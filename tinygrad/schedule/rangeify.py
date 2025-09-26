@@ -26,7 +26,7 @@ def clone_assign_buf(assign:UOp, target:UOp, op:UOp):
   # TODO: what mops are allowed here?
   alloc = UOp.new_buffer(buf.device, buf.size, buf.dtype)
   return assign.replace(src=(target, op.substitute({buf:alloc.assign(buf.rtag(CloneTag()))})))
-remove_clone_tags = PatternMatcher([(UPat({Ops.BUFFER}, name="x"), lambda x: x.replace(tag=None) if isinstance(x.tag, CloneTag) else None)])
+remove_clone_tags = PatternMatcher([(UPat(Ops.BUFFER, name="x"), lambda x: x.rtag(None) if isinstance(x.tag, CloneTag) else None)])
 
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP

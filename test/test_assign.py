@@ -328,15 +328,13 @@ class TestAssign(unittest.TestCase):
       np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
 
   def test_permuted_reduceop_child_dual_use(self):
-    Tensor.manual_seed(0)
     a = Tensor.randn(32, 32, 32).realize()
-    b = Tensor.randn(32, 32).realize()
-    b_np = b.numpy()
+    b = Tensor.full((32, 32), 1.).contiguous().realize()
     with self.assert_permuted_assign():
       r = a.sum(axis=1)
       b.assign(r + b.permute(1, 0))
       b.realize()
-      np.testing.assert_allclose(b.numpy(), a.numpy().sum(axis=1)+b_np.transpose(1, 0), atol=1e-6, rtol=1e-3)
+      np.testing.assert_allclose(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32)).transpose(1, 0), atol=1e-6, rtol=1e-3)
 
   @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
