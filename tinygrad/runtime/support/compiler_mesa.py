@@ -57,9 +57,12 @@ class NAKCompiler(Compiler):
     self.arch = dev.arch
     self.cc = nak.nak_compiler_create(nak.struct_nv_device_info(sm=int(dev.arch[3:]), max_warps_per_mp=dev.max_warps_per_sm))
     self.nir_options = ctypes.cast(nak.nak_nir_options(self.cc), ctypes.POINTER(nir_shader_compiler_options))
+    nak.glsl_type_singleton_init_or_ref()
     super().__init__(f"compile_{cache_key}_{dev.arch}")
+
+  def __del__(self): nak.glsl_type_singleton_decref()
+
   def compile(self, src) -> bytes:
-    nak.glsl_type_singleton_init_or_ref() # TODO: call glsl_type_singleton_decref somewhere
     blobreader = nak.struct_blob_reader()
     nak.blob_reader_init(blobreader, src, len(src))
     shader = nak.nir_deserialize(None, ctypes.cast(self.nir_options, ctypes.POINTER(nak.nir_shader_compiler_options)), blobreader)

@@ -504,10 +504,11 @@ generate_mesa() {
   fixup $BASE/nir.py
   fixup $BASE/nak.py
   fixup $BASE/lvp.py
-  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.mesa as mesa_support\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
-  sed -i "s\FunctionFactoryStub()\mesa_support.nir\g" $BASE/nir.py
-  sed -i "s\FunctionFactoryStub()\mesa_support.lvp\g" $BASE/lvp.py
-  sed -i "s\FunctionFactoryStub()\mesa_support.nak\g" $BASE/nak.py
+  for nm in nak nir lvp; do
+    sed -i "/import ctypes/a from tinygrad.runtime.support.mesa import $nm as dll" $BASE/$nm.py
+    echo "def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')" >> $BASE/$nm.py
+  done
+  sed -i "s\FunctionFactoryStub()\dll\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
   # bitfield bug in clang2py
   sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/nir.py

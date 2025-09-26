@@ -215,11 +215,15 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(nir.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __init__(self, dev, device): self.device, self.dev = device, dev
+  def __init__(self, dev, device):
+    self.device, self.dev = device, dev
+    nir.glsl_type_singleton_init_or_ref()
 
-  def prerender(self, uops:list[UOp]):
-    nir.glsl_type_singleton_init_or_ref() # TODO: call glsl_type_singleton_decref somewhere
-    self.b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
+  def __del__(self):
+    try: nir.glsl_type_singleton_decref()
+    except RuntimeError: pass
+
+  def prerender(self, uops:list[UOp]): self.b = nir.nir_builder_init_simple_shader(nir.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
 
   def render(self, uops:list[UOp]):
     self.prerender(uops)

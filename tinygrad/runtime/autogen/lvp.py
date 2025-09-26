@@ -6,7 +6,8 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, tinygrad.runtime.support.mesa as mesa_support
+import ctypes
+from tinygrad.runtime.support.mesa import lvp as dll
 
 
 class AsDictMixin:
@@ -135,7 +136,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['FIXME_STUB'] = mesa_support.lvp #  ctypes.CDLL('FIXME_STUB')
+_libraries['FIXME_STUB'] = dll #  ctypes.CDLL('FIXME_STUB')
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
@@ -7574,3 +7575,4 @@ __all__ = \
     'union_lp_jit_texture_0', 'union_shader_info_0',
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout']
+def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')
