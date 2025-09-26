@@ -255,7 +255,7 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
-  # rangeify=1 is (sometimes) correct here
+  # passing in RANGEIFY=1, it creates a copy of the target buffer
   def assert_permuted_assign(self): return self.assertRaisesRegex(RuntimeError, "contiguous") if not RANGEIFY else contextlib.nullcontext()
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -280,8 +280,6 @@ class TestAssign(unittest.TestCase):
     #GlobalCounters.cache = []
     ba1 = a.uop.base.realized # noqa: F841
     bb1 = b.uop.base.realized # noqa: F841
-    #with self.assert_permuted_assign():
-    # TODO: rangeify is also wrong here, silently
     with self.assert_permuted_assign():
       a.assign(a.permute(1,0) + b)   # this should not work!
       a.realize()
