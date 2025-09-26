@@ -147,8 +147,7 @@ def if_phi(b:nir.nir_builder, cond, then_fn, else_fn): return nir.nir_if_phi(b, 
 
 # this is a ridiculous hack, but I can't find a better way to grab the glsl_type objects
 glsl_base = {**{d:g(f"GLSL_TYPE_{'U' if d in dtypes.uints else ''}INT{d.itemsize*8 if d.itemsize != 4 else ''}") for d in dtypes.ints},
-             **{getattr(dtypes,d):g(f"GLSL_TYPE_{d.upper()}") for d in ['bool', 'double', 'float', 'float16', 'bfloat16']},
-             dtypes.fp8e4m3: nir.GLSL_TYPE_FLOAT_E4M3FN, dtypes.fp8e5m2: nir.GLSL_TYPE_FLOAT_E5M2}
+             **{getattr(dtypes,d):g(f"GLSL_TYPE_{d.upper()}") for d in ['bool', 'double', 'float', 'float16']}}
 def glsl_type(t:DType) -> nir.struct_glsl_type:
   if isinstance(t, PtrDType): return nir.glsl_array_type(glsl_type(t.base), t.size, 0).contents
   return nir.glsl_get_base_glsl_type(nir.glsl_type(base_type=glsl_base[t])).contents
@@ -256,7 +255,6 @@ class NIRRenderer(Renderer):
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         self.r[u] = cast(nir.nir_def, d)
-    # nir.nir_print_shader(self.b.shader, stdout)
     nir.nir_validate_shader(self.b.shader, b"after render")
     blob = nir.struct_blob()
     nir.nir_serialize(blob, self.b.shader, False)

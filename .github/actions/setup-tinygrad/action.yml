@@ -316,9 +316,8 @@ runs:
       if: inputs.mesa == 'true' && steps.cache-build-libdrm.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        git clone https://gitlab.freedesktop.org/mesa/libdrm.git ${{ github.workspace }}/libdrm
+        git clone --depth 1 --branch libdrm-2.4.121 https://gitlab.freedesktop.org/mesa/libdrm.git ${{ github.workspace }}/libdrm
         cd ${{ github.workspace }}/libdrm
-        git checkout libdrm-2.4.121
         meson setup build/
         ninja -C build/
     - name: Install libdrm
@@ -335,14 +334,13 @@ runs:
         cache-name: cache-mesa-build
       with:
         path: ${{ github.workspace }}/mesa
-        key: ${{ runner.os }}-mesa-25.0.7-rebuild-${{ env.BUILD_CACHE_VERSION }}
+        key: ${{ runner.os }}-mesa-25.1.0-rebuild-${{ env.BUILD_CACHE_VERSION }}
     - name: Build mesa
       if: inputs.mesa == 'true' && steps.cache-build-mesa.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        git clone https://gitlab.freedesktop.org/mesa/mesa.git ${{ github.workspace }}/mesa
+        git clone --depth 1 --branch mesa-25.1.0 https://gitlab.freedesktop.org/mesa/mesa.git ${{ github.workspace }}/mesa
         cd ${{ github.workspace }}/mesa
-        git checkout mesa-25.0.7
         sed -i '/gnu_symbol_visibility/d' src/compiler/meson.build src/compiler/nir/meson.build src/gallium/auxiliary/meson.build src/nouveau/compiler/meson.build src/util/meson.build
         meson setup build/ -Dgallium-drivers=llvmpipe -Dplatforms=[] -Dglx=disabled -Dvulkan-drivers=swrast -Dprefix=/usr -Dopengl=false -Degl=disabled -Dgbm=disabled -Dvideo-codecs=[]
         ninja -C build/
