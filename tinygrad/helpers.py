@@ -262,9 +262,9 @@ def diskcache_get(table:str, key:dict|str|bytes|int) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
+def diskcache_put(table:str, key:dict|str|bytes|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
-  if isinstance(key, (str,int)): key = {"key": key}
+  if isinstance(key, (str,bytes,int)): key = {"key": key}
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
