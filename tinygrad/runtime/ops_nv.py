@@ -188,7 +188,7 @@ class NVCopyQueue(NVCommandQueue):
 class NVArgsState(CLikeArgsState):
   def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     if MOCKGPU: prg.constbuffer_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
+    super().__init__(buf, prg, bufs, vals=vals, prefix=prg.constbuffer_0 or None)
 
 class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):
@@ -198,7 +198,7 @@ class NVProgram(HCQProgram):
     if (NAK:=isinstance(dev.compiler, NAKCompiler)):
       image, self.regs_usage, self.shmem_usage, self.lcmem_usage = parse_nak_shader(lib)
       self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-      self.prog_addr, self.prog_sz, self.constbuffer_0 = self.lib_gpu.va_addr, image.nbytes, None
+      self.prog_addr, self.prog_sz, self.constbuffer_0 = self.lib_gpu.va_addr, image.nbytes, []
     else:
       if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
       else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
