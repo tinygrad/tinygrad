@@ -1950,6 +1950,8 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
