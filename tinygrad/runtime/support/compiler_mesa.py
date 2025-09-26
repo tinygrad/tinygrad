@@ -4,9 +4,10 @@ from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, round_up
 from tinygrad.runtime.autogen.nir import nir_shader_compiler_options
 from tinygrad.runtime.support.compiler_cpu import cerr, expect
-import tinygrad.runtime.autogen.llvm as llvm
 import tinygrad.runtime.autogen.lvp as lvp
 import tinygrad.runtime.autogen.nak as nak
+try: import tinygrad.runtime.autogen.llvm as llvm
+except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
 class LVPCompiler(Compiler):
   def __init__(self, cache_key="lvp"):
