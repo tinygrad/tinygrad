@@ -51,18 +51,15 @@ def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[
   return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
-  # NOTE: this always uses the opts_to_apply path
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
-  input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
   # if no renderer was provided, open the device to get it
   if renderer is None: renderer = Device[p.device].renderer
-  p2 = get_program(input_ast, renderer=renderer)
+  p2 = get_program(ast, renderer=renderer, opts=opts)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
     if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
     return ret.src
   # properly color the name arg
-  ast_repr = codecs.decode(str(input_ast), "unicode_escape")
+  ast_repr = codecs.decode(str(ast.replace(arg=replace(KernelInfo(opts_to_apply=p.applied_opts), name=p.name))), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
