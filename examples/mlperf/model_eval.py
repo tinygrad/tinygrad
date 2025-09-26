@@ -294,6 +294,7 @@ def eval_stable_diffusion():
   from examples.stable_diffusion import AutoencoderKL
   from extra.models.unet import UNetModel
   from tinygrad.nn.state import load_state_dict, torch_load
+  from tinygrad.helpers import BEAM
   from extra.models import clip
   from extra.models.clip import FrozenOpenClipEmbedder
   from extra.models.clip import OpenClipEncoder
@@ -304,7 +305,7 @@ def eval_stable_diffusion():
   for x in GPUS: Device[x]
   print(f"running eval on {GPUS}")
   seed               = config["seed"]                   = getenv("SEED", 12345)
-  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
   CONTEXT_BS         = config["CONTEXT_BS"]             = getenv("CONTEXT_BS", 1 * len(GPUS))
   DENOISE_BS         = config["DENOISE_BS"]             = getenv("DENOISE_BS", 1 * len(GPUS))
@@ -395,8 +396,8 @@ def eval_stable_diffusion():
     models = (cond_stage, unet, first_stage, inception, clip)
     jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, decode, jit_inception:=TinyJit(inception), jit_clip:=TinyJit(clip.get_clip_score))
     all_bs = (CONTEXT_BS, DENOISE_BS, DECODE_BS, INCEPTION_BS, CLIP_BS)
-    if (BEAM_EVAL_SAMPLES:=getenv("BEAM_EVAL_SAMPLES", 0)) and BEAM_EVAL_SAMPLES > 0:
-      eval_inputs = eval_inputs[0:BEAM_EVAL_SAMPLES]
+    if (EVAL_SAMPLES:=getenv("EVAL_SAMPLES", 0)) and EVAL_SAMPLES > 0:
+      eval_inputs = eval_inputs[0:EVAL_SAMPLES]
     output_shapes = [(ns:=len(eval_inputs),77), (ns,77,1024), (ns,4,64,64), (ns,3,512,512), (ns,2048), (ns,)]
     # Writing progress to disk lets us resume eval if we crash
     stages = ["tokens", "embeds", "latents", "imgs", "inception", "clip"]
@@ -496,7 +497,7 @@ def eval_stable_diffusion():
     for name in disk_tensor_names:
       Path(f"{EVAL_CKPT_DIR}/{name}.bytes").unlink(missing_ok=True)
     
-    if BEAM_EVAL_SAMPLES:
+    if EVAL_SAMPLES and BEAM:
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       sys.exit() # Don't eval additional models; we don't care about clip/fid scores when running BEAM on eval sample subset
 
@@ -506,14 +507,17 @@ def eval_stable_diffusion():
   for ckpt_iteration, p in sorted(eval_queue, reverse=True):
     unet_ckpt = safe_load(p)
     load_state_dict(unet, unet_ckpt)
-    clip, fid = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
-    converged = True if clip >= 0.15 and fid <= 90 else False
-    print(f"eval results for {EVAL_CKPT_DIR}/{p.name}: clip={clip}, fid={fid}, converged={converged}")
+    clip_score, fid_score = eval_unet(eval_inputs, unet, model.cond_stage_model, model.first_stage_model, inception, clip_encoder)
+    converged = True if clip_score >= 0.15 and fid_score <= 90 else False
+    print(f"eval results for {EVAL_CKPT_DIR}/{p.name}: clip={clip_score}, fid={fid_score}, converged={converged}")
     if WANDB:
-      wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip, "eval/fid_score": fid})
+      wandb.log({"eval/ckpt_iteration": ckpt_iteration, "eval/clip_score": clip_score, "eval/fid_score": fid_score})
     if converged and STOP_IF_CONVERGED:
       print(f"Convergence detected, exiting early before evaluating other checkpoints due to STOP_IF_CONVERGED={STOP_IF_CONVERGED}")
       sys.exit()
+
+  # for testing
+  return clip_score, fid_score, ckpt_iteration
 
 if __name__ == "__main__":
   # inference only

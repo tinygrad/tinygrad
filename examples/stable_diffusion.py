@@ -161,6 +161,10 @@ unet_params: Dict[str,Any] = {
   "use_linear": False,
 }
 
+mlperf_params: Dict[str,Any] = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+                                "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                                "num_groups":16, "st_norm_eps":1e-6}
+
 class StableDiffusion:
   def __init__(self, version:str|None=None, pretrained:str|None=None):
     self.alphas_cumprod = get_alphas_cumprod()
@@ -171,9 +175,7 @@ class StableDiffusion:
       self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
       unet_init_params = unet_params
     elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
-      unet_init_params = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
-                          "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
-                          "num_groups":16, "st_norm_eps":1e-6}
+      unet_init_params = mlperf_params
       clip.gelu = gelu_erf
       self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
                                                         "clip_tokenizer_version": "sd_mlperf_v5_0"})

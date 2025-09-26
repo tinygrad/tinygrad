@@ -65,7 +65,7 @@ sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setpoweroverdrive 750 && \
 run_retry TOTAL_CKPTS=7 python3 examples/mlperf/model_train.py; (( $? == 2 )) && { echo "training failed before BEAM completion"; exit 2; }
 sleep 90
 
-run_retry BEAM_EVAL_SAMPLES=600 python3 examples/mlperf/model_eval.py; (( $? == 2 )) && { echo "eval failed before BEAM completion"; exit 2; }
+run_retry EVAL_SAMPLES=600 python3 examples/mlperf/model_eval.py; (( $? == 2 )) && { echo "eval failed before BEAM completion"; exit 2; }
 # Checkpoints will be evaluated in reverse chronological order, even if above training crashed early
 # STOP_IF_CONVERGED=1: Stop the eval after the first time convergence is detected; no more checkpoints will be evaluated after that.
 STOP_IF_CONVERGED=1 python3 examples/mlperf/model_eval.py
