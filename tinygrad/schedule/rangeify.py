@@ -19,16 +19,6 @@ double_reshape = PatternMatcher([
    lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
 
-class CloneTag: pass
-def clone_assign_buf(assign:UOp, target:UOp, op:UOp):
-  buf = target.base
-  assert buf.op is Ops.BUFFER, f"assign target isn't buffer, it's {buf.op}"
-  if isinstance(buf.device, tuple): return None # TODO: multi
-  # load a clone of the target buffer
-  if buf not in op.toposort(gate=lambda u:u.op is not Ops.ASSIGN): return None
-  alloc = UOp.new_buffer(buf.device, buf.size, buf.dtype)
-  return assign.replace(src=(target, op.substitute({buf:alloc.assign(nb:=buf.rtag(CloneTag()))}))).substitute({nb:buf})
-
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
@@ -51,9 +41,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
-
-  # create a clone of the target buffer if we're also loading it
-  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("op")), name="assign"), clone_assign_buf),
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
@@ -81,6 +68,9 @@ def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
+def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
+  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
@@ -88,6 +78,8 @@ do_realize = PatternMatcher([
   (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
+  # realize input to assign (might be optimized out)
+  (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
 
 
