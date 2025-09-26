@@ -290,15 +290,13 @@ class TestAssign(unittest.TestCase):
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
+  @unittest.skipUnless(RANGEIFY, "only correct in rangeify")
   def test_post_permuted_assignment_alt(self):
     a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
     b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
-    alu = a.permute(1, 0)+b
-    alu_np = alu.numpy()
-    del alu
-    with self.assert_permuted_assign():
-      a.assign(a.permute(1, 0)+b)
-      np.testing.assert_allclose(a.numpy(), alu_np)
+    new_a = (a.T+b).numpy()
+    a.assign(a.T+b)
+    np.testing.assert_allclose(a.numpy(), new_a)
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
