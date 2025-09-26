@@ -22,11 +22,11 @@ class CloneTag: pass
 def clone_assign_buf(assign:UOp, target:UOp, op:UOp):
   buf = target.base
   assert buf.op is Ops.BUFFER, f"assign target isn't buffer, it's {buf.op}"
-  if isinstance(buf.tag, CloneTag) or isinstance(buf.device, tuple): return # TODO: multi
-  # TODO: what mops are allowed here?
+  if isinstance(buf.device, tuple): return None # TODO: multi
+  # load a clone of the target buffer
+  if buf not in op.toposort(gate=lambda u:u.op is not Ops.ASSIGN): return None
   alloc = UOp.new_buffer(buf.device, buf.size, buf.dtype)
-  return assign.replace(src=(target, op.substitute({buf:alloc.assign(buf.rtag(CloneTag()))})))
-remove_clone_tags = PatternMatcher([(UPat(Ops.BUFFER, name="x"), lambda x: x.rtag(None) if isinstance(x.tag, CloneTag) else None)])
+  return assign.replace(src=(target, op.substitute({buf:alloc.assign(nb:=buf.rtag(CloneTag()))}))).substitute({nb:buf})
 
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
@@ -584,7 +584,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
   tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
-  tsink = graph_rewrite(tsink, remove_contig_tags+remove_clone_tags, name="remove contiguous tags")
+  tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
   # rangeify
