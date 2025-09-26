@@ -6,10 +6,10 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffe
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-from tinygrad.uop.ops import sint
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.runtime.support.lvp import LVPCompiler
+from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
+from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+from tinygrad.uop.ops import sint
 from tinygrad.runtime.support.elf import elf_loader
 
 class CPUSignal(HCQSignal):
