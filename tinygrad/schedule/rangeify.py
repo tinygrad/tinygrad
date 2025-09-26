@@ -18,14 +18,15 @@ double_reshape = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],), tag=(x.src[0].tag or ())+(x.tag or ()))),
 ])
 
-def clone_assign(assign:UOp, target:UOp):
-  if (buf:=target.base).tag == "clone": return None
-  if isinstance(buf.device, tuple): return None # TODO: who owns multi?
-  assert buf.op is Ops.BUFFER, f"target to assign isn't buffer, it's {buf.op}"
-  # can also walk mops
-  # TODO: some more intelligent decision here
-  new = assign.src[1].substitute({buf:buf.rtag("clone").copy_to_device(buf.device).rtag("clone")})
-  return assign.replace(src=(target, new))
+class CloneTag: pass
+def clone_assign_buf(assign:UOp, target:UOp, op:UOp):
+  buf = target.base
+  assert buf.op is Ops.BUFFER, f"assign target isn't buffer, it's {buf.op}"
+  if isinstance(buf.tag, CloneTag) or isinstance(buf.device, tuple): return # TODO: multi
+  # TODO: what mops are allowed here?
+  alloc = UOp.new_buffer(buf.device, buf.size, buf.dtype)
+  return assign.replace(src=(target, op.substitute({buf:alloc.assign(buf.rtag(CloneTag()))})))
+remove_clone_tags = PatternMatcher([(UPat({Ops.BUFFER}, name="x"), lambda x: x.replace(tag=None) if isinstance(x.tag, CloneTag) else None)])
 
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
@@ -48,15 +49,13 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
-   lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER and target.base.tag != "clone" else None),
+   lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
   # create a COPY of the target buffer in ASSIGN
-  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var()), name="assign"), clone_assign),
+  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("op")), name="assign"), clone_assign_buf),
 
   # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device \
-      # TODO: this is really Ops.CLONE
-      and copy.tag != "clone" else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
   # handle disk
   # TODO: this doesn't need to use st.views
@@ -104,8 +103,6 @@ add_contiguous = PatternMatcher([
    lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx and not isinstance(x.tag, WrappedContig) else None),
 ])
 remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag.x) if isinstance(x.tag, WrappedContig) else None)])
-# Ops.CLONE?
-remove_clone_tags = PatternMatcher([(UPat((Ops.COPY, Ops.BUFFER), name="x"), lambda x: x.replace(tag=None) if x.tag == "clone" else None),])
 
 # *****************
 # 2. mark all children
