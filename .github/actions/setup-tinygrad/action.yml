@@ -41,6 +41,10 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
+  mesa:
+    description: "Install mesa"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -174,6 +178,10 @@ runs:
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
           pkgs+=" libllvm20 clang-20 lld-20"
         fi
+        # **** mesa ****
+        if [[ "${{ inputs.mesa }}" == "true" ]]; then
+          pkgs+=" libdrm-dev libclc-20-dev libclang-20-dev llvm-20-dev"
+        fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -289,3 +297,59 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    # **** mesa ****
+    - name: Install mesa dependencies
+      if: inputs.mesa == 'true'
+      shell: bash
+      run: curl -L https://sdk.lunarg.com/sdk/download/1.4.321.1/linux/vulkansdk-linux-x86_64-1.4.321.1.tar.xz | sudo tar -Jxf - -C /usr --strip-components=2
+    - name: Cache libdrm
+      if: inputs.mesa== 'true'
+      id: cache-build-libdrm
+      uses: actions/cache@v4
+      env:
+        cache-name: cache-mesa-build
+      with:
+        path: ${{ github.workspace }}/libdrm
+        key: ${{ runner.os }}-libdrm-2.4.121-rebuild-${{ env.BUILD_CACHE_VERSION }}
+    - name: Build libdrm
+      if: inputs.mesa == 'true' && steps.cache-build-libdrm.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone https://gitlab.freedesktop.org/mesa/libdrm.git ${{ github.workspace }}/libdrm
+        cd ${{ github.workspace }}/libdrm
+        git checkout libdrm-2.4.121
+        meson setup build/
+        ninja -C build/
+    - name: Install libdrm
+      if: inputs.mesa == 'true'
+      shell: bash
+      run: |
+        cd ${{ github.workspace }}/libdrm
+        sudo ninja -C build/ install
+    - name: Cache mesa
+      if: inputs.mesa== 'true'
+      id: cache-build-mesa
+      uses: actions/cache@v4
+      env:
+        cache-name: cache-mesa-build
+      with:
+        path: ${{ github.workspace }}/mesa
+        key: ${{ runner.os }}-mesa-25.0.7-rebuild-${{ env.BUILD_CACHE_VERSION }}
+    - name: Build mesa
+      if: inputs.mesa == 'true' && steps.cache-build-mesa.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        # mesa
+        git clone https://gitlab.freedesktop.org/mesa/mesa.git ${{ github.workspace }}/mesa
+        cd ${{ github.workspace }}/mesa
+        git checkout mesa-25.0.7
+        sed -i '/gnu_symbol_visibility/d' src/compiler/meson.build src/compiler/nir/meson.build src/gallium/auxiliary/meson.build src/nouveau/compiler/meson.build src/util/meson.build
+        meson setup build/ -Dgallium-drivers=llvmpipe -Dplatforms=[] -Dglx=disabled -Dvulkan-drivers=swrast -Dprefix=/usr -Dopengl=false -Degl=disabled -Dgbm=disabled -Dvideo-codecs=[]
+        ninja -C build/
+    - name: Install mesa
+      if: inputs.mesa == 'true'
+      shell: bash
+      run: |
+        cd ${{ github.workspace }}/mesa
+        sudo ninja -C build/ install
