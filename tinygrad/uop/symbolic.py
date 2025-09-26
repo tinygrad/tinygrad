@@ -22,8 +22,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-invalid_pat = UPat.const(dtypes.index, Invalid).named("i")
-invalid_gate = UPat.var("cond").where(UPat.var("x",dtype=dtypes.index), invalid_pat)
+invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
+invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
 propagate_invalid = PatternMatcher([
   # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -113,7 +113,11 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # new decomp rules for threefry
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32, lambda x: x),
-  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0))
+  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0)),
+  # ** simple where folding **
+  # a conditional with the same results either way is a noop, also fold const conditionals
+  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
+  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
@@ -205,17 +209,6 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
-  # div is the smallest factor of the denominator (greater than 1) out of all "factors"
-  # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
-  # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
-  return None
-
 def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
   # for mod we go further and take the remainder of all factors to reduce their size
@@ -232,6 +225,16 @@ def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   new_x = sum(rem)+x.const_like(0)
   if len(quo)==0 or new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
+
+def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # we try and nest the div and see if it allows the numerator to be simplified
+  if ((c := y.arg) < 0): return None
+  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
+  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
+  newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
+  if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
+  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -292,9 +295,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
-  # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
     if f.arg is not Invalid else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const

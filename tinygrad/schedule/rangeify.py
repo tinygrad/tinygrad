@@ -15,7 +15,8 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],))),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
+   lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
 
 earliest_rewrites = double_reshape+PatternMatcher([
@@ -40,6 +41,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # assign only to buffer
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
+
+  # copy only to different device
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
   # handle disk
   # TODO: this doesn't need to use st.views
@@ -317,7 +321,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
 
   # CONST (or DEFINE_VAR) can't have axes. remove INDEX when we get here
-  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c),
+  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
 
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
@@ -336,7 +340,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # assert if there's any index we didn't process
-  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE}).f(Ops.INDEX, name="x"), unprocessed_index),
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # *****************
@@ -385,6 +389,9 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
+    and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
@@ -393,8 +400,7 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
-  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
-   lambda c,b: c.reshape((1,)*len(b.shape)).expand(b.shape).replace(tag=b.tag)),
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
   #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
   # copy on CONST is CONST
@@ -421,7 +427,7 @@ def bufferize_to_store(x:UOp):
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
-    assert assign_target.op is Ops.INDEX
+    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
@@ -455,7 +461,7 @@ pm_add_buffers = pm_mops+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0] for x in m.src])).reshape(m.src[0].arg)),
+   lambda m: m.replace(src=tuple([x.src[0] for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
 ])
 
 # *****************
@@ -581,8 +587,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
+  # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if (x.op is Ops.BUFFERIZE or x.base.op in {Ops.CONST}) and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.parents if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST} and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
