@@ -164,7 +164,6 @@ class TestAssign(unittest.TestCase):
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
 
-  # TODO: like this is the simplest case it can fuse
   def test_double_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     a += 1
@@ -380,7 +379,7 @@ class TestAssign(unittest.TestCase):
     a.assign(a + b)
     kc = GlobalCounters.kernel_count
     a.realize()
-    # rangeify makes a copy
+    # rangeify makes two kernels
     assert GlobalCounters.kernel_count - kc == (2 if RANGEIFY else 1)
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
