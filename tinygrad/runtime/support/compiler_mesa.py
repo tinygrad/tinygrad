@@ -1,16 +1,12 @@
+import base64, ctypes, gzip, pathlib, tempfile, hashlib, subprocess
 from typing import Tuple
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, round_up
-try: from tinygrad.runtime.autogen.nir import nir_shader_compiler_options
-except FileNotFoundError: nir_shader_compiler_options = None #type:ignore[assignment]
+from tinygrad.runtime.autogen.nir import nir_shader_compiler_options
 from tinygrad.runtime.support.compiler_cpu import cerr, expect
-try: import tinygrad.runtime.autogen.llvm as llvm
-except FileNotFoundError: llvm = None #type:ignore[assignment]
-import base64, ctypes, gzip
-try: import tinygrad.runtime.autogen.lvp as lvp
-except FileNotFoundError: lvp = None #type:ignore[assignment]
-try: import tinygrad.runtime.autogen.nak as nak
-except FileNotFoundError: nak = None #type:ignore[assignment]
+import tinygrad.runtime.autogen.llvm as llvm
+import tinygrad.runtime.autogen.lvp as lvp
+import tinygrad.runtime.autogen.nak as nak
 
 class LVPCompiler(Compiler):
   def __init__(self, cache_key="lvp"):
