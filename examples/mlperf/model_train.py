@@ -1511,9 +1511,9 @@ def train_stable_diffusion():
   # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
   # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
   CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = math.ceil(512_000 / BS)
-  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./"))
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
   DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
-  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints/training_checkpoints"))
+  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints"))
   TOTAL_CKPTS        = config["TOTAL_CKPTS"]            = getenv("TOTAL_CKPTS", 0)
 
   print(f"training on {GPUS}")
@@ -1577,6 +1577,8 @@ def train_stable_diffusion():
 
   # training loop
   dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
+  # for tests
+  beam_complete, saved_checkpoints = False, []
 
   train_start_time = time.perf_counter()
   t0 = t6 = time.perf_counter()
@@ -1599,6 +1601,7 @@ def train_stable_diffusion():
 
     if i == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
+      beam_complete=True
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
       
     total_train_time = time.perf_counter() - train_start_time
@@ -1616,11 +1619,11 @@ def train_stable_diffusion():
       # "evaluation is done offline, the time is not counted towards the submission time."
       fn = f"{UNET_CKPTDIR}/{i}.safetensors"
       print(f"saving unet checkpoint at {fn}")
+      saved_checkpoints.append(fn)
       safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
       if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
-        import sys
         print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
-        sys.exit()
+        return beam_complete, saved_checkpoints
 
     t3 = time.perf_counter()
     if WANDB: wandb.log(wandb_log)
