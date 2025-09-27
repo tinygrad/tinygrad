@@ -388,11 +388,11 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
 def pre_assign(w_idx:UOp, r_idx:UOp, op:UOp, b:UOp, assign:UOp):
-  # TODO: can compute if the read and write index overlaps?
-  #print(w_idx, r_idx)
   buf = w_idx.src[0]
   assert buf.op is Ops.BUFFER, f"assign target isn't a buffer, it's {buf}"
-  if buf not in op.toposort(gate=lambda u:u.op is not Ops.BUFFERIZE): return None
+  # TODO: can compute if the read and write index overlaps?
+  idxs = [x for x in op.toposort(gate=lambda u:u.op is not Ops.BUFFERIZE) if x.op is Ops.INDEX and x.src[0] is buf]
+  if len(idxs) <= 1: return None
   new_op = r_idx.replace(src=(b.replace(src=(op.contiguous(),)+b.src[1:]),)+r_idx.src[1:])
   return assign.replace(src=(w_idx, new_op)+assign.src[2:])
 
