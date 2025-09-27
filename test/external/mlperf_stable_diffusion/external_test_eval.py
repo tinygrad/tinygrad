@@ -10,7 +10,7 @@ from examples.mlperf.model_eval import eval_stable_diffusion
 class TestEval(unittest.TestCase):
   def test_eval_ckpt(self):
     Device.DEFAULT="NULL"
-    os.environ.update({"MODEL": "stable_diffusion", "GPUS": "8", "PARALLEL": "0", "EVAL_SAMPLES": "600"})
+    os.environ.update({"MODEL": "stable_diffusion", "GPUS": "8", "EVAL_SAMPLES": "600"})
     os.environ.update({"CONTEXT_BS": "816", "DENOISE_BS": "600", "DECODE_BS": "384", "INCEPTION_BS": "560", "CLIP_BS": "240"})
     # NOTE: update these based on where data/checkpoints are on your system
     if not getenv("DATADIR", ""): os.environ["DATADIR"] = "/raid/datasets/stable_diffusion"

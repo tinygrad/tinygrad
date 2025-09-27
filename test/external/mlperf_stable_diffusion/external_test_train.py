@@ -33,7 +33,7 @@ class TestTrain(unittest.TestCase):
     Device.DEFAULT="NULL"
     # train for num_steps, save checkpoint, and stop training
     num_steps = 42
-    os.environ.update({"MODEL": "stable_diffusion", "TOTAL_CKPTS": "1", "CKPT_STEP_INTERVAL": str(num_steps), "GPUS": "8", "BS": "304", "PARALLEL": "0"})
+    os.environ.update({"MODEL": "stable_diffusion", "TOTAL_CKPTS": "1", "CKPT_STEP_INTERVAL": str(num_steps), "GPUS": "8", "BS": "304"})
     # NOTE: update these based on where data/checkpoints are on your system
     if not getenv("DATADIR", ""): os.environ["DATADIR"] = "/raid/datasets/stable_diffusion"
     if not getenv("CKPTDIR", ""): os.environ["CKPTDIR"] = "/raid/weights/stable_diffusion"
