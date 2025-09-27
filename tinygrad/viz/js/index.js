@@ -163,7 +163,44 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+class GridMap {
+  constructor(width, height) { this.rows = Array.from({length: height}, () => new Uint32Array((width + 31) >>> 5)); }
+  _maskRange(b0, b1) {
+    let n = (b1 - b0 + 1) | 0;
+    return ((-1 >>> (32 - n)) << b0) >>> 0;
+  }
+  fillRect(x0, y0, x1, y1) {
+    const X0 = x0 | 0, Y0 = y0 | 0, X1 = x1 | 0, Y1 = y1 | 0;
+    const w0 = X0 >>> 5, w1 = X1 >>> 5, b0 = X0 & 31, b1 = X1 & 31;
+    for (let y = Y0; y <= Y1; y++) {
+      const row = this.rows[y];
+      if (w0 === w1) { row[w0] |= this._maskRange(b0, b1); continue; }
+      row[w0] |= ((-1 << b0) >>> 0);
+      for (let w = w0 + 1; w < w1; w++) row[w] = 0xFFFFFFFF;
+      row[w1] |= (-1 >>> (31 - b1));
+    }
+  }
+  isFilled(x0, y0, x1, y1) {
+    const X0 = x0 | 0, Y0 = y0 | 0, X1 = x1 | 0, Y1 = y1 | 0;
+    const w0 = X0 >>> 5, w1 = X1 >>> 5, b0 = X0 & 31, b1 = X1 & 31;
+    for (let y = Y0; y <= Y1; y++) {
+      const row = this.rows[y];
+      if (w0 === w1) {
+        const m = this._maskRange(b0, b1);
+        if ((row[w0] & m) !== m) return false;
+        continue;
+      }
+      const m0 = ((-1 << b0) >>> 0), m1 = (-1 >>> (31 - b1));
+      if ((row[w0] & m0) !== m0) return false;
+      for (let w = w0 + 1; w < w1; w++) if (row[w] !== 0xFFFFFFFF) return false;
+      if ((row[w1] & m1) !== m1) return false;
+    }
+    return true;
+  }
+  clear() { for (const r of this.rows) r.fill(0); }
+}
+
+var data, gridMap, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -292,9 +329,12 @@ async function renderProfiler() {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const addRect = (r, visible) => { visible.push(r); gridMap.fillRect(r.x0, r.y0, r.x1, r.y1); }
+  const opts = { minWidth:0.5 };
   function render(transform) {
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    gridMap.clear();
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
@@ -312,7 +352,7 @@ async function renderProfiler() {
           ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
+            addRect({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg }, visible);
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
@@ -323,9 +363,13 @@ async function renderProfiler() {
         if (e.x>et || e.x+e.width<st) continue;
         const x = xscale(e.x);
         const y = offsetY+e.y;
-        const width = xscale(e.x+e.width)-x;
+        let width = xscale(e.x+e.width)-x;
+        if (width < opts.minWidth) {
+          if (gridMap.isFilled(x, y, x+opts.minWidth, y+e.height)) continue;
+          width = opts.minWidth; arg = null;
+        }
         ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
-        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
+        addRect({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg }, visible);
         // add label
         if (e.label == null) continue;
         ctx.textAlign = "left";
@@ -382,6 +426,7 @@ async function renderProfiler() {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    gridMap = new GridMap(width, height);
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
