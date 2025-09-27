@@ -54,6 +54,30 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_shard_alt(self):
+    t = Tensor.ones(4).contiguous().realize().shard(devices_2, 0)
+    r = t.reshape((2, 2)).realize()
+    assert t.uop.is_realized, "shard didn't realize"
+    self.assertEqual(r.tolist(), [[1.,1.],[1.,1.]])
+
+  def test_shard_alt2(self):
+    t = Tensor.ones(4).contiguous().realize().shard(devices_2, 0)
+    r = (t+t).reshape((2, 2)).realize()
+    assert t.uop.is_realized, "shard didn't realize"
+    self.assertEqual(r.tolist(), [[1.,1.],[1.,1.]])
+
+  def test_shard_alt3(self):
+    t = Tensor.ones(6).contiguous().realize().shard(devices_2, 0)
+    r = t.reshape(2, 3).sum(axis=1).realize()
+    self.assertListEqual(r.tolist(), [3.,3.])
+    assert r.uop.is_realized, f"didn't realize {r}"
+
+  def test_shard_alt4(self):
+    t = Tensor.ones(6).contiguous().realize().shard(devices_2, 0)
+    r = t.reshape(2, 3).sum(axis=0).realize()
+    self.assertListEqual(r.tolist(), [2.,2.,2.])
+    assert r.uop.is_realized, f"didn't realize {r}"
+
   def test_shard_not_multiple(self):
     X = Tensor.ones(256).contiguous().realize()
     with self.assertRaises(RuntimeError):
