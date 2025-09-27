@@ -9,7 +9,7 @@ from PIL import Image
 import numpy as np
 import re, gzip
 
-# Allow for monkeypatching for mlperf
+# Allow for monkeypatching for mlperf.
 gelu = Tensor.gelu
 
 # to match behavior of mlperf v5.0 Stable Diffusion training clip tokenizer
