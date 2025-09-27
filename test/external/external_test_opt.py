@@ -46,14 +46,14 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ConvNeXt()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(143):
+    with CLCache(105 if RANGEIFY else 143):
       model(img).realize()
 
   def test_enet(self):
     model = EfficientNet(getenv("ENET_NUM", 0), has_se=False)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(51):
+    with CLCache(50 if RANGEIFY else 51):
       model.forward(img).realize()
 
   def test_enet_se(self):
@@ -61,21 +61,21 @@ class TestInferenceMinKernels(unittest.TestCase):
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
     # TODO: this seems very high
-    with CLCache(115):
+    with CLCache(98 if RANGEIFY else 115):
       model.forward(img).realize()
 
   def test_resnet(self):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(23):
+    with CLCache(28 if RANGEIFY else 23):
       model.forward(img).realize()
 
   def test_vit(self):
     model = ViT(embed_dim=192, num_heads=3)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(209) as cache: # NOTE: this is way too high
+    with CLCache(172 if RANGEIFY else 209) as cache: # NOTE: this is way too high
       out = model.forward(img)
       assert cache.count == 0, "ViT prerealized?"
       out.realize()

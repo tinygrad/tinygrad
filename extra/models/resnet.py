@@ -30,7 +30,7 @@ class BasicBlock:
     out = self.bn2(self.conv2(out))
     out = out + x.sequential(self.downsample)
     out = out.relu()
-    return out
+    return out.contiguous()
 
 
 class Bottleneck:
@@ -59,7 +59,7 @@ class Bottleneck:
     out = self.bn3(self.conv3(out))
     out = out + x.sequential(self.downsample)
     out = out.relu()
-    return out
+    return out.contiguous()
 
 class ResNet:
   def __init__(self, num, num_classes=None, groups=1, width_per_group=64, stride_in_1x1=False):
