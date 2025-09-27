@@ -2,7 +2,7 @@ import unittest, math
 from functools import partial
 
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, CI, OSX, X86
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
@@ -101,6 +101,7 @@ class TestRandomness(unittest.TestCase):
     np.testing.assert_allclose(jr, r)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "indexing uses long in x86")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):

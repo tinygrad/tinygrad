@@ -97,16 +97,19 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   # lower the index dtype to a concrete int
   ret.append(RewriteStep(load_store_indexing+pm_lower_index_dtype, lambda _: opts.device, name="lower all index dtypes"))
 
-  # optional pre matcher
-  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
-
   # decompositions
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
   ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
 
+  # optional pre matcher
+  if opts.pre_matcher is not None: ret.append(RewriteStep(symbolic_simple+opts.pre_matcher, lambda _: opts, name="pre_matcher"))
+
   # final rules for the renderer (without sym)
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
+
+  # rewrite to backend specific ops
+  if opts.isel_matcher is not None: ret.append(RewriteStep(opts.isel_matcher, name="instruction selection", bottom_up=True))
 
   # return the list (with optional linearizer)
   return ret + (rewrites_for_linearizer if linearizer else [])
@@ -114,7 +117,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True, linearizer:bool=False) -> UOp:
   return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize, linearizer))
 
-def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, opts:Renderer=Renderer()) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
@@ -127,5 +130,5 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
 
   lst = list(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None, linearizer=True).arg.lst)
-  if __debug__: type_verify(lst)
+  if __debug__: type_verify(lst, opts.extra_spec)
   return lst
