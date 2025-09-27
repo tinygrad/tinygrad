@@ -19,8 +19,9 @@ def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
   std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
   return std * rand_truncn(*shape, **kwargs)
 
-def zero_module(module):
-  for p in get_parameters(module): p.assign(Tensor.zeros_like(p).contiguous())
+# Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
+def gelu_erf(x:Tensor) -> Tensor:
+  return 0.5 * x * (1.0 + (x / 1.4142135623730951).erf())
 
 class Conv2dHeNormal(nn.Conv2d):
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
@@ -155,14 +156,13 @@ class AutocastLayerNorm(nn.LayerNorm):
   def __call__(self, x:Tensor) -> Tensor:
     return super().__call__(x.cast(dtypes.float32))
 
+def zero_module(module):
+  for p in get_parameters(module): p.assign(Tensor.zeros_like(p).contiguous())
+
 # Stable Diffusion mlperf reference doesn't call scaled_dot_product_attention
 # copy torch AMP: upcast to float32 before softmax on CUDA
 def attn_f32_softmax(q:Tensor, k:Tensor, v:Tensor) -> Tensor:
   return (q.matmul(k.transpose(-2,-1), dtype=dtypes.float32) / math.sqrt(q.shape[-1])).softmax(-1).cast(q.dtype) @ v
-
-# Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
-def gelu_erf(x:Tensor) -> Tensor:
-  return 0.5 * x * (1.0 + (x / 1.4142135623730951).erf())
 
 def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
   from examples.stable_diffusion import StableDiffusion
