@@ -1,10 +1,11 @@
 from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
+from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
 from tinygrad.uop.symbolic import sym, symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -15,7 +16,8 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: x.replace(src=(x.src[0].src[0],), tag=(x.src[0].tag or ())+(x.tag or ()))),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
+   lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
 
 earliest_rewrites = double_reshape+PatternMatcher([
@@ -95,9 +97,12 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 # 2. mark all children
 
 @dataclass
-class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
+class ChildrenContext:
+  children: dict[UOp, list[UOp]]|None = None
+  realize_roots: defaultdict[UOp, list[UOp]] = field(default_factory=lambda: defaultdict(list))
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
+
   children_map = x.get_children_map()
   ctx.children = {}
   for k,v in children_map.items():
@@ -106,6 +111,16 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     # NOTE: this gate shouldn't be here
     if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
       ctx.children[k] = non_sink_children
+  # if a node is in the toposort of multiple realizes, it will be indexed by different indices and we can bufferize early
+  # this prevents index_child: "children not making progress" error on big graphs
+  for r in [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]:  # ignore partial realizes
+    for u in r.toposort(gate=lambda x: x is not Ops.REALIZE or (RANGEIFY>1 and u.arg is not None)):
+      ctx.realize_roots[u].append(r)
+
+def bufferize_early(ctx:ChildrenContext, x:UOp):
+  # this will also change the sources such that mark_children wont add the children/child uops anymore
+  new_srcs = [s.realize() if s in unwrap(ctx.children) and len(ctx.realize_roots[s])>1 else s for s in x.src]
+  return x.replace(src=tuple(new_srcs))
 
 def mark_children(ctx:ChildrenContext, x:UOp):
   assert ctx.children is not None
@@ -115,7 +130,8 @@ def mark_children(ctx:ChildrenContext, x:UOp):
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
-  (UPat(GroupOp.All-{Ops.CHILD, Ops.CHILDREN, Ops.SINK}, name="x"), mark_children),
+  (UPat(GroupOp.All-{Ops.CHILDREN, Ops.SINK, Ops.REALIZE}, name="x"), bufferize_early),
+  (UPat(GroupOp.All-{Ops.CHILDREN, Ops.SINK, Ops.REALIZE}, name="x"), mark_children),
 ])
 
 # *****************
@@ -388,6 +404,9 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+  (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
+    and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
   # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),

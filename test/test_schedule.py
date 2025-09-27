@@ -8,7 +8,7 @@ import functools
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
 
-from tinygrad import nn, dtypes, Device, Tensor
+from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -358,7 +358,7 @@ class TestSchedule(unittest.TestCase):
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 2 if RANGEIFY else 4)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
-    assert len(reduceops) == (3 if RANGEIFY else 2)
+    assert len(reduceops) == 2
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
@@ -1949,6 +1949,19 @@ class TestSchedule(unittest.TestCase):
     new_uop = a.reshape(4,1).realize().uop
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
+
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
+  def test_limit_bufs_with_var(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor([1]*10).contiguous().realize() for i in range(N)]
+
+    vi = Variable("i", 0, 9).bind(1)
+    vj = Variable("j", 0, 9).bind(2)
+    root = bufs[0][vi] + bufs[0][vj]
+    for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
+    self.assertEqual(root.item(), N * 2)
 
 def swizzle_cnt(u:UOp) -> int:
   return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
