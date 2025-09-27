@@ -26,7 +26,22 @@ class Attention:
       start_pos = start_pos.val
 
     if HALF: x = x.half()
-    xqkv = self.c_attn(x)
+    print("xm")
+    print(x.shape)
+    Tensor.manual_seed(1337)
+    c_attn = Linear(1024, 3*1024, bias=True)
+    print(self.c_attn.weight.numpy())
+    c_attn.weight.assign(Tensor(self.c_attn.weight.numpy()).contiguous().realize()).contiguous().realize()
+    c_attn.bias.assign(Tensor(self.c_attn.bias.numpy()).contiguous().realize()).contiguous().realize()
+    # self.c_attn.weight.contiguous().realize()
+    # self.c_attn.bias.contiguous().realize()
+    Tensor.manual_seed(1337)
+    x = Tensor.randn((1, 13, 1024)).contiguous().realize()
+    xqkv = c_attn(x.contiguous().realize()).contiguous().realize()
+    # print(xqkv.numpy())
+    print("xqkv", x.sum().numpy(), xqkv.sum().numpy())
+    exit(0)
+
     xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(None, None, self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, _, _ = xq.shape
 
@@ -45,7 +60,8 @@ class Attention:
       values = xv
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
+    print("att", keys.sum().numpy(), values.sum().numpy(), xq.sum().numpy())
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).contiguous().realize().transpose(1, 2).reshape(bsz, seqlen, self.dim).contiguous().realize())
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -74,7 +90,7 @@ class Transformer:
     self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
-    self.forward_jit = TinyJit(self.forward)
+    self.forward_jit = self.forward
 
   def forward(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()

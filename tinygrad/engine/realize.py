@@ -119,13 +119,13 @@ class BufferCopy(Runner):
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
-      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-    else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+    # if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
+    #   dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
+    # elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
+    #   # fast(ish) path, uses readinto in diskbuffers
+    #   src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+    # else:
+    dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
