@@ -442,6 +442,85 @@ generate_libusb() {
   python3 -c "import tinygrad.runtime.autogen.libusb"
 }
 
+generate_mesa() {
+  MESA_TAG="mesa-25.1.0"
+  MESA_SRC=/tmp/mesa-$MESA_TAG
+  if [ ! -d "$MESA_SRC" ]; then
+    git clone --depth 1 --branch $MESA_TAG https://gitlab.freedesktop.org/mesa/mesa.git $MESA_SRC
+    pushd .
+    cd $MESA_SRC
+    git reset --hard $MESA_COMMIT_HASH
+    # clang 14 doesn't support packed enums
+    sed -i "s/enum \w\+ \(\w\+\);$/uint8_t \1;/" $MESA_SRC/src/nouveau/headers/nv_device_info.h
+    sed -i "s/enum \w\+ \(\w\+\);$/uint8_t \1;/" $MESA_SRC/src/nouveau/compiler/nak.h
+    sed -i "s/nir_instr_type \(\w\+\);/uint8_t \1;/" $MESA_SRC/src/compiler/nir/nir.h
+    mkdir -p gen/util/format
+    python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h
+    python3 src/compiler/nir/nir_opcodes_h.py > gen/nir_opcodes.h
+    python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+    python3 src/compiler/nir/nir_intrinsics_indices_h.py --outdir gen
+    python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
+    python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+    python3 src/compiler/builtin_types_h.py gen/builtin_types.h
+    popd
+  fi
+
+  clang2py -k cdefstu \
+    $MESA_SRC/src/nouveau/headers/nv_device_info.h \
+    $MESA_SRC/src/nouveau/compiler/nak.h \
+    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
+    $MESA_SRC/src/compiler/nir/nir_serialize.h \
+    $MESA_SRC/src/util/blob.h \
+    $MESA_SRC/src/compiler/glsl_types.h \
+    $MESA_SRC/src/util/ralloc.h \
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
+    -o $BASE/nak.py
+
+  clang2py -k cdefstu \
+    $MESA_SRC/src/compiler/nir/nir.h \
+    $MESA_SRC/src/compiler/nir/nir_builder.h \
+    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
+    $MESA_SRC/src/compiler/nir/nir_serialize.h \
+    $MESA_SRC/gen/nir_intrinsics.h \
+    $MESA_SRC/src/compiler/glsl_types.h \
+    $MESA_SRC/src/util/ralloc.h \
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
+    -o $BASE/nir.py
+
+  clang2py -k cdefstu \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_type.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_init.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_nir.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_struct.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_jit_types.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_flow.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_const.h \
+    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
+    $MESA_SRC/src/compiler/nir/nir_serialize.h \
+    $MESA_SRC/src/util/blob.h \
+    $MESA_SRC/src/util/ralloc.h \
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include -I$(llvm-config-14 --includedir)" \
+    -o $BASE/lvp.py
+
+  fixup $BASE/nir.py
+  fixup $BASE/nak.py
+  fixup $BASE/lvp.py
+  sed -i "s\AttributeError\(AttributeError, RuntimeError)\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
+  for nm in nak nir lvp; do
+    sed -i "/import ctypes/a from tinygrad.runtime.support.mesa import $nm as dll" $BASE/$nm.py
+    echo "def __getattr__(nm): raise AttributeError() if nm.startswith('__') else dll.error" >> $BASE/$nm.py
+  done
+  sed -i "s\FunctionFactoryStub()\dll\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
+  sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
+  # bitfield bug in clang2py
+  sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/nir.py
+  sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/nir.py
+  sed -i "s/\([0-9]\+\)()/\1/" $BASE/nir.py
+  sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/nir.py
+  python3 -c "import tinygrad.runtime.autogen.nak, tinygrad.runtime.autogen.nir, tinygrad.runtime.autogen.lvp"
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -465,6 +544,7 @@ elif [ "$1" == "pci" ]; then generate_pci
 elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu
+elif [ "$1" == "mesa" ]; then generate_mesa
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi

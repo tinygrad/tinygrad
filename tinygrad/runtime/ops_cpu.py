@@ -1,12 +1,16 @@
 from __future__ import annotations
-import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap
-from tinygrad.device import BufferSpec, DMACPURef
+import platform, sys, ctypes, functools, time, mmap, threading, queue, struct
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le, i2u
+from tinygrad.device import BufferSpec, DMACPURef, CompilerPairT
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
+from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
+from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
+from tinygrad.runtime.support.compiler_mesa import LVPCompiler
 from tinygrad.uop.ops import sint
+from tinygrad.runtime.support.elf import elf_loader
 
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_waiting_ms:int):
@@ -46,11 +50,18 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
+    if isinstance(args_state, LVPArgsState):
+      self.bind_args_state(args_state)
+      return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
+
+class LVPArgsState(CLikeArgsState):
+  def __init__(self, buf:HCQBuffer, prg:CPUProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+    super().__init__(buf, prg, bufs, vals=vals, prefix=[*data64_le(buf.va_addr + 12), 0xFF])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -76,7 +87,15 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      self.mem.write(lib)
+      if (LVP:=isinstance(dev.compiler, LVPCompiler)):
+        from tinygrad.runtime.autogen import libc
+        (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
+        for ploc,tgt,r_type,r_addend in relocs:
+          match r_type:
+            case libc.R_X86_64_64: image[ploc:ploc+8] = struct.pack("<Q", i2u(64, tgt+r_addend+addr))
+            case _: raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
+        self.mem.write(image)
+      else: self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
@@ -92,7 +111,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
+    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
@@ -123,5 +142,6 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler)]
+    compilers:list[CompilerPairT] = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler),
+                                     (functools.partial(LVPRenderer, self), LVPCompiler)]
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
