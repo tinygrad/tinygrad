@@ -1,6 +1,7 @@
 import ctypes, ctypes.util
 from tinygrad.helpers import getenv
-from tinygrad.runtime.support.llvm import LLVM_PATH
+try: from tinygrad.runtime.support.llvm import LLVM_PATH
+except (ImportError, FileNotFoundError): LLVM_PATH = ""
 
 class dl_phdr_info(ctypes.Structure): _fields_ = [('padding', ctypes.c_void_p), ('name', ctypes.c_char_p)]
 
@@ -8,7 +9,7 @@ class dl_phdr_info(ctypes.Structure): _fields_ = [('padding', ctypes.c_void_p), 
 MESA_PATH = f"{getenv('MESA_PREFIX', '/usr')}/lib/x86_64-linux-gnu"
 
 class LazyDLL(ctypes.CDLL):
-  def __init__(self, path): self.path, self.loaded, self.error, self.mismatch = path, False, None, False
+  def __init__(self, path): self.path, self.loaded, self.error, self.mismatch = path, False, Exception(), False
   def __getattr__(self, name):
     if not self.loaded:
       try: super().__init__(self.path)
