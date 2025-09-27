@@ -285,9 +285,10 @@ class Open:
     def __init__(self, dims, hidden_dims):
       self.c_fc   = Linear(dims, hidden_dims)
       self.c_proj = Linear(hidden_dims, dims)
+      self.gelu = gelu
 
     def __call__(self, x:Tensor) -> Tensor:
-      return x.sequential([self.c_fc, gelu, self.c_proj])
+      return x.sequential([self.c_fc, self.gelu, self.c_proj])
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L210
   class ResidualAttentionBlock:
