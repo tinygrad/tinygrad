@@ -1295,13 +1295,21 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
+    res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+      self.assign(res).realize() # TODO remove realize here?
     else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      # Convert simple indices to tensors for scatter
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape))
+      if isinstance(indices, int):
+        indices = Tensor([indices], device=self.device, dtype=dtypes.int32)
+      elif isinstance(indices, (list, tuple)) and all(isinstance(i, int) for i in indices):
+        indices = Tensor(indices, device=self.device, dtype=dtypes.int32)
+      v = v._broadcast_to(indices.shape)
+      # Use scatter for the assignment
+      src, mask = self._pre_scatter(0, indices, v)
+      self.uop = _masked_setitem(self, src, mask, (-1,)).uop
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
