@@ -137,7 +137,7 @@ def char_pointer_cast(string, encoding='utf-8'):
     if encoding is not None:
         try:
             string = string.encode(encoding)
-        except AttributeError:
+        except (AttributeError, RuntimeError):
             # In Python3, bytes has no encode attribute
             pass
     string = ctypes.c_char_p(string)
@@ -213,7 +213,7 @@ try:
     nv_device_uuid = _libraries['FIXME_STUB'].nv_device_uuid
     nv_device_uuid.restype = None
     nv_device_uuid.argtypes = [ctypes.POINTER(struct_nv_device_info), ctypes.POINTER(ctypes.c_ubyte), size_t, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nak_compiler(Structure):
     pass
@@ -222,20 +222,20 @@ try:
     nak_compiler_create = _libraries['FIXME_STUB'].nak_compiler_create
     nak_compiler_create.restype = ctypes.POINTER(struct_nak_compiler)
     nak_compiler_create.argtypes = [ctypes.POINTER(struct_nv_device_info)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nak_compiler_destroy = _libraries['FIXME_STUB'].nak_compiler_destroy
     nak_compiler_destroy.restype = None
     nak_compiler_destroy.argtypes = [ctypes.POINTER(struct_nak_compiler)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint64_t = ctypes.c_uint64
 try:
     nak_debug_flags = _libraries['FIXME_STUB'].nak_debug_flags
     nak_debug_flags.restype = uint64_t
     nak_debug_flags.argtypes = [ctypes.POINTER(struct_nak_compiler)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_shader_compiler_options(Structure):
     pass
@@ -634,13 +634,13 @@ try:
     nak_nir_options = _libraries['FIXME_STUB'].nak_nir_options
     nak_nir_options.restype = ctypes.POINTER(struct_nir_shader_compiler_options)
     nak_nir_options.argtypes = [ctypes.POINTER(struct_nak_compiler)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nak_preprocess_nir = _libraries['FIXME_STUB'].nak_preprocess_nir
     nak_preprocess_nir.restype = None
     nak_preprocess_nir.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nak_compiler)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nak_sample_location(Structure):
     pass
@@ -676,7 +676,7 @@ try:
     nak_postprocess_nir = _libraries['FIXME_STUB'].nak_postprocess_nir
     nak_postprocess_nir.restype = None
     nak_postprocess_nir.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nak_compiler), nir_variable_mode, ctypes.POINTER(struct_nak_fs_key)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'nak_ts_domain'
@@ -881,13 +881,13 @@ try:
     nak_shader_bin_destroy = _libraries['FIXME_STUB'].nak_shader_bin_destroy
     nak_shader_bin_destroy.restype = None
     nak_shader_bin_destroy.argtypes = [ctypes.POINTER(struct_nak_shader_bin)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nak_compile_shader = _libraries['FIXME_STUB'].nak_compile_shader
     nak_compile_shader.restype = ctypes.POINTER(struct_nak_shader_bin)
     nak_compile_shader.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.POINTER(struct_nak_compiler), nir_variable_mode, ctypes.POINTER(struct_nak_fs_key)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nak_qmd_cbuf(Structure):
     pass
@@ -917,7 +917,7 @@ try:
     nak_fill_qmd = _libraries['FIXME_STUB'].nak_fill_qmd
     nak_fill_qmd.restype = None
     nak_fill_qmd.argtypes = [ctypes.POINTER(struct_nv_device_info), ctypes.POINTER(struct_nak_shader_info), ctypes.POINTER(struct_nak_qmd_info), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nak_qmd_dispatch_size_layout(Structure):
     pass
@@ -936,7 +936,7 @@ try:
     nak_get_qmd_dispatch_size_layout = _libraries['FIXME_STUB'].nak_get_qmd_dispatch_size_layout
     nak_get_qmd_dispatch_size_layout.restype = struct_nak_qmd_dispatch_size_layout
     nak_get_qmd_dispatch_size_layout.argtypes = [ctypes.POINTER(struct_nv_device_info)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nak_qmd_cbuf_desc_layout(Structure):
     pass
@@ -955,7 +955,7 @@ try:
     nak_get_qmd_cbuf_desc_layout = _libraries['FIXME_STUB'].nak_get_qmd_cbuf_desc_layout
     nak_get_qmd_cbuf_desc_layout.restype = struct_nak_qmd_cbuf_desc_layout
     nak_get_qmd_cbuf_desc_layout.argtypes = [ctypes.POINTER(struct_nv_device_info), uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.POINTER(None))
 
@@ -1013,196 +1013,196 @@ try:
     blob_init = _libraries['FIXME_STUB'].blob_init
     blob_init.restype = None
     blob_init.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_init_fixed = _libraries['FIXME_STUB'].blob_init_fixed
     blob_init_fixed.restype = None
     blob_init_fixed.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_finish = _libraries['FIXME_STUB'].blob_finish
     blob_finish.restype = None
     blob_finish.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_finish_get_buffer = _libraries['FIXME_STUB'].blob_finish_get_buffer
     blob_finish_get_buffer.restype = None
     blob_finish_get_buffer.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_align = _libraries['FIXME_STUB'].blob_align
     blob_align.restype = ctypes.c_bool
     blob_align.argtypes = [ctypes.POINTER(struct_blob), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_bytes = _libraries['FIXME_STUB'].blob_write_bytes
     blob_write_bytes.restype = ctypes.c_bool
     blob_write_bytes.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 intptr_t = ctypes.c_int64
 try:
     blob_reserve_bytes = _libraries['FIXME_STUB'].blob_reserve_bytes
     blob_reserve_bytes.restype = intptr_t
     blob_reserve_bytes.argtypes = [ctypes.POINTER(struct_blob), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reserve_uint32 = _libraries['FIXME_STUB'].blob_reserve_uint32
     blob_reserve_uint32.restype = intptr_t
     blob_reserve_uint32.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reserve_intptr = _libraries['FIXME_STUB'].blob_reserve_intptr
     blob_reserve_intptr.restype = intptr_t
     blob_reserve_intptr.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_bytes = _libraries['FIXME_STUB'].blob_overwrite_bytes
     blob_overwrite_bytes.restype = ctypes.c_bool
     blob_overwrite_bytes.argtypes = [ctypes.POINTER(struct_blob), size_t, ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_uint8 = _libraries['FIXME_STUB'].blob_write_uint8
     blob_write_uint8.restype = ctypes.c_bool
     blob_write_uint8.argtypes = [ctypes.POINTER(struct_blob), uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_uint8 = _libraries['FIXME_STUB'].blob_overwrite_uint8
     blob_overwrite_uint8.restype = ctypes.c_bool
     blob_overwrite_uint8.argtypes = [ctypes.POINTER(struct_blob), size_t, uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint16_t = ctypes.c_uint16
 try:
     blob_write_uint16 = _libraries['FIXME_STUB'].blob_write_uint16
     blob_write_uint16.restype = ctypes.c_bool
     blob_write_uint16.argtypes = [ctypes.POINTER(struct_blob), uint16_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint32_t = ctypes.c_uint32
 try:
     blob_write_uint32 = _libraries['FIXME_STUB'].blob_write_uint32
     blob_write_uint32.restype = ctypes.c_bool
     blob_write_uint32.argtypes = [ctypes.POINTER(struct_blob), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_uint32 = _libraries['FIXME_STUB'].blob_overwrite_uint32
     blob_overwrite_uint32.restype = ctypes.c_bool
     blob_overwrite_uint32.argtypes = [ctypes.POINTER(struct_blob), size_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_uint64 = _libraries['FIXME_STUB'].blob_write_uint64
     blob_write_uint64.restype = ctypes.c_bool
     blob_write_uint64.argtypes = [ctypes.POINTER(struct_blob), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_intptr = _libraries['FIXME_STUB'].blob_write_intptr
     blob_write_intptr.restype = ctypes.c_bool
     blob_write_intptr.argtypes = [ctypes.POINTER(struct_blob), intptr_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_intptr = _libraries['FIXME_STUB'].blob_overwrite_intptr
     blob_overwrite_intptr.restype = ctypes.c_bool
     blob_overwrite_intptr.argtypes = [ctypes.POINTER(struct_blob), size_t, intptr_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_string = _libraries['FIXME_STUB'].blob_write_string
     blob_write_string.restype = ctypes.c_bool
     blob_write_string.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reader_init = _libraries['FIXME_STUB'].blob_reader_init
     blob_reader_init.restype = None
     blob_reader_init.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reader_align = _libraries['FIXME_STUB'].blob_reader_align
     blob_reader_align.restype = None
     blob_reader_align.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_bytes = _libraries['FIXME_STUB'].blob_read_bytes
     blob_read_bytes.restype = ctypes.POINTER(None)
     blob_read_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_copy_bytes = _libraries['FIXME_STUB'].blob_copy_bytes
     blob_copy_bytes.restype = None
     blob_copy_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_skip_bytes = _libraries['FIXME_STUB'].blob_skip_bytes
     blob_skip_bytes.restype = None
     blob_skip_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint8 = _libraries['FIXME_STUB'].blob_read_uint8
     blob_read_uint8.restype = uint8_t
     blob_read_uint8.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint16 = _libraries['FIXME_STUB'].blob_read_uint16
     blob_read_uint16.restype = uint16_t
     blob_read_uint16.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint32 = _libraries['FIXME_STUB'].blob_read_uint32
     blob_read_uint32.restype = uint32_t
     blob_read_uint32.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint64 = _libraries['FIXME_STUB'].blob_read_uint64
     blob_read_uint64.restype = uint64_t
     blob_read_uint64.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_intptr = _libraries['FIXME_STUB'].blob_read_intptr
     blob_read_intptr.restype = intptr_t
     blob_read_intptr.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_string = _libraries['FIXME_STUB'].blob_read_string
     blob_read_string.restype = ctypes.POINTER(ctypes.c_char)
     blob_read_string.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_serialize = _libraries['FIXME_STUB'].nir_serialize
     nir_serialize.restype = None
     nir_serialize.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize = _libraries['FIXME_STUB'].nir_deserialize
     nir_deserialize.restype = ctypes.POINTER(struct_nir_shader)
     nir_deserialize.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_function(Structure):
     pass
@@ -1211,13 +1211,13 @@ try:
     nir_serialize_function = _libraries['FIXME_STUB'].nir_serialize_function
     nir_serialize_function.restype = None
     nir_serialize_function.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize_function = _libraries['FIXME_STUB'].nir_deserialize_function
     nir_deserialize_function.restype = ctypes.POINTER(struct_nir_function)
     nir_deserialize_function.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_glsl_type(Structure):
     pass
@@ -2270,68 +2270,68 @@ try:
     glsl_type_singleton_init_or_ref = _libraries['FIXME_STUB'].glsl_type_singleton_init_or_ref
     glsl_type_singleton_init_or_ref.restype = None
     glsl_type_singleton_init_or_ref.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_singleton_decref = _libraries['FIXME_STUB'].glsl_type_singleton_decref
     glsl_type_singleton_decref.restype = None
     glsl_type_singleton_decref.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     encode_type_to_blob = _libraries['FIXME_STUB'].encode_type_to_blob
     encode_type_to_blob.restype = None
     encode_type_to_blob.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     decode_type_from_blob = _libraries['FIXME_STUB'].decode_type_from_blob
     decode_type_from_blob.restype = ctypes.POINTER(struct_glsl_type)
     decode_type_from_blob.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 try:
     glsl_base_type_bit_size = _libraries['FIXME_STUB'].glsl_base_type_bit_size
     glsl_base_type_bit_size.restype = ctypes.c_uint32
     glsl_base_type_bit_size.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_16bit = _libraries['FIXME_STUB'].glsl_base_type_is_16bit
     glsl_base_type_is_16bit.restype = ctypes.c_bool
     glsl_base_type_is_16bit.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_64bit = _libraries['FIXME_STUB'].glsl_base_type_is_64bit
     glsl_base_type_is_64bit.restype = ctypes.c_bool
     glsl_base_type_is_64bit.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_integer = _libraries['FIXME_STUB'].glsl_base_type_is_integer
     glsl_base_type_is_integer.restype = ctypes.c_bool
     glsl_base_type_is_integer.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_get_bit_size = _libraries['FIXME_STUB'].glsl_base_type_get_bit_size
     glsl_base_type_get_bit_size.restype = ctypes.c_uint32
     glsl_base_type_get_bit_size.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_unsigned_base_type_of = _libraries['FIXME_STUB'].glsl_unsigned_base_type_of
     glsl_unsigned_base_type_of.restype = glsl_base_type
     glsl_unsigned_base_type_of.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_signed_base_type_of = _libraries['FIXME_STUB'].glsl_signed_base_type_of
     glsl_signed_base_type_of.restype = glsl_base_type
     glsl_signed_base_type_of.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_sampler_dim'
@@ -2362,7 +2362,7 @@ try:
     glsl_get_sampler_dim_coordinate_components = _libraries['FIXME_STUB'].glsl_get_sampler_dim_coordinate_components
     glsl_get_sampler_dim_coordinate_components.restype = ctypes.c_int32
     glsl_get_sampler_dim_coordinate_components.argtypes = [glsl_sampler_dim]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_matrix_layout'
@@ -2405,835 +2405,835 @@ try:
     glsl_get_type_name = _libraries['FIXME_STUB'].glsl_get_type_name
     glsl_get_type_name.restype = ctypes.POINTER(ctypes.c_char)
     glsl_get_type_name.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_base_type = _libraries['FIXME_STUB'].glsl_get_base_type
     glsl_get_base_type.restype = glsl_base_type
     glsl_get_base_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_bit_size = _libraries['FIXME_STUB'].glsl_get_bit_size
     glsl_get_bit_size.restype = ctypes.c_uint32
     glsl_get_bit_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_boolean = _libraries['FIXME_STUB'].glsl_type_is_boolean
     glsl_type_is_boolean.restype = ctypes.c_bool
     glsl_type_is_boolean.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_sampler = _libraries['FIXME_STUB'].glsl_type_is_sampler
     glsl_type_is_sampler.restype = ctypes.c_bool
     glsl_type_is_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_texture = _libraries['FIXME_STUB'].glsl_type_is_texture
     glsl_type_is_texture.restype = ctypes.c_bool
     glsl_type_is_texture.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_image = _libraries['FIXME_STUB'].glsl_type_is_image
     glsl_type_is_image.restype = ctypes.c_bool
     glsl_type_is_image.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_atomic_uint = _libraries['FIXME_STUB'].glsl_type_is_atomic_uint
     glsl_type_is_atomic_uint.restype = ctypes.c_bool
     glsl_type_is_atomic_uint.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_struct = _libraries['FIXME_STUB'].glsl_type_is_struct
     glsl_type_is_struct.restype = ctypes.c_bool
     glsl_type_is_struct.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_interface = _libraries['FIXME_STUB'].glsl_type_is_interface
     glsl_type_is_interface.restype = ctypes.c_bool
     glsl_type_is_interface.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array = _libraries['FIXME_STUB'].glsl_type_is_array
     glsl_type_is_array.restype = ctypes.c_bool
     glsl_type_is_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_cmat = _libraries['FIXME_STUB'].glsl_type_is_cmat
     glsl_type_is_cmat.restype = ctypes.c_bool
     glsl_type_is_cmat.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_void = _libraries['FIXME_STUB'].glsl_type_is_void
     glsl_type_is_void.restype = ctypes.c_bool
     glsl_type_is_void.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_subroutine = _libraries['FIXME_STUB'].glsl_type_is_subroutine
     glsl_type_is_subroutine.restype = ctypes.c_bool
     glsl_type_is_subroutine.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_error = _libraries['FIXME_STUB'].glsl_type_is_error
     glsl_type_is_error.restype = ctypes.c_bool
     glsl_type_is_error.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_double = _libraries['FIXME_STUB'].glsl_type_is_double
     glsl_type_is_double.restype = ctypes.c_bool
     glsl_type_is_double.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float = _libraries['FIXME_STUB'].glsl_type_is_float
     glsl_type_is_float.restype = ctypes.c_bool
     glsl_type_is_float.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_numeric = _libraries['FIXME_STUB'].glsl_type_is_numeric
     glsl_type_is_numeric.restype = ctypes.c_bool
     glsl_type_is_numeric.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer = _libraries['FIXME_STUB'].glsl_type_is_integer
     glsl_type_is_integer.restype = ctypes.c_bool
     glsl_type_is_integer.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_struct_or_ifc = _libraries['FIXME_STUB'].glsl_type_is_struct_or_ifc
     glsl_type_is_struct_or_ifc.restype = ctypes.c_bool
     glsl_type_is_struct_or_ifc.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_packed = _libraries['FIXME_STUB'].glsl_type_is_packed
     glsl_type_is_packed.restype = ctypes.c_bool
     glsl_type_is_packed.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_16bit = _libraries['FIXME_STUB'].glsl_type_is_16bit
     glsl_type_is_16bit.restype = ctypes.c_bool
     glsl_type_is_16bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_32bit = _libraries['FIXME_STUB'].glsl_type_is_32bit
     glsl_type_is_32bit.restype = ctypes.c_bool
     glsl_type_is_32bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_64bit = _libraries['FIXME_STUB'].glsl_type_is_64bit
     glsl_type_is_64bit.restype = ctypes.c_bool
     glsl_type_is_64bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16 = _libraries['FIXME_STUB'].glsl_type_is_integer_16
     glsl_type_is_integer_16.restype = ctypes.c_bool
     glsl_type_is_integer_16.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_32 = _libraries['FIXME_STUB'].glsl_type_is_integer_32
     glsl_type_is_integer_32.restype = ctypes.c_bool
     glsl_type_is_integer_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_64
     glsl_type_is_integer_64.restype = ctypes.c_bool
     glsl_type_is_integer_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_32_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_32_64
     glsl_type_is_integer_32_64.restype = ctypes.c_bool
     glsl_type_is_integer_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16_32 = _libraries['FIXME_STUB'].glsl_type_is_integer_16_32
     glsl_type_is_integer_16_32.restype = ctypes.c_bool
     glsl_type_is_integer_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_16_32_64
     glsl_type_is_integer_16_32_64.restype = ctypes.c_bool
     glsl_type_is_integer_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16 = _libraries['FIXME_STUB'].glsl_type_is_float_16
     glsl_type_is_float_16.restype = ctypes.c_bool
     glsl_type_is_float_16.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16_32 = _libraries['FIXME_STUB'].glsl_type_is_float_16_32
     glsl_type_is_float_16_32.restype = ctypes.c_bool
     glsl_type_is_float_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_float_16_32_64
     glsl_type_is_float_16_32_64.restype = ctypes.c_bool
     glsl_type_is_float_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_int_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_int_16_32_64
     glsl_type_is_int_16_32_64.restype = ctypes.c_bool
     glsl_type_is_int_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_uint_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_uint_16_32_64
     glsl_type_is_uint_16_32_64.restype = ctypes.c_bool
     glsl_type_is_uint_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_int_16_32 = _libraries['FIXME_STUB'].glsl_type_is_int_16_32
     glsl_type_is_int_16_32.restype = ctypes.c_bool
     glsl_type_is_int_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_uint_16_32 = _libraries['FIXME_STUB'].glsl_type_is_uint_16_32
     glsl_type_is_uint_16_32.restype = ctypes.c_bool
     glsl_type_is_uint_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_unsized_array = _libraries['FIXME_STUB'].glsl_type_is_unsized_array
     glsl_type_is_unsized_array.restype = ctypes.c_bool
     glsl_type_is_unsized_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array_of_arrays = _libraries['FIXME_STUB'].glsl_type_is_array_of_arrays
     glsl_type_is_array_of_arrays.restype = ctypes.c_bool
     glsl_type_is_array_of_arrays.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_bare_sampler = _libraries['FIXME_STUB'].glsl_type_is_bare_sampler
     glsl_type_is_bare_sampler.restype = ctypes.c_bool
     glsl_type_is_bare_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_vector = _libraries['FIXME_STUB'].glsl_type_is_vector
     glsl_type_is_vector.restype = ctypes.c_bool
     glsl_type_is_vector.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_scalar = _libraries['FIXME_STUB'].glsl_type_is_scalar
     glsl_type_is_scalar.restype = ctypes.c_bool
     glsl_type_is_scalar.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_vector_or_scalar = _libraries['FIXME_STUB'].glsl_type_is_vector_or_scalar
     glsl_type_is_vector_or_scalar.restype = ctypes.c_bool
     glsl_type_is_vector_or_scalar.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_matrix = _libraries['FIXME_STUB'].glsl_type_is_matrix
     glsl_type_is_matrix.restype = ctypes.c_bool
     glsl_type_is_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array_or_matrix = _libraries['FIXME_STUB'].glsl_type_is_array_or_matrix
     glsl_type_is_array_or_matrix.restype = ctypes.c_bool
     glsl_type_is_array_or_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_dual_slot = _libraries['FIXME_STUB'].glsl_type_is_dual_slot
     glsl_type_is_dual_slot.restype = ctypes.c_bool
     glsl_type_is_dual_slot.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_leaf = _libraries['FIXME_STUB'].glsl_type_is_leaf
     glsl_type_is_leaf.restype = ctypes.c_bool
     glsl_type_is_leaf.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_matrix_type_is_row_major = _libraries['FIXME_STUB'].glsl_matrix_type_is_row_major
     glsl_matrix_type_is_row_major.restype = ctypes.c_bool
     glsl_matrix_type_is_row_major.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_is_shadow = _libraries['FIXME_STUB'].glsl_sampler_type_is_shadow
     glsl_sampler_type_is_shadow.restype = ctypes.c_bool
     glsl_sampler_type_is_shadow.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_is_array = _libraries['FIXME_STUB'].glsl_sampler_type_is_array
     glsl_sampler_type_is_array.restype = ctypes.c_bool
     glsl_sampler_type_is_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type_is_packed = _libraries['FIXME_STUB'].glsl_struct_type_is_packed
     glsl_struct_type_is_packed.restype = ctypes.c_bool
     glsl_struct_type_is_packed.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_bare_type = _libraries['FIXME_STUB'].glsl_get_bare_type
     glsl_get_bare_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_bare_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_scalar_type = _libraries['FIXME_STUB'].glsl_get_scalar_type
     glsl_get_scalar_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_scalar_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_base_glsl_type = _libraries['FIXME_STUB'].glsl_get_base_glsl_type
     glsl_get_base_glsl_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_base_glsl_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_length = _libraries['FIXME_STUB'].glsl_get_length
     glsl_get_length.restype = ctypes.c_uint32
     glsl_get_length.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_vector_elements = _libraries['FIXME_STUB'].glsl_get_vector_elements
     glsl_get_vector_elements.restype = ctypes.c_uint32
     glsl_get_vector_elements.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_components = _libraries['FIXME_STUB'].glsl_get_components
     glsl_get_components.restype = ctypes.c_uint32
     glsl_get_components.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_matrix_columns = _libraries['FIXME_STUB'].glsl_get_matrix_columns
     glsl_get_matrix_columns.restype = ctypes.c_uint32
     glsl_get_matrix_columns.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_wrap_in_arrays = _libraries['FIXME_STUB'].glsl_type_wrap_in_arrays
     glsl_type_wrap_in_arrays.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_wrap_in_arrays.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_array_size = _libraries['FIXME_STUB'].glsl_array_size
     glsl_array_size.restype = ctypes.c_int32
     glsl_array_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_aoa_size = _libraries['FIXME_STUB'].glsl_get_aoa_size
     glsl_get_aoa_size.restype = ctypes.c_uint32
     glsl_get_aoa_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_array_element = _libraries['FIXME_STUB'].glsl_get_array_element
     glsl_get_array_element.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_array_element.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_without_array = _libraries['FIXME_STUB'].glsl_without_array
     glsl_without_array.restype = ctypes.POINTER(struct_glsl_type)
     glsl_without_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_without_array_or_matrix = _libraries['FIXME_STUB'].glsl_without_array_or_matrix
     glsl_without_array_or_matrix.restype = ctypes.POINTER(struct_glsl_type)
     glsl_without_array_or_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cmat_element = _libraries['FIXME_STUB'].glsl_get_cmat_element
     glsl_get_cmat_element.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_cmat_element.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cmat_description = _libraries['FIXME_STUB'].glsl_get_cmat_description
     glsl_get_cmat_description.restype = ctypes.POINTER(struct_glsl_cmat_description)
     glsl_get_cmat_description.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_atomic_size = _libraries['FIXME_STUB'].glsl_atomic_size
     glsl_atomic_size.restype = ctypes.c_uint32
     glsl_atomic_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_32bit = _libraries['FIXME_STUB'].glsl_type_contains_32bit
     glsl_type_contains_32bit.restype = ctypes.c_bool
     glsl_type_contains_32bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_64bit = _libraries['FIXME_STUB'].glsl_type_contains_64bit
     glsl_type_contains_64bit.restype = ctypes.c_bool
     glsl_type_contains_64bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_image = _libraries['FIXME_STUB'].glsl_type_contains_image
     glsl_type_contains_image.restype = ctypes.c_bool
     glsl_type_contains_image.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_atomic = _libraries['FIXME_STUB'].glsl_contains_atomic
     glsl_contains_atomic.restype = ctypes.c_bool
     glsl_contains_atomic.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_double = _libraries['FIXME_STUB'].glsl_contains_double
     glsl_contains_double.restype = ctypes.c_bool
     glsl_contains_double.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_integer = _libraries['FIXME_STUB'].glsl_contains_integer
     glsl_contains_integer.restype = ctypes.c_bool
     glsl_contains_integer.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_opaque = _libraries['FIXME_STUB'].glsl_contains_opaque
     glsl_contains_opaque.restype = ctypes.c_bool
     glsl_contains_opaque.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_sampler = _libraries['FIXME_STUB'].glsl_contains_sampler
     glsl_contains_sampler.restype = ctypes.c_bool
     glsl_contains_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_array = _libraries['FIXME_STUB'].glsl_contains_array
     glsl_contains_array.restype = ctypes.c_bool
     glsl_contains_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_subroutine = _libraries['FIXME_STUB'].glsl_contains_subroutine
     glsl_contains_subroutine.restype = ctypes.c_bool
     glsl_contains_subroutine.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_dim = _libraries['FIXME_STUB'].glsl_get_sampler_dim
     glsl_get_sampler_dim.restype = glsl_sampler_dim
     glsl_get_sampler_dim.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_result_type = _libraries['FIXME_STUB'].glsl_get_sampler_result_type
     glsl_get_sampler_result_type.restype = glsl_base_type
     glsl_get_sampler_result_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_coordinate_components = _libraries['FIXME_STUB'].glsl_get_sampler_coordinate_components
     glsl_get_sampler_coordinate_components.restype = ctypes.c_int32
     glsl_get_sampler_coordinate_components.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_compare_no_precision = _libraries['FIXME_STUB'].glsl_type_compare_no_precision
     glsl_type_compare_no_precision.restype = ctypes.c_bool
     glsl_type_compare_no_precision.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_record_compare = _libraries['FIXME_STUB'].glsl_record_compare
     glsl_record_compare.restype = ctypes.c_bool
     glsl_record_compare.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field = _libraries['FIXME_STUB'].glsl_get_struct_field
     glsl_get_struct_field.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_struct_field.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field_data = _libraries['FIXME_STUB'].glsl_get_struct_field_data
     glsl_get_struct_field_data.restype = ctypes.POINTER(struct_glsl_struct_field)
     glsl_get_struct_field_data.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_location_offset = _libraries['FIXME_STUB'].glsl_get_struct_location_offset
     glsl_get_struct_location_offset.restype = ctypes.c_uint32
     glsl_get_struct_location_offset.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_field_index = _libraries['FIXME_STUB'].glsl_get_field_index
     glsl_get_field_index.restype = ctypes.c_int32
     glsl_get_field_index.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_field_type = _libraries['FIXME_STUB'].glsl_get_field_type
     glsl_get_field_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_field_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field_offset = _libraries['FIXME_STUB'].glsl_get_struct_field_offset
     glsl_get_struct_field_offset.restype = ctypes.c_int32
     glsl_get_struct_field_offset.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_elem_name = _libraries['FIXME_STUB'].glsl_get_struct_elem_name
     glsl_get_struct_elem_name.restype = ctypes.POINTER(ctypes.c_char)
     glsl_get_struct_elem_name.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_void_type = _libraries['FIXME_STUB'].glsl_void_type
     glsl_void_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_void_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float_type = _libraries['FIXME_STUB'].glsl_float_type
     glsl_float_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float16_t_type = _libraries['FIXME_STUB'].glsl_float16_t_type
     glsl_float16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_double_type = _libraries['FIXME_STUB'].glsl_double_type
     glsl_double_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_double_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec2_type = _libraries['FIXME_STUB'].glsl_vec2_type
     glsl_vec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec2_type = _libraries['FIXME_STUB'].glsl_dvec2_type
     glsl_dvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec2_type = _libraries['FIXME_STUB'].glsl_uvec2_type
     glsl_uvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec2_type = _libraries['FIXME_STUB'].glsl_ivec2_type
     glsl_ivec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec2_type = _libraries['FIXME_STUB'].glsl_bvec2_type
     glsl_bvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec4_type = _libraries['FIXME_STUB'].glsl_vec4_type
     glsl_vec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec4_type = _libraries['FIXME_STUB'].glsl_dvec4_type
     glsl_dvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec4_type = _libraries['FIXME_STUB'].glsl_uvec4_type
     glsl_uvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec4_type = _libraries['FIXME_STUB'].glsl_ivec4_type
     glsl_ivec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec4_type = _libraries['FIXME_STUB'].glsl_bvec4_type
     glsl_bvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int_type = _libraries['FIXME_STUB'].glsl_int_type
     glsl_int_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint_type = _libraries['FIXME_STUB'].glsl_uint_type
     glsl_uint_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int64_t_type = _libraries['FIXME_STUB'].glsl_int64_t_type
     glsl_int64_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int64_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint64_t_type = _libraries['FIXME_STUB'].glsl_uint64_t_type
     glsl_uint64_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint64_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int16_t_type = _libraries['FIXME_STUB'].glsl_int16_t_type
     glsl_int16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint16_t_type = _libraries['FIXME_STUB'].glsl_uint16_t_type
     glsl_uint16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int8_t_type = _libraries['FIXME_STUB'].glsl_int8_t_type
     glsl_int8_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int8_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint8_t_type = _libraries['FIXME_STUB'].glsl_uint8_t_type
     glsl_uint8_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint8_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bool_type = _libraries['FIXME_STUB'].glsl_bool_type
     glsl_bool_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bool_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_atomic_uint_type = _libraries['FIXME_STUB'].glsl_atomic_uint_type
     glsl_atomic_uint_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_atomic_uint_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_floatN_t_type = _libraries['FIXME_STUB'].glsl_floatN_t_type
     glsl_floatN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_floatN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_intN_t_type = _libraries['FIXME_STUB'].glsl_intN_t_type
     glsl_intN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_intN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uintN_t_type = _libraries['FIXME_STUB'].glsl_uintN_t_type
     glsl_uintN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uintN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec_type = _libraries['FIXME_STUB'].glsl_vec_type
     glsl_vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_f16vec_type = _libraries['FIXME_STUB'].glsl_f16vec_type
     glsl_f16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_f16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec_type = _libraries['FIXME_STUB'].glsl_dvec_type
     glsl_dvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec_type = _libraries['FIXME_STUB'].glsl_ivec_type
     glsl_ivec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec_type = _libraries['FIXME_STUB'].glsl_uvec_type
     glsl_uvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec_type = _libraries['FIXME_STUB'].glsl_bvec_type
     glsl_bvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i64vec_type = _libraries['FIXME_STUB'].glsl_i64vec_type
     glsl_i64vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i64vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u64vec_type = _libraries['FIXME_STUB'].glsl_u64vec_type
     glsl_u64vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u64vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i16vec_type = _libraries['FIXME_STUB'].glsl_i16vec_type
     glsl_i16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u16vec_type = _libraries['FIXME_STUB'].glsl_u16vec_type
     glsl_u16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i8vec_type = _libraries['FIXME_STUB'].glsl_i8vec_type
     glsl_i8vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i8vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u8vec_type = _libraries['FIXME_STUB'].glsl_u8vec_type
     glsl_u8vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u8vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_simple_explicit_type = _libraries['FIXME_STUB'].glsl_simple_explicit_type
     glsl_simple_explicit_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_simple_explicit_type.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_simple_type = _libraries['FIXME_STUB'].glsl_simple_type
     glsl_simple_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_simple_type.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type = _libraries['FIXME_STUB'].glsl_sampler_type
     glsl_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_sampler_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bare_sampler_type = _libraries['FIXME_STUB'].glsl_bare_sampler_type
     glsl_bare_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bare_sampler_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bare_shadow_sampler_type = _libraries['FIXME_STUB'].glsl_bare_shadow_sampler_type
     glsl_bare_shadow_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bare_shadow_sampler_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_texture_type = _libraries['FIXME_STUB'].glsl_texture_type
     glsl_texture_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_texture_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_image_type = _libraries['FIXME_STUB'].glsl_image_type
     glsl_image_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_image_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_array_type = _libraries['FIXME_STUB'].glsl_array_type
     glsl_array_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_array_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_cmat_type = _libraries['FIXME_STUB'].glsl_cmat_type
     glsl_cmat_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_cmat_type.argtypes = [ctypes.POINTER(struct_glsl_cmat_description)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type_with_explicit_alignment = _libraries['FIXME_STUB'].glsl_struct_type_with_explicit_alignment
     glsl_struct_type_with_explicit_alignment.restype = ctypes.POINTER(struct_glsl_type)
     glsl_struct_type_with_explicit_alignment.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type = _libraries['FIXME_STUB'].glsl_struct_type
     glsl_struct_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_struct_type.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_interface_packing'
@@ -3252,427 +3252,427 @@ try:
     glsl_interface_type = _libraries['FIXME_STUB'].glsl_interface_type
     glsl_interface_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_interface_type.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, glsl_interface_packing, ctypes.c_bool, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_subroutine_type = _libraries['FIXME_STUB'].glsl_subroutine_type
     glsl_subroutine_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_subroutine_type.argtypes = [ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_row_type = _libraries['FIXME_STUB'].glsl_get_row_type
     glsl_get_row_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_row_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_column_type = _libraries['FIXME_STUB'].glsl_get_column_type
     glsl_get_column_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_column_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_type_for_size_align = _libraries['FIXME_STUB'].glsl_get_explicit_type_for_size_align
     glsl_get_explicit_type_for_size_align.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_type_for_size_align.argtypes = [ctypes.POINTER(struct_glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_replace_vec3_with_vec4 = _libraries['FIXME_STUB'].glsl_type_replace_vec3_with_vec4
     glsl_type_replace_vec3_with_vec4.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_replace_vec3_with_vec4.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float16_type = _libraries['FIXME_STUB'].glsl_float16_type
     glsl_float16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int16_type = _libraries['FIXME_STUB'].glsl_int16_type
     glsl_int16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint16_type = _libraries['FIXME_STUB'].glsl_uint16_type
     glsl_uint16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_to_16bit = _libraries['FIXME_STUB'].glsl_type_to_16bit
     glsl_type_to_16bit.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_to_16bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_scalar_type = _libraries['FIXME_STUB'].glsl_scalar_type
     glsl_scalar_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_scalar_type.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vector_type = _libraries['FIXME_STUB'].glsl_vector_type
     glsl_vector_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vector_type.argtypes = [glsl_base_type, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_matrix_type = _libraries['FIXME_STUB'].glsl_matrix_type
     glsl_matrix_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_matrix_type.argtypes = [glsl_base_type, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_explicit_matrix_type = _libraries['FIXME_STUB'].glsl_explicit_matrix_type
     glsl_explicit_matrix_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_explicit_matrix_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_transposed_type = _libraries['FIXME_STUB'].glsl_transposed_type
     glsl_transposed_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_transposed_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_texture_type_to_sampler = _libraries['FIXME_STUB'].glsl_texture_type_to_sampler
     glsl_texture_type_to_sampler.restype = ctypes.POINTER(struct_glsl_type)
     glsl_texture_type_to_sampler.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_to_texture = _libraries['FIXME_STUB'].glsl_sampler_type_to_texture
     glsl_sampler_type_to_texture.restype = ctypes.POINTER(struct_glsl_type)
     glsl_sampler_type_to_texture.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_replace_vector_type = _libraries['FIXME_STUB'].glsl_replace_vector_type
     glsl_replace_vector_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_replace_vector_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_channel_type = _libraries['FIXME_STUB'].glsl_channel_type
     glsl_channel_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_channel_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_mul_type = _libraries['FIXME_STUB'].glsl_get_mul_type
     glsl_get_mul_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_mul_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_sampler_count = _libraries['FIXME_STUB'].glsl_type_get_sampler_count
     glsl_type_get_sampler_count.restype = ctypes.c_uint32
     glsl_type_get_sampler_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_texture_count = _libraries['FIXME_STUB'].glsl_type_get_texture_count
     glsl_type_get_texture_count.restype = ctypes.c_uint32
     glsl_type_get_texture_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_image_count = _libraries['FIXME_STUB'].glsl_type_get_image_count
     glsl_type_get_image_count.restype = ctypes.c_uint32
     glsl_type_get_image_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_vec4_slots = _libraries['FIXME_STUB'].glsl_count_vec4_slots
     glsl_count_vec4_slots.restype = ctypes.c_uint32
     glsl_count_vec4_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_dword_slots = _libraries['FIXME_STUB'].glsl_count_dword_slots
     glsl_count_dword_slots.restype = ctypes.c_uint32
     glsl_count_dword_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_component_slots = _libraries['FIXME_STUB'].glsl_get_component_slots
     glsl_get_component_slots.restype = ctypes.c_uint32
     glsl_get_component_slots.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_component_slots_aligned = _libraries['FIXME_STUB'].glsl_get_component_slots_aligned
     glsl_get_component_slots_aligned.restype = ctypes.c_uint32
     glsl_get_component_slots_aligned.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_varying_count = _libraries['FIXME_STUB'].glsl_varying_count
     glsl_varying_count.restype = ctypes.c_uint32
     glsl_varying_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_uniform_locations = _libraries['FIXME_STUB'].glsl_type_uniform_locations
     glsl_type_uniform_locations.restype = ctypes.c_uint32
     glsl_type_uniform_locations.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_attribute_slots = _libraries['FIXME_STUB'].glsl_count_attribute_slots
     glsl_count_attribute_slots.restype = ctypes.c_uint32
     glsl_count_attribute_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_size = _libraries['FIXME_STUB'].glsl_get_cl_size
     glsl_get_cl_size.restype = ctypes.c_uint32
     glsl_get_cl_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_alignment = _libraries['FIXME_STUB'].glsl_get_cl_alignment
     glsl_get_cl_alignment.restype = ctypes.c_uint32
     glsl_get_cl_alignment.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_type_size_align = _libraries['FIXME_STUB'].glsl_get_cl_type_size_align
     glsl_get_cl_type_size_align.restype = None
     glsl_get_cl_type_size_align.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_internal_ifc_packing = _libraries['FIXME_STUB'].glsl_get_internal_ifc_packing
     glsl_get_internal_ifc_packing.restype = glsl_interface_packing
     glsl_get_internal_ifc_packing.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_ifc_packing = _libraries['FIXME_STUB'].glsl_get_ifc_packing
     glsl_get_ifc_packing.restype = glsl_interface_packing
     glsl_get_ifc_packing.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std140_base_alignment = _libraries['FIXME_STUB'].glsl_get_std140_base_alignment
     glsl_get_std140_base_alignment.restype = ctypes.c_uint32
     glsl_get_std140_base_alignment.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std140_size = _libraries['FIXME_STUB'].glsl_get_std140_size
     glsl_get_std140_size.restype = ctypes.c_uint32
     glsl_get_std140_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_array_stride = _libraries['FIXME_STUB'].glsl_get_std430_array_stride
     glsl_get_std430_array_stride.restype = ctypes.c_uint32
     glsl_get_std430_array_stride.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_base_alignment = _libraries['FIXME_STUB'].glsl_get_std430_base_alignment
     glsl_get_std430_base_alignment.restype = ctypes.c_uint32
     glsl_get_std430_base_alignment.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_size = _libraries['FIXME_STUB'].glsl_get_std430_size
     glsl_get_std430_size.restype = ctypes.c_uint32
     glsl_get_std430_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_size = _libraries['FIXME_STUB'].glsl_get_explicit_size
     glsl_get_explicit_size.restype = ctypes.c_uint32
     glsl_get_explicit_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_stride = _libraries['FIXME_STUB'].glsl_get_explicit_stride
     glsl_get_explicit_stride.restype = ctypes.c_uint32
     glsl_get_explicit_stride.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_alignment = _libraries['FIXME_STUB'].glsl_get_explicit_alignment
     glsl_get_explicit_alignment.restype = ctypes.c_uint32
     glsl_get_explicit_alignment.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_std140_type = _libraries['FIXME_STUB'].glsl_get_explicit_std140_type
     glsl_get_explicit_std140_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_std140_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_std430_type = _libraries['FIXME_STUB'].glsl_get_explicit_std430_type
     glsl_get_explicit_std430_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_std430_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_interface_type = _libraries['FIXME_STUB'].glsl_get_explicit_interface_type
     glsl_get_explicit_interface_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_interface_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_size_align_handle_array_and_structs = _libraries['FIXME_STUB'].glsl_size_align_handle_array_and_structs
     glsl_size_align_handle_array_and_structs.restype = None
     glsl_size_align_handle_array_and_structs.argtypes = [ctypes.POINTER(struct_glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_natural_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_natural_size_align_bytes
     glsl_get_natural_size_align_bytes.restype = None
     glsl_get_natural_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_word_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_word_size_align_bytes
     glsl_get_word_size_align_bytes.restype = None
     glsl_get_word_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_vec4_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_vec4_size_align_bytes
     glsl_get_vec4_size_align_bytes.restype = None
     glsl_get_vec4_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_context = _libraries['FIXME_STUB'].ralloc_context
     ralloc_context.restype = ctypes.POINTER(None)
     ralloc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_size = _libraries['FIXME_STUB'].ralloc_size
     ralloc_size.restype = ctypes.POINTER(None)
     ralloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_size = _libraries['FIXME_STUB'].rzalloc_size
     rzalloc_size.restype = ctypes.POINTER(None)
     rzalloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_size = _libraries['FIXME_STUB'].reralloc_size
     reralloc_size.restype = ctypes.POINTER(None)
     reralloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_size = _libraries['FIXME_STUB'].rerzalloc_size
     rerzalloc_size.restype = ctypes.POINTER(None)
     rerzalloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_array_size = _libraries['FIXME_STUB'].ralloc_array_size
     ralloc_array_size.restype = ctypes.POINTER(None)
     ralloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_array_size = _libraries['FIXME_STUB'].rzalloc_array_size
     rzalloc_array_size.restype = ctypes.POINTER(None)
     rzalloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_array_size = _libraries['FIXME_STUB'].reralloc_array_size
     reralloc_array_size.restype = ctypes.POINTER(None)
     reralloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_array_size = _libraries['FIXME_STUB'].rerzalloc_array_size
     rerzalloc_array_size.restype = ctypes.POINTER(None)
     rerzalloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_free = _libraries['FIXME_STUB'].ralloc_free
     ralloc_free.restype = None
     ralloc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal = _libraries['FIXME_STUB'].ralloc_steal
     ralloc_steal.restype = None
     ralloc_steal.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_adopt = _libraries['FIXME_STUB'].ralloc_adopt
     ralloc_adopt.restype = None
     ralloc_adopt.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent = _libraries['FIXME_STUB'].ralloc_parent
     ralloc_parent.restype = ctypes.POINTER(None)
     ralloc_parent.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_set_destructor = _libraries['FIXME_STUB'].ralloc_set_destructor
     ralloc_set_destructor.restype = None
     ralloc_set_destructor.argtypes = [ctypes.POINTER(None), ctypes.CFUNCTYPE(None, ctypes.POINTER(None))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_memdup = _libraries['FIXME_STUB'].ralloc_memdup
     ralloc_memdup.restype = ctypes.POINTER(None)
     ralloc_memdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strdup = _libraries['FIXME_STUB'].ralloc_strdup
     ralloc_strdup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strndup = _libraries['FIXME_STUB'].ralloc_strndup
     ralloc_strndup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strndup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strcat = _libraries['FIXME_STUB'].ralloc_strcat
     ralloc_strcat.restype = ctypes.c_bool
     ralloc_strcat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strncat = _libraries['FIXME_STUB'].ralloc_strncat
     ralloc_strncat.restype = ctypes.c_bool
     ralloc_strncat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_str_append = _libraries['FIXME_STUB'].ralloc_str_append
     ralloc_str_append.restype = ctypes.c_bool
     ralloc_str_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf = _libraries['FIXME_STUB'].ralloc_asprintf
     ralloc_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_asprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct___va_list_tag(Structure):
     pass
@@ -3690,37 +3690,37 @@ try:
     ralloc_vasprintf = _libraries['FIXME_STUB'].ralloc_vasprintf
     ralloc_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_vasprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_asprintf_rewrite_tail
     ralloc_asprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_vasprintf_rewrite_tail
     ralloc_vasprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_append = _libraries['FIXME_STUB'].ralloc_asprintf_append
     ralloc_asprintf_append.restype = ctypes.c_bool
     ralloc_asprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_append = _libraries['FIXME_STUB'].ralloc_vasprintf_append
     ralloc_vasprintf_append.restype = ctypes.c_bool
     ralloc_vasprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_total_size = _libraries['FIXME_STUB'].ralloc_total_size
     ralloc_total_size.restype = size_t
     ralloc_total_size.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_gc_ctx(Structure):
     pass
@@ -3730,49 +3730,49 @@ try:
     gc_context = _libraries['FIXME_STUB'].gc_context
     gc_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_alloc_size = _libraries['FIXME_STUB'].gc_alloc_size
     gc_alloc_size.restype = ctypes.POINTER(None)
     gc_alloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_zalloc_size = _libraries['FIXME_STUB'].gc_zalloc_size
     gc_zalloc_size.restype = ctypes.POINTER(None)
     gc_zalloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_free = _libraries['FIXME_STUB'].gc_free
     gc_free.restype = None
     gc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_get_context = _libraries['FIXME_STUB'].gc_get_context
     gc_get_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_get_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_start = _libraries['FIXME_STUB'].gc_sweep_start
     gc_sweep_start.restype = None
     gc_sweep_start.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_mark_live = _libraries['FIXME_STUB'].gc_mark_live
     gc_mark_live.restype = None
     gc_mark_live.argtypes = [ctypes.POINTER(struct_gc_ctx), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_end = _libraries['FIXME_STUB'].gc_sweep_end
     gc_sweep_end.restype = None
     gc_sweep_end.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_linear_ctx(Structure):
     pass
@@ -3782,7 +3782,7 @@ try:
     linear_alloc_child = _libraries['FIXME_STUB'].linear_alloc_child
     linear_alloc_child.restype = ctypes.POINTER(None)
     linear_alloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_c__SA_linear_opts(Structure):
     pass
@@ -3797,97 +3797,97 @@ try:
     linear_context = _libraries['FIXME_STUB'].linear_context
     linear_context.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_context_with_opts = _libraries['FIXME_STUB'].linear_context_with_opts
     linear_context_with_opts.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context_with_opts.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_linear_opts)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child = _libraries['FIXME_STUB'].linear_zalloc_child
     linear_zalloc_child.restype = ctypes.POINTER(None)
     linear_zalloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_free_context = _libraries['FIXME_STUB'].linear_free_context
     linear_free_context.restype = None
     linear_free_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal_linear_context = _libraries['FIXME_STUB'].ralloc_steal_linear_context
     ralloc_steal_linear_context.restype = None
     ralloc_steal_linear_context.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent_of_linear_context = _libraries['FIXME_STUB'].ralloc_parent_of_linear_context
     ralloc_parent_of_linear_context.restype = ctypes.POINTER(None)
     ralloc_parent_of_linear_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_alloc_child_array = _libraries['FIXME_STUB'].linear_alloc_child_array
     linear_alloc_child_array.restype = ctypes.POINTER(None)
     linear_alloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child_array = _libraries['FIXME_STUB'].linear_zalloc_child_array
     linear_zalloc_child_array.restype = ctypes.POINTER(None)
     linear_zalloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strdup = _libraries['FIXME_STUB'].linear_strdup
     linear_strdup.restype = ctypes.POINTER(ctypes.c_char)
     linear_strdup.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf = _libraries['FIXME_STUB'].linear_asprintf
     linear_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_asprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf = _libraries['FIXME_STUB'].linear_vasprintf
     linear_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_vasprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_append = _libraries['FIXME_STUB'].linear_asprintf_append
     linear_asprintf_append.restype = ctypes.c_bool
     linear_asprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_append = _libraries['FIXME_STUB'].linear_vasprintf_append
     linear_vasprintf_append.restype = ctypes.c_bool
     linear_vasprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_asprintf_rewrite_tail
     linear_asprintf_rewrite_tail.restype = ctypes.c_bool
     linear_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_vasprintf_rewrite_tail
     linear_vasprintf_rewrite_tail.restype = ctypes.c_bool
     linear_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strcat = _libraries['FIXME_STUB'].linear_strcat
     linear_strcat.restype = ctypes.c_bool
     linear_strcat.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY'
@@ -3947,7 +3947,7 @@ try:
     ralloc_print_info = _libraries['FIXME_STUB'].ralloc_print_info
     ralloc_print_info.restype = None
     ralloc_print_info.argtypes = [ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(None), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 __all__ = \
     ['GLSL_CMAT_USE_A', 'GLSL_CMAT_USE_ACCUMULATOR',
@@ -4437,4 +4437,4 @@ __all__ = \
     'struct_nv_device_info', 'struct_nv_device_info_pci', 'uint16_t',
     'uint32_t', 'uint64_t', 'uint8_t', 'union_glsl_struct_field_0',
     'union_glsl_type_fields', 'union_nak_shader_info_0', 'va_list']
-def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')
+def __getattr__(nm): raise AttributeError() if nm.startswith('__') else dll.error

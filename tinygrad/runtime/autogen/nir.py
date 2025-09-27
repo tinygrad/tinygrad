@@ -129,7 +129,7 @@ def char_pointer_cast(string, encoding='utf-8'):
     if encoding is not None:
         try:
             string = string.encode(encoding)
-        except AttributeError:
+        except (AttributeError, RuntimeError):
             # In Python3, bytes has no encode attribute
             pass
     string = ctypes.c_char_p(string)
@@ -1209,13 +1209,13 @@ try:
     glsl_type_singleton_init_or_ref = _libraries['FIXME_STUB'].glsl_type_singleton_init_or_ref
     glsl_type_singleton_init_or_ref.restype = None
     glsl_type_singleton_init_or_ref.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_singleton_decref = _libraries['FIXME_STUB'].glsl_type_singleton_decref
     glsl_type_singleton_decref.restype = None
     glsl_type_singleton_decref.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_blob(Structure):
     pass
@@ -1234,7 +1234,7 @@ try:
     encode_type_to_blob = _libraries['FIXME_STUB'].encode_type_to_blob
     encode_type_to_blob.restype = None
     encode_type_to_blob.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_blob_reader(Structure):
     pass
@@ -1252,50 +1252,50 @@ try:
     decode_type_from_blob = _libraries['FIXME_STUB'].decode_type_from_blob
     decode_type_from_blob.restype = ctypes.POINTER(struct_glsl_type)
     decode_type_from_blob.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 try:
     glsl_base_type_bit_size = _libraries['FIXME_STUB'].glsl_base_type_bit_size
     glsl_base_type_bit_size.restype = ctypes.c_uint32
     glsl_base_type_bit_size.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_16bit = _libraries['FIXME_STUB'].glsl_base_type_is_16bit
     glsl_base_type_is_16bit.restype = ctypes.c_bool
     glsl_base_type_is_16bit.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_64bit = _libraries['FIXME_STUB'].glsl_base_type_is_64bit
     glsl_base_type_is_64bit.restype = ctypes.c_bool
     glsl_base_type_is_64bit.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_is_integer = _libraries['FIXME_STUB'].glsl_base_type_is_integer
     glsl_base_type_is_integer.restype = ctypes.c_bool
     glsl_base_type_is_integer.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_base_type_get_bit_size = _libraries['FIXME_STUB'].glsl_base_type_get_bit_size
     glsl_base_type_get_bit_size.restype = ctypes.c_uint32
     glsl_base_type_get_bit_size.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_unsigned_base_type_of = _libraries['FIXME_STUB'].glsl_unsigned_base_type_of
     glsl_unsigned_base_type_of.restype = glsl_base_type
     glsl_unsigned_base_type_of.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_signed_base_type_of = _libraries['FIXME_STUB'].glsl_signed_base_type_of
     glsl_signed_base_type_of.restype = glsl_base_type
     glsl_signed_base_type_of.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_sampler_dim'
@@ -1326,7 +1326,7 @@ try:
     glsl_get_sampler_dim_coordinate_components = _libraries['FIXME_STUB'].glsl_get_sampler_dim_coordinate_components
     glsl_get_sampler_dim_coordinate_components.restype = ctypes.c_int32
     glsl_get_sampler_dim_coordinate_components.argtypes = [glsl_sampler_dim]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_matrix_layout'
@@ -1369,835 +1369,835 @@ try:
     glsl_get_type_name = _libraries['FIXME_STUB'].glsl_get_type_name
     glsl_get_type_name.restype = ctypes.POINTER(ctypes.c_char)
     glsl_get_type_name.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_base_type = _libraries['FIXME_STUB'].glsl_get_base_type
     glsl_get_base_type.restype = glsl_base_type
     glsl_get_base_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_bit_size = _libraries['FIXME_STUB'].glsl_get_bit_size
     glsl_get_bit_size.restype = ctypes.c_uint32
     glsl_get_bit_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_boolean = _libraries['FIXME_STUB'].glsl_type_is_boolean
     glsl_type_is_boolean.restype = ctypes.c_bool
     glsl_type_is_boolean.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_sampler = _libraries['FIXME_STUB'].glsl_type_is_sampler
     glsl_type_is_sampler.restype = ctypes.c_bool
     glsl_type_is_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_texture = _libraries['FIXME_STUB'].glsl_type_is_texture
     glsl_type_is_texture.restype = ctypes.c_bool
     glsl_type_is_texture.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_image = _libraries['FIXME_STUB'].glsl_type_is_image
     glsl_type_is_image.restype = ctypes.c_bool
     glsl_type_is_image.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_atomic_uint = _libraries['FIXME_STUB'].glsl_type_is_atomic_uint
     glsl_type_is_atomic_uint.restype = ctypes.c_bool
     glsl_type_is_atomic_uint.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_struct = _libraries['FIXME_STUB'].glsl_type_is_struct
     glsl_type_is_struct.restype = ctypes.c_bool
     glsl_type_is_struct.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_interface = _libraries['FIXME_STUB'].glsl_type_is_interface
     glsl_type_is_interface.restype = ctypes.c_bool
     glsl_type_is_interface.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array = _libraries['FIXME_STUB'].glsl_type_is_array
     glsl_type_is_array.restype = ctypes.c_bool
     glsl_type_is_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_cmat = _libraries['FIXME_STUB'].glsl_type_is_cmat
     glsl_type_is_cmat.restype = ctypes.c_bool
     glsl_type_is_cmat.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_void = _libraries['FIXME_STUB'].glsl_type_is_void
     glsl_type_is_void.restype = ctypes.c_bool
     glsl_type_is_void.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_subroutine = _libraries['FIXME_STUB'].glsl_type_is_subroutine
     glsl_type_is_subroutine.restype = ctypes.c_bool
     glsl_type_is_subroutine.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_error = _libraries['FIXME_STUB'].glsl_type_is_error
     glsl_type_is_error.restype = ctypes.c_bool
     glsl_type_is_error.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_double = _libraries['FIXME_STUB'].glsl_type_is_double
     glsl_type_is_double.restype = ctypes.c_bool
     glsl_type_is_double.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float = _libraries['FIXME_STUB'].glsl_type_is_float
     glsl_type_is_float.restype = ctypes.c_bool
     glsl_type_is_float.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_numeric = _libraries['FIXME_STUB'].glsl_type_is_numeric
     glsl_type_is_numeric.restype = ctypes.c_bool
     glsl_type_is_numeric.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer = _libraries['FIXME_STUB'].glsl_type_is_integer
     glsl_type_is_integer.restype = ctypes.c_bool
     glsl_type_is_integer.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_struct_or_ifc = _libraries['FIXME_STUB'].glsl_type_is_struct_or_ifc
     glsl_type_is_struct_or_ifc.restype = ctypes.c_bool
     glsl_type_is_struct_or_ifc.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_packed = _libraries['FIXME_STUB'].glsl_type_is_packed
     glsl_type_is_packed.restype = ctypes.c_bool
     glsl_type_is_packed.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_16bit = _libraries['FIXME_STUB'].glsl_type_is_16bit
     glsl_type_is_16bit.restype = ctypes.c_bool
     glsl_type_is_16bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_32bit = _libraries['FIXME_STUB'].glsl_type_is_32bit
     glsl_type_is_32bit.restype = ctypes.c_bool
     glsl_type_is_32bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_64bit = _libraries['FIXME_STUB'].glsl_type_is_64bit
     glsl_type_is_64bit.restype = ctypes.c_bool
     glsl_type_is_64bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16 = _libraries['FIXME_STUB'].glsl_type_is_integer_16
     glsl_type_is_integer_16.restype = ctypes.c_bool
     glsl_type_is_integer_16.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_32 = _libraries['FIXME_STUB'].glsl_type_is_integer_32
     glsl_type_is_integer_32.restype = ctypes.c_bool
     glsl_type_is_integer_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_64
     glsl_type_is_integer_64.restype = ctypes.c_bool
     glsl_type_is_integer_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_32_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_32_64
     glsl_type_is_integer_32_64.restype = ctypes.c_bool
     glsl_type_is_integer_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16_32 = _libraries['FIXME_STUB'].glsl_type_is_integer_16_32
     glsl_type_is_integer_16_32.restype = ctypes.c_bool
     glsl_type_is_integer_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_integer_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_integer_16_32_64
     glsl_type_is_integer_16_32_64.restype = ctypes.c_bool
     glsl_type_is_integer_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16 = _libraries['FIXME_STUB'].glsl_type_is_float_16
     glsl_type_is_float_16.restype = ctypes.c_bool
     glsl_type_is_float_16.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16_32 = _libraries['FIXME_STUB'].glsl_type_is_float_16_32
     glsl_type_is_float_16_32.restype = ctypes.c_bool
     glsl_type_is_float_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_float_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_float_16_32_64
     glsl_type_is_float_16_32_64.restype = ctypes.c_bool
     glsl_type_is_float_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_int_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_int_16_32_64
     glsl_type_is_int_16_32_64.restype = ctypes.c_bool
     glsl_type_is_int_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_uint_16_32_64 = _libraries['FIXME_STUB'].glsl_type_is_uint_16_32_64
     glsl_type_is_uint_16_32_64.restype = ctypes.c_bool
     glsl_type_is_uint_16_32_64.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_int_16_32 = _libraries['FIXME_STUB'].glsl_type_is_int_16_32
     glsl_type_is_int_16_32.restype = ctypes.c_bool
     glsl_type_is_int_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_uint_16_32 = _libraries['FIXME_STUB'].glsl_type_is_uint_16_32
     glsl_type_is_uint_16_32.restype = ctypes.c_bool
     glsl_type_is_uint_16_32.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_unsized_array = _libraries['FIXME_STUB'].glsl_type_is_unsized_array
     glsl_type_is_unsized_array.restype = ctypes.c_bool
     glsl_type_is_unsized_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array_of_arrays = _libraries['FIXME_STUB'].glsl_type_is_array_of_arrays
     glsl_type_is_array_of_arrays.restype = ctypes.c_bool
     glsl_type_is_array_of_arrays.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_bare_sampler = _libraries['FIXME_STUB'].glsl_type_is_bare_sampler
     glsl_type_is_bare_sampler.restype = ctypes.c_bool
     glsl_type_is_bare_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_vector = _libraries['FIXME_STUB'].glsl_type_is_vector
     glsl_type_is_vector.restype = ctypes.c_bool
     glsl_type_is_vector.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_scalar = _libraries['FIXME_STUB'].glsl_type_is_scalar
     glsl_type_is_scalar.restype = ctypes.c_bool
     glsl_type_is_scalar.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_vector_or_scalar = _libraries['FIXME_STUB'].glsl_type_is_vector_or_scalar
     glsl_type_is_vector_or_scalar.restype = ctypes.c_bool
     glsl_type_is_vector_or_scalar.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_matrix = _libraries['FIXME_STUB'].glsl_type_is_matrix
     glsl_type_is_matrix.restype = ctypes.c_bool
     glsl_type_is_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_array_or_matrix = _libraries['FIXME_STUB'].glsl_type_is_array_or_matrix
     glsl_type_is_array_or_matrix.restype = ctypes.c_bool
     glsl_type_is_array_or_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_dual_slot = _libraries['FIXME_STUB'].glsl_type_is_dual_slot
     glsl_type_is_dual_slot.restype = ctypes.c_bool
     glsl_type_is_dual_slot.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_is_leaf = _libraries['FIXME_STUB'].glsl_type_is_leaf
     glsl_type_is_leaf.restype = ctypes.c_bool
     glsl_type_is_leaf.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_matrix_type_is_row_major = _libraries['FIXME_STUB'].glsl_matrix_type_is_row_major
     glsl_matrix_type_is_row_major.restype = ctypes.c_bool
     glsl_matrix_type_is_row_major.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_is_shadow = _libraries['FIXME_STUB'].glsl_sampler_type_is_shadow
     glsl_sampler_type_is_shadow.restype = ctypes.c_bool
     glsl_sampler_type_is_shadow.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_is_array = _libraries['FIXME_STUB'].glsl_sampler_type_is_array
     glsl_sampler_type_is_array.restype = ctypes.c_bool
     glsl_sampler_type_is_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type_is_packed = _libraries['FIXME_STUB'].glsl_struct_type_is_packed
     glsl_struct_type_is_packed.restype = ctypes.c_bool
     glsl_struct_type_is_packed.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_bare_type = _libraries['FIXME_STUB'].glsl_get_bare_type
     glsl_get_bare_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_bare_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_scalar_type = _libraries['FIXME_STUB'].glsl_get_scalar_type
     glsl_get_scalar_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_scalar_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_base_glsl_type = _libraries['FIXME_STUB'].glsl_get_base_glsl_type
     glsl_get_base_glsl_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_base_glsl_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_length = _libraries['FIXME_STUB'].glsl_get_length
     glsl_get_length.restype = ctypes.c_uint32
     glsl_get_length.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_vector_elements = _libraries['FIXME_STUB'].glsl_get_vector_elements
     glsl_get_vector_elements.restype = ctypes.c_uint32
     glsl_get_vector_elements.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_components = _libraries['FIXME_STUB'].glsl_get_components
     glsl_get_components.restype = ctypes.c_uint32
     glsl_get_components.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_matrix_columns = _libraries['FIXME_STUB'].glsl_get_matrix_columns
     glsl_get_matrix_columns.restype = ctypes.c_uint32
     glsl_get_matrix_columns.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_wrap_in_arrays = _libraries['FIXME_STUB'].glsl_type_wrap_in_arrays
     glsl_type_wrap_in_arrays.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_wrap_in_arrays.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_array_size = _libraries['FIXME_STUB'].glsl_array_size
     glsl_array_size.restype = ctypes.c_int32
     glsl_array_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_aoa_size = _libraries['FIXME_STUB'].glsl_get_aoa_size
     glsl_get_aoa_size.restype = ctypes.c_uint32
     glsl_get_aoa_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_array_element = _libraries['FIXME_STUB'].glsl_get_array_element
     glsl_get_array_element.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_array_element.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_without_array = _libraries['FIXME_STUB'].glsl_without_array
     glsl_without_array.restype = ctypes.POINTER(struct_glsl_type)
     glsl_without_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_without_array_or_matrix = _libraries['FIXME_STUB'].glsl_without_array_or_matrix
     glsl_without_array_or_matrix.restype = ctypes.POINTER(struct_glsl_type)
     glsl_without_array_or_matrix.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cmat_element = _libraries['FIXME_STUB'].glsl_get_cmat_element
     glsl_get_cmat_element.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_cmat_element.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cmat_description = _libraries['FIXME_STUB'].glsl_get_cmat_description
     glsl_get_cmat_description.restype = ctypes.POINTER(struct_glsl_cmat_description)
     glsl_get_cmat_description.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_atomic_size = _libraries['FIXME_STUB'].glsl_atomic_size
     glsl_atomic_size.restype = ctypes.c_uint32
     glsl_atomic_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_32bit = _libraries['FIXME_STUB'].glsl_type_contains_32bit
     glsl_type_contains_32bit.restype = ctypes.c_bool
     glsl_type_contains_32bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_64bit = _libraries['FIXME_STUB'].glsl_type_contains_64bit
     glsl_type_contains_64bit.restype = ctypes.c_bool
     glsl_type_contains_64bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_contains_image = _libraries['FIXME_STUB'].glsl_type_contains_image
     glsl_type_contains_image.restype = ctypes.c_bool
     glsl_type_contains_image.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_atomic = _libraries['FIXME_STUB'].glsl_contains_atomic
     glsl_contains_atomic.restype = ctypes.c_bool
     glsl_contains_atomic.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_double = _libraries['FIXME_STUB'].glsl_contains_double
     glsl_contains_double.restype = ctypes.c_bool
     glsl_contains_double.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_integer = _libraries['FIXME_STUB'].glsl_contains_integer
     glsl_contains_integer.restype = ctypes.c_bool
     glsl_contains_integer.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_opaque = _libraries['FIXME_STUB'].glsl_contains_opaque
     glsl_contains_opaque.restype = ctypes.c_bool
     glsl_contains_opaque.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_sampler = _libraries['FIXME_STUB'].glsl_contains_sampler
     glsl_contains_sampler.restype = ctypes.c_bool
     glsl_contains_sampler.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_array = _libraries['FIXME_STUB'].glsl_contains_array
     glsl_contains_array.restype = ctypes.c_bool
     glsl_contains_array.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_contains_subroutine = _libraries['FIXME_STUB'].glsl_contains_subroutine
     glsl_contains_subroutine.restype = ctypes.c_bool
     glsl_contains_subroutine.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_dim = _libraries['FIXME_STUB'].glsl_get_sampler_dim
     glsl_get_sampler_dim.restype = glsl_sampler_dim
     glsl_get_sampler_dim.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_result_type = _libraries['FIXME_STUB'].glsl_get_sampler_result_type
     glsl_get_sampler_result_type.restype = glsl_base_type
     glsl_get_sampler_result_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_sampler_coordinate_components = _libraries['FIXME_STUB'].glsl_get_sampler_coordinate_components
     glsl_get_sampler_coordinate_components.restype = ctypes.c_int32
     glsl_get_sampler_coordinate_components.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_compare_no_precision = _libraries['FIXME_STUB'].glsl_type_compare_no_precision
     glsl_type_compare_no_precision.restype = ctypes.c_bool
     glsl_type_compare_no_precision.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_record_compare = _libraries['FIXME_STUB'].glsl_record_compare
     glsl_record_compare.restype = ctypes.c_bool
     glsl_record_compare.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field = _libraries['FIXME_STUB'].glsl_get_struct_field
     glsl_get_struct_field.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_struct_field.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field_data = _libraries['FIXME_STUB'].glsl_get_struct_field_data
     glsl_get_struct_field_data.restype = ctypes.POINTER(struct_glsl_struct_field)
     glsl_get_struct_field_data.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_location_offset = _libraries['FIXME_STUB'].glsl_get_struct_location_offset
     glsl_get_struct_location_offset.restype = ctypes.c_uint32
     glsl_get_struct_location_offset.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_field_index = _libraries['FIXME_STUB'].glsl_get_field_index
     glsl_get_field_index.restype = ctypes.c_int32
     glsl_get_field_index.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_field_type = _libraries['FIXME_STUB'].glsl_get_field_type
     glsl_get_field_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_field_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_field_offset = _libraries['FIXME_STUB'].glsl_get_struct_field_offset
     glsl_get_struct_field_offset.restype = ctypes.c_int32
     glsl_get_struct_field_offset.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_struct_elem_name = _libraries['FIXME_STUB'].glsl_get_struct_elem_name
     glsl_get_struct_elem_name.restype = ctypes.POINTER(ctypes.c_char)
     glsl_get_struct_elem_name.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_void_type = _libraries['FIXME_STUB'].glsl_void_type
     glsl_void_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_void_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float_type = _libraries['FIXME_STUB'].glsl_float_type
     glsl_float_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float16_t_type = _libraries['FIXME_STUB'].glsl_float16_t_type
     glsl_float16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_double_type = _libraries['FIXME_STUB'].glsl_double_type
     glsl_double_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_double_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec2_type = _libraries['FIXME_STUB'].glsl_vec2_type
     glsl_vec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec2_type = _libraries['FIXME_STUB'].glsl_dvec2_type
     glsl_dvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec2_type = _libraries['FIXME_STUB'].glsl_uvec2_type
     glsl_uvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec2_type = _libraries['FIXME_STUB'].glsl_ivec2_type
     glsl_ivec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec2_type = _libraries['FIXME_STUB'].glsl_bvec2_type
     glsl_bvec2_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec2_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec4_type = _libraries['FIXME_STUB'].glsl_vec4_type
     glsl_vec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec4_type = _libraries['FIXME_STUB'].glsl_dvec4_type
     glsl_dvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec4_type = _libraries['FIXME_STUB'].glsl_uvec4_type
     glsl_uvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec4_type = _libraries['FIXME_STUB'].glsl_ivec4_type
     glsl_ivec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec4_type = _libraries['FIXME_STUB'].glsl_bvec4_type
     glsl_bvec4_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int_type = _libraries['FIXME_STUB'].glsl_int_type
     glsl_int_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint_type = _libraries['FIXME_STUB'].glsl_uint_type
     glsl_uint_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int64_t_type = _libraries['FIXME_STUB'].glsl_int64_t_type
     glsl_int64_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int64_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint64_t_type = _libraries['FIXME_STUB'].glsl_uint64_t_type
     glsl_uint64_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint64_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int16_t_type = _libraries['FIXME_STUB'].glsl_int16_t_type
     glsl_int16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint16_t_type = _libraries['FIXME_STUB'].glsl_uint16_t_type
     glsl_uint16_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint16_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int8_t_type = _libraries['FIXME_STUB'].glsl_int8_t_type
     glsl_int8_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int8_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint8_t_type = _libraries['FIXME_STUB'].glsl_uint8_t_type
     glsl_uint8_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint8_t_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bool_type = _libraries['FIXME_STUB'].glsl_bool_type
     glsl_bool_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bool_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_atomic_uint_type = _libraries['FIXME_STUB'].glsl_atomic_uint_type
     glsl_atomic_uint_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_atomic_uint_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_floatN_t_type = _libraries['FIXME_STUB'].glsl_floatN_t_type
     glsl_floatN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_floatN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_intN_t_type = _libraries['FIXME_STUB'].glsl_intN_t_type
     glsl_intN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_intN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uintN_t_type = _libraries['FIXME_STUB'].glsl_uintN_t_type
     glsl_uintN_t_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uintN_t_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vec_type = _libraries['FIXME_STUB'].glsl_vec_type
     glsl_vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_f16vec_type = _libraries['FIXME_STUB'].glsl_f16vec_type
     glsl_f16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_f16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_dvec_type = _libraries['FIXME_STUB'].glsl_dvec_type
     glsl_dvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_dvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_ivec_type = _libraries['FIXME_STUB'].glsl_ivec_type
     glsl_ivec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_ivec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uvec_type = _libraries['FIXME_STUB'].glsl_uvec_type
     glsl_uvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bvec_type = _libraries['FIXME_STUB'].glsl_bvec_type
     glsl_bvec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bvec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i64vec_type = _libraries['FIXME_STUB'].glsl_i64vec_type
     glsl_i64vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i64vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u64vec_type = _libraries['FIXME_STUB'].glsl_u64vec_type
     glsl_u64vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u64vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i16vec_type = _libraries['FIXME_STUB'].glsl_i16vec_type
     glsl_i16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u16vec_type = _libraries['FIXME_STUB'].glsl_u16vec_type
     glsl_u16vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u16vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_i8vec_type = _libraries['FIXME_STUB'].glsl_i8vec_type
     glsl_i8vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_i8vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_u8vec_type = _libraries['FIXME_STUB'].glsl_u8vec_type
     glsl_u8vec_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_u8vec_type.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_simple_explicit_type = _libraries['FIXME_STUB'].glsl_simple_explicit_type
     glsl_simple_explicit_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_simple_explicit_type.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_simple_type = _libraries['FIXME_STUB'].glsl_simple_type
     glsl_simple_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_simple_type.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type = _libraries['FIXME_STUB'].glsl_sampler_type
     glsl_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_sampler_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bare_sampler_type = _libraries['FIXME_STUB'].glsl_bare_sampler_type
     glsl_bare_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bare_sampler_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_bare_shadow_sampler_type = _libraries['FIXME_STUB'].glsl_bare_shadow_sampler_type
     glsl_bare_shadow_sampler_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_bare_shadow_sampler_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_texture_type = _libraries['FIXME_STUB'].glsl_texture_type
     glsl_texture_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_texture_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_image_type = _libraries['FIXME_STUB'].glsl_image_type
     glsl_image_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_image_type.argtypes = [glsl_sampler_dim, ctypes.c_bool, glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_array_type = _libraries['FIXME_STUB'].glsl_array_type
     glsl_array_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_array_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_cmat_type = _libraries['FIXME_STUB'].glsl_cmat_type
     glsl_cmat_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_cmat_type.argtypes = [ctypes.POINTER(struct_glsl_cmat_description)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type_with_explicit_alignment = _libraries['FIXME_STUB'].glsl_struct_type_with_explicit_alignment
     glsl_struct_type_with_explicit_alignment.restype = ctypes.POINTER(struct_glsl_type)
     glsl_struct_type_with_explicit_alignment.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_struct_type = _libraries['FIXME_STUB'].glsl_struct_type
     glsl_struct_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_struct_type.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'glsl_interface_packing'
@@ -2216,428 +2216,428 @@ try:
     glsl_interface_type = _libraries['FIXME_STUB'].glsl_interface_type
     glsl_interface_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_interface_type.argtypes = [ctypes.POINTER(struct_glsl_struct_field), ctypes.c_uint32, glsl_interface_packing, ctypes.c_bool, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_subroutine_type = _libraries['FIXME_STUB'].glsl_subroutine_type
     glsl_subroutine_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_subroutine_type.argtypes = [ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_row_type = _libraries['FIXME_STUB'].glsl_get_row_type
     glsl_get_row_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_row_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_column_type = _libraries['FIXME_STUB'].glsl_get_column_type
     glsl_get_column_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_column_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_type_for_size_align = _libraries['FIXME_STUB'].glsl_get_explicit_type_for_size_align
     glsl_get_explicit_type_for_size_align.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_type_for_size_align.argtypes = [ctypes.POINTER(struct_glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_replace_vec3_with_vec4 = _libraries['FIXME_STUB'].glsl_type_replace_vec3_with_vec4
     glsl_type_replace_vec3_with_vec4.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_replace_vec3_with_vec4.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_float16_type = _libraries['FIXME_STUB'].glsl_float16_type
     glsl_float16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_float16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_int16_type = _libraries['FIXME_STUB'].glsl_int16_type
     glsl_int16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_int16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_uint16_type = _libraries['FIXME_STUB'].glsl_uint16_type
     glsl_uint16_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_uint16_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_to_16bit = _libraries['FIXME_STUB'].glsl_type_to_16bit
     glsl_type_to_16bit.restype = ctypes.POINTER(struct_glsl_type)
     glsl_type_to_16bit.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_scalar_type = _libraries['FIXME_STUB'].glsl_scalar_type
     glsl_scalar_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_scalar_type.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_vector_type = _libraries['FIXME_STUB'].glsl_vector_type
     glsl_vector_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_vector_type.argtypes = [glsl_base_type, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_matrix_type = _libraries['FIXME_STUB'].glsl_matrix_type
     glsl_matrix_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_matrix_type.argtypes = [glsl_base_type, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_explicit_matrix_type = _libraries['FIXME_STUB'].glsl_explicit_matrix_type
     glsl_explicit_matrix_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_explicit_matrix_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_transposed_type = _libraries['FIXME_STUB'].glsl_transposed_type
     glsl_transposed_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_transposed_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_texture_type_to_sampler = _libraries['FIXME_STUB'].glsl_texture_type_to_sampler
     glsl_texture_type_to_sampler.restype = ctypes.POINTER(struct_glsl_type)
     glsl_texture_type_to_sampler.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_sampler_type_to_texture = _libraries['FIXME_STUB'].glsl_sampler_type_to_texture
     glsl_sampler_type_to_texture.restype = ctypes.POINTER(struct_glsl_type)
     glsl_sampler_type_to_texture.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_replace_vector_type = _libraries['FIXME_STUB'].glsl_replace_vector_type
     glsl_replace_vector_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_replace_vector_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_channel_type = _libraries['FIXME_STUB'].glsl_channel_type
     glsl_channel_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_channel_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_mul_type = _libraries['FIXME_STUB'].glsl_get_mul_type
     glsl_get_mul_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_mul_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_sampler_count = _libraries['FIXME_STUB'].glsl_type_get_sampler_count
     glsl_type_get_sampler_count.restype = ctypes.c_uint32
     glsl_type_get_sampler_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_texture_count = _libraries['FIXME_STUB'].glsl_type_get_texture_count
     glsl_type_get_texture_count.restype = ctypes.c_uint32
     glsl_type_get_texture_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_get_image_count = _libraries['FIXME_STUB'].glsl_type_get_image_count
     glsl_type_get_image_count.restype = ctypes.c_uint32
     glsl_type_get_image_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_vec4_slots = _libraries['FIXME_STUB'].glsl_count_vec4_slots
     glsl_count_vec4_slots.restype = ctypes.c_uint32
     glsl_count_vec4_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_dword_slots = _libraries['FIXME_STUB'].glsl_count_dword_slots
     glsl_count_dword_slots.restype = ctypes.c_uint32
     glsl_count_dword_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_component_slots = _libraries['FIXME_STUB'].glsl_get_component_slots
     glsl_get_component_slots.restype = ctypes.c_uint32
     glsl_get_component_slots.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_component_slots_aligned = _libraries['FIXME_STUB'].glsl_get_component_slots_aligned
     glsl_get_component_slots_aligned.restype = ctypes.c_uint32
     glsl_get_component_slots_aligned.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_varying_count = _libraries['FIXME_STUB'].glsl_varying_count
     glsl_varying_count.restype = ctypes.c_uint32
     glsl_varying_count.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_type_uniform_locations = _libraries['FIXME_STUB'].glsl_type_uniform_locations
     glsl_type_uniform_locations.restype = ctypes.c_uint32
     glsl_type_uniform_locations.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_count_attribute_slots = _libraries['FIXME_STUB'].glsl_count_attribute_slots
     glsl_count_attribute_slots.restype = ctypes.c_uint32
     glsl_count_attribute_slots.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_size = _libraries['FIXME_STUB'].glsl_get_cl_size
     glsl_get_cl_size.restype = ctypes.c_uint32
     glsl_get_cl_size.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_alignment = _libraries['FIXME_STUB'].glsl_get_cl_alignment
     glsl_get_cl_alignment.restype = ctypes.c_uint32
     glsl_get_cl_alignment.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_cl_type_size_align = _libraries['FIXME_STUB'].glsl_get_cl_type_size_align
     glsl_get_cl_type_size_align.restype = None
     glsl_get_cl_type_size_align.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_internal_ifc_packing = _libraries['FIXME_STUB'].glsl_get_internal_ifc_packing
     glsl_get_internal_ifc_packing.restype = glsl_interface_packing
     glsl_get_internal_ifc_packing.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_ifc_packing = _libraries['FIXME_STUB'].glsl_get_ifc_packing
     glsl_get_ifc_packing.restype = glsl_interface_packing
     glsl_get_ifc_packing.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std140_base_alignment = _libraries['FIXME_STUB'].glsl_get_std140_base_alignment
     glsl_get_std140_base_alignment.restype = ctypes.c_uint32
     glsl_get_std140_base_alignment.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std140_size = _libraries['FIXME_STUB'].glsl_get_std140_size
     glsl_get_std140_size.restype = ctypes.c_uint32
     glsl_get_std140_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_array_stride = _libraries['FIXME_STUB'].glsl_get_std430_array_stride
     glsl_get_std430_array_stride.restype = ctypes.c_uint32
     glsl_get_std430_array_stride.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_base_alignment = _libraries['FIXME_STUB'].glsl_get_std430_base_alignment
     glsl_get_std430_base_alignment.restype = ctypes.c_uint32
     glsl_get_std430_base_alignment.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_std430_size = _libraries['FIXME_STUB'].glsl_get_std430_size
     glsl_get_std430_size.restype = ctypes.c_uint32
     glsl_get_std430_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_size = _libraries['FIXME_STUB'].glsl_get_explicit_size
     glsl_get_explicit_size.restype = ctypes.c_uint32
     glsl_get_explicit_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_stride = _libraries['FIXME_STUB'].glsl_get_explicit_stride
     glsl_get_explicit_stride.restype = ctypes.c_uint32
     glsl_get_explicit_stride.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_alignment = _libraries['FIXME_STUB'].glsl_get_explicit_alignment
     glsl_get_explicit_alignment.restype = ctypes.c_uint32
     glsl_get_explicit_alignment.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_std140_type = _libraries['FIXME_STUB'].glsl_get_explicit_std140_type
     glsl_get_explicit_std140_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_std140_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_std430_type = _libraries['FIXME_STUB'].glsl_get_explicit_std430_type
     glsl_get_explicit_std430_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_std430_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_explicit_interface_type = _libraries['FIXME_STUB'].glsl_get_explicit_interface_type
     glsl_get_explicit_interface_type.restype = ctypes.POINTER(struct_glsl_type)
     glsl_get_explicit_interface_type.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_size_align_handle_array_and_structs = _libraries['FIXME_STUB'].glsl_size_align_handle_array_and_structs
     glsl_size_align_handle_array_and_structs.restype = None
     glsl_size_align_handle_array_and_structs.argtypes = [ctypes.POINTER(struct_glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_natural_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_natural_size_align_bytes
     glsl_get_natural_size_align_bytes.restype = None
     glsl_get_natural_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_word_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_word_size_align_bytes
     glsl_get_word_size_align_bytes.restype = None
     glsl_get_word_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     glsl_get_vec4_size_align_bytes = _libraries['FIXME_STUB'].glsl_get_vec4_size_align_bytes
     glsl_get_vec4_size_align_bytes.restype = None
     glsl_get_vec4_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_context = _libraries['FIXME_STUB'].ralloc_context
     ralloc_context.restype = ctypes.POINTER(None)
     ralloc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 size_t = ctypes.c_uint64
 try:
     ralloc_size = _libraries['FIXME_STUB'].ralloc_size
     ralloc_size.restype = ctypes.POINTER(None)
     ralloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_size = _libraries['FIXME_STUB'].rzalloc_size
     rzalloc_size.restype = ctypes.POINTER(None)
     rzalloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_size = _libraries['FIXME_STUB'].reralloc_size
     reralloc_size.restype = ctypes.POINTER(None)
     reralloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_size = _libraries['FIXME_STUB'].rerzalloc_size
     rerzalloc_size.restype = ctypes.POINTER(None)
     rerzalloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_array_size = _libraries['FIXME_STUB'].ralloc_array_size
     ralloc_array_size.restype = ctypes.POINTER(None)
     ralloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_array_size = _libraries['FIXME_STUB'].rzalloc_array_size
     rzalloc_array_size.restype = ctypes.POINTER(None)
     rzalloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_array_size = _libraries['FIXME_STUB'].reralloc_array_size
     reralloc_array_size.restype = ctypes.POINTER(None)
     reralloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_array_size = _libraries['FIXME_STUB'].rerzalloc_array_size
     rerzalloc_array_size.restype = ctypes.POINTER(None)
     rerzalloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_free = _libraries['FIXME_STUB'].ralloc_free
     ralloc_free.restype = None
     ralloc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal = _libraries['FIXME_STUB'].ralloc_steal
     ralloc_steal.restype = None
     ralloc_steal.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_adopt = _libraries['FIXME_STUB'].ralloc_adopt
     ralloc_adopt.restype = None
     ralloc_adopt.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent = _libraries['FIXME_STUB'].ralloc_parent
     ralloc_parent.restype = ctypes.POINTER(None)
     ralloc_parent.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_set_destructor = _libraries['FIXME_STUB'].ralloc_set_destructor
     ralloc_set_destructor.restype = None
     ralloc_set_destructor.argtypes = [ctypes.POINTER(None), ctypes.CFUNCTYPE(None, ctypes.POINTER(None))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_memdup = _libraries['FIXME_STUB'].ralloc_memdup
     ralloc_memdup.restype = ctypes.POINTER(None)
     ralloc_memdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strdup = _libraries['FIXME_STUB'].ralloc_strdup
     ralloc_strdup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strndup = _libraries['FIXME_STUB'].ralloc_strndup
     ralloc_strndup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strndup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strcat = _libraries['FIXME_STUB'].ralloc_strcat
     ralloc_strcat.restype = ctypes.c_bool
     ralloc_strcat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strncat = _libraries['FIXME_STUB'].ralloc_strncat
     ralloc_strncat.restype = ctypes.c_bool
     ralloc_strncat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_str_append = _libraries['FIXME_STUB'].ralloc_str_append
     ralloc_str_append.restype = ctypes.c_bool
     ralloc_str_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf = _libraries['FIXME_STUB'].ralloc_asprintf
     ralloc_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_asprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct___va_list_tag(Structure):
     pass
@@ -2655,37 +2655,37 @@ try:
     ralloc_vasprintf = _libraries['FIXME_STUB'].ralloc_vasprintf
     ralloc_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_vasprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_asprintf_rewrite_tail
     ralloc_asprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_vasprintf_rewrite_tail
     ralloc_vasprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_append = _libraries['FIXME_STUB'].ralloc_asprintf_append
     ralloc_asprintf_append.restype = ctypes.c_bool
     ralloc_asprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_append = _libraries['FIXME_STUB'].ralloc_vasprintf_append
     ralloc_vasprintf_append.restype = ctypes.c_bool
     ralloc_vasprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_total_size = _libraries['FIXME_STUB'].ralloc_total_size
     ralloc_total_size.restype = size_t
     ralloc_total_size.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_gc_ctx(Structure):
     pass
@@ -2695,49 +2695,49 @@ try:
     gc_context = _libraries['FIXME_STUB'].gc_context
     gc_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_alloc_size = _libraries['FIXME_STUB'].gc_alloc_size
     gc_alloc_size.restype = ctypes.POINTER(None)
     gc_alloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_zalloc_size = _libraries['FIXME_STUB'].gc_zalloc_size
     gc_zalloc_size.restype = ctypes.POINTER(None)
     gc_zalloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_free = _libraries['FIXME_STUB'].gc_free
     gc_free.restype = None
     gc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_get_context = _libraries['FIXME_STUB'].gc_get_context
     gc_get_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_get_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_start = _libraries['FIXME_STUB'].gc_sweep_start
     gc_sweep_start.restype = None
     gc_sweep_start.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_mark_live = _libraries['FIXME_STUB'].gc_mark_live
     gc_mark_live.restype = None
     gc_mark_live.argtypes = [ctypes.POINTER(struct_gc_ctx), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_end = _libraries['FIXME_STUB'].gc_sweep_end
     gc_sweep_end.restype = None
     gc_sweep_end.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_linear_ctx(Structure):
     pass
@@ -2747,7 +2747,7 @@ try:
     linear_alloc_child = _libraries['FIXME_STUB'].linear_alloc_child
     linear_alloc_child.restype = ctypes.POINTER(None)
     linear_alloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_c__SA_linear_opts(Structure):
     pass
@@ -2762,97 +2762,97 @@ try:
     linear_context = _libraries['FIXME_STUB'].linear_context
     linear_context.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_context_with_opts = _libraries['FIXME_STUB'].linear_context_with_opts
     linear_context_with_opts.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context_with_opts.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_linear_opts)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child = _libraries['FIXME_STUB'].linear_zalloc_child
     linear_zalloc_child.restype = ctypes.POINTER(None)
     linear_zalloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_free_context = _libraries['FIXME_STUB'].linear_free_context
     linear_free_context.restype = None
     linear_free_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal_linear_context = _libraries['FIXME_STUB'].ralloc_steal_linear_context
     ralloc_steal_linear_context.restype = None
     ralloc_steal_linear_context.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent_of_linear_context = _libraries['FIXME_STUB'].ralloc_parent_of_linear_context
     ralloc_parent_of_linear_context.restype = ctypes.POINTER(None)
     ralloc_parent_of_linear_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_alloc_child_array = _libraries['FIXME_STUB'].linear_alloc_child_array
     linear_alloc_child_array.restype = ctypes.POINTER(None)
     linear_alloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child_array = _libraries['FIXME_STUB'].linear_zalloc_child_array
     linear_zalloc_child_array.restype = ctypes.POINTER(None)
     linear_zalloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strdup = _libraries['FIXME_STUB'].linear_strdup
     linear_strdup.restype = ctypes.POINTER(ctypes.c_char)
     linear_strdup.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf = _libraries['FIXME_STUB'].linear_asprintf
     linear_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_asprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf = _libraries['FIXME_STUB'].linear_vasprintf
     linear_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_vasprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_append = _libraries['FIXME_STUB'].linear_asprintf_append
     linear_asprintf_append.restype = ctypes.c_bool
     linear_asprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_append = _libraries['FIXME_STUB'].linear_vasprintf_append
     linear_vasprintf_append.restype = ctypes.c_bool
     linear_vasprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_asprintf_rewrite_tail
     linear_asprintf_rewrite_tail.restype = ctypes.c_bool
     linear_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_vasprintf_rewrite_tail
     linear_vasprintf_rewrite_tail.restype = ctypes.c_bool
     linear_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strcat = _libraries['FIXME_STUB'].linear_strcat
     linear_strcat.restype = ctypes.c_bool
     linear_strcat.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY'
@@ -2912,7 +2912,7 @@ try:
     ralloc_print_info = _libraries['FIXME_STUB'].ralloc_print_info
     ralloc_print_info.restype = None
     ralloc_print_info.argtypes = [ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(None), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_int64_options'
@@ -3876,31 +3876,31 @@ try:
     nir_round_up_components = _libraries['FIXME_STUB'].nir_round_up_components
     nir_round_up_components.restype = ctypes.c_uint32
     nir_round_up_components.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_component_mask = _libraries['FIXME_STUB'].nir_component_mask
     nir_component_mask.restype = nir_component_mask_t
     nir_component_mask.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_process_debug_variable = _libraries['FIXME_STUB'].nir_process_debug_variable
     nir_process_debug_variable.restype = None
     nir_process_debug_variable.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_component_mask_can_reinterpret = _libraries['FIXME_STUB'].nir_component_mask_can_reinterpret
     nir_component_mask_can_reinterpret.restype = ctypes.c_bool
     nir_component_mask_can_reinterpret.argtypes = [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_component_mask_reinterpret = _libraries['FIXME_STUB'].nir_component_mask_reinterpret
     nir_component_mask_reinterpret.restype = nir_component_mask_t
     nir_component_mask_reinterpret.argtypes = [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_state_slot(Structure):
     pass
@@ -4029,56 +4029,56 @@ try:
     nir_const_value_for_raw_uint = _libraries['FIXME_STUB'].nir_const_value_for_raw_uint
     nir_const_value_for_raw_uint.restype = nir_const_value
     nir_const_value_for_raw_uint.argtypes = [uint64_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 int64_t = ctypes.c_int64
 try:
     nir_const_value_for_int = _libraries['FIXME_STUB'].nir_const_value_for_int
     nir_const_value_for_int.restype = nir_const_value
     nir_const_value_for_int.argtypes = [int64_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_for_uint = _libraries['FIXME_STUB'].nir_const_value_for_uint
     nir_const_value_for_uint.restype = nir_const_value
     nir_const_value_for_uint.argtypes = [uint64_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_for_bool = _libraries['FIXME_STUB'].nir_const_value_for_bool
     nir_const_value_for_bool.restype = nir_const_value
     nir_const_value_for_bool.argtypes = [ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_for_float = _libraries['FIXME_STUB'].nir_const_value_for_float
     nir_const_value_for_float.restype = nir_const_value
     nir_const_value_for_float.argtypes = [ctypes.c_double, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_as_int = _libraries['FIXME_STUB'].nir_const_value_as_int
     nir_const_value_as_int.restype = int64_t
     nir_const_value_as_int.argtypes = [nir_const_value, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_as_uint = _libraries['FIXME_STUB'].nir_const_value_as_uint
     nir_const_value_as_uint.restype = uint64_t
     nir_const_value_as_uint.argtypes = [nir_const_value, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_as_bool = _libraries['FIXME_STUB'].nir_const_value_as_bool
     nir_const_value_as_bool.restype = ctypes.c_bool
     nir_const_value_as_bool.argtypes = [nir_const_value, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_as_float = _libraries['FIXME_STUB'].nir_const_value_as_float
     nir_const_value_as_float.restype = ctypes.c_double
     nir_const_value_as_float.argtypes = [nir_const_value, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_constant(Structure):
     pass
@@ -4249,13 +4249,13 @@ try:
     _nir_shader_variable_has_mode = _libraries['FIXME_STUB']._nir_shader_variable_has_mode
     _nir_shader_variable_has_mode.restype = ctypes.c_bool
     _nir_shader_variable_has_mode.argtypes = [ctypes.POINTER(struct_nir_variable), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_is_global = _libraries['FIXME_STUB'].nir_variable_is_global
     nir_variable_is_global.restype = ctypes.c_bool
     nir_variable_is_global.argtypes = [ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_instr_type'
@@ -4289,25 +4289,25 @@ try:
     nir_instr_next = _libraries['FIXME_STUB'].nir_instr_next
     nir_instr_next.restype = ctypes.POINTER(struct_nir_instr)
     nir_instr_next.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_prev = _libraries['FIXME_STUB'].nir_instr_prev
     nir_instr_prev.restype = ctypes.POINTER(struct_nir_instr)
     nir_instr_prev.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_is_first = _libraries['FIXME_STUB'].nir_instr_is_first
     nir_instr_is_first.restype = ctypes.c_bool
     nir_instr_is_first.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_is_last = _libraries['FIXME_STUB'].nir_instr_is_last
     nir_instr_is_last.restype = ctypes.c_bool
     nir_instr_is_last.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_def(Structure):
     pass
@@ -4348,13 +4348,13 @@ try:
     nir_src_is_if = _libraries['FIXME_STUB'].nir_src_is_if
     nir_src_is_if.restype = ctypes.c_bool
     nir_src_is_if.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_parent_instr = _libraries['FIXME_STUB'].nir_src_parent_instr
     nir_src_parent_instr.restype = ctypes.POINTER(struct_nir_instr)
     nir_src_parent_instr.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_if(Structure):
     pass
@@ -4386,91 +4386,91 @@ try:
     nir_src_parent_if = _libraries['FIXME_STUB'].nir_src_parent_if
     nir_src_parent_if.restype = ctypes.POINTER(struct_nir_if)
     nir_src_parent_if.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     _nir_src_set_parent = _libraries['FIXME_STUB']._nir_src_set_parent
     _nir_src_set_parent.restype = None
     _nir_src_set_parent.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.POINTER(None), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_set_parent_instr = _libraries['FIXME_STUB'].nir_src_set_parent_instr
     nir_src_set_parent_instr.restype = None
     nir_src_set_parent_instr.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_set_parent_if = _libraries['FIXME_STUB'].nir_src_set_parent_if
     nir_src_set_parent_if.restype = None
     nir_src_set_parent_if.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_init = _libraries['FIXME_STUB'].nir_src_init
     nir_src_init.restype = nir_src
     nir_src_init.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_used_by_if = _libraries['FIXME_STUB'].nir_def_used_by_if
     nir_def_used_by_if.restype = ctypes.c_bool
     nir_def_used_by_if.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_only_used_by_if = _libraries['FIXME_STUB'].nir_def_only_used_by_if
     nir_def_only_used_by_if.restype = ctypes.c_bool
     nir_def_only_used_by_if.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_for_ssa = _libraries['FIXME_STUB'].nir_src_for_ssa
     nir_src_for_ssa.restype = nir_src
     nir_src_for_ssa.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_bit_size = _libraries['FIXME_STUB'].nir_src_bit_size
     nir_src_bit_size.restype = ctypes.c_uint32
     nir_src_bit_size.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_num_components = _libraries['FIXME_STUB'].nir_src_num_components
     nir_src_num_components.restype = ctypes.c_uint32
     nir_src_num_components.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_is_const = _libraries['FIXME_STUB'].nir_src_is_const
     nir_src_is_const.restype = ctypes.c_bool
     nir_src_is_const.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_is_undef = _libraries['FIXME_STUB'].nir_src_is_undef
     nir_src_is_undef.restype = ctypes.c_bool
     nir_src_is_undef.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_is_divergent = _libraries['FIXME_STUB'].nir_src_is_divergent
     nir_src_is_divergent.restype = ctypes.c_bool
     nir_src_is_divergent.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_same_comp_swizzle = _libraries['FIXME_STUB'].nir_is_same_comp_swizzle
     nir_is_same_comp_swizzle.restype = ctypes.c_bool
     nir_is_same_comp_swizzle.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_sequential_comp_swizzle = _libraries['FIXME_STUB'].nir_is_sequential_comp_swizzle
     nir_is_sequential_comp_swizzle.restype = ctypes.c_bool
     nir_is_sequential_comp_swizzle.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_alu_src(Structure):
     pass
@@ -4537,19 +4537,19 @@ try:
     nir_get_nir_type_for_glsl_base_type = _libraries['FIXME_STUB'].nir_get_nir_type_for_glsl_base_type
     nir_get_nir_type_for_glsl_base_type.restype = nir_alu_type
     nir_get_nir_type_for_glsl_base_type.argtypes = [glsl_base_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_nir_type_for_glsl_type = _libraries['FIXME_STUB'].nir_get_nir_type_for_glsl_type
     nir_get_nir_type_for_glsl_type.restype = nir_alu_type
     nir_get_nir_type_for_glsl_type.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_glsl_base_type_for_nir_type = _libraries['FIXME_STUB'].nir_get_glsl_base_type_for_nir_type
     nir_get_glsl_base_type_for_nir_type.restype = glsl_base_type
     nir_get_glsl_base_type_for_nir_type.argtypes = [nir_alu_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_op'
@@ -5506,7 +5506,7 @@ try:
     nir_type_conversion_op = _libraries['FIXME_STUB'].nir_type_conversion_op
     nir_type_conversion_op.restype = nir_op
     nir_type_conversion_op.argtypes = [nir_alu_type, nir_alu_type, nir_rounding_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_atomic_op'
@@ -5553,103 +5553,103 @@ try:
     nir_atomic_op_type = _libraries['FIXME_STUB'].nir_atomic_op_type
     nir_atomic_op_type.restype = nir_alu_type
     nir_atomic_op_type.argtypes = [nir_atomic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_atomic_op_to_alu = _libraries['FIXME_STUB'].nir_atomic_op_to_alu
     nir_atomic_op_to_alu.restype = nir_op
     nir_atomic_op_to_alu.argtypes = [nir_atomic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_op_vec = _libraries['FIXME_STUB'].nir_op_vec
     nir_op_vec.restype = nir_op
     nir_op_vec.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_op_is_vec = _libraries['FIXME_STUB'].nir_op_is_vec
     nir_op_is_vec.restype = ctypes.c_bool
     nir_op_is_vec.argtypes = [nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_op_is_vec_or_mov = _libraries['FIXME_STUB'].nir_op_is_vec_or_mov
     nir_op_is_vec_or_mov.restype = ctypes.c_bool
     nir_op_is_vec_or_mov.argtypes = [nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_float_control_signed_zero_preserve = _libraries['FIXME_STUB'].nir_is_float_control_signed_zero_preserve
     nir_is_float_control_signed_zero_preserve.restype = ctypes.c_bool
     nir_is_float_control_signed_zero_preserve.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_float_control_inf_preserve = _libraries['FIXME_STUB'].nir_is_float_control_inf_preserve
     nir_is_float_control_inf_preserve.restype = ctypes.c_bool
     nir_is_float_control_inf_preserve.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_float_control_nan_preserve = _libraries['FIXME_STUB'].nir_is_float_control_nan_preserve
     nir_is_float_control_nan_preserve.restype = ctypes.c_bool
     nir_is_float_control_nan_preserve.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_float_control_signed_zero_inf_nan_preserve = _libraries['FIXME_STUB'].nir_is_float_control_signed_zero_inf_nan_preserve
     nir_is_float_control_signed_zero_inf_nan_preserve.restype = ctypes.c_bool
     nir_is_float_control_signed_zero_inf_nan_preserve.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_denorm_flush_to_zero = _libraries['FIXME_STUB'].nir_is_denorm_flush_to_zero
     nir_is_denorm_flush_to_zero.restype = ctypes.c_bool
     nir_is_denorm_flush_to_zero.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_denorm_preserve = _libraries['FIXME_STUB'].nir_is_denorm_preserve
     nir_is_denorm_preserve.restype = ctypes.c_bool
     nir_is_denorm_preserve.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_rounding_mode_rtne = _libraries['FIXME_STUB'].nir_is_rounding_mode_rtne
     nir_is_rounding_mode_rtne.restype = ctypes.c_bool
     nir_is_rounding_mode_rtne.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_rounding_mode_rtz = _libraries['FIXME_STUB'].nir_is_rounding_mode_rtz
     nir_is_rounding_mode_rtz.restype = ctypes.c_bool
     nir_is_rounding_mode_rtz.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_has_any_rounding_mode_rtz = _libraries['FIXME_STUB'].nir_has_any_rounding_mode_rtz
     nir_has_any_rounding_mode_rtz.restype = ctypes.c_bool
     nir_has_any_rounding_mode_rtz.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_has_any_rounding_mode_rtne = _libraries['FIXME_STUB'].nir_has_any_rounding_mode_rtne
     nir_has_any_rounding_mode_rtne.restype = ctypes.c_bool
     nir_has_any_rounding_mode_rtne.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_rounding_mode_from_float_controls = _libraries['FIXME_STUB'].nir_get_rounding_mode_from_float_controls
     nir_get_rounding_mode_from_float_controls.restype = nir_rounding_mode
     nir_get_rounding_mode_from_float_controls.argtypes = [ctypes.c_uint32, nir_alu_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_has_any_rounding_mode_enabled = _libraries['FIXME_STUB'].nir_has_any_rounding_mode_enabled
     nir_has_any_rounding_mode_enabled.restype = ctypes.c_bool
     nir_has_any_rounding_mode_enabled.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_op_algebraic_property'
@@ -5687,7 +5687,7 @@ try:
     nir_op_is_selection = _libraries['FIXME_STUB'].nir_op_is_selection
     nir_op_is_selection.restype = ctypes.c_bool
     nir_op_is_selection.argtypes = [nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_alu_instr(Structure):
     pass
@@ -5710,85 +5710,85 @@ try:
     nir_alu_instr_is_signed_zero_preserve = _libraries['FIXME_STUB'].nir_alu_instr_is_signed_zero_preserve
     nir_alu_instr_is_signed_zero_preserve.restype = ctypes.c_bool
     nir_alu_instr_is_signed_zero_preserve.argtypes = [ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_is_inf_preserve = _libraries['FIXME_STUB'].nir_alu_instr_is_inf_preserve
     nir_alu_instr_is_inf_preserve.restype = ctypes.c_bool
     nir_alu_instr_is_inf_preserve.argtypes = [ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_is_nan_preserve = _libraries['FIXME_STUB'].nir_alu_instr_is_nan_preserve
     nir_alu_instr_is_nan_preserve.restype = ctypes.c_bool
     nir_alu_instr_is_nan_preserve.argtypes = [ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_is_signed_zero_inf_nan_preserve = _libraries['FIXME_STUB'].nir_alu_instr_is_signed_zero_inf_nan_preserve
     nir_alu_instr_is_signed_zero_inf_nan_preserve.restype = ctypes.c_bool
     nir_alu_instr_is_signed_zero_inf_nan_preserve.argtypes = [ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_src_copy = _libraries['FIXME_STUB'].nir_alu_src_copy
     nir_alu_src_copy.restype = None
     nir_alu_src_copy.argtypes = [ctypes.POINTER(struct_nir_alu_src), ctypes.POINTER(struct_nir_alu_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_src_read_mask = _libraries['FIXME_STUB'].nir_alu_instr_src_read_mask
     nir_alu_instr_src_read_mask.restype = nir_component_mask_t
     nir_alu_instr_src_read_mask.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ssa_alu_instr_src_components = _libraries['FIXME_STUB'].nir_ssa_alu_instr_src_components
     nir_ssa_alu_instr_src_components.restype = ctypes.c_uint32
     nir_ssa_alu_instr_src_components.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_channel_used = _libraries['FIXME_STUB'].nir_alu_instr_channel_used
     nir_alu_instr_channel_used.restype = ctypes.c_bool
     nir_alu_instr_channel_used.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_is_comparison = _libraries['FIXME_STUB'].nir_alu_instr_is_comparison
     nir_alu_instr_is_comparison.restype = ctypes.c_bool
     nir_alu_instr_is_comparison.argtypes = [ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_const_value_negative_equal = _libraries['FIXME_STUB'].nir_const_value_negative_equal
     nir_const_value_negative_equal.restype = ctypes.c_bool
     nir_const_value_negative_equal.argtypes = [nir_const_value, nir_const_value, nir_alu_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_srcs_equal = _libraries['FIXME_STUB'].nir_alu_srcs_equal
     nir_alu_srcs_equal.restype = ctypes.c_bool
     nir_alu_srcs_equal.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_srcs_negative_equal_typed = _libraries['FIXME_STUB'].nir_alu_srcs_negative_equal_typed
     nir_alu_srcs_negative_equal_typed.restype = ctypes.c_bool
     nir_alu_srcs_negative_equal_typed.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, nir_alu_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_srcs_negative_equal = _libraries['FIXME_STUB'].nir_alu_srcs_negative_equal
     nir_alu_srcs_negative_equal.restype = ctypes.c_bool
     nir_alu_srcs_negative_equal.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_src_is_trivial_ssa = _libraries['FIXME_STUB'].nir_alu_src_is_trivial_ssa
     nir_alu_src_is_trivial_ssa.restype = ctypes.c_bool
     nir_alu_src_is_trivial_ssa.argtypes = [ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_deref_type'
@@ -5877,7 +5877,7 @@ try:
     nir_deref_cast_is_trivial = _libraries['FIXME_STUB'].nir_deref_cast_is_trivial
     nir_deref_cast_is_trivial.restype = ctypes.c_bool
     nir_deref_cast_is_trivial.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_variable_mode = c__EA_nir_variable_mode
 nir_variable_mode__enumvalues = c__EA_nir_variable_mode__enumvalues
@@ -5885,61 +5885,61 @@ try:
     nir_deref_mode_may_be = _libraries['FIXME_STUB'].nir_deref_mode_may_be
     nir_deref_mode_may_be.restype = ctypes.c_bool
     nir_deref_mode_may_be.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_mode_must_be = _libraries['FIXME_STUB'].nir_deref_mode_must_be
     nir_deref_mode_must_be.restype = ctypes.c_bool
     nir_deref_mode_must_be.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_mode_is = _libraries['FIXME_STUB'].nir_deref_mode_is
     nir_deref_mode_is.restype = ctypes.c_bool
     nir_deref_mode_is.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_mode_is_one_of = _libraries['FIXME_STUB'].nir_deref_mode_is_one_of
     nir_deref_mode_is_one_of.restype = ctypes.c_bool
     nir_deref_mode_is_one_of.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_mode_is_in_set = _libraries['FIXME_STUB'].nir_deref_mode_is_in_set
     nir_deref_mode_is_in_set.restype = ctypes.c_bool
     nir_deref_mode_is_in_set.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_deref = _libraries['FIXME_STUB'].nir_src_as_deref
     nir_src_as_deref.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_src_as_deref.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_parent = _libraries['FIXME_STUB'].nir_deref_instr_parent
     nir_deref_instr_parent.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_deref_instr_parent.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_get_variable = _libraries['FIXME_STUB'].nir_deref_instr_get_variable
     nir_deref_instr_get_variable.restype = ctypes.POINTER(struct_nir_variable)
     nir_deref_instr_get_variable.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_has_indirect = _libraries['FIXME_STUB'].nir_deref_instr_has_indirect
     nir_deref_instr_has_indirect.restype = ctypes.c_bool
     nir_deref_instr_has_indirect.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_is_known_out_of_bounds = _libraries['FIXME_STUB'].nir_deref_instr_is_known_out_of_bounds
     nir_deref_instr_is_known_out_of_bounds.restype = ctypes.c_bool
     nir_deref_instr_is_known_out_of_bounds.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_deref_instr_has_complex_use_options'
@@ -5958,19 +5958,19 @@ try:
     nir_deref_instr_has_complex_use = _libraries['FIXME_STUB'].nir_deref_instr_has_complex_use
     nir_deref_instr_has_complex_use.restype = ctypes.c_bool
     nir_deref_instr_has_complex_use.argtypes = [ctypes.POINTER(struct_nir_deref_instr), nir_deref_instr_has_complex_use_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_remove_if_unused = _libraries['FIXME_STUB'].nir_deref_instr_remove_if_unused
     nir_deref_instr_remove_if_unused.restype = ctypes.c_bool
     nir_deref_instr_remove_if_unused.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_array_stride = _libraries['FIXME_STUB'].nir_deref_instr_array_stride
     nir_deref_instr_array_stride.restype = ctypes.c_uint32
     nir_deref_instr_array_stride.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_call_instr(Structure):
     pass
@@ -7661,7 +7661,7 @@ try:
     nir_intrinsic_get_var = _libraries['FIXME_STUB'].nir_intrinsic_get_var
     nir_intrinsic_get_var.restype = ctypes.POINTER(struct_nir_variable)
     nir_intrinsic_get_var.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_memory_semantics'
@@ -7740,7 +7740,7 @@ try:
     nir_instr_xfb_write_mask = _libraries['FIXME_STUB'].nir_instr_xfb_write_mask
     nir_instr_xfb_write_mask.restype = ctypes.c_uint32
     nir_instr_xfb_write_mask.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_intrinsic_info(Structure):
     pass
@@ -7766,92 +7766,92 @@ try:
     nir_intrinsic_src_components = _libraries['FIXME_STUB'].nir_intrinsic_src_components
     nir_intrinsic_src_components.restype = ctypes.c_uint32
     nir_intrinsic_src_components.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_dest_components = _libraries['FIXME_STUB'].nir_intrinsic_dest_components
     nir_intrinsic_dest_components.restype = ctypes.c_uint32
     nir_intrinsic_dest_components.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_instr_src_type = _libraries['FIXME_STUB'].nir_intrinsic_instr_src_type
     nir_intrinsic_instr_src_type.restype = nir_alu_type
     nir_intrinsic_instr_src_type.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_instr_dest_type = _libraries['FIXME_STUB'].nir_intrinsic_instr_dest_type
     nir_intrinsic_instr_dest_type.restype = nir_alu_type
     nir_intrinsic_instr_dest_type.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_copy_const_indices = _libraries['FIXME_STUB'].nir_intrinsic_copy_const_indices
     nir_intrinsic_copy_const_indices.restype = None
     nir_intrinsic_copy_const_indices.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_set_align = _libraries['FIXME_STUB'].nir_intrinsic_set_align
     nir_intrinsic_set_align.restype = None
     nir_intrinsic_set_align.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint32_t = ctypes.c_uint32
 try:
     nir_combined_align = _libraries['FIXME_STUB'].nir_combined_align
     nir_combined_align.restype = uint32_t
     nir_combined_align.argtypes = [uint32_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_align = _libraries['FIXME_STUB'].nir_intrinsic_align
     nir_intrinsic_align.restype = ctypes.c_uint32
     nir_intrinsic_align.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_has_align = _libraries['FIXME_STUB'].nir_intrinsic_has_align
     nir_intrinsic_has_align.restype = ctypes.c_bool
     nir_intrinsic_has_align.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_image_intrinsic_coord_components = _libraries['FIXME_STUB'].nir_image_intrinsic_coord_components
     nir_image_intrinsic_coord_components.restype = ctypes.c_uint32
     nir_image_intrinsic_coord_components.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_rewrite_image_intrinsic = _libraries['FIXME_STUB'].nir_rewrite_image_intrinsic
     nir_rewrite_image_intrinsic.restype = None
     nir_rewrite_image_intrinsic.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_def), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_can_reorder = _libraries['FIXME_STUB'].nir_intrinsic_can_reorder
     nir_intrinsic_can_reorder.restype = ctypes.c_bool
     nir_intrinsic_can_reorder.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_writes_external_memory = _libraries['FIXME_STUB'].nir_intrinsic_writes_external_memory
     nir_intrinsic_writes_external_memory.restype = ctypes.c_bool
     nir_intrinsic_writes_external_memory.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_has_semantic = _libraries['FIXME_STUB'].nir_intrinsic_has_semantic
     nir_intrinsic_has_semantic.restype = ctypes.c_bool
     nir_intrinsic_has_semantic.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), nir_intrinsic_semantic_flag]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_is_ray_query = _libraries['FIXME_STUB'].nir_intrinsic_is_ray_query
     nir_intrinsic_is_ray_query.restype = ctypes.c_bool
     nir_intrinsic_is_ray_query.argtypes = [nir_intrinsic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'nir_tex_src_type'
@@ -8010,67 +8010,67 @@ try:
     nir_tex_instr_need_sampler = _libraries['FIXME_STUB'].nir_tex_instr_need_sampler
     nir_tex_instr_need_sampler.restype = ctypes.c_bool
     nir_tex_instr_need_sampler.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_result_size = _libraries['FIXME_STUB'].nir_tex_instr_result_size
     nir_tex_instr_result_size.restype = ctypes.c_uint32
     nir_tex_instr_result_size.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_dest_size = _libraries['FIXME_STUB'].nir_tex_instr_dest_size
     nir_tex_instr_dest_size.restype = ctypes.c_uint32
     nir_tex_instr_dest_size.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_is_query = _libraries['FIXME_STUB'].nir_tex_instr_is_query
     nir_tex_instr_is_query.restype = ctypes.c_bool
     nir_tex_instr_is_query.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_has_implicit_derivative = _libraries['FIXME_STUB'].nir_tex_instr_has_implicit_derivative
     nir_tex_instr_has_implicit_derivative.restype = ctypes.c_bool
     nir_tex_instr_has_implicit_derivative.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_src_type = _libraries['FIXME_STUB'].nir_tex_instr_src_type
     nir_tex_instr_src_type.restype = nir_alu_type
     nir_tex_instr_src_type.argtypes = [ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_src_size = _libraries['FIXME_STUB'].nir_tex_instr_src_size
     nir_tex_instr_src_size.restype = ctypes.c_uint32
     nir_tex_instr_src_size.argtypes = [ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_src_index = _libraries['FIXME_STUB'].nir_tex_instr_src_index
     nir_tex_instr_src_index.restype = ctypes.c_int32
     nir_tex_instr_src_index.argtypes = [ctypes.POINTER(struct_nir_tex_instr), nir_tex_src_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_add_src = _libraries['FIXME_STUB'].nir_tex_instr_add_src
     nir_tex_instr_add_src.restype = None
     nir_tex_instr_add_src.argtypes = [ctypes.POINTER(struct_nir_tex_instr), nir_tex_src_type, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_remove_src = _libraries['FIXME_STUB'].nir_tex_instr_remove_src
     nir_tex_instr_remove_src.restype = None
     nir_tex_instr_remove_src.argtypes = [ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_has_explicit_tg4_offsets = _libraries['FIXME_STUB'].nir_tex_instr_has_explicit_tg4_offsets
     nir_tex_instr_has_explicit_tg4_offsets.restype = ctypes.c_bool
     nir_tex_instr_has_explicit_tg4_offsets.argtypes = [ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_load_const_instr(Structure):
     _pack_ = 1 # source:False
@@ -8146,7 +8146,7 @@ try:
     nir_phi_get_src_from_block = _libraries['FIXME_STUB'].nir_phi_get_src_from_block
     nir_phi_get_src_from_block.restype = ctypes.POINTER(struct_nir_phi_src)
     nir_phi_get_src_from_block.argtypes = [ctypes.POINTER(struct_nir_phi_instr), ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_parallel_copy_entry(Structure):
     pass
@@ -8196,109 +8196,109 @@ try:
     nir_instr_as_alu = _libraries['FIXME_STUB'].nir_instr_as_alu
     nir_instr_as_alu.restype = ctypes.POINTER(struct_nir_alu_instr)
     nir_instr_as_alu.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_deref = _libraries['FIXME_STUB'].nir_instr_as_deref
     nir_instr_as_deref.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_instr_as_deref.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_call = _libraries['FIXME_STUB'].nir_instr_as_call
     nir_instr_as_call.restype = ctypes.POINTER(struct_nir_call_instr)
     nir_instr_as_call.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_jump = _libraries['FIXME_STUB'].nir_instr_as_jump
     nir_instr_as_jump.restype = ctypes.POINTER(struct_nir_jump_instr)
     nir_instr_as_jump.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_tex = _libraries['FIXME_STUB'].nir_instr_as_tex
     nir_instr_as_tex.restype = ctypes.POINTER(struct_nir_tex_instr)
     nir_instr_as_tex.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_intrinsic = _libraries['FIXME_STUB'].nir_instr_as_intrinsic
     nir_instr_as_intrinsic.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_instr_as_intrinsic.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_load_const = _libraries['FIXME_STUB'].nir_instr_as_load_const
     nir_instr_as_load_const.restype = ctypes.POINTER(struct_nir_load_const_instr)
     nir_instr_as_load_const.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_undef = _libraries['FIXME_STUB'].nir_instr_as_undef
     nir_instr_as_undef.restype = ctypes.POINTER(struct_nir_undef_instr)
     nir_instr_as_undef.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_phi = _libraries['FIXME_STUB'].nir_instr_as_phi
     nir_instr_as_phi.restype = ctypes.POINTER(struct_nir_phi_instr)
     nir_instr_as_phi.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_parallel_copy = _libraries['FIXME_STUB'].nir_instr_as_parallel_copy
     nir_instr_as_parallel_copy.restype = ctypes.POINTER(struct_nir_parallel_copy_instr)
     nir_instr_as_parallel_copy.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_comp_as_int = _libraries['FIXME_STUB'].nir_src_comp_as_int
     nir_src_comp_as_int.restype = int64_t
     nir_src_comp_as_int.argtypes = [nir_src, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_int = _libraries['FIXME_STUB'].nir_src_as_int
     nir_src_as_int.restype = int64_t
     nir_src_as_int.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_comp_as_uint = _libraries['FIXME_STUB'].nir_src_comp_as_uint
     nir_src_comp_as_uint.restype = uint64_t
     nir_src_comp_as_uint.argtypes = [nir_src, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_uint = _libraries['FIXME_STUB'].nir_src_as_uint
     nir_src_as_uint.restype = uint64_t
     nir_src_as_uint.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_comp_as_bool = _libraries['FIXME_STUB'].nir_src_comp_as_bool
     nir_src_comp_as_bool.restype = ctypes.c_bool
     nir_src_comp_as_bool.argtypes = [nir_src, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_bool = _libraries['FIXME_STUB'].nir_src_as_bool
     nir_src_as_bool.restype = ctypes.c_bool
     nir_src_as_bool.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_comp_as_float = _libraries['FIXME_STUB'].nir_src_comp_as_float
     nir_src_comp_as_float.restype = ctypes.c_double
     nir_src_comp_as_float.argtypes = [nir_src, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_float = _libraries['FIXME_STUB'].nir_src_as_float
     nir_src_as_float.restype = ctypes.c_double
     nir_src_as_float.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_scalar(Structure):
     pass
@@ -8315,103 +8315,103 @@ try:
     nir_scalar_is_const = _libraries['FIXME_STUB'].nir_scalar_is_const
     nir_scalar_is_const.restype = ctypes.c_bool
     nir_scalar_is_const.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_is_undef = _libraries['FIXME_STUB'].nir_scalar_is_undef
     nir_scalar_is_undef.restype = ctypes.c_bool
     nir_scalar_is_undef.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_as_const_value = _libraries['FIXME_STUB'].nir_scalar_as_const_value
     nir_scalar_as_const_value.restype = nir_const_value
     nir_scalar_as_const_value.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_as_int = _libraries['FIXME_STUB'].nir_scalar_as_int
     nir_scalar_as_int.restype = int64_t
     nir_scalar_as_int.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_as_uint = _libraries['FIXME_STUB'].nir_scalar_as_uint
     nir_scalar_as_uint.restype = uint64_t
     nir_scalar_as_uint.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_as_bool = _libraries['FIXME_STUB'].nir_scalar_as_bool
     nir_scalar_as_bool.restype = ctypes.c_bool
     nir_scalar_as_bool.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_as_float = _libraries['FIXME_STUB'].nir_scalar_as_float
     nir_scalar_as_float.restype = ctypes.c_double
     nir_scalar_as_float.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_is_alu = _libraries['FIXME_STUB'].nir_scalar_is_alu
     nir_scalar_is_alu.restype = ctypes.c_bool
     nir_scalar_is_alu.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_alu_op = _libraries['FIXME_STUB'].nir_scalar_alu_op
     nir_scalar_alu_op.restype = nir_op
     nir_scalar_alu_op.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_is_intrinsic = _libraries['FIXME_STUB'].nir_scalar_is_intrinsic
     nir_scalar_is_intrinsic.restype = ctypes.c_bool
     nir_scalar_is_intrinsic.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_intrinsic_op = _libraries['FIXME_STUB'].nir_scalar_intrinsic_op
     nir_scalar_intrinsic_op.restype = nir_intrinsic_op
     nir_scalar_intrinsic_op.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_chase_alu_src = _libraries['FIXME_STUB'].nir_scalar_chase_alu_src
     nir_scalar_chase_alu_src.restype = nir_scalar
     nir_scalar_chase_alu_src.argtypes = [nir_scalar, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_chase_movs = _libraries['FIXME_STUB'].nir_scalar_chase_movs
     nir_scalar_chase_movs.restype = nir_scalar
     nir_scalar_chase_movs.argtypes = [nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_scalar = _libraries['FIXME_STUB'].nir_get_scalar
     nir_get_scalar.restype = nir_scalar
     nir_get_scalar.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_resolved = _libraries['FIXME_STUB'].nir_scalar_resolved
     nir_scalar_resolved.restype = nir_scalar
     nir_scalar_resolved.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scalar_equal = _libraries['FIXME_STUB'].nir_scalar_equal
     nir_scalar_equal.restype = ctypes.c_bool
     nir_scalar_equal.argtypes = [nir_scalar, nir_scalar]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_src_as_uint = _libraries['FIXME_STUB'].nir_alu_src_as_uint
     nir_alu_src_as_uint.restype = uint64_t
     nir_alu_src_as_uint.argtypes = [nir_alu_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_binding(Structure):
     pass
@@ -8435,13 +8435,13 @@ try:
     nir_chase_binding = _libraries['FIXME_STUB'].nir_chase_binding
     nir_chase_binding.restype = nir_binding
     nir_chase_binding.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_binding_variable = _libraries['FIXME_STUB'].nir_get_binding_variable
     nir_get_binding_variable.restype = ctypes.POINTER(struct_nir_variable)
     nir_get_binding_variable.argtypes = [ctypes.POINTER(struct_nir_shader), nir_binding]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_cf_node_type = c__EA_nir_cf_node_type
 nir_cf_node_type__enumvalues = c__EA_nir_cf_node_type__enumvalues
@@ -8451,61 +8451,61 @@ try:
     nir_block_is_reachable = _libraries['FIXME_STUB'].nir_block_is_reachable
     nir_block_is_reachable.restype = ctypes.c_bool
     nir_block_is_reachable.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_first_instr = _libraries['FIXME_STUB'].nir_block_first_instr
     nir_block_first_instr.restype = ctypes.POINTER(struct_nir_instr)
     nir_block_first_instr.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_last_instr = _libraries['FIXME_STUB'].nir_block_last_instr
     nir_block_last_instr.restype = ctypes.POINTER(struct_nir_instr)
     nir_block_last_instr.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_ends_in_jump = _libraries['FIXME_STUB'].nir_block_ends_in_jump
     nir_block_ends_in_jump.restype = ctypes.c_bool
     nir_block_ends_in_jump.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_ends_in_return_or_halt = _libraries['FIXME_STUB'].nir_block_ends_in_return_or_halt
     nir_block_ends_in_return_or_halt.restype = ctypes.c_bool
     nir_block_ends_in_return_or_halt.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_ends_in_break = _libraries['FIXME_STUB'].nir_block_ends_in_break
     nir_block_ends_in_break.restype = ctypes.c_bool
     nir_block_ends_in_break.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_contains_work = _libraries['FIXME_STUB'].nir_block_contains_work
     nir_block_contains_work.restype = ctypes.c_bool
     nir_block_contains_work.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_first_phi_in_block = _libraries['FIXME_STUB'].nir_first_phi_in_block
     nir_first_phi_in_block.restype = ctypes.POINTER(struct_nir_phi_instr)
     nir_first_phi_in_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_next_phi = _libraries['FIXME_STUB'].nir_next_phi
     nir_next_phi.restype = ctypes.POINTER(struct_nir_phi_instr)
     nir_next_phi.argtypes = [ctypes.POINTER(struct_nir_phi_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_last_phi_instr = _libraries['FIXME_STUB'].nir_block_last_phi_instr
     nir_block_last_phi_instr.restype = ctypes.POINTER(struct_nir_phi_instr)
     nir_block_last_phi_instr.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_selection_control = c__EA_nir_selection_control
 nir_selection_control__enumvalues = c__EA_nir_selection_control__enumvalues
@@ -8623,7 +8623,7 @@ try:
     nir_loop_is_divergent = _libraries['FIXME_STUB'].nir_loop_is_divergent
     nir_loop_is_divergent.restype = ctypes.c_bool
     nir_loop_is_divergent.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_metadata = c__EA_nir_metadata
 nir_metadata__enumvalues = c__EA_nir_metadata__enumvalues
@@ -8632,127 +8632,127 @@ try:
     nir_start_block = _libraries['FIXME_STUB'].nir_start_block
     nir_start_block.restype = ctypes.POINTER(struct_nir_block)
     nir_start_block.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_impl_last_block = _libraries['FIXME_STUB'].nir_impl_last_block
     nir_impl_last_block.restype = ctypes.POINTER(struct_nir_block)
     nir_impl_last_block.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_next = _libraries['FIXME_STUB'].nir_cf_node_next
     nir_cf_node_next.restype = ctypes.POINTER(struct_nir_cf_node)
     nir_cf_node_next.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_prev = _libraries['FIXME_STUB'].nir_cf_node_prev
     nir_cf_node_prev.restype = ctypes.POINTER(struct_nir_cf_node)
     nir_cf_node_prev.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_is_first = _libraries['FIXME_STUB'].nir_cf_node_is_first
     nir_cf_node_is_first.restype = ctypes.c_bool
     nir_cf_node_is_first.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_is_last = _libraries['FIXME_STUB'].nir_cf_node_is_last
     nir_cf_node_is_last.restype = ctypes.c_bool
     nir_cf_node_is_last.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_as_block = _libraries['FIXME_STUB'].nir_cf_node_as_block
     nir_cf_node_as_block.restype = ctypes.POINTER(struct_nir_block)
     nir_cf_node_as_block.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_as_if = _libraries['FIXME_STUB'].nir_cf_node_as_if
     nir_cf_node_as_if.restype = ctypes.POINTER(struct_nir_if)
     nir_cf_node_as_if.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_as_loop = _libraries['FIXME_STUB'].nir_cf_node_as_loop
     nir_cf_node_as_loop.restype = ctypes.POINTER(struct_nir_loop)
     nir_cf_node_as_loop.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_as_function = _libraries['FIXME_STUB'].nir_cf_node_as_function
     nir_cf_node_as_function.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_cf_node_as_function.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_first_then_block = _libraries['FIXME_STUB'].nir_if_first_then_block
     nir_if_first_then_block.restype = ctypes.POINTER(struct_nir_block)
     nir_if_first_then_block.argtypes = [ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_last_then_block = _libraries['FIXME_STUB'].nir_if_last_then_block
     nir_if_last_then_block.restype = ctypes.POINTER(struct_nir_block)
     nir_if_last_then_block.argtypes = [ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_first_else_block = _libraries['FIXME_STUB'].nir_if_first_else_block
     nir_if_first_else_block.restype = ctypes.POINTER(struct_nir_block)
     nir_if_first_else_block.argtypes = [ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_last_else_block = _libraries['FIXME_STUB'].nir_if_last_else_block
     nir_if_last_else_block.restype = ctypes.POINTER(struct_nir_block)
     nir_if_last_else_block.argtypes = [ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_first_block = _libraries['FIXME_STUB'].nir_loop_first_block
     nir_loop_first_block.restype = ctypes.POINTER(struct_nir_block)
     nir_loop_first_block.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_last_block = _libraries['FIXME_STUB'].nir_loop_last_block
     nir_loop_last_block.restype = ctypes.POINTER(struct_nir_block)
     nir_loop_last_block.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_has_continue_construct = _libraries['FIXME_STUB'].nir_loop_has_continue_construct
     nir_loop_has_continue_construct.restype = ctypes.c_bool
     nir_loop_has_continue_construct.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_first_continue_block = _libraries['FIXME_STUB'].nir_loop_first_continue_block
     nir_loop_first_continue_block.restype = ctypes.POINTER(struct_nir_block)
     nir_loop_first_continue_block.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_last_continue_block = _libraries['FIXME_STUB'].nir_loop_last_continue_block
     nir_loop_last_continue_block.restype = ctypes.POINTER(struct_nir_block)
     nir_loop_last_continue_block.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_continue_target = _libraries['FIXME_STUB'].nir_loop_continue_target
     nir_loop_continue_target.restype = ctypes.POINTER(struct_nir_block)
     nir_loop_continue_target.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_list_is_empty_block = _libraries['FIXME_STUB'].nir_cf_list_is_empty_block
     nir_cf_list_is_empty_block.restype = ctypes.c_bool
     nir_cf_list_is_empty_block.argtypes = [ctypes.POINTER(struct_exec_list)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_parameter = struct_nir_parameter
 nir_function = struct_nir_function
@@ -8763,49 +8763,49 @@ try:
     nir_foreach_function_with_impl_first = _libraries['FIXME_STUB'].nir_foreach_function_with_impl_first
     nir_foreach_function_with_impl_first.restype = ctypes.POINTER(struct_nir_function)
     nir_foreach_function_with_impl_first.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_foreach_function_with_impl_next = _libraries['FIXME_STUB'].nir_foreach_function_with_impl_next
     nir_foreach_function_with_impl_next.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_foreach_function_with_impl_next.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_nir_function))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_get_entrypoint = _libraries['FIXME_STUB'].nir_shader_get_entrypoint
     nir_shader_get_entrypoint.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_shader_get_entrypoint.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_get_function_for_name = _libraries['FIXME_STUB'].nir_shader_get_function_for_name
     nir_shader_get_function_for_name.restype = ctypes.POINTER(struct_nir_function)
     nir_shader_get_function_for_name.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_non_entrypoints = _libraries['FIXME_STUB'].nir_remove_non_entrypoints
     nir_remove_non_entrypoints.restype = None
     nir_remove_non_entrypoints.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_non_exported = _libraries['FIXME_STUB'].nir_remove_non_exported
     nir_remove_non_exported.restype = None
     nir_remove_non_exported.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_entrypoints = _libraries['FIXME_STUB'].nir_remove_entrypoints
     nir_remove_entrypoints.restype = None
     nir_remove_entrypoints.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fixup_is_exported = _libraries['FIXME_STUB'].nir_fixup_is_exported
     nir_fixup_is_exported.restype = None
     nir_fixup_is_exported.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 gl_shader_stage = pipe_shader_type
 gl_shader_stage__enumvalues = pipe_shader_type__enumvalues
@@ -8813,229 +8813,229 @@ try:
     nir_shader_create = _libraries['FIXME_STUB'].nir_shader_create
     nir_shader_create.restype = ctypes.POINTER(struct_nir_shader)
     nir_shader_create.argtypes = [ctypes.POINTER(None), gl_shader_stage, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_shader_info)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_add_variable = _libraries['FIXME_STUB'].nir_shader_add_variable
     nir_shader_add_variable.restype = None
     nir_shader_add_variable.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_add_variable = _libraries['FIXME_STUB'].nir_function_impl_add_variable
     nir_function_impl_add_variable.restype = None
     nir_function_impl_add_variable.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_create = _libraries['FIXME_STUB'].nir_variable_create
     nir_variable_create.restype = ctypes.POINTER(struct_nir_variable)
     nir_variable_create.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_local_variable_create = _libraries['FIXME_STUB'].nir_local_variable_create
     nir_local_variable_create.restype = ctypes.POINTER(struct_nir_variable)
     nir_local_variable_create.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_state_variable_create = _libraries['FIXME_STUB'].nir_state_variable_create
     nir_state_variable_create.restype = ctypes.POINTER(struct_nir_variable)
     nir_state_variable_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char), ctypes.c_int16 * 4]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_variable_with_location = _libraries['FIXME_STUB'].nir_get_variable_with_location
     nir_get_variable_with_location.restype = ctypes.POINTER(struct_nir_variable)
     nir_get_variable_with_location.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_create_variable_with_location = _libraries['FIXME_STUB'].nir_create_variable_with_location
     nir_create_variable_with_location.restype = ctypes.POINTER(struct_nir_variable)
     nir_create_variable_with_location.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_find_variable_with_location = _libraries['FIXME_STUB'].nir_find_variable_with_location
     nir_find_variable_with_location.restype = ctypes.POINTER(struct_nir_variable)
     nir_find_variable_with_location.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_find_variable_with_driver_location = _libraries['FIXME_STUB'].nir_find_variable_with_driver_location
     nir_find_variable_with_driver_location.restype = ctypes.POINTER(struct_nir_variable)
     nir_find_variable_with_driver_location.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_find_state_variable = _libraries['FIXME_STUB'].nir_find_state_variable
     nir_find_state_variable.restype = ctypes.POINTER(struct_nir_variable)
     nir_find_state_variable.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_int16 * 4]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_find_sampler_variable_with_tex_index = _libraries['FIXME_STUB'].nir_find_sampler_variable_with_tex_index
     nir_find_sampler_variable_with_tex_index.restype = ctypes.POINTER(struct_nir_variable)
     nir_find_sampler_variable_with_tex_index.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_sort_variables_with_modes = _libraries['FIXME_STUB'].nir_sort_variables_with_modes
     nir_sort_variables_with_modes.restype = None
     nir_sort_variables_with_modes.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_variable)), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_create = _libraries['FIXME_STUB'].nir_function_create
     nir_function_create.restype = ctypes.POINTER(struct_nir_function)
     nir_function_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_set_impl = _libraries['FIXME_STUB'].nir_function_set_impl
     nir_function_set_impl.restype = None
     nir_function_set_impl.argtypes = [ctypes.POINTER(struct_nir_function), ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_create = _libraries['FIXME_STUB'].nir_function_impl_create
     nir_function_impl_create.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_function_impl_create.argtypes = [ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_create_bare = _libraries['FIXME_STUB'].nir_function_impl_create_bare
     nir_function_impl_create_bare.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_function_impl_create_bare.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_create = _libraries['FIXME_STUB'].nir_block_create
     nir_block_create.restype = ctypes.POINTER(struct_nir_block)
     nir_block_create.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_create = _libraries['FIXME_STUB'].nir_if_create
     nir_if_create.restype = ctypes.POINTER(struct_nir_if)
     nir_if_create.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_create = _libraries['FIXME_STUB'].nir_loop_create
     nir_loop_create.restype = ctypes.POINTER(struct_nir_loop)
     nir_loop_create.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_get_function = _libraries['FIXME_STUB'].nir_cf_node_get_function
     nir_cf_node_get_function.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_cf_node_get_function.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_metadata_require = _libraries['FIXME_STUB'].nir_metadata_require
     nir_metadata_require.restype = None
     nir_metadata_require.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_metadata]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_preserve_all_metadata = _libraries['FIXME_STUB'].nir_shader_preserve_all_metadata
     nir_shader_preserve_all_metadata.restype = None
     nir_shader_preserve_all_metadata.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_metadata_invalidate = _libraries['FIXME_STUB'].nir_metadata_invalidate
     nir_metadata_invalidate.restype = None
     nir_metadata_invalidate.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_progress = _libraries['FIXME_STUB'].nir_progress
     nir_progress.restype = ctypes.c_bool
     nir_progress.argtypes = [ctypes.c_bool, ctypes.POINTER(struct_nir_function_impl), nir_metadata]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_no_progress = _libraries['FIXME_STUB'].nir_no_progress
     nir_no_progress.restype = ctypes.c_bool
     nir_no_progress.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_create = _libraries['FIXME_STUB'].nir_alu_instr_create
     nir_alu_instr_create.restype = ctypes.POINTER(struct_nir_alu_instr)
     nir_alu_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_instr_create = _libraries['FIXME_STUB'].nir_deref_instr_create
     nir_deref_instr_create.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_deref_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), nir_deref_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_jump_instr_create = _libraries['FIXME_STUB'].nir_jump_instr_create
     nir_jump_instr_create.restype = ctypes.POINTER(struct_nir_jump_instr)
     nir_jump_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), nir_jump_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_const_instr_create = _libraries['FIXME_STUB'].nir_load_const_instr_create
     nir_load_const_instr_create.restype = ctypes.POINTER(struct_nir_load_const_instr)
     nir_load_const_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_intrinsic_instr_create = _libraries['FIXME_STUB'].nir_intrinsic_instr_create
     nir_intrinsic_instr_create.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_intrinsic_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), nir_intrinsic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_call_instr_create = _libraries['FIXME_STUB'].nir_call_instr_create
     nir_call_instr_create.restype = ctypes.POINTER(struct_nir_call_instr)
     nir_call_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_instr_create = _libraries['FIXME_STUB'].nir_tex_instr_create
     nir_tex_instr_create.restype = ctypes.POINTER(struct_nir_tex_instr)
     nir_tex_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_phi_instr_create = _libraries['FIXME_STUB'].nir_phi_instr_create
     nir_phi_instr_create.restype = ctypes.POINTER(struct_nir_phi_instr)
     nir_phi_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_phi_instr_add_src = _libraries['FIXME_STUB'].nir_phi_instr_add_src
     nir_phi_instr_add_src.restype = ctypes.POINTER(struct_nir_phi_src)
     nir_phi_instr_add_src.argtypes = [ctypes.POINTER(struct_nir_phi_instr), ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_parallel_copy_instr_create = _libraries['FIXME_STUB'].nir_parallel_copy_instr_create
     nir_parallel_copy_instr_create.restype = ctypes.POINTER(struct_nir_parallel_copy_instr)
     nir_parallel_copy_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_undef_instr_create = _libraries['FIXME_STUB'].nir_undef_instr_create
     nir_undef_instr_create.restype = ctypes.POINTER(struct_nir_undef_instr)
     nir_undef_instr_create.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_binop_identity = _libraries['FIXME_STUB'].nir_alu_binop_identity
     nir_alu_binop_identity.restype = nir_const_value
     nir_alu_binop_identity.argtypes = [nir_op, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_cursor_option'
@@ -9077,217 +9077,217 @@ try:
     nir_cursor_current_block = _libraries['FIXME_STUB'].nir_cursor_current_block
     nir_cursor_current_block.restype = ctypes.POINTER(struct_nir_block)
     nir_cursor_current_block.argtypes = [nir_cursor]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cursors_equal = _libraries['FIXME_STUB'].nir_cursors_equal
     nir_cursors_equal.restype = ctypes.c_bool
     nir_cursors_equal.argtypes = [nir_cursor, nir_cursor]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_block = _libraries['FIXME_STUB'].nir_before_block
     nir_before_block.restype = nir_cursor
     nir_before_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_block = _libraries['FIXME_STUB'].nir_after_block
     nir_after_block.restype = nir_cursor
     nir_after_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_instr = _libraries['FIXME_STUB'].nir_before_instr
     nir_before_instr.restype = nir_cursor
     nir_before_instr.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_instr = _libraries['FIXME_STUB'].nir_after_instr
     nir_after_instr.restype = nir_cursor
     nir_after_instr.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_block_after_phis = _libraries['FIXME_STUB'].nir_before_block_after_phis
     nir_before_block_after_phis.restype = nir_cursor
     nir_before_block_after_phis.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_block_before_jump = _libraries['FIXME_STUB'].nir_after_block_before_jump
     nir_after_block_before_jump.restype = nir_cursor
     nir_after_block_before_jump.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_src = _libraries['FIXME_STUB'].nir_before_src
     nir_before_src.restype = nir_cursor
     nir_before_src.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_cf_node = _libraries['FIXME_STUB'].nir_before_cf_node
     nir_before_cf_node.restype = nir_cursor
     nir_before_cf_node.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_cf_node = _libraries['FIXME_STUB'].nir_after_cf_node
     nir_after_cf_node.restype = nir_cursor
     nir_after_cf_node.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_phis = _libraries['FIXME_STUB'].nir_after_phis
     nir_after_phis.restype = nir_cursor
     nir_after_phis.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_instr_and_phis = _libraries['FIXME_STUB'].nir_after_instr_and_phis
     nir_after_instr_and_phis.restype = nir_cursor
     nir_after_instr_and_phis.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_cf_node_and_phis = _libraries['FIXME_STUB'].nir_after_cf_node_and_phis
     nir_after_cf_node_and_phis.restype = nir_cursor
     nir_after_cf_node_and_phis.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_cf_list = _libraries['FIXME_STUB'].nir_before_cf_list
     nir_before_cf_list.restype = nir_cursor
     nir_before_cf_list.argtypes = [ctypes.POINTER(struct_exec_list)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_cf_list = _libraries['FIXME_STUB'].nir_after_cf_list
     nir_after_cf_list.restype = nir_cursor
     nir_after_cf_list.argtypes = [ctypes.POINTER(struct_exec_list)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_before_impl = _libraries['FIXME_STUB'].nir_before_impl
     nir_before_impl.restype = nir_cursor
     nir_before_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_impl = _libraries['FIXME_STUB'].nir_after_impl
     nir_after_impl.restype = nir_cursor
     nir_after_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert = _libraries['FIXME_STUB'].nir_instr_insert
     nir_instr_insert.restype = None
     nir_instr_insert.argtypes = [nir_cursor, ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_move = _libraries['FIXME_STUB'].nir_instr_move
     nir_instr_move.restype = ctypes.c_bool
     nir_instr_move.argtypes = [nir_cursor, ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_before = _libraries['FIXME_STUB'].nir_instr_insert_before
     nir_instr_insert_before.restype = None
     nir_instr_insert_before.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_after = _libraries['FIXME_STUB'].nir_instr_insert_after
     nir_instr_insert_after.restype = None
     nir_instr_insert_after.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_before_block = _libraries['FIXME_STUB'].nir_instr_insert_before_block
     nir_instr_insert_before_block.restype = None
     nir_instr_insert_before_block.argtypes = [ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_after_block = _libraries['FIXME_STUB'].nir_instr_insert_after_block
     nir_instr_insert_after_block.restype = None
     nir_instr_insert_after_block.argtypes = [ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_before_cf = _libraries['FIXME_STUB'].nir_instr_insert_before_cf
     nir_instr_insert_before_cf.restype = None
     nir_instr_insert_before_cf.argtypes = [ctypes.POINTER(struct_nir_cf_node), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_after_cf = _libraries['FIXME_STUB'].nir_instr_insert_after_cf
     nir_instr_insert_after_cf.restype = None
     nir_instr_insert_after_cf.argtypes = [ctypes.POINTER(struct_nir_cf_node), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_before_cf_list = _libraries['FIXME_STUB'].nir_instr_insert_before_cf_list
     nir_instr_insert_before_cf_list.restype = None
     nir_instr_insert_before_cf_list.argtypes = [ctypes.POINTER(struct_exec_list), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_insert_after_cf_list = _libraries['FIXME_STUB'].nir_instr_insert_after_cf_list
     nir_instr_insert_after_cf_list.restype = None
     nir_instr_insert_after_cf_list.argtypes = [ctypes.POINTER(struct_exec_list), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_remove_v = _libraries['FIXME_STUB'].nir_instr_remove_v
     nir_instr_remove_v.restype = None
     nir_instr_remove_v.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_free = _libraries['FIXME_STUB'].nir_instr_free
     nir_instr_free.restype = None
     nir_instr_free.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_free_list = _libraries['FIXME_STUB'].nir_instr_free_list
     nir_instr_free_list.restype = None
     nir_instr_free_list.argtypes = [ctypes.POINTER(struct_exec_list)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_remove = _libraries['FIXME_STUB'].nir_instr_remove
     nir_instr_remove.restype = nir_cursor
     nir_instr_remove.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_free_and_dce = _libraries['FIXME_STUB'].nir_instr_free_and_dce
     nir_instr_free_and_dce.restype = nir_cursor
     nir_instr_free_and_dce.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_def = _libraries['FIXME_STUB'].nir_instr_def
     nir_instr_def.restype = ctypes.POINTER(struct_nir_def)
     nir_instr_def.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_get_debug_info = _libraries['FIXME_STUB'].nir_instr_get_debug_info
     nir_instr_get_debug_info.restype = ctypes.POINTER(struct_nir_instr_debug_info)
     nir_instr_get_debug_info.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_get_gc_pointer = _libraries['FIXME_STUB'].nir_instr_get_gc_pointer
     nir_instr_get_gc_pointer.restype = ctypes.POINTER(None)
     nir_instr_get_gc_pointer.argtypes = [ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_foreach_def_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_def), ctypes.POINTER(None))
 nir_foreach_src_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_src), ctypes.POINTER(None))
@@ -9295,307 +9295,307 @@ try:
     nir_foreach_src = _libraries['FIXME_STUB'].nir_foreach_src
     nir_foreach_src.restype = ctypes.c_bool
     nir_foreach_src.argtypes = [ctypes.POINTER(struct_nir_instr), nir_foreach_src_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_foreach_phi_src_leaving_block = _libraries['FIXME_STUB'].nir_foreach_phi_src_leaving_block
     nir_foreach_phi_src_leaving_block.restype = ctypes.c_bool
     nir_foreach_phi_src_leaving_block.argtypes = [ctypes.POINTER(struct_nir_block), nir_foreach_src_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_const_value = _libraries['FIXME_STUB'].nir_src_as_const_value
     nir_src_as_const_value.restype = ctypes.POINTER(union_c__UA_nir_const_value)
     nir_src_as_const_value.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_alu_instr = _libraries['FIXME_STUB'].nir_src_as_alu_instr
     nir_src_as_alu_instr.restype = ctypes.POINTER(struct_nir_alu_instr)
     nir_src_as_alu_instr.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_intrinsic = _libraries['FIXME_STUB'].nir_src_as_intrinsic
     nir_src_as_intrinsic.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_src_as_intrinsic.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_as_string = _libraries['FIXME_STUB'].nir_src_as_string
     nir_src_as_string.restype = ctypes.POINTER(ctypes.c_char)
     nir_src_as_string.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_is_always_uniform = _libraries['FIXME_STUB'].nir_src_is_always_uniform
     nir_src_is_always_uniform.restype = ctypes.c_bool
     nir_src_is_always_uniform.argtypes = [nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_srcs_equal = _libraries['FIXME_STUB'].nir_srcs_equal
     nir_srcs_equal.restype = ctypes.c_bool
     nir_srcs_equal.argtypes = [nir_src, nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instrs_equal = _libraries['FIXME_STUB'].nir_instrs_equal
     nir_instrs_equal.restype = ctypes.c_bool
     nir_instrs_equal.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_get_block = _libraries['FIXME_STUB'].nir_src_get_block
     nir_src_get_block.restype = ctypes.POINTER(struct_nir_block)
     nir_src_get_block.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_rewrite = _libraries['FIXME_STUB'].nir_src_rewrite
     nir_src_rewrite.restype = None
     nir_src_rewrite.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_init_src = _libraries['FIXME_STUB'].nir_instr_init_src
     nir_instr_init_src.restype = None
     nir_instr_init_src.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_clear_src = _libraries['FIXME_STUB'].nir_instr_clear_src
     nir_instr_clear_src.restype = None
     nir_instr_clear_src.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_move_src = _libraries['FIXME_STUB'].nir_instr_move_src
     nir_instr_move_src.restype = None
     nir_instr_move_src.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_is_before = _libraries['FIXME_STUB'].nir_instr_is_before
     nir_instr_is_before.restype = ctypes.c_bool
     nir_instr_is_before.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_init = _libraries['FIXME_STUB'].nir_def_init
     nir_def_init.restype = None
     nir_def_init.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_init_for_type = _libraries['FIXME_STUB'].nir_def_init_for_type
     nir_def_init_for_type.restype = None
     nir_def_init_for_type.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_rewrite_uses = _libraries['FIXME_STUB'].nir_def_rewrite_uses
     nir_def_rewrite_uses.restype = None
     nir_def_rewrite_uses.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_rewrite_uses_src = _libraries['FIXME_STUB'].nir_def_rewrite_uses_src
     nir_def_rewrite_uses_src.restype = None
     nir_def_rewrite_uses_src.argtypes = [ctypes.POINTER(struct_nir_def), nir_src]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_rewrite_uses_after = _libraries['FIXME_STUB'].nir_def_rewrite_uses_after
     nir_def_rewrite_uses_after.restype = None
     nir_def_rewrite_uses_after.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_replace = _libraries['FIXME_STUB'].nir_def_replace
     nir_def_replace.restype = None
     nir_def_replace.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_src_components_read = _libraries['FIXME_STUB'].nir_src_components_read
     nir_src_components_read.restype = nir_component_mask_t
     nir_src_components_read.argtypes = [ctypes.POINTER(struct_nir_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_components_read = _libraries['FIXME_STUB'].nir_def_components_read
     nir_def_components_read.restype = nir_component_mask_t
     nir_def_components_read.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_all_uses_are_fsat = _libraries['FIXME_STUB'].nir_def_all_uses_are_fsat
     nir_def_all_uses_are_fsat.restype = ctypes.c_bool
     nir_def_all_uses_are_fsat.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_all_uses_ignore_sign_bit = _libraries['FIXME_STUB'].nir_def_all_uses_ignore_sign_bit
     nir_def_all_uses_ignore_sign_bit.restype = ctypes.c_bool
     nir_def_all_uses_ignore_sign_bit.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_first_component_read = _libraries['FIXME_STUB'].nir_def_first_component_read
     nir_def_first_component_read.restype = ctypes.c_int32
     nir_def_first_component_read.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_last_component_read = _libraries['FIXME_STUB'].nir_def_last_component_read
     nir_def_last_component_read.restype = ctypes.c_int32
     nir_def_last_component_read.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_is_unused = _libraries['FIXME_STUB'].nir_def_is_unused
     nir_def_is_unused.restype = ctypes.c_bool
     nir_def_is_unused.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_sort_unstructured_blocks = _libraries['FIXME_STUB'].nir_sort_unstructured_blocks
     nir_sort_unstructured_blocks.restype = None
     nir_sort_unstructured_blocks.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_unstructured_next = _libraries['FIXME_STUB'].nir_block_unstructured_next
     nir_block_unstructured_next.restype = ctypes.POINTER(struct_nir_block)
     nir_block_unstructured_next.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_unstructured_start_block = _libraries['FIXME_STUB'].nir_unstructured_start_block
     nir_unstructured_start_block.restype = ctypes.POINTER(struct_nir_block)
     nir_unstructured_start_block.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_cf_tree_next = _libraries['FIXME_STUB'].nir_block_cf_tree_next
     nir_block_cf_tree_next.restype = ctypes.POINTER(struct_nir_block)
     nir_block_cf_tree_next.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_cf_tree_prev = _libraries['FIXME_STUB'].nir_block_cf_tree_prev
     nir_block_cf_tree_prev.restype = ctypes.POINTER(struct_nir_block)
     nir_block_cf_tree_prev.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_cf_tree_first = _libraries['FIXME_STUB'].nir_cf_node_cf_tree_first
     nir_cf_node_cf_tree_first.restype = ctypes.POINTER(struct_nir_block)
     nir_cf_node_cf_tree_first.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_cf_tree_last = _libraries['FIXME_STUB'].nir_cf_node_cf_tree_last
     nir_cf_node_cf_tree_last.restype = ctypes.POINTER(struct_nir_block)
     nir_cf_node_cf_tree_last.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_cf_tree_next = _libraries['FIXME_STUB'].nir_cf_node_cf_tree_next
     nir_cf_node_cf_tree_next.restype = ctypes.POINTER(struct_nir_block)
     nir_cf_node_cf_tree_next.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cf_node_cf_tree_prev = _libraries['FIXME_STUB'].nir_cf_node_cf_tree_prev
     nir_cf_node_cf_tree_prev.restype = ctypes.POINTER(struct_nir_block)
     nir_cf_node_cf_tree_prev.argtypes = [ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_get_following_if = _libraries['FIXME_STUB'].nir_block_get_following_if
     nir_block_get_following_if.restype = ctypes.POINTER(struct_nir_if)
     nir_block_get_following_if.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_get_following_loop = _libraries['FIXME_STUB'].nir_block_get_following_loop
     nir_block_get_following_loop.restype = ctypes.POINTER(struct_nir_loop)
     nir_block_get_following_loop.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_get_predecessors_sorted = _libraries['FIXME_STUB'].nir_block_get_predecessors_sorted
     nir_block_get_predecessors_sorted.restype = ctypes.POINTER(ctypes.POINTER(struct_nir_block))
     nir_block_get_predecessors_sorted.argtypes = [ctypes.POINTER(struct_nir_block), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_index_ssa_defs = _libraries['FIXME_STUB'].nir_index_ssa_defs
     nir_index_ssa_defs.restype = None
     nir_index_ssa_defs.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_index_instrs = _libraries['FIXME_STUB'].nir_index_instrs
     nir_index_instrs.restype = ctypes.c_uint32
     nir_index_instrs.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_index_blocks = _libraries['FIXME_STUB'].nir_index_blocks
     nir_index_blocks.restype = None
     nir_index_blocks.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_clear_pass_flags = _libraries['FIXME_STUB'].nir_shader_clear_pass_flags
     nir_shader_clear_pass_flags.restype = None
     nir_shader_clear_pass_flags.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_index_vars = _libraries['FIXME_STUB'].nir_shader_index_vars
     nir_shader_index_vars.restype = ctypes.c_uint32
     nir_shader_index_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_index_vars = _libraries['FIXME_STUB'].nir_function_impl_index_vars
     nir_function_impl_index_vars.restype = ctypes.c_uint32
     nir_function_impl_index_vars.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_shader = _libraries['FIXME_STUB'].nir_print_shader
     nir_print_shader.restype = None
     nir_print_shader.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_function_body = _libraries['FIXME_STUB'].nir_print_function_body
     nir_print_function_body.restype = None
     nir_print_function_body.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_shader_annotated = _libraries['FIXME_STUB'].nir_print_shader_annotated
     nir_print_shader_annotated.restype = None
     nir_print_shader_annotated.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(struct_hash_table)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_instr = _libraries['FIXME_STUB'].nir_print_instr
     nir_print_instr.restype = None
     nir_print_instr.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_deref = _libraries['FIXME_STUB'].nir_print_deref
     nir_print_deref.restype = None
     nir_print_deref.argtypes = [ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'mesa_log_level'
@@ -9614,139 +9614,139 @@ try:
     nir_log_shader_annotated_tagged = _libraries['FIXME_STUB'].nir_log_shader_annotated_tagged
     nir_log_shader_annotated_tagged.restype = None
     nir_log_shader_annotated_tagged.argtypes = [mesa_log_level, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_hash_table)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_as_str = _libraries['FIXME_STUB'].nir_shader_as_str
     nir_shader_as_str.restype = ctypes.POINTER(ctypes.c_char)
     nir_shader_as_str.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_as_str_annotated = _libraries['FIXME_STUB'].nir_shader_as_str_annotated
     nir_shader_as_str_annotated.restype = ctypes.POINTER(ctypes.c_char)
     nir_shader_as_str_annotated.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_hash_table), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_as_str = _libraries['FIXME_STUB'].nir_instr_as_str
     nir_instr_as_str.restype = ctypes.POINTER(ctypes.c_char)
     nir_instr_as_str.argtypes = [ctypes.POINTER(struct_nir_instr), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_gather_debug_info = _libraries['FIXME_STUB'].nir_shader_gather_debug_info
     nir_shader_gather_debug_info.restype = ctypes.POINTER(ctypes.c_char)
     nir_shader_gather_debug_info.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_char), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_clone = _libraries['FIXME_STUB'].nir_instr_clone
     nir_instr_clone.restype = ctypes.POINTER(struct_nir_instr)
     nir_instr_clone.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_clone_deep = _libraries['FIXME_STUB'].nir_instr_clone_deep
     nir_instr_clone_deep.restype = ctypes.POINTER(struct_nir_instr)
     nir_instr_clone_deep.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_hash_table)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alu_instr_clone = _libraries['FIXME_STUB'].nir_alu_instr_clone
     nir_alu_instr_clone.restype = ctypes.POINTER(struct_nir_alu_instr)
     nir_alu_instr_clone.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_clone = _libraries['FIXME_STUB'].nir_shader_clone
     nir_shader_clone.restype = ctypes.POINTER(struct_nir_shader)
     nir_shader_clone.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_clone = _libraries['FIXME_STUB'].nir_function_clone
     nir_function_clone.restype = ctypes.POINTER(struct_nir_function)
     nir_function_clone.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_clone = _libraries['FIXME_STUB'].nir_function_impl_clone
     nir_function_impl_clone.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_function_impl_clone.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_impl_clone_remap_globals = _libraries['FIXME_STUB'].nir_function_impl_clone_remap_globals
     nir_function_impl_clone_remap_globals.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_function_impl_clone_remap_globals.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct_hash_table)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_constant_clone = _libraries['FIXME_STUB'].nir_constant_clone
     nir_constant_clone.restype = ctypes.POINTER(struct_nir_constant)
     nir_constant_clone.argtypes = [ctypes.POINTER(struct_nir_constant), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_clone = _libraries['FIXME_STUB'].nir_variable_clone
     nir_variable_clone.restype = ctypes.POINTER(struct_nir_variable)
     nir_variable_clone.argtypes = [ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_replace = _libraries['FIXME_STUB'].nir_shader_replace
     nir_shader_replace.restype = None
     nir_shader_replace.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_serialize_deserialize = _libraries['FIXME_STUB'].nir_shader_serialize_deserialize
     nir_shader_serialize_deserialize.restype = None
     nir_shader_serialize_deserialize.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_validate_shader = _libraries['FIXME_STUB'].nir_validate_shader
     nir_validate_shader.restype = None
     nir_validate_shader.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_validate_ssa_dominance = _libraries['FIXME_STUB'].nir_validate_ssa_dominance
     nir_validate_ssa_dominance.restype = None
     nir_validate_ssa_dominance.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_metadata_set_validation_flag = _libraries['FIXME_STUB'].nir_metadata_set_validation_flag
     nir_metadata_set_validation_flag.restype = None
     nir_metadata_set_validation_flag.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_metadata_check_validation_flag = _libraries['FIXME_STUB'].nir_metadata_check_validation_flag
     nir_metadata_check_validation_flag.restype = None
     nir_metadata_check_validation_flag.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_metadata_require_all = _libraries['FIXME_STUB'].nir_metadata_require_all
     nir_metadata_require_all.restype = None
     nir_metadata_require_all.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     should_skip_nir = _libraries['FIXME_STUB'].should_skip_nir
     should_skip_nir.restype = ctypes.c_bool
     should_skip_nir.argtypes = [ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     should_print_nir = _libraries['FIXME_STUB'].should_print_nir
     should_print_nir.restype = ctypes.c_bool
     should_print_nir.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.POINTER(None))
 class struct_nir_builder(Structure):
@@ -9766,85 +9766,85 @@ try:
     nir_function_impl_lower_instructions = _libraries['FIXME_STUB'].nir_function_impl_lower_instructions
     nir_function_impl_lower_instructions.restype = ctypes.c_bool
     nir_function_impl_lower_instructions.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_lower_instructions = _libraries['FIXME_STUB'].nir_shader_lower_instructions
     nir_shader_lower_instructions.restype = ctypes.c_bool
     nir_shader_lower_instructions.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_calc_dominance_impl = _libraries['FIXME_STUB'].nir_calc_dominance_impl
     nir_calc_dominance_impl.restype = None
     nir_calc_dominance_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_calc_dominance = _libraries['FIXME_STUB'].nir_calc_dominance
     nir_calc_dominance.restype = None
     nir_calc_dominance.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dominance_lca = _libraries['FIXME_STUB'].nir_dominance_lca
     nir_dominance_lca.restype = ctypes.POINTER(struct_nir_block)
     nir_dominance_lca.argtypes = [ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_dominates = _libraries['FIXME_STUB'].nir_block_dominates
     nir_block_dominates.restype = ctypes.c_bool
     nir_block_dominates.argtypes = [ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_block_is_unreachable = _libraries['FIXME_STUB'].nir_block_is_unreachable
     nir_block_is_unreachable.restype = ctypes.c_bool
     nir_block_is_unreachable.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_dom_tree_impl = _libraries['FIXME_STUB'].nir_dump_dom_tree_impl
     nir_dump_dom_tree_impl.restype = None
     nir_dump_dom_tree_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_dom_tree = _libraries['FIXME_STUB'].nir_dump_dom_tree
     nir_dump_dom_tree.restype = None
     nir_dump_dom_tree.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_dom_frontier_impl = _libraries['FIXME_STUB'].nir_dump_dom_frontier_impl
     nir_dump_dom_frontier_impl.restype = None
     nir_dump_dom_frontier_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_dom_frontier = _libraries['FIXME_STUB'].nir_dump_dom_frontier
     nir_dump_dom_frontier.restype = None
     nir_dump_dom_frontier.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_cfg_impl = _libraries['FIXME_STUB'].nir_dump_cfg_impl
     nir_dump_cfg_impl.restype = None
     nir_dump_cfg_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dump_cfg = _libraries['FIXME_STUB'].nir_dump_cfg
     nir_dump_cfg.restype = None
     nir_dump_cfg.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct__IO_FILE)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_gs_count_vertices_and_primitives = _libraries['FIXME_STUB'].nir_gs_count_vertices_and_primitives
     nir_gs_count_vertices_and_primitives.restype = None
     nir_gs_count_vertices_and_primitives.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_load_grouping'
@@ -9861,163 +9861,163 @@ try:
     nir_group_loads = _libraries['FIXME_STUB'].nir_group_loads
     nir_group_loads.restype = None
     nir_group_loads.argtypes = [ctypes.POINTER(struct_nir_shader), nir_load_grouping, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shrink_vec_array_vars = _libraries['FIXME_STUB'].nir_shrink_vec_array_vars
     nir_shrink_vec_array_vars.restype = ctypes.c_bool
     nir_shrink_vec_array_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_split_array_vars = _libraries['FIXME_STUB'].nir_split_array_vars
     nir_split_array_vars.restype = ctypes.c_bool
     nir_split_array_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_split_var_copies = _libraries['FIXME_STUB'].nir_split_var_copies
     nir_split_var_copies.restype = ctypes.c_bool
     nir_split_var_copies.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_split_per_member_structs = _libraries['FIXME_STUB'].nir_split_per_member_structs
     nir_split_per_member_structs.restype = ctypes.c_bool
     nir_split_per_member_structs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_split_struct_vars = _libraries['FIXME_STUB'].nir_split_struct_vars
     nir_split_struct_vars.restype = ctypes.c_bool
     nir_split_struct_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_returns_impl = _libraries['FIXME_STUB'].nir_lower_returns_impl
     nir_lower_returns_impl.restype = ctypes.c_bool
     nir_lower_returns_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_returns = _libraries['FIXME_STUB'].nir_lower_returns
     nir_lower_returns.restype = ctypes.c_bool
     nir_lower_returns.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_inline_function_impl = _libraries['FIXME_STUB'].nir_inline_function_impl
     nir_inline_function_impl.restype = ctypes.POINTER(struct_nir_def)
     nir_inline_function_impl.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(ctypes.POINTER(struct_nir_def)), ctypes.POINTER(struct_hash_table)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_inline_functions = _libraries['FIXME_STUB'].nir_inline_functions
     nir_inline_functions.restype = ctypes.c_bool
     nir_inline_functions.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_cleanup_functions = _libraries['FIXME_STUB'].nir_cleanup_functions
     nir_cleanup_functions.restype = None
     nir_cleanup_functions.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_link_shader_functions = _libraries['FIXME_STUB'].nir_link_shader_functions
     nir_link_shader_functions.restype = ctypes.c_bool
     nir_link_shader_functions.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_calls_to_builtins = _libraries['FIXME_STUB'].nir_lower_calls_to_builtins
     nir_lower_calls_to_builtins.restype = ctypes.c_bool
     nir_lower_calls_to_builtins.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_find_inlinable_uniforms = _libraries['FIXME_STUB'].nir_find_inlinable_uniforms
     nir_find_inlinable_uniforms.restype = None
     nir_find_inlinable_uniforms.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_inline_uniforms = _libraries['FIXME_STUB'].nir_inline_uniforms
     nir_inline_uniforms.restype = None
     nir_inline_uniforms.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint16)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_collect_src_uniforms = _libraries['FIXME_STUB'].nir_collect_src_uniforms
     nir_collect_src_uniforms.restype = ctypes.c_bool
     nir_collect_src_uniforms.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.c_int32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_add_inlinable_uniforms = _libraries['FIXME_STUB'].nir_add_inlinable_uniforms
     nir_add_inlinable_uniforms.restype = None
     nir_add_inlinable_uniforms.argtypes = [ctypes.POINTER(struct_nir_src), ctypes.POINTER(struct_nir_loop_info), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_propagate_invariant = _libraries['FIXME_STUB'].nir_propagate_invariant
     nir_propagate_invariant.restype = ctypes.c_bool
     nir_propagate_invariant.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_var_copy_instr = _libraries['FIXME_STUB'].nir_lower_var_copy_instr
     nir_lower_var_copy_instr.restype = None
     nir_lower_var_copy_instr.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_deref_copy_instr = _libraries['FIXME_STUB'].nir_lower_deref_copy_instr
     nir_lower_deref_copy_instr.restype = None
     nir_lower_deref_copy_instr.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_var_copies = _libraries['FIXME_STUB'].nir_lower_var_copies
     nir_lower_var_copies.restype = ctypes.c_bool
     nir_lower_var_copies.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_memcpy = _libraries['FIXME_STUB'].nir_opt_memcpy
     nir_opt_memcpy.restype = ctypes.c_bool
     nir_opt_memcpy.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_memcpy = _libraries['FIXME_STUB'].nir_lower_memcpy
     nir_lower_memcpy.restype = ctypes.c_bool
     nir_lower_memcpy.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fixup_deref_modes = _libraries['FIXME_STUB'].nir_fixup_deref_modes
     nir_fixup_deref_modes.restype = ctypes.c_bool
     nir_fixup_deref_modes.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fixup_deref_types = _libraries['FIXME_STUB'].nir_fixup_deref_types
     nir_fixup_deref_types.restype = ctypes.c_bool
     nir_fixup_deref_types.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_global_vars_to_local = _libraries['FIXME_STUB'].nir_lower_global_vars_to_local
     nir_lower_global_vars_to_local.restype = ctypes.c_bool
     nir_lower_global_vars_to_local.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_constant_to_temp = _libraries['FIXME_STUB'].nir_lower_constant_to_temp
     nir_lower_constant_to_temp.restype = None
     nir_lower_constant_to_temp.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_array_deref_of_vec_options'
@@ -10038,116 +10038,116 @@ try:
     nir_lower_array_deref_of_vec = _libraries['FIXME_STUB'].nir_lower_array_deref_of_vec
     nir_lower_array_deref_of_vec.restype = ctypes.c_bool
     nir_lower_array_deref_of_vec.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_variable)), nir_lower_array_deref_of_vec_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_indirect_derefs = _libraries['FIXME_STUB'].nir_lower_indirect_derefs
     nir_lower_indirect_derefs.restype = ctypes.c_bool
     nir_lower_indirect_derefs.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_indirect_var_derefs = _libraries['FIXME_STUB'].nir_lower_indirect_var_derefs
     nir_lower_indirect_var_derefs.restype = ctypes.c_bool
     nir_lower_indirect_var_derefs.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_set)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint8_t = ctypes.c_uint8
 try:
     nir_lower_locals_to_regs = _libraries['FIXME_STUB'].nir_lower_locals_to_regs
     nir_lower_locals_to_regs.restype = ctypes.c_bool
     nir_lower_locals_to_regs.argtypes = [ctypes.POINTER(struct_nir_shader), uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_to_temporaries = _libraries['FIXME_STUB'].nir_lower_io_to_temporaries
     nir_lower_io_to_temporaries.restype = ctypes.c_bool
     nir_lower_io_to_temporaries.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function_impl), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_vars_to_scratch = _libraries['FIXME_STUB'].nir_lower_vars_to_scratch
     nir_lower_vars_to_scratch.restype = ctypes.c_bool
     nir_lower_vars_to_scratch.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_scratch_to_var = _libraries['FIXME_STUB'].nir_lower_scratch_to_var
     nir_lower_scratch_to_var.restype = ctypes.c_bool
     nir_lower_scratch_to_var.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_halfz = _libraries['FIXME_STUB'].nir_lower_clip_halfz
     nir_lower_clip_halfz.restype = ctypes.c_bool
     nir_lower_clip_halfz.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_gather_info = _libraries['FIXME_STUB'].nir_shader_gather_info
     nir_shader_gather_info.restype = None
     nir_shader_gather_info.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_gather_types = _libraries['FIXME_STUB'].nir_gather_types
     nir_gather_types.restype = None
     nir_gather_types.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_assign_var_locations = _libraries['FIXME_STUB'].nir_assign_var_locations
     nir_assign_var_locations.restype = None
     nir_assign_var_locations.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint32), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_unused_varyings = _libraries['FIXME_STUB'].nir_remove_unused_varyings
     nir_remove_unused_varyings.restype = ctypes.c_bool
     nir_remove_unused_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_unused_io_vars = _libraries['FIXME_STUB'].nir_remove_unused_io_vars
     nir_remove_unused_io_vars.restype = ctypes.c_bool
     nir_remove_unused_io_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_compact_varyings = _libraries['FIXME_STUB'].nir_compact_varyings
     nir_compact_varyings.restype = None
     nir_compact_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_link_xfb_varyings = _libraries['FIXME_STUB'].nir_link_xfb_varyings
     nir_link_xfb_varyings.restype = None
     nir_link_xfb_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_link_opt_varyings = _libraries['FIXME_STUB'].nir_link_opt_varyings
     nir_link_opt_varyings.restype = ctypes.c_bool
     nir_link_opt_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_link_varying_precision = _libraries['FIXME_STUB'].nir_link_varying_precision
     nir_link_varying_precision.restype = None
     nir_link_varying_precision.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_clone_uniform_variable = _libraries['FIXME_STUB'].nir_clone_uniform_variable
     nir_clone_uniform_variable.restype = ctypes.POINTER(struct_nir_variable)
     nir_clone_uniform_variable.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_variable), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_clone_deref_instr = _libraries['FIXME_STUB'].nir_clone_deref_instr
     nir_clone_deref_instr.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_clone_deref_instr.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_opt_varyings_progress'
@@ -10164,7 +10164,7 @@ try:
     nir_opt_varyings = _libraries['FIXME_STUB'].nir_opt_varyings
     nir_opt_varyings.restype = nir_opt_varyings_progress
     nir_opt_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_gl_varying_slot'
@@ -10413,61 +10413,61 @@ try:
     nir_slot_is_sysval_output = _libraries['FIXME_STUB'].nir_slot_is_sysval_output
     nir_slot_is_sysval_output.restype = ctypes.c_bool
     nir_slot_is_sysval_output.argtypes = [gl_varying_slot, gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_slot_is_varying = _libraries['FIXME_STUB'].nir_slot_is_varying
     nir_slot_is_varying.restype = ctypes.c_bool
     nir_slot_is_varying.argtypes = [gl_varying_slot, gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_slot_is_sysval_output_and_varying = _libraries['FIXME_STUB'].nir_slot_is_sysval_output_and_varying
     nir_slot_is_sysval_output_and_varying.restype = ctypes.c_bool
     nir_slot_is_sysval_output_and_varying.argtypes = [gl_varying_slot, gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_varying = _libraries['FIXME_STUB'].nir_remove_varying
     nir_remove_varying.restype = ctypes.c_bool
     nir_remove_varying.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_sysval_output = _libraries['FIXME_STUB'].nir_remove_sysval_output
     nir_remove_sysval_output.restype = ctypes.c_bool
     nir_remove_sysval_output.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_amul = _libraries['FIXME_STUB'].nir_lower_amul
     nir_lower_amul.restype = ctypes.c_bool
     nir_lower_amul.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_ubo_vec4 = _libraries['FIXME_STUB'].nir_lower_ubo_vec4
     nir_lower_ubo_vec4.restype = ctypes.c_bool
     nir_lower_ubo_vec4.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_sort_variables_by_location = _libraries['FIXME_STUB'].nir_sort_variables_by_location
     nir_sort_variables_by_location.restype = None
     nir_sort_variables_by_location.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_assign_io_var_locations = _libraries['FIXME_STUB'].nir_assign_io_var_locations
     nir_assign_io_var_locations.restype = None
     nir_assign_io_var_locations.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint32), gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_clip_cull_const = _libraries['FIXME_STUB'].nir_opt_clip_cull_const
     nir_opt_clip_cull_const.restype = ctypes.c_bool
     nir_opt_clip_cull_const.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_io_options'
@@ -10488,49 +10488,49 @@ try:
     nir_lower_io = _libraries['FIXME_STUB'].nir_lower_io
     nir_lower_io.restype = ctypes.c_bool
     nir_lower_io.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_io_add_const_offset_to_base = _libraries['FIXME_STUB'].nir_io_add_const_offset_to_base
     nir_io_add_const_offset_to_base.restype = ctypes.c_bool
     nir_io_add_const_offset_to_base.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_color_inputs = _libraries['FIXME_STUB'].nir_lower_color_inputs
     nir_lower_color_inputs.restype = ctypes.c_bool
     nir_lower_color_inputs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_passes = _libraries['FIXME_STUB'].nir_lower_io_passes
     nir_lower_io_passes.restype = None
     nir_lower_io_passes.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_io_add_intrinsic_xfb_info = _libraries['FIXME_STUB'].nir_io_add_intrinsic_xfb_info
     nir_io_add_intrinsic_xfb_info.restype = ctypes.c_bool
     nir_io_add_intrinsic_xfb_info.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_vars_to_explicit_types = _libraries['FIXME_STUB'].nir_lower_vars_to_explicit_types
     nir_lower_vars_to_explicit_types.restype = ctypes.c_bool
     nir_lower_vars_to_explicit_types.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, glsl_type_size_align_func]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_gather_explicit_io_initializers = _libraries['FIXME_STUB'].nir_gather_explicit_io_initializers
     nir_gather_explicit_io_initializers.restype = None
     nir_gather_explicit_io_initializers.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(None), size_t, nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_vec3_to_vec4 = _libraries['FIXME_STUB'].nir_lower_vec3_to_vec4
     nir_lower_vec3_to_vec4.restype = ctypes.c_bool
     nir_lower_vec3_to_vec4.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_address_format'
@@ -10567,73 +10567,73 @@ try:
     nir_address_format_bit_size = _libraries['FIXME_STUB'].nir_address_format_bit_size
     nir_address_format_bit_size.restype = ctypes.c_uint32
     nir_address_format_bit_size.argtypes = [nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_address_format_num_components = _libraries['FIXME_STUB'].nir_address_format_num_components
     nir_address_format_num_components.restype = ctypes.c_uint32
     nir_address_format_num_components.argtypes = [nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_address_format_to_glsl_type = _libraries['FIXME_STUB'].nir_address_format_to_glsl_type
     nir_address_format_to_glsl_type.restype = ctypes.POINTER(struct_glsl_type)
     nir_address_format_to_glsl_type.argtypes = [nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_address_format_null_value = _libraries['FIXME_STUB'].nir_address_format_null_value
     nir_address_format_null_value.restype = ctypes.POINTER(union_c__UA_nir_const_value)
     nir_address_format_null_value.argtypes = [nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_addr_iadd = _libraries['FIXME_STUB'].nir_build_addr_iadd
     nir_build_addr_iadd.restype = ctypes.POINTER(struct_nir_def)
     nir_build_addr_iadd.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_address_format, nir_variable_mode, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_addr_iadd_imm = _libraries['FIXME_STUB'].nir_build_addr_iadd_imm
     nir_build_addr_iadd_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_build_addr_iadd_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_address_format, nir_variable_mode, int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_addr_ieq = _libraries['FIXME_STUB'].nir_build_addr_ieq
     nir_build_addr_ieq.restype = ctypes.POINTER(struct_nir_def)
     nir_build_addr_ieq.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_addr_isub = _libraries['FIXME_STUB'].nir_build_addr_isub
     nir_build_addr_isub.restype = ctypes.POINTER(struct_nir_def)
     nir_build_addr_isub.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_explicit_io_address_from_deref = _libraries['FIXME_STUB'].nir_explicit_io_address_from_deref
     nir_explicit_io_address_from_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_explicit_io_address_from_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_explicit_deref_align = _libraries['FIXME_STUB'].nir_get_explicit_deref_align
     nir_get_explicit_deref_align.restype = ctypes.c_bool
     nir_get_explicit_deref_align.argtypes = [ctypes.POINTER(struct_nir_deref_instr), ctypes.c_bool, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_explicit_io_instr = _libraries['FIXME_STUB'].nir_lower_explicit_io_instr
     nir_lower_explicit_io_instr.restype = None
     nir_lower_explicit_io_instr.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_def), nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_explicit_io = _libraries['FIXME_STUB'].nir_lower_explicit_io
     nir_lower_explicit_io.restype = ctypes.c_bool
     nir_lower_explicit_io.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, nir_address_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_mem_access_shift_method'
@@ -10717,13 +10717,13 @@ try:
     nir_lower_mem_access_bit_sizes = _libraries['FIXME_STUB'].nir_lower_mem_access_bit_sizes
     nir_lower_mem_access_bit_sizes.restype = ctypes.c_bool
     nir_lower_mem_access_bit_sizes.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_mem_access_bit_sizes_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_robust_access = _libraries['FIXME_STUB'].nir_lower_robust_access
     nir_lower_robust_access.restype = ctypes.c_bool
     nir_lower_robust_access.argtypes = [ctypes.POINTER(struct_nir_shader), nir_intrin_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_should_vectorize_mem_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(None))
 class struct_nir_load_store_vectorize_options(Structure):
@@ -10744,13 +10744,13 @@ try:
     nir_opt_load_store_vectorize = _libraries['FIXME_STUB'].nir_opt_load_store_vectorize
     nir_opt_load_store_vectorize.restype = ctypes.c_bool
     nir_opt_load_store_vectorize.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_load_store_vectorize_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_load_store_update_alignments = _libraries['FIXME_STUB'].nir_opt_load_store_update_alignments
     nir_opt_load_store_update_alignments.restype = ctypes.c_bool
     nir_opt_load_store_update_alignments.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_lower_shader_calls_should_remat_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.POINTER(None))
 class struct_nir_lower_shader_calls_options(Structure):
@@ -10773,85 +10773,85 @@ try:
     nir_lower_shader_calls = _libraries['FIXME_STUB'].nir_lower_shader_calls
     nir_lower_shader_calls.restype = ctypes.c_bool
     nir_lower_shader_calls.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_shader_calls_options), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(struct_nir_shader))), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_offset_src_number = _libraries['FIXME_STUB'].nir_get_io_offset_src_number
     nir_get_io_offset_src_number.restype = ctypes.c_int32
     nir_get_io_offset_src_number.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_index_src_number = _libraries['FIXME_STUB'].nir_get_io_index_src_number
     nir_get_io_index_src_number.restype = ctypes.c_int32
     nir_get_io_index_src_number.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_arrayed_index_src_number = _libraries['FIXME_STUB'].nir_get_io_arrayed_index_src_number
     nir_get_io_arrayed_index_src_number.restype = ctypes.c_int32
     nir_get_io_arrayed_index_src_number.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_offset_src = _libraries['FIXME_STUB'].nir_get_io_offset_src
     nir_get_io_offset_src.restype = ctypes.POINTER(struct_nir_src)
     nir_get_io_offset_src.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_index_src = _libraries['FIXME_STUB'].nir_get_io_index_src
     nir_get_io_index_src.restype = ctypes.POINTER(struct_nir_src)
     nir_get_io_index_src.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_io_arrayed_index_src = _libraries['FIXME_STUB'].nir_get_io_arrayed_index_src
     nir_get_io_arrayed_index_src.restype = ctypes.POINTER(struct_nir_src)
     nir_get_io_arrayed_index_src.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_shader_call_payload_src = _libraries['FIXME_STUB'].nir_get_shader_call_payload_src
     nir_get_shader_call_payload_src.restype = ctypes.POINTER(struct_nir_src)
     nir_get_shader_call_payload_src.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_arrayed_io = _libraries['FIXME_STUB'].nir_is_arrayed_io
     nir_is_arrayed_io.restype = ctypes.c_bool
     nir_is_arrayed_io.argtypes = [ctypes.POINTER(struct_nir_variable), gl_shader_stage]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_reg_intrinsics_to_ssa_impl = _libraries['FIXME_STUB'].nir_lower_reg_intrinsics_to_ssa_impl
     nir_lower_reg_intrinsics_to_ssa_impl.restype = ctypes.c_bool
     nir_lower_reg_intrinsics_to_ssa_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_reg_intrinsics_to_ssa = _libraries['FIXME_STUB'].nir_lower_reg_intrinsics_to_ssa
     nir_lower_reg_intrinsics_to_ssa.restype = ctypes.c_bool
     nir_lower_reg_intrinsics_to_ssa.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_vars_to_ssa = _libraries['FIXME_STUB'].nir_lower_vars_to_ssa
     nir_lower_vars_to_ssa.restype = ctypes.c_bool
     nir_lower_vars_to_ssa.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_dead_derefs = _libraries['FIXME_STUB'].nir_remove_dead_derefs
     nir_remove_dead_derefs.restype = ctypes.c_bool
     nir_remove_dead_derefs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_dead_derefs_impl = _libraries['FIXME_STUB'].nir_remove_dead_derefs_impl
     nir_remove_dead_derefs_impl.restype = ctypes.c_bool
     nir_remove_dead_derefs_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_remove_dead_variables_options(Structure):
     pass
@@ -10867,43 +10867,43 @@ try:
     nir_remove_dead_variables = _libraries['FIXME_STUB'].nir_remove_dead_variables
     nir_remove_dead_variables.restype = ctypes.c_bool
     nir_remove_dead_variables.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, ctypes.POINTER(struct_nir_remove_dead_variables_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_variable_initializers = _libraries['FIXME_STUB'].nir_lower_variable_initializers
     nir_lower_variable_initializers.restype = ctypes.c_bool
     nir_lower_variable_initializers.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_zero_initialize_shared_memory = _libraries['FIXME_STUB'].nir_zero_initialize_shared_memory
     nir_zero_initialize_shared_memory.restype = ctypes.c_bool
     nir_zero_initialize_shared_memory.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_clear_shared_memory = _libraries['FIXME_STUB'].nir_clear_shared_memory
     nir_clear_shared_memory.restype = ctypes.c_bool
     nir_clear_shared_memory.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_move_vec_src_uses_to_dest = _libraries['FIXME_STUB'].nir_move_vec_src_uses_to_dest
     nir_move_vec_src_uses_to_dest.restype = ctypes.c_bool
     nir_move_vec_src_uses_to_dest.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_move_output_stores_to_end = _libraries['FIXME_STUB'].nir_move_output_stores_to_end
     nir_move_output_stores_to_end.restype = ctypes.c_bool
     nir_move_output_stores_to_end.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_vec_to_regs = _libraries['FIXME_STUB'].nir_lower_vec_to_regs
     nir_lower_vec_to_regs.restype = ctypes.c_bool
     nir_lower_vec_to_regs.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_writemask_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'compare_func'
@@ -10930,223 +10930,223 @@ try:
     nir_lower_alpha_test = _libraries['FIXME_STUB'].nir_lower_alpha_test
     nir_lower_alpha_test.restype = ctypes.c_bool
     nir_lower_alpha_test.argtypes = [ctypes.POINTER(struct_nir_shader), compare_func, ctypes.c_bool, ctypes.POINTER(ctypes.c_int16)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_alu = _libraries['FIXME_STUB'].nir_lower_alu
     nir_lower_alu.restype = ctypes.c_bool
     nir_lower_alu.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_flrp = _libraries['FIXME_STUB'].nir_lower_flrp
     nir_lower_flrp.restype = ctypes.c_bool
     nir_lower_flrp.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_scale_fdiv = _libraries['FIXME_STUB'].nir_scale_fdiv
     nir_scale_fdiv.restype = ctypes.c_bool
     nir_scale_fdiv.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_alu_to_scalar = _libraries['FIXME_STUB'].nir_lower_alu_to_scalar
     nir_lower_alu_to_scalar.restype = ctypes.c_bool
     nir_lower_alu_to_scalar.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_alu_width = _libraries['FIXME_STUB'].nir_lower_alu_width
     nir_lower_alu_width.restype = ctypes.c_bool
     nir_lower_alu_width.argtypes = [ctypes.POINTER(struct_nir_shader), nir_vectorize_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_alu_vec8_16_srcs = _libraries['FIXME_STUB'].nir_lower_alu_vec8_16_srcs
     nir_lower_alu_vec8_16_srcs.restype = ctypes.c_bool
     nir_lower_alu_vec8_16_srcs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_bool_to_bitsize = _libraries['FIXME_STUB'].nir_lower_bool_to_bitsize
     nir_lower_bool_to_bitsize.restype = ctypes.c_bool
     nir_lower_bool_to_bitsize.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_bool_to_float = _libraries['FIXME_STUB'].nir_lower_bool_to_float
     nir_lower_bool_to_float.restype = ctypes.c_bool
     nir_lower_bool_to_float.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_bool_to_int32 = _libraries['FIXME_STUB'].nir_lower_bool_to_int32
     nir_lower_bool_to_int32.restype = ctypes.c_bool
     nir_lower_bool_to_int32.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_simplify_convert_alu_types = _libraries['FIXME_STUB'].nir_opt_simplify_convert_alu_types
     nir_opt_simplify_convert_alu_types.restype = ctypes.c_bool
     nir_opt_simplify_convert_alu_types.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_const_arrays_to_uniforms = _libraries['FIXME_STUB'].nir_lower_const_arrays_to_uniforms
     nir_lower_const_arrays_to_uniforms.restype = ctypes.c_bool
     nir_lower_const_arrays_to_uniforms.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_convert_alu_types = _libraries['FIXME_STUB'].nir_lower_convert_alu_types
     nir_lower_convert_alu_types.restype = ctypes.c_bool
     nir_lower_convert_alu_types.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_constant_convert_alu_types = _libraries['FIXME_STUB'].nir_lower_constant_convert_alu_types
     nir_lower_constant_convert_alu_types.restype = ctypes.c_bool
     nir_lower_constant_convert_alu_types.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_alu_conversion_to_intrinsic = _libraries['FIXME_STUB'].nir_lower_alu_conversion_to_intrinsic
     nir_lower_alu_conversion_to_intrinsic.restype = ctypes.c_bool
     nir_lower_alu_conversion_to_intrinsic.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_int_to_float = _libraries['FIXME_STUB'].nir_lower_int_to_float
     nir_lower_int_to_float.restype = ctypes.c_bool
     nir_lower_int_to_float.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_load_const_to_scalar = _libraries['FIXME_STUB'].nir_lower_load_const_to_scalar
     nir_lower_load_const_to_scalar.restype = ctypes.c_bool
     nir_lower_load_const_to_scalar.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_read_invocation_to_scalar = _libraries['FIXME_STUB'].nir_lower_read_invocation_to_scalar
     nir_lower_read_invocation_to_scalar.restype = ctypes.c_bool
     nir_lower_read_invocation_to_scalar.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_phis_to_scalar = _libraries['FIXME_STUB'].nir_lower_phis_to_scalar
     nir_lower_phis_to_scalar.restype = ctypes.c_bool
     nir_lower_phis_to_scalar.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_arrays_to_elements = _libraries['FIXME_STUB'].nir_lower_io_arrays_to_elements
     nir_lower_io_arrays_to_elements.restype = None
     nir_lower_io_arrays_to_elements.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_arrays_to_elements_no_indirects = _libraries['FIXME_STUB'].nir_lower_io_arrays_to_elements_no_indirects
     nir_lower_io_arrays_to_elements_no_indirects.restype = ctypes.c_bool
     nir_lower_io_arrays_to_elements_no_indirects.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_to_scalar = _libraries['FIXME_STUB'].nir_lower_io_to_scalar
     nir_lower_io_to_scalar.restype = ctypes.c_bool
     nir_lower_io_to_scalar.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, nir_instr_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_to_scalar_early = _libraries['FIXME_STUB'].nir_lower_io_to_scalar_early
     nir_lower_io_to_scalar_early.restype = ctypes.c_bool
     nir_lower_io_to_scalar_early.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_io_to_vector = _libraries['FIXME_STUB'].nir_lower_io_to_vector
     nir_lower_io_to_vector.restype = ctypes.c_bool
     nir_lower_io_to_vector.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vectorize_tess_levels = _libraries['FIXME_STUB'].nir_vectorize_tess_levels
     nir_vectorize_tess_levels.restype = ctypes.c_bool
     nir_vectorize_tess_levels.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_create_passthrough_tcs_impl = _libraries['FIXME_STUB'].nir_create_passthrough_tcs_impl
     nir_create_passthrough_tcs_impl.restype = ctypes.POINTER(struct_nir_shader)
     nir_create_passthrough_tcs_impl.argtypes = [ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32, uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_create_passthrough_tcs = _libraries['FIXME_STUB'].nir_create_passthrough_tcs
     nir_create_passthrough_tcs.restype = ctypes.POINTER(struct_nir_shader)
     nir_create_passthrough_tcs.argtypes = [ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_nir_shader), uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_create_passthrough_gs = _libraries['FIXME_STUB'].nir_create_passthrough_gs
     nir_create_passthrough_gs.restype = ctypes.POINTER(struct_nir_shader)
     nir_create_passthrough_gs.argtypes = [ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_nir_shader), mesa_prim, mesa_prim, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_fragcolor = _libraries['FIXME_STUB'].nir_lower_fragcolor
     nir_lower_fragcolor.restype = ctypes.c_bool
     nir_lower_fragcolor.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_fragcoord_wtrans = _libraries['FIXME_STUB'].nir_lower_fragcoord_wtrans
     nir_lower_fragcoord_wtrans.restype = ctypes.c_bool
     nir_lower_fragcoord_wtrans.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_frag_coord_to_pixel_coord = _libraries['FIXME_STUB'].nir_opt_frag_coord_to_pixel_coord
     nir_opt_frag_coord_to_pixel_coord.restype = ctypes.c_bool
     nir_opt_frag_coord_to_pixel_coord.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_frag_coord_to_pixel_coord = _libraries['FIXME_STUB'].nir_lower_frag_coord_to_pixel_coord
     nir_lower_frag_coord_to_pixel_coord.restype = ctypes.c_bool
     nir_lower_frag_coord_to_pixel_coord.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_viewport_transform = _libraries['FIXME_STUB'].nir_lower_viewport_transform
     nir_lower_viewport_transform.restype = ctypes.c_bool
     nir_lower_viewport_transform.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_uniforms_to_ubo = _libraries['FIXME_STUB'].nir_lower_uniforms_to_ubo
     nir_lower_uniforms_to_ubo.restype = ctypes.c_bool
     nir_lower_uniforms_to_ubo.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_is_helper_invocation = _libraries['FIXME_STUB'].nir_lower_is_helper_invocation
     nir_lower_is_helper_invocation.restype = ctypes.c_bool
     nir_lower_is_helper_invocation.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_single_sampled = _libraries['FIXME_STUB'].nir_lower_single_sampled
     nir_lower_single_sampled.restype = ctypes.c_bool
     nir_lower_single_sampled.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_atomics = _libraries['FIXME_STUB'].nir_lower_atomics
     nir_lower_atomics.restype = ctypes.c_bool
     nir_lower_atomics.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_filter_cb]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_subgroups_options(Structure):
     pass
@@ -11190,19 +11190,19 @@ try:
     nir_lower_subgroups = _libraries['FIXME_STUB'].nir_lower_subgroups
     nir_lower_subgroups.restype = ctypes.c_bool
     nir_lower_subgroups.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_subgroups_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_system_values = _libraries['FIXME_STUB'].nir_lower_system_values
     nir_lower_system_values.restype = ctypes.c_bool
     nir_lower_system_values.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_lowered_load_helper_invocation = _libraries['FIXME_STUB'].nir_build_lowered_load_helper_invocation
     nir_build_lowered_load_helper_invocation.restype = ctypes.POINTER(struct_nir_def)
     nir_build_lowered_load_helper_invocation.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_compute_system_values_options(Structure):
     pass
@@ -11227,7 +11227,7 @@ try:
     nir_lower_compute_system_values = _libraries['FIXME_STUB'].nir_lower_compute_system_values
     nir_lower_compute_system_values.restype = ctypes.c_bool
     nir_lower_compute_system_values.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_compute_system_values_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_sysvals_to_varyings_options(Structure):
     pass
@@ -11245,7 +11245,7 @@ try:
     nir_lower_sysvals_to_varyings = _libraries['FIXME_STUB'].nir_lower_sysvals_to_varyings
     nir_lower_sysvals_to_varyings.restype = ctypes.c_bool
     nir_lower_sysvals_to_varyings.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_sysvals_to_varyings_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'nir_lower_tex_packing'
@@ -11327,7 +11327,7 @@ try:
     nir_lower_tex = _libraries['FIXME_STUB'].nir_lower_tex
     nir_lower_tex.restype = ctypes.c_bool
     nir_lower_tex.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_tex_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_tex_shadow_swizzle(Structure):
     pass
@@ -11346,7 +11346,7 @@ try:
     nir_lower_tex_shadow = _libraries['FIXME_STUB'].nir_lower_tex_shadow
     nir_lower_tex_shadow.restype = ctypes.c_bool
     nir_lower_tex_shadow.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.POINTER(compare_func), ctypes.POINTER(struct_nir_lower_tex_shadow_swizzle), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_image_options(Structure):
     pass
@@ -11363,19 +11363,19 @@ try:
     nir_lower_image = _libraries['FIXME_STUB'].nir_lower_image
     nir_lower_image.restype = ctypes.c_bool
     nir_lower_image.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_image_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_image_atomics_to_global = _libraries['FIXME_STUB'].nir_lower_image_atomics_to_global
     nir_lower_image_atomics_to_global.restype = ctypes.c_bool
     nir_lower_image_atomics_to_global.argtypes = [ctypes.POINTER(struct_nir_shader), nir_intrin_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_readonly_images_to_tex = _libraries['FIXME_STUB'].nir_lower_readonly_images_to_tex
     nir_lower_readonly_images_to_tex.restype = ctypes.c_bool
     nir_lower_readonly_images_to_tex.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'nir_lower_non_uniform_access_type'
@@ -11415,19 +11415,19 @@ try:
     nir_has_non_uniform_access = _libraries['FIXME_STUB'].nir_has_non_uniform_access
     nir_has_non_uniform_access.restype = ctypes.c_bool
     nir_has_non_uniform_access.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_non_uniform_access_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_non_uniform_access = _libraries['FIXME_STUB'].nir_opt_non_uniform_access
     nir_opt_non_uniform_access.restype = ctypes.c_bool
     nir_opt_non_uniform_access.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_non_uniform_access = _libraries['FIXME_STUB'].nir_lower_non_uniform_access
     nir_lower_non_uniform_access.restype = ctypes.c_bool
     nir_lower_non_uniform_access.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_non_uniform_access_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_idiv_options(Structure):
     pass
@@ -11442,7 +11442,7 @@ try:
     nir_lower_idiv = _libraries['FIXME_STUB'].nir_lower_idiv
     nir_lower_idiv.restype = ctypes.c_bool
     nir_lower_idiv.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_idiv_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_input_attachment_options(Structure):
     pass
@@ -11461,85 +11461,85 @@ try:
     nir_lower_input_attachments = _libraries['FIXME_STUB'].nir_lower_input_attachments
     nir_lower_input_attachments.restype = ctypes.c_bool
     nir_lower_input_attachments.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_input_attachment_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_vs = _libraries['FIXME_STUB'].nir_lower_clip_vs
     nir_lower_clip_vs.restype = ctypes.c_bool
     nir_lower_clip_vs.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ctypes.c_int16 * 4 * 0]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_gs = _libraries['FIXME_STUB'].nir_lower_clip_gs
     nir_lower_clip_gs.restype = ctypes.c_bool
     nir_lower_clip_gs.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_int16 * 4 * 0]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_fs = _libraries['FIXME_STUB'].nir_lower_clip_fs
     nir_lower_clip_fs.restype = ctypes.c_bool
     nir_lower_clip_fs.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_cull_distance_to_vec4s = _libraries['FIXME_STUB'].nir_lower_clip_cull_distance_to_vec4s
     nir_lower_clip_cull_distance_to_vec4s.restype = ctypes.c_bool
     nir_lower_clip_cull_distance_to_vec4s.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_cull_distance_arrays = _libraries['FIXME_STUB'].nir_lower_clip_cull_distance_arrays
     nir_lower_clip_cull_distance_arrays.restype = ctypes.c_bool
     nir_lower_clip_cull_distance_arrays.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clip_disable = _libraries['FIXME_STUB'].nir_lower_clip_disable
     nir_lower_clip_disable.restype = ctypes.c_bool
     nir_lower_clip_disable.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_point_size_mov = _libraries['FIXME_STUB'].nir_lower_point_size_mov
     nir_lower_point_size_mov.restype = ctypes.c_bool
     nir_lower_point_size_mov.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(ctypes.c_int16)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_frexp = _libraries['FIXME_STUB'].nir_lower_frexp
     nir_lower_frexp.restype = ctypes.c_bool
     nir_lower_frexp.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_two_sided_color = _libraries['FIXME_STUB'].nir_lower_two_sided_color
     nir_lower_two_sided_color.restype = ctypes.c_bool
     nir_lower_two_sided_color.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_clamp_color_outputs = _libraries['FIXME_STUB'].nir_lower_clamp_color_outputs
     nir_lower_clamp_color_outputs.restype = ctypes.c_bool
     nir_lower_clamp_color_outputs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_flatshade = _libraries['FIXME_STUB'].nir_lower_flatshade
     nir_lower_flatshade.restype = ctypes.c_bool
     nir_lower_flatshade.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_passthrough_edgeflags = _libraries['FIXME_STUB'].nir_lower_passthrough_edgeflags
     nir_lower_passthrough_edgeflags.restype = ctypes.c_bool
     nir_lower_passthrough_edgeflags.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_patch_vertices = _libraries['FIXME_STUB'].nir_lower_patch_vertices
     nir_lower_patch_vertices.restype = ctypes.c_bool
     nir_lower_patch_vertices.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.POINTER(ctypes.c_int16)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_wpos_ytransform_options(Structure):
     pass
@@ -11559,31 +11559,31 @@ try:
     nir_lower_wpos_ytransform = _libraries['FIXME_STUB'].nir_lower_wpos_ytransform
     nir_lower_wpos_ytransform.restype = ctypes.c_bool
     nir_lower_wpos_ytransform.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_wpos_ytransform_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_wpos_center = _libraries['FIXME_STUB'].nir_lower_wpos_center
     nir_lower_wpos_center.restype = ctypes.c_bool
     nir_lower_wpos_center.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_pntc_ytransform = _libraries['FIXME_STUB'].nir_lower_pntc_ytransform
     nir_lower_pntc_ytransform.restype = ctypes.c_bool
     nir_lower_pntc_ytransform.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_int16 * 4 * 0]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_wrmasks = _libraries['FIXME_STUB'].nir_lower_wrmasks
     nir_lower_wrmasks.restype = ctypes.c_bool
     nir_lower_wrmasks.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_filter_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_fb_read = _libraries['FIXME_STUB'].nir_lower_fb_read
     nir_lower_fb_read.restype = ctypes.c_bool
     nir_lower_fb_read.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_drawpixels_options(Structure):
     pass
@@ -11605,7 +11605,7 @@ try:
     nir_lower_drawpixels = _libraries['FIXME_STUB'].nir_lower_drawpixels
     nir_lower_drawpixels.restype = ctypes.c_bool
     nir_lower_drawpixels.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_drawpixels_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_bitmap_options(Structure):
     pass
@@ -11622,13 +11622,13 @@ try:
     nir_lower_bitmap = _libraries['FIXME_STUB'].nir_lower_bitmap
     nir_lower_bitmap.restype = ctypes.c_bool
     nir_lower_bitmap.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_bitmap_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_atomics_to_ssbo = _libraries['FIXME_STUB'].nir_lower_atomics_to_ssbo
     nir_lower_atomics_to_ssbo.restype = ctypes.c_bool
     nir_lower_atomics_to_ssbo.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_gs_intrinsics_flags'
@@ -11653,13 +11653,13 @@ try:
     nir_lower_gs_intrinsics = _libraries['FIXME_STUB'].nir_lower_gs_intrinsics
     nir_lower_gs_intrinsics.restype = ctypes.c_bool
     nir_lower_gs_intrinsics.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_gs_intrinsics_flags]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_tess_coord_z = _libraries['FIXME_STUB'].nir_lower_tess_coord_z
     nir_lower_tess_coord_z.restype = ctypes.c_bool
     nir_lower_tess_coord_z.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_task_shader_options(Structure):
     pass
@@ -11677,20 +11677,20 @@ try:
     nir_lower_task_shader = _libraries['FIXME_STUB'].nir_lower_task_shader
     nir_lower_task_shader.restype = ctypes.c_bool
     nir_lower_task_shader.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_task_shader_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.POINTER(None))
 try:
     nir_lower_bit_size = _libraries['FIXME_STUB'].nir_lower_bit_size
     nir_lower_bit_size.restype = ctypes.c_bool
     nir_lower_bit_size.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_bit_size_callback, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_64bit_phis = _libraries['FIXME_STUB'].nir_lower_64bit_phis
     nir_lower_64bit_phis.restype = ctypes.c_bool
     nir_lower_64bit_phis.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_split_conversions_options(Structure):
     pass
@@ -11708,79 +11708,79 @@ try:
     nir_split_conversions = _libraries['FIXME_STUB'].nir_split_conversions
     nir_split_conversions.restype = ctypes.c_bool
     nir_split_conversions.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_split_conversions_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_split_64bit_vec3_and_vec4 = _libraries['FIXME_STUB'].nir_split_64bit_vec3_and_vec4
     nir_split_64bit_vec3_and_vec4.restype = ctypes.c_bool
     nir_split_64bit_vec3_and_vec4.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_int64_op_to_options_mask = _libraries['FIXME_STUB'].nir_lower_int64_op_to_options_mask
     nir_lower_int64_op_to_options_mask.restype = nir_lower_int64_options
     nir_lower_int64_op_to_options_mask.argtypes = [nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_int64 = _libraries['FIXME_STUB'].nir_lower_int64
     nir_lower_int64.restype = ctypes.c_bool
     nir_lower_int64.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_int64_float_conversions = _libraries['FIXME_STUB'].nir_lower_int64_float_conversions
     nir_lower_int64_float_conversions.restype = ctypes.c_bool
     nir_lower_int64_float_conversions.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_doubles_op_to_options_mask = _libraries['FIXME_STUB'].nir_lower_doubles_op_to_options_mask
     nir_lower_doubles_op_to_options_mask.restype = nir_lower_doubles_options
     nir_lower_doubles_op_to_options_mask.argtypes = [nir_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_doubles = _libraries['FIXME_STUB'].nir_lower_doubles
     nir_lower_doubles.restype = ctypes.c_bool
     nir_lower_doubles.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader), nir_lower_doubles_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_pack = _libraries['FIXME_STUB'].nir_lower_pack
     nir_lower_pack.restype = ctypes.c_bool
     nir_lower_pack.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_recompute_io_bases = _libraries['FIXME_STUB'].nir_recompute_io_bases
     nir_recompute_io_bases.restype = ctypes.c_bool
     nir_recompute_io_bases.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_mediump_vars = _libraries['FIXME_STUB'].nir_lower_mediump_vars
     nir_lower_mediump_vars.restype = ctypes.c_bool
     nir_lower_mediump_vars.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_mediump_io = _libraries['FIXME_STUB'].nir_lower_mediump_io
     nir_lower_mediump_io.restype = ctypes.c_bool
     nir_lower_mediump_io.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, uint64_t, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_force_mediump_io = _libraries['FIXME_STUB'].nir_force_mediump_io
     nir_force_mediump_io.restype = ctypes.c_bool
     nir_force_mediump_io.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, nir_alu_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_unpack_16bit_varying_slots = _libraries['FIXME_STUB'].nir_unpack_16bit_varying_slots
     nir_unpack_16bit_varying_slots.restype = ctypes.c_bool
     nir_unpack_16bit_varying_slots.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_opt_tex_srcs_options(Structure):
     pass
@@ -11814,7 +11814,7 @@ try:
     nir_opt_16bit_tex_image = _libraries['FIXME_STUB'].nir_opt_16bit_tex_image
     nir_opt_16bit_tex_image.restype = ctypes.c_bool
     nir_opt_16bit_tex_image.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_opt_16bit_tex_image_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_tex_src_type_constraint(Structure):
     pass
@@ -11833,25 +11833,25 @@ try:
     nir_legalize_16bit_sampler_srcs = _libraries['FIXME_STUB'].nir_legalize_16bit_sampler_srcs
     nir_legalize_16bit_sampler_srcs.restype = ctypes.c_bool
     nir_legalize_16bit_sampler_srcs.argtypes = [ctypes.POINTER(struct_nir_shader), nir_tex_src_type_constraints]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_point_size = _libraries['FIXME_STUB'].nir_lower_point_size
     nir_lower_point_size.restype = ctypes.c_bool
     nir_lower_point_size.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_float, ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_texcoord_replace = _libraries['FIXME_STUB'].nir_lower_texcoord_replace
     nir_lower_texcoord_replace.restype = ctypes.c_bool
     nir_lower_texcoord_replace.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_texcoord_replace_late = _libraries['FIXME_STUB'].nir_lower_texcoord_replace_late
     nir_lower_texcoord_replace_late.restype = ctypes.c_bool
     nir_lower_texcoord_replace_late.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_interpolation_options'
@@ -11874,7 +11874,7 @@ try:
     nir_lower_interpolation = _libraries['FIXME_STUB'].nir_lower_interpolation
     nir_lower_interpolation.restype = ctypes.c_bool
     nir_lower_interpolation.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_interpolation_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_discard_if_options'
@@ -11891,31 +11891,31 @@ try:
     nir_lower_discard_if = _libraries['FIXME_STUB'].nir_lower_discard_if
     nir_lower_discard_if.restype = ctypes.c_bool
     nir_lower_discard_if.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_discard_if_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_terminate_to_demote = _libraries['FIXME_STUB'].nir_lower_terminate_to_demote
     nir_lower_terminate_to_demote.restype = ctypes.c_bool
     nir_lower_terminate_to_demote.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_memory_model = _libraries['FIXME_STUB'].nir_lower_memory_model
     nir_lower_memory_model.restype = ctypes.c_bool
     nir_lower_memory_model.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_goto_ifs = _libraries['FIXME_STUB'].nir_lower_goto_ifs
     nir_lower_goto_ifs.restype = ctypes.c_bool
     nir_lower_goto_ifs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_continue_constructs = _libraries['FIXME_STUB'].nir_lower_continue_constructs
     nir_lower_continue_constructs.restype = ctypes.c_bool
     nir_lower_continue_constructs.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_multiview_options(Structure):
     pass
@@ -11932,25 +11932,25 @@ try:
     nir_shader_uses_view_index = _libraries['FIXME_STUB'].nir_shader_uses_view_index
     nir_shader_uses_view_index.restype = ctypes.c_bool
     nir_shader_uses_view_index.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_can_lower_multiview = _libraries['FIXME_STUB'].nir_can_lower_multiview
     nir_can_lower_multiview.restype = ctypes.c_bool
     nir_can_lower_multiview.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_multiview_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_multiview = _libraries['FIXME_STUB'].nir_lower_multiview
     nir_lower_multiview.restype = ctypes.c_bool
     nir_lower_multiview.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_multiview_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_view_index_to_device_index = _libraries['FIXME_STUB'].nir_lower_view_index_to_device_index
     nir_lower_view_index_to_device_index.restype = ctypes.c_bool
     nir_lower_view_index_to_device_index.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_fp16_cast_options'
@@ -11975,145 +11975,145 @@ try:
     nir_lower_fp16_casts = _libraries['FIXME_STUB'].nir_lower_fp16_casts
     nir_lower_fp16_casts.restype = ctypes.c_bool
     nir_lower_fp16_casts.argtypes = [ctypes.POINTER(struct_nir_shader), nir_lower_fp16_cast_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_normalize_cubemap_coords = _libraries['FIXME_STUB'].nir_normalize_cubemap_coords
     nir_normalize_cubemap_coords.restype = ctypes.c_bool
     nir_normalize_cubemap_coords.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_supports_implicit_lod = _libraries['FIXME_STUB'].nir_shader_supports_implicit_lod
     nir_shader_supports_implicit_lod.restype = ctypes.c_bool
     nir_shader_supports_implicit_lod.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_live_defs_impl = _libraries['FIXME_STUB'].nir_live_defs_impl
     nir_live_defs_impl.restype = None
     nir_live_defs_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_live_defs = _libraries['FIXME_STUB'].nir_get_live_defs
     nir_get_live_defs.restype = ctypes.POINTER(ctypes.c_uint32)
     nir_get_live_defs.argtypes = [nir_cursor, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_loop_analyze_impl = _libraries['FIXME_STUB'].nir_loop_analyze_impl
     nir_loop_analyze_impl.restype = None
     nir_loop_analyze_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_variable_mode, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_defs_interfere = _libraries['FIXME_STUB'].nir_defs_interfere
     nir_defs_interfere.restype = ctypes.c_bool
     nir_defs_interfere.argtypes = [ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_repair_ssa_impl = _libraries['FIXME_STUB'].nir_repair_ssa_impl
     nir_repair_ssa_impl.restype = ctypes.c_bool
     nir_repair_ssa_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_repair_ssa = _libraries['FIXME_STUB'].nir_repair_ssa
     nir_repair_ssa.restype = ctypes.c_bool
     nir_repair_ssa.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_convert_loop_to_lcssa = _libraries['FIXME_STUB'].nir_convert_loop_to_lcssa
     nir_convert_loop_to_lcssa.restype = None
     nir_convert_loop_to_lcssa.argtypes = [ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_convert_to_lcssa = _libraries['FIXME_STUB'].nir_convert_to_lcssa
     nir_convert_to_lcssa.restype = ctypes.c_bool
     nir_convert_to_lcssa.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_divergence_analysis_impl = _libraries['FIXME_STUB'].nir_divergence_analysis_impl
     nir_divergence_analysis_impl.restype = None
     nir_divergence_analysis_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_divergence_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_divergence_analysis = _libraries['FIXME_STUB'].nir_divergence_analysis
     nir_divergence_analysis.restype = None
     nir_divergence_analysis.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vertex_divergence_analysis = _libraries['FIXME_STUB'].nir_vertex_divergence_analysis
     nir_vertex_divergence_analysis.restype = None
     nir_vertex_divergence_analysis.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_has_divergent_loop = _libraries['FIXME_STUB'].nir_has_divergent_loop
     nir_has_divergent_loop.restype = ctypes.c_bool
     nir_has_divergent_loop.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_rewrite_uses_to_load_reg = _libraries['FIXME_STUB'].nir_rewrite_uses_to_load_reg
     nir_rewrite_uses_to_load_reg.restype = None
     nir_rewrite_uses_to_load_reg.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_convert_from_ssa = _libraries['FIXME_STUB'].nir_convert_from_ssa
     nir_convert_from_ssa.restype = ctypes.c_bool
     nir_convert_from_ssa.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_phis_to_regs_block = _libraries['FIXME_STUB'].nir_lower_phis_to_regs_block
     nir_lower_phis_to_regs_block.restype = ctypes.c_bool
     nir_lower_phis_to_regs_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_ssa_defs_to_regs_block = _libraries['FIXME_STUB'].nir_lower_ssa_defs_to_regs_block
     nir_lower_ssa_defs_to_regs_block.restype = ctypes.c_bool
     nir_lower_ssa_defs_to_regs_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_rematerialize_deref_in_use_blocks = _libraries['FIXME_STUB'].nir_rematerialize_deref_in_use_blocks
     nir_rematerialize_deref_in_use_blocks.restype = ctypes.c_bool
     nir_rematerialize_deref_in_use_blocks.argtypes = [ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_rematerialize_derefs_in_use_blocks_impl = _libraries['FIXME_STUB'].nir_rematerialize_derefs_in_use_blocks_impl
     nir_rematerialize_derefs_in_use_blocks_impl.restype = ctypes.c_bool
     nir_rematerialize_derefs_in_use_blocks_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_samplers = _libraries['FIXME_STUB'].nir_lower_samplers
     nir_lower_samplers.restype = ctypes.c_bool
     nir_lower_samplers.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_cl_images = _libraries['FIXME_STUB'].nir_lower_cl_images
     nir_lower_cl_images.restype = ctypes.c_bool
     nir_lower_cl_images.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_dedup_inline_samplers = _libraries['FIXME_STUB'].nir_dedup_inline_samplers
     nir_dedup_inline_samplers.restype = ctypes.c_bool
     nir_dedup_inline_samplers.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_ssbo_options(Structure):
     pass
@@ -12129,13 +12129,13 @@ try:
     nir_lower_ssbo = _libraries['FIXME_STUB'].nir_lower_ssbo
     nir_lower_ssbo.restype = ctypes.c_bool
     nir_lower_ssbo.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_ssbo_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_helper_writes = _libraries['FIXME_STUB'].nir_lower_helper_writes
     nir_lower_helper_writes.restype = ctypes.c_bool
     nir_lower_helper_writes.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_lower_printf_options(Structure):
     pass
@@ -12153,25 +12153,25 @@ try:
     nir_lower_printf = _libraries['FIXME_STUB'].nir_lower_printf
     nir_lower_printf.restype = ctypes.c_bool
     nir_lower_printf.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_printf_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_printf_buffer = _libraries['FIXME_STUB'].nir_lower_printf_buffer
     nir_lower_printf_buffer.restype = ctypes.c_bool
     nir_lower_printf_buffer.argtypes = [ctypes.POINTER(struct_nir_shader), uint64_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_comparison_pre_impl = _libraries['FIXME_STUB'].nir_opt_comparison_pre_impl
     nir_opt_comparison_pre_impl.restype = ctypes.c_bool
     nir_opt_comparison_pre_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_comparison_pre = _libraries['FIXME_STUB'].nir_opt_comparison_pre
     nir_opt_comparison_pre.restype = ctypes.c_bool
     nir_opt_comparison_pre.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_opt_access_options(Structure):
     pass
@@ -12186,164 +12186,164 @@ try:
     nir_opt_access = _libraries['FIXME_STUB'].nir_opt_access
     nir_opt_access.restype = ctypes.c_bool
     nir_opt_access.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_opt_access_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_algebraic = _libraries['FIXME_STUB'].nir_opt_algebraic
     nir_opt_algebraic.restype = ctypes.c_bool
     nir_opt_algebraic.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_algebraic_before_ffma = _libraries['FIXME_STUB'].nir_opt_algebraic_before_ffma
     nir_opt_algebraic_before_ffma.restype = ctypes.c_bool
     nir_opt_algebraic_before_ffma.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_algebraic_before_lower_int64 = _libraries['FIXME_STUB'].nir_opt_algebraic_before_lower_int64
     nir_opt_algebraic_before_lower_int64.restype = ctypes.c_bool
     nir_opt_algebraic_before_lower_int64.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_algebraic_late = _libraries['FIXME_STUB'].nir_opt_algebraic_late
     nir_opt_algebraic_late.restype = ctypes.c_bool
     nir_opt_algebraic_late.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_algebraic_distribute_src_mods = _libraries['FIXME_STUB'].nir_opt_algebraic_distribute_src_mods
     nir_opt_algebraic_distribute_src_mods.restype = ctypes.c_bool
     nir_opt_algebraic_distribute_src_mods.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_constant_folding = _libraries['FIXME_STUB'].nir_opt_constant_folding
     nir_opt_constant_folding.restype = ctypes.c_bool
     nir_opt_constant_folding.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_combine_barrier_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(None))
 try:
     nir_opt_combine_barriers = _libraries['FIXME_STUB'].nir_opt_combine_barriers
     nir_opt_combine_barriers.restype = ctypes.c_bool
     nir_opt_combine_barriers.argtypes = [ctypes.POINTER(struct_nir_shader), nir_combine_barrier_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_barrier_modes = _libraries['FIXME_STUB'].nir_opt_barrier_modes
     nir_opt_barrier_modes.restype = ctypes.c_bool
     nir_opt_barrier_modes.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_minimize_call_live_states = _libraries['FIXME_STUB'].nir_minimize_call_live_states
     nir_minimize_call_live_states.restype = ctypes.c_bool
     nir_minimize_call_live_states.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_combine_stores = _libraries['FIXME_STUB'].nir_opt_combine_stores
     nir_opt_combine_stores.restype = ctypes.c_bool
     nir_opt_combine_stores.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_copy_prop_impl = _libraries['FIXME_STUB'].nir_copy_prop_impl
     nir_copy_prop_impl.restype = ctypes.c_bool
     nir_copy_prop_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_copy_prop = _libraries['FIXME_STUB'].nir_copy_prop
     nir_copy_prop.restype = ctypes.c_bool
     nir_copy_prop.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_copy_prop_vars = _libraries['FIXME_STUB'].nir_opt_copy_prop_vars
     nir_opt_copy_prop_vars.restype = ctypes.c_bool
     nir_opt_copy_prop_vars.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_cse = _libraries['FIXME_STUB'].nir_opt_cse
     nir_opt_cse.restype = ctypes.c_bool
     nir_opt_cse.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_dce = _libraries['FIXME_STUB'].nir_opt_dce
     nir_opt_dce.restype = ctypes.c_bool
     nir_opt_dce.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_dead_cf = _libraries['FIXME_STUB'].nir_opt_dead_cf
     nir_opt_dead_cf.restype = ctypes.c_bool
     nir_opt_dead_cf.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_dead_write_vars = _libraries['FIXME_STUB'].nir_opt_dead_write_vars
     nir_opt_dead_write_vars.restype = ctypes.c_bool
     nir_opt_dead_write_vars.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_deref_impl = _libraries['FIXME_STUB'].nir_opt_deref_impl
     nir_opt_deref_impl.restype = ctypes.c_bool
     nir_opt_deref_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_deref = _libraries['FIXME_STUB'].nir_opt_deref
     nir_opt_deref.restype = ctypes.c_bool
     nir_opt_deref.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_find_array_copies = _libraries['FIXME_STUB'].nir_opt_find_array_copies
     nir_opt_find_array_copies.restype = ctypes.c_bool
     nir_opt_find_array_copies.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_def_is_frag_coord_z = _libraries['FIXME_STUB'].nir_def_is_frag_coord_z
     nir_def_is_frag_coord_z.restype = ctypes.c_bool
     nir_def_is_frag_coord_z.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_fragdepth = _libraries['FIXME_STUB'].nir_opt_fragdepth
     nir_opt_fragdepth.restype = ctypes.c_bool
     nir_opt_fragdepth.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_gcm = _libraries['FIXME_STUB'].nir_opt_gcm
     nir_opt_gcm.restype = ctypes.c_bool
     nir_opt_gcm.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_generate_bfi = _libraries['FIXME_STUB'].nir_opt_generate_bfi
     nir_opt_generate_bfi.restype = ctypes.c_bool
     nir_opt_generate_bfi.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_idiv_const = _libraries['FIXME_STUB'].nir_opt_idiv_const
     nir_opt_idiv_const.restype = ctypes.c_bool
     nir_opt_idiv_const.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_mqsad = _libraries['FIXME_STUB'].nir_opt_mqsad
     nir_opt_mqsad.restype = ctypes.c_bool
     nir_opt_mqsad.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_opt_if_options'
@@ -12360,37 +12360,37 @@ try:
     nir_opt_if = _libraries['FIXME_STUB'].nir_opt_if
     nir_opt_if.restype = ctypes.c_bool
     nir_opt_if.argtypes = [ctypes.POINTER(struct_nir_shader), nir_opt_if_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_intrinsics = _libraries['FIXME_STUB'].nir_opt_intrinsics
     nir_opt_intrinsics.restype = ctypes.c_bool
     nir_opt_intrinsics.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_large_constants = _libraries['FIXME_STUB'].nir_opt_large_constants
     nir_opt_large_constants.restype = ctypes.c_bool
     nir_opt_large_constants.argtypes = [ctypes.POINTER(struct_nir_shader), glsl_type_size_align_func, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_licm = _libraries['FIXME_STUB'].nir_opt_licm
     nir_opt_licm.restype = ctypes.c_bool
     nir_opt_licm.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_loop = _libraries['FIXME_STUB'].nir_opt_loop
     nir_opt_loop.restype = ctypes.c_bool
     nir_opt_loop.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_loop_unroll = _libraries['FIXME_STUB'].nir_opt_loop_unroll
     nir_opt_loop_unroll.restype = ctypes.c_bool
     nir_opt_loop_unroll.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_move_options'
@@ -12419,19 +12419,19 @@ try:
     nir_can_move_instr = _libraries['FIXME_STUB'].nir_can_move_instr
     nir_can_move_instr.restype = ctypes.c_bool
     nir_can_move_instr.argtypes = [ctypes.POINTER(struct_nir_instr), nir_move_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_sink = _libraries['FIXME_STUB'].nir_opt_sink
     nir_opt_sink.restype = ctypes.c_bool
     nir_opt_sink.argtypes = [ctypes.POINTER(struct_nir_shader), nir_move_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_move = _libraries['FIXME_STUB'].nir_opt_move
     nir_opt_move.restype = ctypes.c_bool
     nir_opt_move.argtypes = [ctypes.POINTER(struct_nir_shader), nir_move_options]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_opt_offsets_options(Structure):
     pass
@@ -12455,7 +12455,7 @@ try:
     nir_opt_offsets = _libraries['FIXME_STUB'].nir_opt_offsets
     nir_opt_offsets.restype = ctypes.c_bool
     nir_opt_offsets.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_opt_offsets_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_opt_peephole_select_options(Structure):
     pass
@@ -12474,121 +12474,121 @@ try:
     nir_opt_peephole_select = _libraries['FIXME_STUB'].nir_opt_peephole_select
     nir_opt_peephole_select.restype = ctypes.c_bool
     nir_opt_peephole_select.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_opt_peephole_select_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_reassociate_bfi = _libraries['FIXME_STUB'].nir_opt_reassociate_bfi
     nir_opt_reassociate_bfi.restype = ctypes.c_bool
     nir_opt_reassociate_bfi.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_rematerialize_compares = _libraries['FIXME_STUB'].nir_opt_rematerialize_compares
     nir_opt_rematerialize_compares.restype = ctypes.c_bool
     nir_opt_rematerialize_compares.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_remove_phis = _libraries['FIXME_STUB'].nir_opt_remove_phis
     nir_opt_remove_phis.restype = ctypes.c_bool
     nir_opt_remove_phis.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_single_src_phis_block = _libraries['FIXME_STUB'].nir_remove_single_src_phis_block
     nir_remove_single_src_phis_block.restype = ctypes.c_bool
     nir_remove_single_src_phis_block.argtypes = [ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_phi_precision = _libraries['FIXME_STUB'].nir_opt_phi_precision
     nir_opt_phi_precision.restype = ctypes.c_bool
     nir_opt_phi_precision.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_phi_to_bool = _libraries['FIXME_STUB'].nir_opt_phi_to_bool
     nir_opt_phi_to_bool.restype = ctypes.c_bool
     nir_opt_phi_to_bool.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_shrink_stores = _libraries['FIXME_STUB'].nir_opt_shrink_stores
     nir_opt_shrink_stores.restype = ctypes.c_bool
     nir_opt_shrink_stores.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_shrink_vectors = _libraries['FIXME_STUB'].nir_opt_shrink_vectors
     nir_opt_shrink_vectors.restype = ctypes.c_bool
     nir_opt_shrink_vectors.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_undef = _libraries['FIXME_STUB'].nir_opt_undef
     nir_opt_undef.restype = ctypes.c_bool
     nir_opt_undef.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_undef_to_zero = _libraries['FIXME_STUB'].nir_lower_undef_to_zero
     nir_lower_undef_to_zero.restype = ctypes.c_bool
     nir_lower_undef_to_zero.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_uniform_atomics = _libraries['FIXME_STUB'].nir_opt_uniform_atomics
     nir_opt_uniform_atomics.restype = ctypes.c_bool
     nir_opt_uniform_atomics.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_uniform_subgroup = _libraries['FIXME_STUB'].nir_opt_uniform_subgroup
     nir_opt_uniform_subgroup.restype = ctypes.c_bool
     nir_opt_uniform_subgroup.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_lower_subgroups_options)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_vectorize = _libraries['FIXME_STUB'].nir_opt_vectorize
     nir_opt_vectorize.restype = ctypes.c_bool
     nir_opt_vectorize.argtypes = [ctypes.POINTER(struct_nir_shader), nir_vectorize_cb, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_vectorize_io = _libraries['FIXME_STUB'].nir_opt_vectorize_io
     nir_opt_vectorize_io.restype = ctypes.c_bool
     nir_opt_vectorize_io.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_move_discards_to_top = _libraries['FIXME_STUB'].nir_opt_move_discards_to_top
     nir_opt_move_discards_to_top.restype = ctypes.c_bool
     nir_opt_move_discards_to_top.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_ray_queries = _libraries['FIXME_STUB'].nir_opt_ray_queries
     nir_opt_ray_queries.restype = ctypes.c_bool
     nir_opt_ray_queries.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_ray_query_ranges = _libraries['FIXME_STUB'].nir_opt_ray_query_ranges
     nir_opt_ray_query_ranges.restype = ctypes.c_bool
     nir_opt_ray_query_ranges.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_opt_tex_skip_helpers = _libraries['FIXME_STUB'].nir_opt_tex_skip_helpers
     nir_opt_tex_skip_helpers.restype = ctypes.c_bool
     nir_opt_tex_skip_helpers.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_sweep = _libraries['FIXME_STUB'].nir_sweep
     nir_sweep.restype = None
     nir_sweep.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_gl_system_value'
@@ -12797,43 +12797,43 @@ try:
     nir_intrinsic_from_system_value = _libraries['FIXME_STUB'].nir_intrinsic_from_system_value
     nir_intrinsic_from_system_value.restype = nir_intrinsic_op
     nir_intrinsic_from_system_value.argtypes = [gl_system_value]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_system_value_from_intrinsic = _libraries['FIXME_STUB'].nir_system_value_from_intrinsic
     nir_system_value_from_intrinsic.restype = gl_system_value
     nir_system_value_from_intrinsic.argtypes = [nir_intrinsic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_is_in_ubo = _libraries['FIXME_STUB'].nir_variable_is_in_ubo
     nir_variable_is_in_ubo.restype = ctypes.c_bool
     nir_variable_is_in_ubo.argtypes = [ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_is_in_ssbo = _libraries['FIXME_STUB'].nir_variable_is_in_ssbo
     nir_variable_is_in_ssbo.restype = ctypes.c_bool
     nir_variable_is_in_ssbo.argtypes = [ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_is_in_block = _libraries['FIXME_STUB'].nir_variable_is_in_block
     nir_variable_is_in_block.restype = ctypes.c_bool
     nir_variable_is_in_block.argtypes = [ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_variable_count_slots = _libraries['FIXME_STUB'].nir_variable_count_slots
     nir_variable_count_slots.restype = ctypes.c_uint32
     nir_variable_count_slots.argtypes = [ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deref_count_slots = _libraries['FIXME_STUB'].nir_deref_count_slots
     nir_deref_count_slots.restype = ctypes.c_uint32
     nir_deref_count_slots.argtypes = [ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_unsigned_upper_bound_config(Structure):
     pass
@@ -12853,13 +12853,13 @@ try:
     nir_unsigned_upper_bound = _libraries['FIXME_STUB'].nir_unsigned_upper_bound
     nir_unsigned_upper_bound.restype = uint32_t
     nir_unsigned_upper_bound.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.POINTER(struct_nir_unsigned_upper_bound_config)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_addition_might_overflow = _libraries['FIXME_STUB'].nir_addition_might_overflow
     nir_addition_might_overflow.restype = ctypes.c_bool
     nir_addition_might_overflow.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.c_uint32, ctypes.POINTER(struct_nir_unsigned_upper_bound_config)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_opt_preamble_options(Structure):
     pass
@@ -12884,91 +12884,91 @@ try:
     nir_opt_preamble = _libraries['FIXME_STUB'].nir_opt_preamble
     nir_opt_preamble.restype = ctypes.c_bool
     nir_opt_preamble.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_get_preamble = _libraries['FIXME_STUB'].nir_shader_get_preamble
     nir_shader_get_preamble.restype = ctypes.POINTER(struct_nir_function_impl)
     nir_shader_get_preamble.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_point_smooth = _libraries['FIXME_STUB'].nir_lower_point_smooth
     nir_lower_point_smooth.restype = ctypes.c_bool
     nir_lower_point_smooth.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_lower_poly_line_smooth = _libraries['FIXME_STUB'].nir_lower_poly_line_smooth
     nir_lower_poly_line_smooth.restype = ctypes.c_bool
     nir_lower_poly_line_smooth.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_mod_analysis = _libraries['FIXME_STUB'].nir_mod_analysis
     nir_mod_analysis.restype = ctypes.c_bool
     nir_mod_analysis.argtypes = [nir_scalar, nir_alu_type, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_remove_tex_shadow = _libraries['FIXME_STUB'].nir_remove_tex_shadow
     nir_remove_tex_shadow.restype = ctypes.c_bool
     nir_remove_tex_shadow.argtypes = [ctypes.POINTER(struct_nir_shader), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_trivialize_registers = _libraries['FIXME_STUB'].nir_trivialize_registers
     nir_trivialize_registers.restype = ctypes.c_bool
     nir_trivialize_registers.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_static_workgroup_size = _libraries['FIXME_STUB'].nir_static_workgroup_size
     nir_static_workgroup_size.restype = ctypes.c_uint32
     nir_static_workgroup_size.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_reg_get_decl = _libraries['FIXME_STUB'].nir_reg_get_decl
     nir_reg_get_decl.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_reg_get_decl.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_next_decl_reg = _libraries['FIXME_STUB'].nir_next_decl_reg
     nir_next_decl_reg.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_next_decl_reg.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_after_reg_decls = _libraries['FIXME_STUB'].nir_after_reg_decls
     nir_after_reg_decls.restype = nir_cursor
     nir_after_reg_decls.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_load_reg = _libraries['FIXME_STUB'].nir_is_load_reg
     nir_is_load_reg.restype = ctypes.c_bool
     nir_is_load_reg.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_is_store_reg = _libraries['FIXME_STUB'].nir_is_store_reg
     nir_is_store_reg.restype = ctypes.c_bool
     nir_is_store_reg.argtypes = [ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_reg_for_def = _libraries['FIXME_STUB'].nir_load_reg_for_def
     nir_load_reg_for_def.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_load_reg_for_def.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_reg_for_def = _libraries['FIXME_STUB'].nir_store_reg_for_def
     nir_store_reg_for_def.restype = ctypes.POINTER(struct_nir_intrinsic_instr)
     nir_store_reg_for_def.argtypes = [ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_use_dominance_state(Structure):
     pass
@@ -12978,50 +12978,50 @@ try:
     nir_calc_use_dominance_impl = _libraries['FIXME_STUB'].nir_calc_use_dominance_impl
     nir_calc_use_dominance_impl.restype = ctypes.POINTER(struct_nir_use_dominance_state)
     nir_calc_use_dominance_impl.argtypes = [ctypes.POINTER(struct_nir_function_impl), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_immediate_use_dominator = _libraries['FIXME_STUB'].nir_get_immediate_use_dominator
     nir_get_immediate_use_dominator.restype = ctypes.POINTER(struct_nir_instr)
     nir_get_immediate_use_dominator.argtypes = [ctypes.POINTER(struct_nir_use_dominance_state), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_use_dominance_lca = _libraries['FIXME_STUB'].nir_use_dominance_lca
     nir_use_dominance_lca.restype = ctypes.POINTER(struct_nir_instr)
     nir_use_dominance_lca.argtypes = [ctypes.POINTER(struct_nir_use_dominance_state), ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_instr_dominates_use = _libraries['FIXME_STUB'].nir_instr_dominates_use
     nir_instr_dominates_use.restype = ctypes.c_bool
     nir_instr_dominates_use.argtypes = [ctypes.POINTER(struct_nir_use_dominance_state), ctypes.POINTER(struct_nir_instr), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_print_use_dominators = _libraries['FIXME_STUB'].nir_print_use_dominators
     nir_print_use_dominators.restype = None
     nir_print_use_dominators.argtypes = [ctypes.POINTER(struct_nir_use_dominance_state), ctypes.POINTER(ctypes.POINTER(struct_nir_instr)), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_builder = struct_nir_builder
 try:
     nir_builder_create = _libraries['FIXME_STUB'].nir_builder_create
     nir_builder_create.restype = nir_builder
     nir_builder_create.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_at = _libraries['FIXME_STUB'].nir_builder_at
     nir_builder_at.restype = nir_builder
     nir_builder_at.argtypes = [nir_cursor]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_init_simple_shader = _libraries['FIXME_STUB'].nir_builder_init_simple_shader
     nir_builder_init_simple_shader.restype = nir_builder
     nir_builder_init_simple_shader.argtypes = [gl_shader_stage, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 nir_instr_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.POINTER(None))
 nir_intrinsic_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(None))
@@ -13032,1183 +13032,1183 @@ try:
     nir_function_instructions_pass = _libraries['FIXME_STUB'].nir_function_instructions_pass
     nir_function_instructions_pass.restype = ctypes.c_bool
     nir_function_instructions_pass.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_instr_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_instructions_pass = _libraries['FIXME_STUB'].nir_shader_instructions_pass
     nir_shader_instructions_pass.restype = ctypes.c_bool
     nir_shader_instructions_pass.argtypes = [ctypes.POINTER(struct_nir_shader), nir_instr_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_function_intrinsics_pass = _libraries['FIXME_STUB'].nir_function_intrinsics_pass
     nir_function_intrinsics_pass.restype = ctypes.c_bool
     nir_function_intrinsics_pass.argtypes = [ctypes.POINTER(struct_nir_function_impl), nir_intrinsic_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_intrinsics_pass = _libraries['FIXME_STUB'].nir_shader_intrinsics_pass
     nir_shader_intrinsics_pass.restype = ctypes.c_bool
     nir_shader_intrinsics_pass.argtypes = [ctypes.POINTER(struct_nir_shader), nir_intrinsic_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_alu_pass = _libraries['FIXME_STUB'].nir_shader_alu_pass
     nir_shader_alu_pass.restype = ctypes.c_bool
     nir_shader_alu_pass.argtypes = [ctypes.POINTER(struct_nir_shader), nir_alu_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_tex_pass = _libraries['FIXME_STUB'].nir_shader_tex_pass
     nir_shader_tex_pass.restype = ctypes.c_bool
     nir_shader_tex_pass.argtypes = [ctypes.POINTER(struct_nir_shader), nir_tex_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_shader_phi_pass = _libraries['FIXME_STUB'].nir_shader_phi_pass
     nir_shader_phi_pass.restype = ctypes.c_bool
     nir_shader_phi_pass.argtypes = [ctypes.POINTER(struct_nir_shader), nir_phi_pass_cb, nir_metadata, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_instr_insert = _libraries['FIXME_STUB'].nir_builder_instr_insert
     nir_builder_instr_insert.restype = None
     nir_builder_instr_insert.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_instr_insert_at_top = _libraries['FIXME_STUB'].nir_builder_instr_insert_at_top
     nir_builder_instr_insert_at_top.restype = None
     nir_builder_instr_insert_at_top.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_last_instr = _libraries['FIXME_STUB'].nir_builder_last_instr
     nir_builder_last_instr.restype = ctypes.POINTER(struct_nir_instr)
     nir_builder_last_instr.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu = _libraries['FIXME_STUB'].nir_build_alu
     nir_build_alu.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu1 = _libraries['FIXME_STUB'].nir_build_alu1
     nir_build_alu1.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu1.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu2 = _libraries['FIXME_STUB'].nir_build_alu2
     nir_build_alu2.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu2.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu3 = _libraries['FIXME_STUB'].nir_build_alu3
     nir_build_alu3.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu3.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu4 = _libraries['FIXME_STUB'].nir_build_alu4
     nir_build_alu4.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu4.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_alu_src_arr = _libraries['FIXME_STUB'].nir_build_alu_src_arr
     nir_build_alu_src_arr.restype = ctypes.POINTER(struct_nir_def)
     nir_build_alu_src_arr.argtypes = [ctypes.POINTER(struct_nir_builder), nir_op, ctypes.POINTER(ctypes.POINTER(struct_nir_def))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_tex_deref_instr = _libraries['FIXME_STUB'].nir_build_tex_deref_instr
     nir_build_tex_deref_instr.restype = ctypes.POINTER(struct_nir_def)
     nir_build_tex_deref_instr.argtypes = [ctypes.POINTER(struct_nir_builder), nir_texop, ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.c_uint32, ctypes.POINTER(struct_nir_tex_src)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_cf_insert = _libraries['FIXME_STUB'].nir_builder_cf_insert
     nir_builder_cf_insert.restype = None
     nir_builder_cf_insert.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_is_inside_cf = _libraries['FIXME_STUB'].nir_builder_is_inside_cf
     nir_builder_is_inside_cf.restype = ctypes.c_bool
     nir_builder_is_inside_cf.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_cf_node)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_push_if = _libraries['FIXME_STUB'].nir_push_if
     nir_push_if.restype = ctypes.POINTER(struct_nir_if)
     nir_push_if.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_push_else = _libraries['FIXME_STUB'].nir_push_else
     nir_push_else.restype = ctypes.POINTER(struct_nir_if)
     nir_push_else.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pop_if = _libraries['FIXME_STUB'].nir_pop_if
     nir_pop_if.restype = None
     nir_pop_if.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_if)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_if_phi = _libraries['FIXME_STUB'].nir_if_phi
     nir_if_phi.restype = ctypes.POINTER(struct_nir_def)
     nir_if_phi.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_push_loop = _libraries['FIXME_STUB'].nir_push_loop
     nir_push_loop.restype = ctypes.POINTER(struct_nir_loop)
     nir_push_loop.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_push_continue = _libraries['FIXME_STUB'].nir_push_continue
     nir_push_continue.restype = ctypes.POINTER(struct_nir_loop)
     nir_push_continue.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pop_loop = _libraries['FIXME_STUB'].nir_pop_loop
     nir_pop_loop.restype = None
     nir_pop_loop.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_loop)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_undef = _libraries['FIXME_STUB'].nir_undef
     nir_undef.restype = ctypes.POINTER(struct_nir_def)
     nir_undef.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_imm = _libraries['FIXME_STUB'].nir_build_imm
     nir_build_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_build_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(union_c__UA_nir_const_value)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_zero = _libraries['FIXME_STUB'].nir_imm_zero
     nir_imm_zero.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_zero.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_boolN_t = _libraries['FIXME_STUB'].nir_imm_boolN_t
     nir_imm_boolN_t.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_boolN_t.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_bool, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_bool = _libraries['FIXME_STUB'].nir_imm_bool
     nir_imm_bool.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_bool.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_true = _libraries['FIXME_STUB'].nir_imm_true
     nir_imm_true.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_true.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_false = _libraries['FIXME_STUB'].nir_imm_false
     nir_imm_false.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_false.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_floatN_t = _libraries['FIXME_STUB'].nir_imm_floatN_t
     nir_imm_floatN_t.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_floatN_t.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_double, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_float16 = _libraries['FIXME_STUB'].nir_imm_float16
     nir_imm_float16.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_float16.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_float = _libraries['FIXME_STUB'].nir_imm_float
     nir_imm_float.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_float.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_double = _libraries['FIXME_STUB'].nir_imm_double
     nir_imm_double.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_double.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_vec2 = _libraries['FIXME_STUB'].nir_imm_vec2
     nir_imm_vec2.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_vec2.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float, ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_vec3 = _libraries['FIXME_STUB'].nir_imm_vec3
     nir_imm_vec3.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_vec3.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float, ctypes.c_float, ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_vec4 = _libraries['FIXME_STUB'].nir_imm_vec4
     nir_imm_vec4.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_vec4.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_vec4_16 = _libraries['FIXME_STUB'].nir_imm_vec4_16
     nir_imm_vec4_16.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_vec4_16.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_intN_t = _libraries['FIXME_STUB'].nir_imm_intN_t
     nir_imm_intN_t.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_intN_t.argtypes = [ctypes.POINTER(struct_nir_builder), uint64_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_int = _libraries['FIXME_STUB'].nir_imm_int
     nir_imm_int.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_int.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_int64 = _libraries['FIXME_STUB'].nir_imm_int64
     nir_imm_int64.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_int64.argtypes = [ctypes.POINTER(struct_nir_builder), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_ivec2 = _libraries['FIXME_STUB'].nir_imm_ivec2
     nir_imm_ivec2.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_ivec2.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32, ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_ivec3_intN = _libraries['FIXME_STUB'].nir_imm_ivec3_intN
     nir_imm_ivec3_intN.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_ivec3_intN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_uvec2_intN = _libraries['FIXME_STUB'].nir_imm_uvec2_intN
     nir_imm_uvec2_intN.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_uvec2_intN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_uvec3_intN = _libraries['FIXME_STUB'].nir_imm_uvec3_intN
     nir_imm_uvec3_intN.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_uvec3_intN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_ivec3 = _libraries['FIXME_STUB'].nir_imm_ivec3
     nir_imm_ivec3.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_ivec3.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_ivec4_intN = _libraries['FIXME_STUB'].nir_imm_ivec4_intN
     nir_imm_ivec4_intN.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_ivec4_intN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imm_ivec4 = _libraries['FIXME_STUB'].nir_imm_ivec4
     nir_imm_ivec4.restype = ctypes.POINTER(struct_nir_def)
     nir_imm_ivec4.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_builder_alu_instr_finish_and_insert = _libraries['FIXME_STUB'].nir_builder_alu_instr_finish_and_insert
     nir_builder_alu_instr_finish_and_insert.restype = ctypes.POINTER(struct_nir_def)
     nir_builder_alu_instr_finish_and_insert.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_system_value = _libraries['FIXME_STUB'].nir_load_system_value
     nir_load_system_value.restype = ctypes.POINTER(struct_nir_def)
     nir_load_system_value.argtypes = [ctypes.POINTER(struct_nir_builder), nir_intrinsic_op, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_type_convert = _libraries['FIXME_STUB'].nir_type_convert
     nir_type_convert.restype = ctypes.POINTER(struct_nir_def)
     nir_type_convert.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_alu_type, nir_alu_type, nir_rounding_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_convert_to_bit_size = _libraries['FIXME_STUB'].nir_convert_to_bit_size
     nir_convert_to_bit_size.restype = ctypes.POINTER(struct_nir_def)
     nir_convert_to_bit_size.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_alu_type, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_i2iN = _libraries['FIXME_STUB'].nir_i2iN
     nir_i2iN.restype = ctypes.POINTER(struct_nir_def)
     nir_i2iN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_u2uN = _libraries['FIXME_STUB'].nir_u2uN
     nir_u2uN.restype = ctypes.POINTER(struct_nir_def)
     nir_u2uN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_b2bN = _libraries['FIXME_STUB'].nir_b2bN
     nir_b2bN.restype = ctypes.POINTER(struct_nir_def)
     nir_b2bN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_f2fN = _libraries['FIXME_STUB'].nir_f2fN
     nir_f2fN.restype = ctypes.POINTER(struct_nir_def)
     nir_f2fN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_i2b = _libraries['FIXME_STUB'].nir_i2b
     nir_i2b.restype = ctypes.POINTER(struct_nir_def)
     nir_i2b.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_b2iN = _libraries['FIXME_STUB'].nir_b2iN
     nir_b2iN.restype = ctypes.POINTER(struct_nir_def)
     nir_b2iN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_b2fN = _libraries['FIXME_STUB'].nir_b2fN
     nir_b2fN.restype = ctypes.POINTER(struct_nir_def)
     nir_b2fN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_i2fN = _libraries['FIXME_STUB'].nir_i2fN
     nir_i2fN.restype = ctypes.POINTER(struct_nir_def)
     nir_i2fN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_u2fN = _libraries['FIXME_STUB'].nir_u2fN
     nir_u2fN.restype = ctypes.POINTER(struct_nir_def)
     nir_u2fN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_f2uN = _libraries['FIXME_STUB'].nir_f2uN
     nir_f2uN.restype = ctypes.POINTER(struct_nir_def)
     nir_f2uN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_f2iN = _libraries['FIXME_STUB'].nir_f2iN
     nir_f2iN.restype = ctypes.POINTER(struct_nir_def)
     nir_f2iN.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vec = _libraries['FIXME_STUB'].nir_vec
     nir_vec.restype = ctypes.POINTER(struct_nir_def)
     nir_vec.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.POINTER(struct_nir_def)), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vec_scalars = _libraries['FIXME_STUB'].nir_vec_scalars
     nir_vec_scalars.restype = ctypes.POINTER(struct_nir_def)
     nir_vec_scalars.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_scalar), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_mov_alu = _libraries['FIXME_STUB'].nir_mov_alu
     nir_mov_alu.restype = ctypes.POINTER(struct_nir_def)
     nir_mov_alu.argtypes = [ctypes.POINTER(struct_nir_builder), nir_alu_src, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_swizzle = _libraries['FIXME_STUB'].nir_swizzle
     nir_swizzle.restype = ctypes.POINTER(struct_nir_def)
     nir_swizzle.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fdot = _libraries['FIXME_STUB'].nir_fdot
     nir_fdot.restype = ctypes.POINTER(struct_nir_def)
     nir_fdot.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ball_iequal = _libraries['FIXME_STUB'].nir_ball_iequal
     nir_ball_iequal.restype = ctypes.POINTER(struct_nir_def)
     nir_ball_iequal.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ball = _libraries['FIXME_STUB'].nir_ball
     nir_ball.restype = ctypes.POINTER(struct_nir_def)
     nir_ball.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_bany_inequal = _libraries['FIXME_STUB'].nir_bany_inequal
     nir_bany_inequal.restype = ctypes.POINTER(struct_nir_def)
     nir_bany_inequal.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_bany = _libraries['FIXME_STUB'].nir_bany
     nir_bany.restype = ctypes.POINTER(struct_nir_def)
     nir_bany.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_channel = _libraries['FIXME_STUB'].nir_channel
     nir_channel.restype = ctypes.POINTER(struct_nir_def)
     nir_channel.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_channel_or_undef = _libraries['FIXME_STUB'].nir_channel_or_undef
     nir_channel_or_undef.restype = ctypes.POINTER(struct_nir_def)
     nir_channel_or_undef.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_channels = _libraries['FIXME_STUB'].nir_channels
     nir_channels.restype = ctypes.POINTER(struct_nir_def)
     nir_channels.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_component_mask_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     _nir_select_from_array_helper = _libraries['FIXME_STUB']._nir_select_from_array_helper
     _nir_select_from_array_helper.restype = ctypes.POINTER(struct_nir_def)
     _nir_select_from_array_helper.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.POINTER(struct_nir_def)), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_select_from_ssa_def_array = _libraries['FIXME_STUB'].nir_select_from_ssa_def_array
     nir_select_from_ssa_def_array.restype = ctypes.POINTER(struct_nir_def)
     nir_select_from_ssa_def_array.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.POINTER(struct_nir_def)), ctypes.c_uint32, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vector_extract = _libraries['FIXME_STUB'].nir_vector_extract
     nir_vector_extract.restype = ctypes.POINTER(struct_nir_def)
     nir_vector_extract.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vector_insert_imm = _libraries['FIXME_STUB'].nir_vector_insert_imm
     nir_vector_insert_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_vector_insert_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_vector_insert = _libraries['FIXME_STUB'].nir_vector_insert
     nir_vector_insert.restype = ctypes.POINTER(struct_nir_def)
     nir_vector_insert.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_replicate = _libraries['FIXME_STUB'].nir_replicate
     nir_replicate.restype = ctypes.POINTER(struct_nir_def)
     nir_replicate.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_iadd_imm = _libraries['FIXME_STUB'].nir_iadd_imm
     nir_iadd_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_iadd_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_iadd_imm_nuw = _libraries['FIXME_STUB'].nir_iadd_imm_nuw
     nir_iadd_imm_nuw.restype = ctypes.POINTER(struct_nir_def)
     nir_iadd_imm_nuw.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_iadd_nuw = _libraries['FIXME_STUB'].nir_iadd_nuw
     nir_iadd_nuw.restype = ctypes.POINTER(struct_nir_def)
     nir_iadd_nuw.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fgt_imm = _libraries['FIXME_STUB'].nir_fgt_imm
     nir_fgt_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fgt_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fle_imm = _libraries['FIXME_STUB'].nir_fle_imm
     nir_fle_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fle_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_isub_imm = _libraries['FIXME_STUB'].nir_isub_imm
     nir_isub_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_isub_imm.argtypes = [ctypes.POINTER(struct_nir_builder), uint64_t, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imax_imm = _libraries['FIXME_STUB'].nir_imax_imm
     nir_imax_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_imax_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imin_imm = _libraries['FIXME_STUB'].nir_imin_imm
     nir_imin_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_imin_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_umax_imm = _libraries['FIXME_STUB'].nir_umax_imm
     nir_umax_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_umax_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_umin_imm = _libraries['FIXME_STUB'].nir_umin_imm
     nir_umin_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_umin_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     _nir_mul_imm = _libraries['FIXME_STUB']._nir_mul_imm
     _nir_mul_imm.restype = ctypes.POINTER(struct_nir_def)
     _nir_mul_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t, ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imul_imm = _libraries['FIXME_STUB'].nir_imul_imm
     nir_imul_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_imul_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_amul_imm = _libraries['FIXME_STUB'].nir_amul_imm
     nir_amul_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_amul_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fadd_imm = _libraries['FIXME_STUB'].nir_fadd_imm
     nir_fadd_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fadd_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fsub_imm = _libraries['FIXME_STUB'].nir_fsub_imm
     nir_fsub_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fsub_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_double, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fmul_imm = _libraries['FIXME_STUB'].nir_fmul_imm
     nir_fmul_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fmul_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fdiv_imm = _libraries['FIXME_STUB'].nir_fdiv_imm
     nir_fdiv_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fdiv_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fpow_imm = _libraries['FIXME_STUB'].nir_fpow_imm
     nir_fpow_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_fpow_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_iand_imm = _libraries['FIXME_STUB'].nir_iand_imm
     nir_iand_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_iand_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_test_mask = _libraries['FIXME_STUB'].nir_test_mask
     nir_test_mask.restype = ctypes.POINTER(struct_nir_def)
     nir_test_mask.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ior_imm = _libraries['FIXME_STUB'].nir_ior_imm
     nir_ior_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ior_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ishl_imm = _libraries['FIXME_STUB'].nir_ishl_imm
     nir_ishl_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ishl_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ishr_imm = _libraries['FIXME_STUB'].nir_ishr_imm
     nir_ishr_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ishr_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ushr_imm = _libraries['FIXME_STUB'].nir_ushr_imm
     nir_ushr_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ushr_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_imod_imm = _libraries['FIXME_STUB'].nir_imod_imm
     nir_imod_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_imod_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_udiv_imm = _libraries['FIXME_STUB'].nir_udiv_imm
     nir_udiv_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_udiv_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_umod_imm = _libraries['FIXME_STUB'].nir_umod_imm
     nir_umod_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_umod_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ibfe_imm = _libraries['FIXME_STUB'].nir_ibfe_imm
     nir_ibfe_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ibfe_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ubfe_imm = _libraries['FIXME_STUB'].nir_ubfe_imm
     nir_ubfe_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ubfe_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ubitfield_extract_imm = _libraries['FIXME_STUB'].nir_ubitfield_extract_imm
     nir_ubitfield_extract_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_ubitfield_extract_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint32_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_extract_u8_imm = _libraries['FIXME_STUB'].nir_extract_u8_imm
     nir_extract_u8_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_extract_u8_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_extract_i8_imm = _libraries['FIXME_STUB'].nir_extract_i8_imm
     nir_extract_i8_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_extract_i8_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_fclamp = _libraries['FIXME_STUB'].nir_fclamp
     nir_fclamp.restype = ctypes.POINTER(struct_nir_def)
     nir_fclamp.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_iclamp = _libraries['FIXME_STUB'].nir_iclamp
     nir_iclamp.restype = ctypes.POINTER(struct_nir_def)
     nir_iclamp.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_uclamp = _libraries['FIXME_STUB'].nir_uclamp
     nir_uclamp.restype = ctypes.POINTER(struct_nir_def)
     nir_uclamp.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ffma_imm12 = _libraries['FIXME_STUB'].nir_ffma_imm12
     nir_ffma_imm12.restype = ctypes.POINTER(struct_nir_def)
     nir_ffma_imm12.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double, ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ffma_imm1 = _libraries['FIXME_STUB'].nir_ffma_imm1
     nir_ffma_imm1.restype = ctypes.POINTER(struct_nir_def)
     nir_ffma_imm1.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_double, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ffma_imm2 = _libraries['FIXME_STUB'].nir_ffma_imm2
     nir_ffma_imm2.restype = ctypes.POINTER(struct_nir_def)
     nir_ffma_imm2.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_a_minus_bc = _libraries['FIXME_STUB'].nir_a_minus_bc
     nir_a_minus_bc.restype = ctypes.POINTER(struct_nir_def)
     nir_a_minus_bc.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pack_bits = _libraries['FIXME_STUB'].nir_pack_bits
     nir_pack_bits.restype = ctypes.POINTER(struct_nir_def)
     nir_pack_bits.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_unpack_bits = _libraries['FIXME_STUB'].nir_unpack_bits
     nir_unpack_bits.restype = ctypes.POINTER(struct_nir_def)
     nir_unpack_bits.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_extract_bits = _libraries['FIXME_STUB'].nir_extract_bits
     nir_extract_bits.restype = ctypes.POINTER(struct_nir_def)
     nir_extract_bits.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.POINTER(struct_nir_def)), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_bitcast_vector = _libraries['FIXME_STUB'].nir_bitcast_vector
     nir_bitcast_vector.restype = ctypes.POINTER(struct_nir_def)
     nir_bitcast_vector.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_trim_vector = _libraries['FIXME_STUB'].nir_trim_vector
     nir_trim_vector.restype = ctypes.POINTER(struct_nir_def)
     nir_trim_vector.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pad_vector = _libraries['FIXME_STUB'].nir_pad_vector
     nir_pad_vector.restype = ctypes.POINTER(struct_nir_def)
     nir_pad_vector.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pad_vector_imm_int = _libraries['FIXME_STUB'].nir_pad_vector_imm_int
     nir_pad_vector_imm_int.restype = ctypes.POINTER(struct_nir_def)
     nir_pad_vector_imm_int.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), uint64_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_pad_vec4 = _libraries['FIXME_STUB'].nir_pad_vec4
     nir_pad_vec4.restype = ctypes.POINTER(struct_nir_def)
     nir_pad_vec4.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_resize_vector = _libraries['FIXME_STUB'].nir_resize_vector
     nir_resize_vector.restype = ctypes.POINTER(struct_nir_def)
     nir_resize_vector.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ssa_for_alu_src = _libraries['FIXME_STUB'].nir_ssa_for_alu_src
     nir_ssa_for_alu_src.restype = ctypes.POINTER(struct_nir_def)
     nir_ssa_for_alu_src.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_get_ptr_bitsize = _libraries['FIXME_STUB'].nir_get_ptr_bitsize
     nir_get_ptr_bitsize.restype = ctypes.c_uint32
     nir_get_ptr_bitsize.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_var = _libraries['FIXME_STUB'].nir_build_deref_var
     nir_build_deref_var.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_array = _libraries['FIXME_STUB'].nir_build_deref_array
     nir_build_deref_array.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_array.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_array_imm = _libraries['FIXME_STUB'].nir_build_deref_array_imm
     nir_build_deref_array_imm.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_array_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_ptr_as_array = _libraries['FIXME_STUB'].nir_build_deref_ptr_as_array
     nir_build_deref_ptr_as_array.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_ptr_as_array.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_array_wildcard = _libraries['FIXME_STUB'].nir_build_deref_array_wildcard
     nir_build_deref_array_wildcard.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_array_wildcard.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_struct = _libraries['FIXME_STUB'].nir_build_deref_struct
     nir_build_deref_struct.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_struct.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_cast_with_alignment = _libraries['FIXME_STUB'].nir_build_deref_cast_with_alignment
     nir_build_deref_cast_with_alignment.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_cast_with_alignment.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_variable_mode, ctypes.POINTER(struct_glsl_type), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_cast = _libraries['FIXME_STUB'].nir_build_deref_cast
     nir_build_deref_cast.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_cast.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_variable_mode, ctypes.POINTER(struct_glsl_type), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_alignment_deref_cast = _libraries['FIXME_STUB'].nir_alignment_deref_cast
     nir_alignment_deref_cast.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_alignment_deref_cast.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), uint32_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deref_follower = _libraries['FIXME_STUB'].nir_build_deref_follower
     nir_build_deref_follower.restype = ctypes.POINTER(struct_nir_deref_instr)
     nir_build_deref_follower.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_deref_with_access = _libraries['FIXME_STUB'].nir_load_deref_with_access
     nir_load_deref_with_access.restype = ctypes.POINTER(struct_nir_def)
     nir_load_deref_with_access.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), gl_access_qualifier]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_deref = _libraries['FIXME_STUB'].nir_load_deref
     nir_load_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_load_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_deref_with_access = _libraries['FIXME_STUB'].nir_store_deref_with_access
     nir_store_deref_with_access.restype = None
     nir_store_deref_with_access.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, gl_access_qualifier]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_deref = _libraries['FIXME_STUB'].nir_store_deref
     nir_store_deref.restype = None
     nir_store_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_write_masked_store = _libraries['FIXME_STUB'].nir_build_write_masked_store
     nir_build_write_masked_store.restype = None
     nir_build_write_masked_store.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_write_masked_stores = _libraries['FIXME_STUB'].nir_build_write_masked_stores
     nir_build_write_masked_stores.restype = None
     nir_build_write_masked_stores.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_copy_deref_with_access = _libraries['FIXME_STUB'].nir_copy_deref_with_access
     nir_copy_deref_with_access.restype = None
     nir_copy_deref_with_access.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), gl_access_qualifier, gl_access_qualifier]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_copy_deref = _libraries['FIXME_STUB'].nir_copy_deref
     nir_copy_deref.restype = None
     nir_copy_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_memcpy_deref_with_access = _libraries['FIXME_STUB'].nir_memcpy_deref_with_access
     nir_memcpy_deref_with_access.restype = None
     nir_memcpy_deref_with_access.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), gl_access_qualifier, gl_access_qualifier]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_memcpy_deref = _libraries['FIXME_STUB'].nir_memcpy_deref
     nir_memcpy_deref.restype = None
     nir_memcpy_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_var = _libraries['FIXME_STUB'].nir_load_var
     nir_load_var.restype = ctypes.POINTER(struct_nir_def)
     nir_load_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_var = _libraries['FIXME_STUB'].nir_store_var
     nir_store_var.restype = None
     nir_store_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_copy_var = _libraries['FIXME_STUB'].nir_copy_var
     nir_copy_var.restype = None
     nir_copy_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_variable)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_array_var = _libraries['FIXME_STUB'].nir_load_array_var
     nir_load_array_var.restype = ctypes.POINTER(struct_nir_def)
     nir_load_array_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_array_var_imm = _libraries['FIXME_STUB'].nir_load_array_var_imm
     nir_load_array_var_imm.restype = ctypes.POINTER(struct_nir_def)
     nir_load_array_var_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_array_var = _libraries['FIXME_STUB'].nir_store_array_var
     nir_store_array_var.restype = None
     nir_store_array_var.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_array_var_imm = _libraries['FIXME_STUB'].nir_store_array_var_imm
     nir_store_array_var_imm.restype = None
     nir_store_array_var_imm.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_variable), int64_t, ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_global = _libraries['FIXME_STUB'].nir_load_global
     nir_load_global.restype = ctypes.POINTER(struct_nir_def)
     nir_load_global.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_global = _libraries['FIXME_STUB'].nir_store_global
     nir_store_global.restype = None
     nir_store_global.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.POINTER(struct_nir_def), nir_component_mask_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_global_constant = _libraries['FIXME_STUB'].nir_load_global_constant
     nir_load_global_constant.restype = ctypes.POINTER(struct_nir_def)
     nir_load_global_constant.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_param = _libraries['FIXME_STUB'].nir_load_param
     nir_load_param.restype = ctypes.POINTER(struct_nir_def)
     nir_load_param.argtypes = [ctypes.POINTER(struct_nir_builder), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_decl_reg = _libraries['FIXME_STUB'].nir_decl_reg
     nir_decl_reg.restype = ctypes.POINTER(struct_nir_def)
     nir_decl_reg.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_reg = _libraries['FIXME_STUB'].nir_load_reg
     nir_load_reg.restype = ctypes.POINTER(struct_nir_def)
     nir_load_reg.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_store_reg = _libraries['FIXME_STUB'].nir_store_reg
     nir_store_reg.restype = None
     nir_store_reg.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_src_for_ssa = _libraries['FIXME_STUB'].nir_tex_src_for_ssa
     nir_tex_src_for_ssa.restype = nir_tex_src
     nir_tex_src_for_ssa.argtypes = [nir_tex_src_type, ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_deriv = _libraries['FIXME_STUB'].nir_build_deriv
     nir_build_deriv.restype = ctypes.POINTER(struct_nir_def)
     nir_build_deriv.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), nir_intrinsic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddx = _libraries['FIXME_STUB'].nir_ddx
     nir_ddx.restype = ctypes.POINTER(struct_nir_def)
     nir_ddx.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddx_fine = _libraries['FIXME_STUB'].nir_ddx_fine
     nir_ddx_fine.restype = ctypes.POINTER(struct_nir_def)
     nir_ddx_fine.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddx_coarse = _libraries['FIXME_STUB'].nir_ddx_coarse
     nir_ddx_coarse.restype = ctypes.POINTER(struct_nir_def)
     nir_ddx_coarse.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddy = _libraries['FIXME_STUB'].nir_ddy
     nir_ddy.restype = ctypes.POINTER(struct_nir_def)
     nir_ddy.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddy_fine = _libraries['FIXME_STUB'].nir_ddy_fine
     nir_ddy_fine.restype = ctypes.POINTER(struct_nir_def)
     nir_ddy_fine.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_ddy_coarse = _libraries['FIXME_STUB'].nir_ddy_coarse
     nir_ddy_coarse.restype = ctypes.POINTER(struct_nir_def)
     nir_ddy_coarse.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_steal_tex_src = _libraries['FIXME_STUB'].nir_steal_tex_src
     nir_steal_tex_src.restype = ctypes.POINTER(struct_nir_def)
     nir_steal_tex_src.argtypes = [ctypes.POINTER(struct_nir_tex_instr), nir_tex_src_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_deref = _libraries['FIXME_STUB'].nir_tex_deref
     nir_tex_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_tex_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_txl_deref = _libraries['FIXME_STUB'].nir_txl_deref
     nir_txl_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_txl_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_txl_zero_deref = _libraries['FIXME_STUB'].nir_txl_zero_deref
     nir_txl_zero_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_txl_zero_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_tex_type_has_lod = _libraries['FIXME_STUB'].nir_tex_type_has_lod
     nir_tex_type_has_lod.restype = ctypes.c_bool
     nir_tex_type_has_lod.argtypes = [ctypes.POINTER(struct_glsl_type)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_txf_deref = _libraries['FIXME_STUB'].nir_txf_deref
     nir_txf_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_txf_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_txf_ms_deref = _libraries['FIXME_STUB'].nir_txf_ms_deref
     nir_txf_ms_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_txf_ms_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_txs_deref = _libraries['FIXME_STUB'].nir_txs_deref
     nir_txs_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_txs_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_samples_identical_deref = _libraries['FIXME_STUB'].nir_samples_identical_deref
     nir_samples_identical_deref.restype = ctypes.POINTER(struct_nir_def)
     nir_samples_identical_deref.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_deref_instr), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_mask = _libraries['FIXME_STUB'].nir_mask
     nir_mask.restype = ctypes.POINTER(struct_nir_def)
     nir_mask.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_load_barycentric = _libraries['FIXME_STUB'].nir_load_barycentric
     nir_load_barycentric.restype = ctypes.POINTER(struct_nir_def)
     nir_load_barycentric.argtypes = [ctypes.POINTER(struct_nir_builder), nir_intrinsic_op, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_jump = _libraries['FIXME_STUB'].nir_jump
     nir_jump.restype = None
     nir_jump.argtypes = [ctypes.POINTER(struct_nir_builder), nir_jump_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_goto = _libraries['FIXME_STUB'].nir_goto
     nir_goto.restype = None
     nir_goto.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_goto_if = _libraries['FIXME_STUB'].nir_goto_if
     nir_goto_if.restype = None
     nir_goto_if.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_block), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_block)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_break_if = _libraries['FIXME_STUB'].nir_break_if
     nir_break_if.restype = None
     nir_break_if.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_call = _libraries['FIXME_STUB'].nir_build_call
     nir_build_call.restype = None
     nir_build_call.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_function), size_t, ctypes.POINTER(ctypes.POINTER(struct_nir_def))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_indirect_call = _libraries['FIXME_STUB'].nir_build_indirect_call
     nir_build_indirect_call.restype = None
     nir_build_indirect_call.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_function), ctypes.POINTER(struct_nir_def), size_t, ctypes.POINTER(ctypes.POINTER(struct_nir_def))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_discard = _libraries['FIXME_STUB'].nir_discard
     nir_discard.restype = None
     nir_discard.argtypes = [ctypes.POINTER(struct_nir_builder)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_discard_if = _libraries['FIXME_STUB'].nir_discard_if
     nir_discard_if.restype = None
     nir_discard_if.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_build_string = _libraries['FIXME_STUB'].nir_build_string
     nir_build_string.restype = ctypes.POINTER(struct_nir_def)
     nir_build_string.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_compare_func = _libraries['FIXME_STUB'].nir_compare_func
     nir_compare_func.restype = ctypes.POINTER(struct_nir_def)
     nir_compare_func.argtypes = [ctypes.POINTER(struct_nir_builder), compare_func, ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_mesa_scope'
@@ -14235,49 +14235,49 @@ try:
     nir_scoped_memory_barrier = _libraries['FIXME_STUB'].nir_scoped_memory_barrier
     nir_scoped_memory_barrier.restype = None
     nir_scoped_memory_barrier.argtypes = [ctypes.POINTER(struct_nir_builder), mesa_scope, nir_memory_semantics, nir_variable_mode]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_gen_rect_vertices = _libraries['FIXME_STUB'].nir_gen_rect_vertices
     nir_gen_rect_vertices.restype = ctypes.POINTER(struct_nir_def)
     nir_gen_rect_vertices.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_def)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_printf_fmt = _libraries['FIXME_STUB'].nir_printf_fmt
     nir_printf_fmt.restype = None
     nir_printf_fmt.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_call_serialized = _libraries['FIXME_STUB'].nir_call_serialized
     nir_call_serialized.restype = ctypes.POINTER(struct_nir_def)
     nir_call_serialized.argtypes = [ctypes.POINTER(struct_nir_builder), ctypes.POINTER(ctypes.c_uint32), size_t, ctypes.POINTER(ctypes.POINTER(struct_nir_def))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_serialize = _libraries['FIXME_STUB'].nir_serialize
     nir_serialize.restype = None
     nir_serialize.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize = _libraries['FIXME_STUB'].nir_deserialize
     nir_deserialize.restype = ctypes.POINTER(struct_nir_shader)
     nir_deserialize.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_serialize_function = _libraries['FIXME_STUB'].nir_serialize_function
     nir_serialize_function.restype = None
     nir_serialize_function.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize_function = _libraries['FIXME_STUB'].nir_deserialize_function
     nir_deserialize_function.restype = ctypes.POINTER(struct_nir_function)
     nir_deserialize_function.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 __all__ = \
     ['ACCESS_CAN_REORDER', 'ACCESS_CAN_SPECULATE', 'ACCESS_COHERENT',
@@ -16460,4 +16460,4 @@ __all__ = \
     'union_nir_cursor_0', 'union_nir_deref_instr_0',
     'union_nir_deref_instr_1', 'union_nir_parallel_copy_entry_dest',
     'union_nir_variable_data_0', 'union_shader_info_0', 'va_list']
-def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')
+def __getattr__(nm): raise AttributeError() if nm.startswith('__') else dll.error

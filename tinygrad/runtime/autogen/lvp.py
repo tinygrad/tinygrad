@@ -148,7 +148,7 @@ def char_pointer_cast(string, encoding='utf-8'):
     if encoding is not None:
         try:
             string = string.encode(encoding)
-        except AttributeError:
+        except (AttributeError, RuntimeError):
             # In Python3, bytes has no encode attribute
             pass
     string = ctypes.c_char_p(string)
@@ -176,13 +176,13 @@ try:
     lp_context_create = _libraries['FIXME_STUB'].lp_context_create
     lp_context_create.restype = None
     lp_context_create.argtypes = [ctypes.POINTER(struct_lp_context_ref)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_context_destroy = _libraries['FIXME_STUB'].lp_context_destroy
     lp_context_destroy.restype = None
     lp_context_destroy.argtypes = [ctypes.POINTER(struct_lp_context_ref)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 lp_native_vector_width = 0 # Variable ctypes.c_uint32
 class struct_lp_type(Structure):
@@ -1281,165 +1281,165 @@ try:
     lp_type_from_format_desc = _libraries['FIXME_STUB'].lp_type_from_format_desc
     lp_type_from_format_desc.restype = None
     lp_type_from_format_desc.argtypes = [ctypes.POINTER(struct_lp_type), ctypes.POINTER(struct_util_format_description)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_from_format = _libraries['FIXME_STUB'].lp_type_from_format
     lp_type_from_format.restype = None
     lp_type_from_format.argtypes = [ctypes.POINTER(struct_lp_type), pipe_format]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_width = _libraries['FIXME_STUB'].lp_type_width
     lp_type_width.restype = ctypes.c_uint32
     lp_type_width.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_float = _libraries['FIXME_STUB'].lp_type_float
     lp_type_float.restype = struct_lp_type
     lp_type_float.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_float_vec = _libraries['FIXME_STUB'].lp_type_float_vec
     lp_type_float_vec.restype = struct_lp_type
     lp_type_float_vec.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_int = _libraries['FIXME_STUB'].lp_type_int
     lp_type_int.restype = struct_lp_type
     lp_type_int.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_int_vec = _libraries['FIXME_STUB'].lp_type_int_vec
     lp_type_int_vec.restype = struct_lp_type
     lp_type_int_vec.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_uint = _libraries['FIXME_STUB'].lp_type_uint
     lp_type_uint.restype = struct_lp_type
     lp_type_uint.argtypes = [ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_uint_vec = _libraries['FIXME_STUB'].lp_type_uint_vec
     lp_type_uint_vec.restype = struct_lp_type
     lp_type_uint_vec.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_unorm = _libraries['FIXME_STUB'].lp_type_unorm
     lp_type_unorm.restype = struct_lp_type
     lp_type_unorm.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_fixed = _libraries['FIXME_STUB'].lp_type_fixed
     lp_type_fixed.restype = struct_lp_type
     lp_type_fixed.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_type_ufixed = _libraries['FIXME_STUB'].lp_type_ufixed
     lp_type_ufixed.restype = struct_lp_type
     lp_type_ufixed.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMTypeRef = ctypes.POINTER(struct_LLVMOpaqueType)
 try:
     lp_build_elem_type = _libraries['FIXME_STUB'].lp_build_elem_type
     lp_build_elem_type.restype = LLVMTypeRef
     lp_build_elem_type.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_vec_type = _libraries['FIXME_STUB'].lp_build_vec_type
     lp_build_vec_type.restype = LLVMTypeRef
     lp_build_vec_type.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_check_elem_type = _libraries['FIXME_STUB'].lp_check_elem_type
     lp_check_elem_type.restype = ctypes.c_bool
     lp_check_elem_type.argtypes = [struct_lp_type, LLVMTypeRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_check_vec_type = _libraries['FIXME_STUB'].lp_check_vec_type
     lp_check_vec_type.restype = ctypes.c_bool
     lp_check_vec_type.argtypes = [struct_lp_type, LLVMTypeRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
 try:
     lp_check_value = _libraries['FIXME_STUB'].lp_check_value
     lp_check_value.restype = ctypes.c_bool
     lp_check_value.argtypes = [struct_lp_type, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_int_elem_type = _libraries['FIXME_STUB'].lp_build_int_elem_type
     lp_build_int_elem_type.restype = LLVMTypeRef
     lp_build_int_elem_type.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_int_vec_type = _libraries['FIXME_STUB'].lp_build_int_vec_type
     lp_build_int_vec_type.restype = LLVMTypeRef
     lp_build_int_vec_type.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_float32_vec4_type = _libraries['FIXME_STUB'].lp_float32_vec4_type
     lp_float32_vec4_type.restype = struct_lp_type
     lp_float32_vec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_int32_vec4_type = _libraries['FIXME_STUB'].lp_int32_vec4_type
     lp_int32_vec4_type.restype = struct_lp_type
     lp_int32_vec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_unorm8_vec4_type = _libraries['FIXME_STUB'].lp_unorm8_vec4_type
     lp_unorm8_vec4_type.restype = struct_lp_type
     lp_unorm8_vec4_type.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_elem_type = _libraries['FIXME_STUB'].lp_elem_type
     lp_elem_type.restype = struct_lp_type
     lp_elem_type.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_uint_type = _libraries['FIXME_STUB'].lp_uint_type
     lp_uint_type.restype = struct_lp_type
     lp_uint_type.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_int_type = _libraries['FIXME_STUB'].lp_int_type
     lp_int_type.restype = struct_lp_type
     lp_int_type.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_wider_type = _libraries['FIXME_STUB'].lp_wider_type
     lp_wider_type.restype = struct_lp_type
     lp_wider_type.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_sizeof_llvm_type = _libraries['FIXME_STUB'].lp_sizeof_llvm_type
     lp_sizeof_llvm_type.restype = ctypes.c_uint32
     lp_sizeof_llvm_type.argtypes = [LLVMTypeRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_LLVMTypeKind'
@@ -1492,111 +1492,111 @@ try:
     lp_typekind_name = _libraries['FIXME_STUB'].lp_typekind_name
     lp_typekind_name.restype = ctypes.POINTER(ctypes.c_char)
     lp_typekind_name.argtypes = [LLVMTypeKind]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_dump_llvmtype = _libraries['FIXME_STUB'].lp_dump_llvmtype
     lp_dump_llvmtype.restype = None
     lp_dump_llvmtype.argtypes = [LLVMTypeRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_context_init = _libraries['FIXME_STUB'].lp_build_context_init
     lp_build_context_init.restype = None
     lp_build_context_init.argtypes = [ctypes.POINTER(struct_lp_build_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
 try:
     lp_build_count_ir_module = _libraries['FIXME_STUB'].lp_build_count_ir_module
     lp_build_count_ir_module.restype = ctypes.c_uint32
     lp_build_count_ir_module.argtypes = [LLVMModuleRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_init_native_width = _libraries['FIXME_STUB'].lp_build_init_native_width
     lp_build_init_native_width.restype = ctypes.c_uint32
     lp_build_init_native_width.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_init = _libraries['FIXME_STUB'].lp_build_init
     lp_build_init.restype = ctypes.c_bool
     lp_build_init.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_create = _libraries['FIXME_STUB'].gallivm_create
     gallivm_create.restype = ctypes.POINTER(struct_gallivm_state)
     gallivm_create.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_lp_context_ref), ctypes.POINTER(struct_lp_cached_code)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_destroy = _libraries['FIXME_STUB'].gallivm_destroy
     gallivm_destroy.restype = None
     gallivm_destroy.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_free_ir = _libraries['FIXME_STUB'].gallivm_free_ir
     gallivm_free_ir.restype = None
     gallivm_free_ir.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_verify_function = _libraries['FIXME_STUB'].gallivm_verify_function
     gallivm_verify_function.restype = None
     gallivm_verify_function.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_add_global_mapping = _libraries['FIXME_STUB'].gallivm_add_global_mapping
     gallivm_add_global_mapping.restype = None
     gallivm_add_global_mapping.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_compile_module = _libraries['FIXME_STUB'].gallivm_compile_module
     gallivm_compile_module.restype = None
     gallivm_compile_module.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 func_pointer = ctypes.CFUNCTYPE(None)
 try:
     gallivm_jit_function = _libraries['FIXME_STUB'].gallivm_jit_function
     gallivm_jit_function.restype = func_pointer
     gallivm_jit_function.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_stub_func = _libraries['FIXME_STUB'].gallivm_stub_func
     gallivm_stub_func.restype = None
     gallivm_stub_func.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gallivm_get_perf_flags = _libraries['FIXME_STUB'].gallivm_get_perf_flags
     gallivm_get_perf_flags.restype = ctypes.c_uint32
     gallivm_get_perf_flags.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_init_clock_hook = _libraries['FIXME_STUB'].lp_init_clock_hook
     lp_init_clock_hook.restype = None
     lp_init_clock_hook.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_init_env_options = _libraries['FIXME_STUB'].lp_init_env_options
     lp_init_env_options.restype = None
     lp_init_env_options.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_bld_ppc_disable_denorms = _libraries['FIXME_STUB'].lp_bld_ppc_disable_denorms
     lp_bld_ppc_disable_denorms.restype = None
     lp_bld_ppc_disable_denorms.argtypes = []
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_skip_context(Structure):
     pass
@@ -1614,19 +1614,19 @@ try:
     lp_build_flow_skip_begin = _libraries['FIXME_STUB'].lp_build_flow_skip_begin
     lp_build_flow_skip_begin.restype = None
     lp_build_flow_skip_begin.argtypes = [ctypes.POINTER(struct_lp_build_skip_context), ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_flow_skip_cond_break = _libraries['FIXME_STUB'].lp_build_flow_skip_cond_break
     lp_build_flow_skip_cond_break.restype = None
     lp_build_flow_skip_cond_break.argtypes = [ctypes.POINTER(struct_lp_build_skip_context), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_flow_skip_end = _libraries['FIXME_STUB'].lp_build_flow_skip_end
     lp_build_flow_skip_end.restype = None
     lp_build_flow_skip_end.argtypes = [ctypes.POINTER(struct_lp_build_skip_context)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_mask_context(Structure):
     pass
@@ -1643,37 +1643,37 @@ try:
     lp_build_mask_begin = _libraries['FIXME_STUB'].lp_build_mask_begin
     lp_build_mask_begin.restype = None
     lp_build_mask_begin.argtypes = [ctypes.POINTER(struct_lp_build_mask_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_mask_value = _libraries['FIXME_STUB'].lp_build_mask_value
     lp_build_mask_value.restype = LLVMValueRef
     lp_build_mask_value.argtypes = [ctypes.POINTER(struct_lp_build_mask_context)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_mask_update = _libraries['FIXME_STUB'].lp_build_mask_update
     lp_build_mask_update.restype = None
     lp_build_mask_update.argtypes = [ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_mask_force = _libraries['FIXME_STUB'].lp_build_mask_force
     lp_build_mask_force.restype = None
     lp_build_mask_force.argtypes = [ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_mask_check = _libraries['FIXME_STUB'].lp_build_mask_check
     lp_build_mask_check.restype = None
     lp_build_mask_check.argtypes = [ctypes.POINTER(struct_lp_build_mask_context)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_mask_end = _libraries['FIXME_STUB'].lp_build_mask_end
     lp_build_mask_end.restype = LLVMValueRef
     lp_build_mask_end.argtypes = [ctypes.POINTER(struct_lp_build_mask_context)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_loop_state(Structure):
     pass
@@ -1691,25 +1691,25 @@ try:
     lp_build_loop_begin = _libraries['FIXME_STUB'].lp_build_loop_begin
     lp_build_loop_begin.restype = None
     lp_build_loop_begin.argtypes = [ctypes.POINTER(struct_lp_build_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_loop_end = _libraries['FIXME_STUB'].lp_build_loop_end
     lp_build_loop_end.restype = None
     lp_build_loop_end.argtypes = [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_loop_force_set_counter = _libraries['FIXME_STUB'].lp_build_loop_force_set_counter
     lp_build_loop_force_set_counter.restype = None
     lp_build_loop_force_set_counter.argtypes = [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_loop_force_reload_counter = _libraries['FIXME_STUB'].lp_build_loop_force_reload_counter
     lp_build_loop_force_reload_counter.restype = None
     lp_build_loop_force_reload_counter.argtypes = [ctypes.POINTER(struct_lp_build_loop_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_LLVMIntPredicate'
@@ -1742,7 +1742,7 @@ try:
     lp_build_loop_end_cond = _libraries['FIXME_STUB'].lp_build_loop_end_cond
     lp_build_loop_end_cond.restype = None
     lp_build_loop_end_cond.argtypes = [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef, LLVMIntPredicate]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_for_loop_state(Structure):
     pass
@@ -1766,13 +1766,13 @@ try:
     lp_build_for_loop_begin = _libraries['FIXME_STUB'].lp_build_for_loop_begin
     lp_build_for_loop_begin.restype = None
     lp_build_for_loop_begin.argtypes = [ctypes.POINTER(struct_lp_build_for_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMIntPredicate, LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_for_loop_end = _libraries['FIXME_STUB'].lp_build_for_loop_end
     lp_build_for_loop_end.restype = None
     lp_build_for_loop_end.argtypes = [ctypes.POINTER(struct_lp_build_for_loop_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_if_state(Structure):
     pass
@@ -1791,51 +1791,51 @@ try:
     lp_build_if = _libraries['FIXME_STUB'].lp_build_if
     lp_build_if.restype = None
     lp_build_if.argtypes = [ctypes.POINTER(struct_lp_build_if_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_else = _libraries['FIXME_STUB'].lp_build_else
     lp_build_else.restype = None
     lp_build_else.argtypes = [ctypes.POINTER(struct_lp_build_if_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_endif = _libraries['FIXME_STUB'].lp_build_endif
     lp_build_endif.restype = None
     lp_build_endif.argtypes = [ctypes.POINTER(struct_lp_build_if_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMBasicBlockRef = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
 try:
     lp_build_insert_new_block = _libraries['FIXME_STUB'].lp_build_insert_new_block
     lp_build_insert_new_block.restype = LLVMBasicBlockRef
     lp_build_insert_new_block.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMBuilderRef = ctypes.POINTER(struct_LLVMOpaqueBuilder)
 try:
     lp_create_builder_at_entry = _libraries['FIXME_STUB'].lp_create_builder_at_entry
     lp_create_builder_at_entry.restype = LLVMBuilderRef
     lp_create_builder_at_entry.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_alloca = _libraries['FIXME_STUB'].lp_build_alloca
     lp_build_alloca.restype = LLVMValueRef
     lp_build_alloca.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_alloca_undef = _libraries['FIXME_STUB'].lp_build_alloca_undef
     lp_build_alloca_undef.restype = LLVMValueRef
     lp_build_alloca_undef.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_array_alloca = _libraries['FIXME_STUB'].lp_build_array_alloca
     lp_build_array_alloca.restype = LLVMValueRef
     lp_build_array_alloca.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_blob(Structure):
     pass
@@ -1866,313 +1866,313 @@ try:
     blob_init = _libraries['FIXME_STUB'].blob_init
     blob_init.restype = None
     blob_init.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 size_t = ctypes.c_uint64
 try:
     blob_init_fixed = _libraries['FIXME_STUB'].blob_init_fixed
     blob_init_fixed.restype = None
     blob_init_fixed.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_finish = _libraries['FIXME_STUB'].blob_finish
     blob_finish.restype = None
     blob_finish.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_finish_get_buffer = _libraries['FIXME_STUB'].blob_finish_get_buffer
     blob_finish_get_buffer.restype = None
     blob_finish_get_buffer.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_align = _libraries['FIXME_STUB'].blob_align
     blob_align.restype = ctypes.c_bool
     blob_align.argtypes = [ctypes.POINTER(struct_blob), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_bytes = _libraries['FIXME_STUB'].blob_write_bytes
     blob_write_bytes.restype = ctypes.c_bool
     blob_write_bytes.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 intptr_t = ctypes.c_int64
 try:
     blob_reserve_bytes = _libraries['FIXME_STUB'].blob_reserve_bytes
     blob_reserve_bytes.restype = intptr_t
     blob_reserve_bytes.argtypes = [ctypes.POINTER(struct_blob), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reserve_uint32 = _libraries['FIXME_STUB'].blob_reserve_uint32
     blob_reserve_uint32.restype = intptr_t
     blob_reserve_uint32.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reserve_intptr = _libraries['FIXME_STUB'].blob_reserve_intptr
     blob_reserve_intptr.restype = intptr_t
     blob_reserve_intptr.argtypes = [ctypes.POINTER(struct_blob)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_bytes = _libraries['FIXME_STUB'].blob_overwrite_bytes
     blob_overwrite_bytes.restype = ctypes.c_bool
     blob_overwrite_bytes.argtypes = [ctypes.POINTER(struct_blob), size_t, ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint8_t = ctypes.c_uint8
 try:
     blob_write_uint8 = _libraries['FIXME_STUB'].blob_write_uint8
     blob_write_uint8.restype = ctypes.c_bool
     blob_write_uint8.argtypes = [ctypes.POINTER(struct_blob), uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_uint8 = _libraries['FIXME_STUB'].blob_overwrite_uint8
     blob_overwrite_uint8.restype = ctypes.c_bool
     blob_overwrite_uint8.argtypes = [ctypes.POINTER(struct_blob), size_t, uint8_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint16_t = ctypes.c_uint16
 try:
     blob_write_uint16 = _libraries['FIXME_STUB'].blob_write_uint16
     blob_write_uint16.restype = ctypes.c_bool
     blob_write_uint16.argtypes = [ctypes.POINTER(struct_blob), uint16_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint32_t = ctypes.c_uint32
 try:
     blob_write_uint32 = _libraries['FIXME_STUB'].blob_write_uint32
     blob_write_uint32.restype = ctypes.c_bool
     blob_write_uint32.argtypes = [ctypes.POINTER(struct_blob), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_uint32 = _libraries['FIXME_STUB'].blob_overwrite_uint32
     blob_overwrite_uint32.restype = ctypes.c_bool
     blob_overwrite_uint32.argtypes = [ctypes.POINTER(struct_blob), size_t, uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 uint64_t = ctypes.c_uint64
 try:
     blob_write_uint64 = _libraries['FIXME_STUB'].blob_write_uint64
     blob_write_uint64.restype = ctypes.c_bool
     blob_write_uint64.argtypes = [ctypes.POINTER(struct_blob), uint64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_intptr = _libraries['FIXME_STUB'].blob_write_intptr
     blob_write_intptr.restype = ctypes.c_bool
     blob_write_intptr.argtypes = [ctypes.POINTER(struct_blob), intptr_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_overwrite_intptr = _libraries['FIXME_STUB'].blob_overwrite_intptr
     blob_overwrite_intptr.restype = ctypes.c_bool
     blob_overwrite_intptr.argtypes = [ctypes.POINTER(struct_blob), size_t, intptr_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_write_string = _libraries['FIXME_STUB'].blob_write_string
     blob_write_string.restype = ctypes.c_bool
     blob_write_string.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reader_init = _libraries['FIXME_STUB'].blob_reader_init
     blob_reader_init.restype = None
     blob_reader_init.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_reader_align = _libraries['FIXME_STUB'].blob_reader_align
     blob_reader_align.restype = None
     blob_reader_align.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_bytes = _libraries['FIXME_STUB'].blob_read_bytes
     blob_read_bytes.restype = ctypes.POINTER(None)
     blob_read_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_copy_bytes = _libraries['FIXME_STUB'].blob_copy_bytes
     blob_copy_bytes.restype = None
     blob_copy_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_skip_bytes = _libraries['FIXME_STUB'].blob_skip_bytes
     blob_skip_bytes.restype = None
     blob_skip_bytes.argtypes = [ctypes.POINTER(struct_blob_reader), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint8 = _libraries['FIXME_STUB'].blob_read_uint8
     blob_read_uint8.restype = uint8_t
     blob_read_uint8.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint16 = _libraries['FIXME_STUB'].blob_read_uint16
     blob_read_uint16.restype = uint16_t
     blob_read_uint16.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint32 = _libraries['FIXME_STUB'].blob_read_uint32
     blob_read_uint32.restype = uint32_t
     blob_read_uint32.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_uint64 = _libraries['FIXME_STUB'].blob_read_uint64
     blob_read_uint64.restype = uint64_t
     blob_read_uint64.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_intptr = _libraries['FIXME_STUB'].blob_read_intptr
     blob_read_intptr.restype = intptr_t
     blob_read_intptr.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     blob_read_string = _libraries['FIXME_STUB'].blob_read_string
     blob_read_string.restype = ctypes.POINTER(ctypes.c_char)
     blob_read_string.argtypes = [ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_context = _libraries['FIXME_STUB'].ralloc_context
     ralloc_context.restype = ctypes.POINTER(None)
     ralloc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_size = _libraries['FIXME_STUB'].ralloc_size
     ralloc_size.restype = ctypes.POINTER(None)
     ralloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_size = _libraries['FIXME_STUB'].rzalloc_size
     rzalloc_size.restype = ctypes.POINTER(None)
     rzalloc_size.argtypes = [ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_size = _libraries['FIXME_STUB'].reralloc_size
     reralloc_size.restype = ctypes.POINTER(None)
     reralloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_size = _libraries['FIXME_STUB'].rerzalloc_size
     rerzalloc_size.restype = ctypes.POINTER(None)
     rerzalloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_array_size = _libraries['FIXME_STUB'].ralloc_array_size
     ralloc_array_size.restype = ctypes.POINTER(None)
     ralloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rzalloc_array_size = _libraries['FIXME_STUB'].rzalloc_array_size
     rzalloc_array_size.restype = ctypes.POINTER(None)
     rzalloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     reralloc_array_size = _libraries['FIXME_STUB'].reralloc_array_size
     reralloc_array_size.restype = ctypes.POINTER(None)
     reralloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     rerzalloc_array_size = _libraries['FIXME_STUB'].rerzalloc_array_size
     rerzalloc_array_size.restype = ctypes.POINTER(None)
     rerzalloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_free = _libraries['FIXME_STUB'].ralloc_free
     ralloc_free.restype = None
     ralloc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal = _libraries['FIXME_STUB'].ralloc_steal
     ralloc_steal.restype = None
     ralloc_steal.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_adopt = _libraries['FIXME_STUB'].ralloc_adopt
     ralloc_adopt.restype = None
     ralloc_adopt.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent = _libraries['FIXME_STUB'].ralloc_parent
     ralloc_parent.restype = ctypes.POINTER(None)
     ralloc_parent.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_set_destructor = _libraries['FIXME_STUB'].ralloc_set_destructor
     ralloc_set_destructor.restype = None
     ralloc_set_destructor.argtypes = [ctypes.POINTER(None), ctypes.CFUNCTYPE(None, ctypes.POINTER(None))]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_memdup = _libraries['FIXME_STUB'].ralloc_memdup
     ralloc_memdup.restype = ctypes.POINTER(None)
     ralloc_memdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strdup = _libraries['FIXME_STUB'].ralloc_strdup
     ralloc_strdup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strndup = _libraries['FIXME_STUB'].ralloc_strndup
     ralloc_strndup.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_strndup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strcat = _libraries['FIXME_STUB'].ralloc_strcat
     ralloc_strcat.restype = ctypes.c_bool
     ralloc_strcat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_strncat = _libraries['FIXME_STUB'].ralloc_strncat
     ralloc_strncat.restype = ctypes.c_bool
     ralloc_strncat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_str_append = _libraries['FIXME_STUB'].ralloc_str_append
     ralloc_str_append.restype = ctypes.c_bool
     ralloc_str_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf = _libraries['FIXME_STUB'].ralloc_asprintf
     ralloc_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_asprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct___va_list_tag(Structure):
     pass
@@ -2190,37 +2190,37 @@ try:
     ralloc_vasprintf = _libraries['FIXME_STUB'].ralloc_vasprintf
     ralloc_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     ralloc_vasprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_asprintf_rewrite_tail
     ralloc_asprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_vasprintf_rewrite_tail
     ralloc_vasprintf_rewrite_tail.restype = ctypes.c_bool
     ralloc_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_asprintf_append = _libraries['FIXME_STUB'].ralloc_asprintf_append
     ralloc_asprintf_append.restype = ctypes.c_bool
     ralloc_asprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_vasprintf_append = _libraries['FIXME_STUB'].ralloc_vasprintf_append
     ralloc_vasprintf_append.restype = ctypes.c_bool
     ralloc_vasprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_total_size = _libraries['FIXME_STUB'].ralloc_total_size
     ralloc_total_size.restype = size_t
     ralloc_total_size.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_gc_ctx(Structure):
     pass
@@ -2230,49 +2230,49 @@ try:
     gc_context = _libraries['FIXME_STUB'].gc_context
     gc_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_alloc_size = _libraries['FIXME_STUB'].gc_alloc_size
     gc_alloc_size.restype = ctypes.POINTER(None)
     gc_alloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_zalloc_size = _libraries['FIXME_STUB'].gc_zalloc_size
     gc_zalloc_size.restype = ctypes.POINTER(None)
     gc_zalloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_free = _libraries['FIXME_STUB'].gc_free
     gc_free.restype = None
     gc_free.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_get_context = _libraries['FIXME_STUB'].gc_get_context
     gc_get_context.restype = ctypes.POINTER(struct_gc_ctx)
     gc_get_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_start = _libraries['FIXME_STUB'].gc_sweep_start
     gc_sweep_start.restype = None
     gc_sweep_start.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_mark_live = _libraries['FIXME_STUB'].gc_mark_live
     gc_mark_live.restype = None
     gc_mark_live.argtypes = [ctypes.POINTER(struct_gc_ctx), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     gc_sweep_end = _libraries['FIXME_STUB'].gc_sweep_end
     gc_sweep_end.restype = None
     gc_sweep_end.argtypes = [ctypes.POINTER(struct_gc_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_linear_ctx(Structure):
     pass
@@ -2282,7 +2282,7 @@ try:
     linear_alloc_child = _libraries['FIXME_STUB'].linear_alloc_child
     linear_alloc_child.restype = ctypes.POINTER(None)
     linear_alloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_c__SA_linear_opts(Structure):
     pass
@@ -2297,97 +2297,97 @@ try:
     linear_context = _libraries['FIXME_STUB'].linear_context
     linear_context.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context.argtypes = [ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_context_with_opts = _libraries['FIXME_STUB'].linear_context_with_opts
     linear_context_with_opts.restype = ctypes.POINTER(struct_linear_ctx)
     linear_context_with_opts.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_linear_opts)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child = _libraries['FIXME_STUB'].linear_zalloc_child
     linear_zalloc_child.restype = ctypes.POINTER(None)
     linear_zalloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_free_context = _libraries['FIXME_STUB'].linear_free_context
     linear_free_context.restype = None
     linear_free_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_steal_linear_context = _libraries['FIXME_STUB'].ralloc_steal_linear_context
     ralloc_steal_linear_context.restype = None
     ralloc_steal_linear_context.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     ralloc_parent_of_linear_context = _libraries['FIXME_STUB'].ralloc_parent_of_linear_context
     ralloc_parent_of_linear_context.restype = ctypes.POINTER(None)
     ralloc_parent_of_linear_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_alloc_child_array = _libraries['FIXME_STUB'].linear_alloc_child_array
     linear_alloc_child_array.restype = ctypes.POINTER(None)
     linear_alloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_zalloc_child_array = _libraries['FIXME_STUB'].linear_zalloc_child_array
     linear_zalloc_child_array.restype = ctypes.POINTER(None)
     linear_zalloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strdup = _libraries['FIXME_STUB'].linear_strdup
     linear_strdup.restype = ctypes.POINTER(ctypes.c_char)
     linear_strdup.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf = _libraries['FIXME_STUB'].linear_asprintf
     linear_asprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_asprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf = _libraries['FIXME_STUB'].linear_vasprintf
     linear_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
     linear_vasprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_append = _libraries['FIXME_STUB'].linear_asprintf_append
     linear_asprintf_append.restype = ctypes.c_bool
     linear_asprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_append = _libraries['FIXME_STUB'].linear_vasprintf_append
     linear_vasprintf_append.restype = ctypes.c_bool
     linear_vasprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_asprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_asprintf_rewrite_tail
     linear_asprintf_rewrite_tail.restype = ctypes.c_bool
     linear_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_vasprintf_rewrite_tail
     linear_vasprintf_rewrite_tail.restype = ctypes.c_bool
     linear_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     linear_strcat = _libraries['FIXME_STUB'].linear_strcat
     linear_strcat.restype = ctypes.c_bool
     linear_strcat.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY'
@@ -2447,7 +2447,7 @@ try:
     ralloc_print_info = _libraries['FIXME_STUB'].ralloc_print_info
     ralloc_print_info.restype = None
     ralloc_print_info.argtypes = [ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(None), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__EA_nir_lower_int64_options'
@@ -3790,7 +3790,7 @@ try:
     lp_build_nir_soa = _libraries['FIXME_STUB'].lp_build_nir_soa
     lp_build_nir_soa.restype = None
     lp_build_nir_soa.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueValue) * 4)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_function_impl(Structure):
     pass
@@ -4038,7 +4038,7 @@ try:
     lp_build_nir_soa_func = _libraries['FIXME_STUB'].lp_build_nir_soa_func
     lp_build_nir_soa_func.restype = None
     lp_build_nir_soa_func.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_function_impl), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueValue) * 4)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_sampler_aos(Structure):
     pass
@@ -4114,7 +4114,7 @@ try:
     lp_build_nir_aos = _libraries['FIXME_STUB'].lp_build_nir_aos
     lp_build_nir_aos.restype = None
     lp_build_nir_aos.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), struct_lp_type, ctypes.c_ubyte * 4, LLVMValueRef, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueValue)), ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueValue)), ctypes.POINTER(struct_lp_build_sampler_aos)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_build_fn(Structure):
     pass
@@ -4129,19 +4129,19 @@ try:
     lp_build_nir_soa_prepasses = _libraries['FIXME_STUB'].lp_build_nir_soa_prepasses
     lp_build_nir_soa_prepasses.restype = None
     lp_build_nir_soa_prepasses.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_opt_nir = _libraries['FIXME_STUB'].lp_build_opt_nir
     lp_build_opt_nir.restype = None
     lp_build_opt_nir.argtypes = [ctypes.POINTER(struct_nir_shader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_nir_array_build_gather_values = _libraries['FIXME_STUB'].lp_nir_array_build_gather_values
     lp_nir_array_build_gather_values.restype = LLVMValueRef
     lp_nir_array_build_gather_values.argtypes = [LLVMBuilderRef, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueValue)), ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 LLVMAtomicRMWBinOp = c__EA_LLVMAtomicRMWBinOp
 LLVMAtomicRMWBinOp__enumvalues = c__EA_LLVMAtomicRMWBinOp__enumvalues
@@ -4190,7 +4190,7 @@ try:
     lp_translate_atomic_op = _libraries['FIXME_STUB'].lp_translate_atomic_op
     lp_translate_atomic_op.restype = LLVMAtomicRMWBinOp
     lp_translate_atomic_op.argtypes = [nir_atomic_op]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 gl_shader_stage = pipe_shader_type
 gl_shader_stage__enumvalues = pipe_shader_type__enumvalues
@@ -4456,7 +4456,7 @@ try:
     lp_build_nir_sample_key = _libraries['FIXME_STUB'].lp_build_nir_sample_key
     lp_build_nir_sample_key.restype = uint32_t
     lp_build_nir_sample_key.argtypes = [gl_shader_stage, ctypes.POINTER(struct_nir_tex_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_nir_intrinsic_instr(Structure):
     pass
@@ -5894,7 +5894,7 @@ try:
     lp_img_op_from_intrinsic = _libraries['FIXME_STUB'].lp_img_op_from_intrinsic
     lp_img_op_from_intrinsic.restype = None
     lp_img_op_from_intrinsic.argtypes = [ctypes.POINTER(struct_lp_img_params), ctypes.POINTER(struct_nir_intrinsic_instr)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'lp_nir_call_context_args'
@@ -5941,55 +5941,55 @@ try:
     lp_build_cs_func_call_context = _libraries['FIXME_STUB'].lp_build_cs_func_call_context
     lp_build_cs_func_call_context.restype = LLVMTypeRef
     lp_build_cs_func_call_context.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_struct_get_ptr2 = _libraries['FIXME_STUB'].lp_build_struct_get_ptr2
     lp_build_struct_get_ptr2.restype = LLVMValueRef
     lp_build_struct_get_ptr2.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_struct_get2 = _libraries['FIXME_STUB'].lp_build_struct_get2
     lp_build_struct_get2.restype = LLVMValueRef
     lp_build_struct_get2.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_array_get_ptr2 = _libraries['FIXME_STUB'].lp_build_array_get_ptr2
     lp_build_array_get_ptr2.restype = LLVMValueRef
     lp_build_array_get_ptr2.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_array_get2 = _libraries['FIXME_STUB'].lp_build_array_get2
     lp_build_array_get2.restype = LLVMValueRef
     lp_build_array_get2.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_pointer_get2 = _libraries['FIXME_STUB'].lp_build_pointer_get2
     lp_build_pointer_get2.restype = LLVMValueRef
     lp_build_pointer_get2.argtypes = [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_pointer_get_unaligned2 = _libraries['FIXME_STUB'].lp_build_pointer_get_unaligned2
     lp_build_pointer_get_unaligned2.restype = LLVMValueRef
     lp_build_pointer_get_unaligned2.argtypes = [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_pointer_set = _libraries['FIXME_STUB'].lp_build_pointer_set
     lp_build_pointer_set.restype = None
     lp_build_pointer_set.argtypes = [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_pointer_set_unaligned = _libraries['FIXME_STUB'].lp_build_pointer_set_unaligned
     lp_build_pointer_set_unaligned.restype = None
     lp_build_pointer_set_unaligned.argtypes = [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_jit_buffer(Structure):
     pass
@@ -6026,19 +6026,19 @@ try:
     lp_llvm_descriptor_base = _libraries['FIXME_STUB'].lp_llvm_descriptor_base
     lp_llvm_descriptor_base.restype = LLVMValueRef
     lp_llvm_descriptor_base.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_llvm_buffer_base = _libraries['FIXME_STUB'].lp_llvm_buffer_base
     lp_llvm_buffer_base.restype = LLVMValueRef
     lp_llvm_buffer_base.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_llvm_buffer_num_elements = _libraries['FIXME_STUB'].lp_llvm_buffer_num_elements
     lp_llvm_buffer_num_elements.restype = LLVMValueRef
     lp_llvm_buffer_num_elements.argtypes = [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_jit_texture(Structure):
     pass
@@ -6208,7 +6208,7 @@ try:
     lp_build_jit_resources_type = _libraries['FIXME_STUB'].lp_build_jit_resources_type
     lp_build_jit_resources_type.restype = LLVMTypeRef
     lp_build_jit_resources_type.argtypes = [ctypes.POINTER(struct_gallivm_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 
 # values for enumeration 'c__Ea_LP_JIT_VERTEX_HEADER_VERTEX_ID'
@@ -6225,7 +6225,7 @@ try:
     lp_build_create_jit_vertex_header_type = _libraries['FIXME_STUB'].lp_build_create_jit_vertex_header_type
     lp_build_create_jit_vertex_header_type.restype = LLVMTypeRef
     lp_build_create_jit_vertex_header_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_sampler_dynamic_state(Structure):
     pass
@@ -6234,31 +6234,31 @@ try:
     lp_build_jit_fill_sampler_dynamic_state = _libraries['FIXME_STUB'].lp_build_jit_fill_sampler_dynamic_state
     lp_build_jit_fill_sampler_dynamic_state.restype = None
     lp_build_jit_fill_sampler_dynamic_state.argtypes = [ctypes.POINTER(struct_lp_sampler_dynamic_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_jit_fill_image_dynamic_state = _libraries['FIXME_STUB'].lp_build_jit_fill_image_dynamic_state
     lp_build_jit_fill_image_dynamic_state.restype = None
     lp_build_jit_fill_image_dynamic_state.argtypes = [ctypes.POINTER(struct_lp_sampler_dynamic_state)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_sample_function_type = _libraries['FIXME_STUB'].lp_build_sample_function_type
     lp_build_sample_function_type.restype = LLVMTypeRef
     lp_build_sample_function_type.argtypes = [ctypes.POINTER(struct_gallivm_state), uint32_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_size_function_type = _libraries['FIXME_STUB'].lp_build_size_function_type
     lp_build_size_function_type.restype = LLVMTypeRef
     lp_build_size_function_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_size_query_params)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_image_function_type = _libraries['FIXME_STUB'].lp_build_image_function_type
     lp_build_image_function_type.restype = LLVMTypeRef
     lp_build_image_function_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_img_params), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 class struct_lp_texture_functions(Structure):
     pass
@@ -6378,176 +6378,176 @@ try:
     lp_mantissa = _libraries['FIXME_STUB'].lp_mantissa
     lp_mantissa.restype = ctypes.c_uint32
     lp_mantissa.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_shift = _libraries['FIXME_STUB'].lp_const_shift
     lp_const_shift.restype = ctypes.c_uint32
     lp_const_shift.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_offset = _libraries['FIXME_STUB'].lp_const_offset
     lp_const_offset.restype = ctypes.c_uint32
     lp_const_offset.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_scale = _libraries['FIXME_STUB'].lp_const_scale
     lp_const_scale.restype = ctypes.c_double
     lp_const_scale.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_min = _libraries['FIXME_STUB'].lp_const_min
     lp_const_min.restype = ctypes.c_double
     lp_const_min.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_max = _libraries['FIXME_STUB'].lp_const_max
     lp_const_max.restype = ctypes.c_double
     lp_const_max.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_const_eps = _libraries['FIXME_STUB'].lp_const_eps
     lp_const_eps.restype = ctypes.c_double
     lp_const_eps.argtypes = [struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_undef = _libraries['FIXME_STUB'].lp_build_undef
     lp_build_undef.restype = LLVMValueRef
     lp_build_undef.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_zero = _libraries['FIXME_STUB'].lp_build_zero
     lp_build_zero.restype = LLVMValueRef
     lp_build_zero.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_one = _libraries['FIXME_STUB'].lp_build_one
     lp_build_one.restype = LLVMValueRef
     lp_build_one.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_elem = _libraries['FIXME_STUB'].lp_build_const_elem
     lp_build_const_elem.restype = LLVMValueRef
     lp_build_const_elem.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_vec = _libraries['FIXME_STUB'].lp_build_const_vec
     lp_build_const_vec.restype = LLVMValueRef
     lp_build_const_vec.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_int_vec = _libraries['FIXME_STUB'].lp_build_const_int_vec
     lp_build_const_int_vec.restype = LLVMValueRef
     lp_build_const_int_vec.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_int64]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_channel_vec = _libraries['FIXME_STUB'].lp_build_const_channel_vec
     lp_build_const_channel_vec.restype = LLVMValueRef
     lp_build_const_channel_vec.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_aos = _libraries['FIXME_STUB'].lp_build_const_aos
     lp_build_const_aos.restype = LLVMValueRef
     lp_build_const_aos.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.POINTER(ctypes.c_ubyte)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_mask_aos = _libraries['FIXME_STUB'].lp_build_const_mask_aos
     lp_build_const_mask_aos.restype = LLVMValueRef
     lp_build_const_mask_aos.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_mask_aos_swizzled = _libraries['FIXME_STUB'].lp_build_const_mask_aos_swizzled
     lp_build_const_mask_aos_swizzled.restype = LLVMValueRef
     lp_build_const_mask_aos_swizzled.argtypes = [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_int32 = _libraries['FIXME_STUB'].lp_build_const_int32
     lp_build_const_int32.restype = LLVMValueRef
     lp_build_const_int32.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 int64_t = ctypes.c_int64
 try:
     lp_build_const_int64 = _libraries['FIXME_STUB'].lp_build_const_int64
     lp_build_const_int64.restype = LLVMValueRef
     lp_build_const_int64.argtypes = [ctypes.POINTER(struct_gallivm_state), int64_t]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_float = _libraries['FIXME_STUB'].lp_build_const_float
     lp_build_const_float.restype = LLVMValueRef
     lp_build_const_float.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_double = _libraries['FIXME_STUB'].lp_build_const_double
     lp_build_const_double.restype = LLVMValueRef
     lp_build_const_double.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.c_float]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_int_pointer = _libraries['FIXME_STUB'].lp_build_const_int_pointer
     lp_build_const_int_pointer.restype = LLVMValueRef
     lp_build_const_int_pointer.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(None)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_string = _libraries['FIXME_STUB'].lp_build_const_string
     lp_build_const_string.restype = LLVMValueRef
     lp_build_const_string.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_func_pointer = _libraries['FIXME_STUB'].lp_build_const_func_pointer
     lp_build_const_func_pointer.restype = LLVMValueRef
     lp_build_const_func_pointer.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(None), LLVMTypeRef, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueType)), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     lp_build_const_func_pointer_from_type = _libraries['FIXME_STUB'].lp_build_const_func_pointer_from_type
     lp_build_const_func_pointer_from_type.restype = LLVMValueRef
     lp_build_const_func_pointer_from_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(None), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_serialize = _libraries['FIXME_STUB'].nir_serialize
     nir_serialize.restype = None
     nir_serialize.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_shader), ctypes.c_bool]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize = _libraries['FIXME_STUB'].nir_deserialize
     nir_deserialize.restype = ctypes.POINTER(struct_nir_shader)
     nir_deserialize.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_serialize_function = _libraries['FIXME_STUB'].nir_serialize_function
     nir_serialize_function.restype = None
     nir_serialize_function.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_nir_function)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 try:
     nir_deserialize_function = _libraries['FIXME_STUB'].nir_deserialize_function
     nir_deserialize_function.restype = ctypes.POINTER(struct_nir_function)
     nir_deserialize_function.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
-except AttributeError:
+except (AttributeError, RuntimeError):
     pass
 __all__ = \
     ['DERIVATIVE_GROUP_LINEAR', 'DERIVATIVE_GROUP_NONE',
@@ -7788,4 +7788,4 @@ __all__ = \
     'union_lp_jit_texture_0', 'union_shader_info_0',
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
-def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')
+def __getattr__(nm): raise AttributeError() if nm.startswith('__') else dll.error
