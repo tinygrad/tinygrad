@@ -49,7 +49,7 @@ class MBConvBlock:
     x = self._bn2(x.conv2d(self._project_conv))
     if x.shape == inputs.shape:
       x = x.add(inputs)
-    return x
+    return x.contiguous()
 
 class EfficientNet:
   def __init__(self, number=0, classes=1000, has_se=True, track_running_stats=True, input_channels=3, has_fc_output=True):
@@ -161,4 +161,3 @@ class EfficientNet:
         mv.replace(vnp.to(mv.device))
       else:
         print("MISMATCH SHAPE IN %s, %r %r" % (k, mv.shape, vnp.shape))
-
