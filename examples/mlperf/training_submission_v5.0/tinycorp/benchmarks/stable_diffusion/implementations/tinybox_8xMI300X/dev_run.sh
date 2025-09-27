@@ -18,7 +18,7 @@ fi
 if [[ -d .venv-sd-mlperf ]]; then
   . .venv-sd-mlperf/bin/activate
 else
-  python3 -m venv .venv-sd-mlperf && . venv-sd-mlperf/bin/activate
+  python3 -m venv .venv-sd-mlperf && . .venv-sd-mlperf/bin/activate
   pip install --index-url https://download.pytorch.org/whl/cpu torch && pip install tqdm numpy ftfy regex pillow scipy wandb webdataset
 fi
 pip list
