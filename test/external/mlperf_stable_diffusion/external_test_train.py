@@ -1,4 +1,5 @@
-import unittest, math
+import unittest
+import numpy as np
 from tinygrad import Tensor, dtypes
 from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
 from tinygrad.nn.optim import AdamW
@@ -20,10 +21,11 @@ class TestLRScheduler(unittest.TestCase):
       if i in {0, 499, 998, 999, 1000, 1199}:
         lrs[i] = optimizer.lr.item()
 
-    assert math.isclose(lr, lrs[999], rel_tol=0.0, abs_tol=1e-11)
-    assert lrs[999] == lrs[1000] == lrs[1199]
-    assert math.isclose(lrs[999] / lrs[0], 1000, rel_tol=0.0, abs_tol=1)
-    assert math.isclose(lrs[999] / lrs[499], 2, rel_tol=0.0, abs_tol=1e-5)
+    np.testing.assert_allclose(lr, lrs[999], rtol=0, atol=1e-11)
+    np.testing.assert_equal(lrs[999], lrs[1000])
+    np.testing.assert_equal(lrs[999], lrs[1199])
+    np.testing.assert_allclose(lrs[999] / lrs[0], 1000, rtol=0, atol=1)
+    np.testing.assert_allclose(lrs[999] / lrs[499], 2, rtol=0, atol=1e-5)
 
 if __name__=="__main__":
   unittest.main()
