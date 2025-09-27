@@ -250,9 +250,9 @@ def diskcache_clear():
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables] + ["VACUUM;"]))
 
-def diskcache_get(table:str, key:dict|str|bytes|int) -> Any:
+def diskcache_get(table:str, key:dict|str|int) -> Any:
   if CACHELEVEL < 1: return None
-  if isinstance(key, (str,bytes,int)): key = {"key": key}
+  if isinstance(key, (str,int)): key = {"key": key}
   cur = db_connection().cursor()
   try:
     res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
@@ -262,9 +262,9 @@ def diskcache_get(table:str, key:dict|str|bytes|int) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:dict|str|bytes|int, val:Any, prepickled=False):
+def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
-  if isinstance(key, (str,bytes,int)): key = {"key": key}
+  if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
