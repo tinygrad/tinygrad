@@ -6,7 +6,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 import tinygrad.runtime.autogen.nir as nir
-import ctypes, struct
+import base64, ctypes, struct
 
 s = nir.char_pointer_cast
 def g(s:str): return getattr(nir, s)
@@ -258,7 +258,7 @@ class NIRRenderer(Renderer):
     nir.nir_validate_shader(self.b.shader, b"after render")
     blob = nir.struct_blob()
     nir.nir_serialize(blob, self.b.shader, False)
-    return ctypes.string_at(blob.data, blob.size)
+    return base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
 
 class NAKRenderer(NIRRenderer):
   def __init__(self, dev, device="NV"): super().__init__(dev, device)

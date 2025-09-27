@@ -22,7 +22,7 @@ class LVPCompiler(Compiler):
     # import os
     # input(f"pid: {os.getpid()}")
     blobreader = lvp.struct_blob_reader()
-    lvp.blob_reader_init(blobreader, src, len(src))
+    lvp.blob_reader_init(blobreader, real_src:=base64.b64decode(src), len(real_src))
     shader = lvp.nir_deserialize(None, ctypes.cast(self.nir_options, ctypes.POINTER(lvp.nir_shader_compiler_options)), blobreader)
 
     gallivm = lvp.gallivm_create(None, self.ctx, None)
@@ -65,7 +65,7 @@ class NAKCompiler(Compiler):
 
   def compile(self, src) -> bytes:
     blobreader = nak.struct_blob_reader()
-    nak.blob_reader_init(blobreader, src, len(src))
+    nak.blob_reader_init(blobreader, real_src:=base64.b64decode(src), len(real_src))
     shader = nak.nir_deserialize(None, ctypes.cast(self.nir_options, ctypes.POINTER(nak.nir_shader_compiler_options)), blobreader)
     nak.nak_preprocess_nir(shader, self.cc)
     return nak.nak_compile_shader(shader, False, self.cc, 0, None).contents
