@@ -13,8 +13,9 @@ class LVPCompiler(Compiler):
   def __init__(self, cache_key="lvp"):
     # FIXME: this is wrong if mesa is compiled using ORCJIT
     self.ctx = lvp.lp_context_ref(ctypes.cast(llvm.LLVMContextCreate(), ctypes.POINTER(lvp.struct_LLVMOpaqueContext)), True)
+    # see extra/mesa/lvp_nir_options.sh
     self.nir_options = ctypes.pointer(nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode(
-      "H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJ0syHAgCuUNSvAAEAAA=="))))
+      "H4sIAAAAAAAAA5WMsREAIAwCnw0cwU1czdE9JbHwtJAiEEhAEjCnTGbCxIIUikvLTYmZZcmJi/WCqJfHxQV67K3t8KPbGIq2g3b4AAAA%"))))
     super().__init__(f"compile_{cache_key}")
 
   def compile(self, src) -> bytes:
