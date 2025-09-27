@@ -99,9 +99,10 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 @dataclass
 class ChildrenContext:
   children: dict[UOp, list[UOp]]|None = None
-  realize_roots: dict[UOp, list[UOp]]|None = None
+  realize_roots: dict[UOp, list[UOp]]|None = field(default_factory=lambda: defaultdict(list))
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
+
   children_map = x.get_children_map()
   ctx.children = {}
   for k,v in children_map.items():
@@ -111,26 +112,25 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
       ctx.children[k] = non_sink_children
   # if a node is in the toposort of multiple realizes, it will be indexed by different indices and we can bufferize early
-  realizes = [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]
-  ctx.realize_roots = defaultdict(list)
-  for r in realizes:
-    for u in r.toposort(gate=lambda x: x is not Ops.REALIZE):
-      if u not in ctx.children: continue
+  # this prevents index_child: "children not making progress" error on big graphs
+  for r in [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]:
+    for u in r.toposort(gate=lambda x: x is not Ops.REALIZE or (RANGEIFY>1 and u.arg is not None)):
       ctx.realize_roots[u].append(r)
+
+def bufferize_early(ctx:ChildrenContext, x:UOp):
+  # this will also change the sources such that mark_children wont add the children/child uops anymore
+  new_srcs = [s.realize() if s in ctx.children and len(ctx.realize_roots[s])>1 else s for s in x.src]
+  return x.replace(src=tuple(new_srcs))
 
 def mark_children(ctx:ChildrenContext, x:UOp):
   assert ctx.children is not None
-  new_srcs = []
-  for s in x.src:
-    if s in ctx.children:
-      if len(ctx.realize_roots[s])>1: new_srcs.append(s.realize())
-      else: new_srcs.append(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
-                       arg=(ctx.children[s].index(x), len(ctx.children[s]))))
-    else: new_srcs.append(s)
+  new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(UOp(Ops.CHILDREN, s.dtype, (s,), arg=len(ctx.children[s])),),
+                   arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
   return x.replace(src=tuple(new_srcs))
 
 pm_children = PatternMatcher([
   (UPat(Ops.SINK, name="x"), extract_children),
+  (UPat(GroupOp.All-{Ops.CHILDREN, Ops.SINK, Ops.REALIZE}, name="x"), bufferize_early),
   (UPat(GroupOp.All-{Ops.CHILDREN, Ops.SINK, Ops.REALIZE}, name="x"), mark_children),
 ])
 
