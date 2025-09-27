@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
 from tinygrad.uop.symbolic import sym, symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap
 from tinygrad.schedule.multi import multi_pm
 
 from tinygrad.schedule.kernelize import Kernel
@@ -99,7 +99,7 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 @dataclass
 class ChildrenContext:
   children: dict[UOp, list[UOp]]|None = None
-  realize_roots: dict[UOp, list[UOp]]|None = field(default_factory=lambda: defaultdict(list))
+  realize_roots: defaultdict[UOp, list[UOp]] = field(default_factory=lambda: defaultdict(list))
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
 
@@ -113,13 +113,13 @@ def extract_children(ctx:ChildrenContext, x:UOp):
       ctx.children[k] = non_sink_children
   # if a node is in the toposort of multiple realizes, it will be indexed by different indices and we can bufferize early
   # this prevents index_child: "children not making progress" error on big graphs
-  for r in [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]:
+  for r in [u for u in x.toposort() if u.op is Ops.REALIZE and (RANGEIFY<2 or u.arg is None)]:  # ignore partial realizes
     for u in r.toposort(gate=lambda x: x is not Ops.REALIZE or (RANGEIFY>1 and u.arg is not None)):
       ctx.realize_roots[u].append(r)
 
 def bufferize_early(ctx:ChildrenContext, x:UOp):
   # this will also change the sources such that mark_children wont add the children/child uops anymore
-  new_srcs = [s.realize() if s in ctx.children and len(ctx.realize_roots[s])>1 else s for s in x.src]
+  new_srcs = [s.realize() if s in unwrap(ctx.children) and len(ctx.realize_roots[s])>1 else s for s in x.src]
   return x.replace(src=tuple(new_srcs))
 
 def mark_children(ctx:ChildrenContext, x:UOp):
