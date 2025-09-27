@@ -472,6 +472,7 @@ generate_mesa() {
     $MESA_SRC/src/compiler/nir/nir_serialize.h \
     $MESA_SRC/src/util/blob.h \
     $MESA_SRC/src/compiler/glsl_types.h \
+    $MESA_SRC/src/util/ralloc.h \
     --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
     -o $BASE/nak.py
 
@@ -482,6 +483,7 @@ generate_mesa() {
     $MESA_SRC/src/compiler/nir/nir_serialize.h \
     $MESA_SRC/gen/nir_intrinsics.h \
     $MESA_SRC/src/compiler/glsl_types.h \
+    $MESA_SRC/src/util/ralloc.h \
     --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
     -o $BASE/nir.py
 
@@ -497,6 +499,7 @@ generate_mesa() {
     $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
     $MESA_SRC/src/compiler/nir/nir_serialize.h \
     $MESA_SRC/src/util/blob.h \
+    $MESA_SRC/src/util/ralloc.h \
     --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include -I$(llvm-config-14 --includedir)" \
     -o $BASE/lvp.py
 

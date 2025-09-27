@@ -2512,6 +2512,408 @@ try:
     glsl_get_vec4_size_align_bytes.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
+try:
+    ralloc_context = _libraries['FIXME_STUB'].ralloc_context
+    ralloc_context.restype = ctypes.POINTER(None)
+    ralloc_context.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+size_t = ctypes.c_uint64
+try:
+    ralloc_size = _libraries['FIXME_STUB'].ralloc_size
+    ralloc_size.restype = ctypes.POINTER(None)
+    ralloc_size.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    rzalloc_size = _libraries['FIXME_STUB'].rzalloc_size
+    rzalloc_size.restype = ctypes.POINTER(None)
+    rzalloc_size.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    reralloc_size = _libraries['FIXME_STUB'].reralloc_size
+    reralloc_size.restype = ctypes.POINTER(None)
+    reralloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    rerzalloc_size = _libraries['FIXME_STUB'].rerzalloc_size
+    rerzalloc_size.restype = ctypes.POINTER(None)
+    rerzalloc_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, size_t]
+except AttributeError:
+    pass
+try:
+    ralloc_array_size = _libraries['FIXME_STUB'].ralloc_array_size
+    ralloc_array_size.restype = ctypes.POINTER(None)
+    ralloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    rzalloc_array_size = _libraries['FIXME_STUB'].rzalloc_array_size
+    rzalloc_array_size.restype = ctypes.POINTER(None)
+    rzalloc_array_size.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    reralloc_array_size = _libraries['FIXME_STUB'].reralloc_array_size
+    reralloc_array_size.restype = ctypes.POINTER(None)
+    reralloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    rerzalloc_array_size = _libraries['FIXME_STUB'].rerzalloc_array_size
+    rerzalloc_array_size.restype = ctypes.POINTER(None)
+    rerzalloc_array_size.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t, ctypes.c_uint32, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ralloc_free = _libraries['FIXME_STUB'].ralloc_free
+    ralloc_free.restype = None
+    ralloc_free.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ralloc_steal = _libraries['FIXME_STUB'].ralloc_steal
+    ralloc_steal.restype = None
+    ralloc_steal.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ralloc_adopt = _libraries['FIXME_STUB'].ralloc_adopt
+    ralloc_adopt.restype = None
+    ralloc_adopt.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ralloc_parent = _libraries['FIXME_STUB'].ralloc_parent
+    ralloc_parent.restype = ctypes.POINTER(None)
+    ralloc_parent.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ralloc_set_destructor = _libraries['FIXME_STUB'].ralloc_set_destructor
+    ralloc_set_destructor.restype = None
+    ralloc_set_destructor.argtypes = [ctypes.POINTER(None), ctypes.CFUNCTYPE(None, ctypes.POINTER(None))]
+except AttributeError:
+    pass
+try:
+    ralloc_memdup = _libraries['FIXME_STUB'].ralloc_memdup
+    ralloc_memdup.restype = ctypes.POINTER(None)
+    ralloc_memdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    ralloc_strdup = _libraries['FIXME_STUB'].ralloc_strdup
+    ralloc_strdup.restype = ctypes.POINTER(ctypes.c_char)
+    ralloc_strdup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    ralloc_strndup = _libraries['FIXME_STUB'].ralloc_strndup
+    ralloc_strndup.restype = ctypes.POINTER(ctypes.c_char)
+    ralloc_strndup.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), size_t]
+except AttributeError:
+    pass
+try:
+    ralloc_strcat = _libraries['FIXME_STUB'].ralloc_strcat
+    ralloc_strcat.restype = ctypes.c_bool
+    ralloc_strcat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    ralloc_strncat = _libraries['FIXME_STUB'].ralloc_strncat
+    ralloc_strncat.restype = ctypes.c_bool
+    ralloc_strncat.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t]
+except AttributeError:
+    pass
+try:
+    ralloc_str_append = _libraries['FIXME_STUB'].ralloc_str_append
+    ralloc_str_append.restype = ctypes.c_bool
+    ralloc_str_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t]
+except AttributeError:
+    pass
+try:
+    ralloc_asprintf = _libraries['FIXME_STUB'].ralloc_asprintf
+    ralloc_asprintf.restype = ctypes.POINTER(ctypes.c_char)
+    ralloc_asprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+class struct___va_list_tag(Structure):
+    pass
+
+struct___va_list_tag._pack_ = 1 # source:False
+struct___va_list_tag._fields_ = [
+    ('gp_offset', ctypes.c_uint32),
+    ('fp_offset', ctypes.c_uint32),
+    ('overflow_arg_area', ctypes.POINTER(None)),
+    ('reg_save_area', ctypes.POINTER(None)),
+]
+
+va_list = struct___va_list_tag * 1
+try:
+    ralloc_vasprintf = _libraries['FIXME_STUB'].ralloc_vasprintf
+    ralloc_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
+    ralloc_vasprintf.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    ralloc_asprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_asprintf_rewrite_tail
+    ralloc_asprintf_rewrite_tail.restype = ctypes.c_bool
+    ralloc_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    ralloc_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].ralloc_vasprintf_rewrite_tail
+    ralloc_vasprintf_rewrite_tail.restype = ctypes.c_bool
+    ralloc_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    ralloc_asprintf_append = _libraries['FIXME_STUB'].ralloc_asprintf_append
+    ralloc_asprintf_append.restype = ctypes.c_bool
+    ralloc_asprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    ralloc_vasprintf_append = _libraries['FIXME_STUB'].ralloc_vasprintf_append
+    ralloc_vasprintf_append.restype = ctypes.c_bool
+    ralloc_vasprintf_append.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    ralloc_total_size = _libraries['FIXME_STUB'].ralloc_total_size
+    ralloc_total_size.restype = size_t
+    ralloc_total_size.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+class struct_gc_ctx(Structure):
+    pass
+
+gc_ctx = struct_gc_ctx
+try:
+    gc_context = _libraries['FIXME_STUB'].gc_context
+    gc_context.restype = ctypes.POINTER(struct_gc_ctx)
+    gc_context.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    gc_alloc_size = _libraries['FIXME_STUB'].gc_alloc_size
+    gc_alloc_size.restype = ctypes.POINTER(None)
+    gc_alloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
+except AttributeError:
+    pass
+try:
+    gc_zalloc_size = _libraries['FIXME_STUB'].gc_zalloc_size
+    gc_zalloc_size.restype = ctypes.POINTER(None)
+    gc_zalloc_size.argtypes = [ctypes.POINTER(struct_gc_ctx), size_t, size_t]
+except AttributeError:
+    pass
+try:
+    gc_free = _libraries['FIXME_STUB'].gc_free
+    gc_free.restype = None
+    gc_free.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    gc_get_context = _libraries['FIXME_STUB'].gc_get_context
+    gc_get_context.restype = ctypes.POINTER(struct_gc_ctx)
+    gc_get_context.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    gc_sweep_start = _libraries['FIXME_STUB'].gc_sweep_start
+    gc_sweep_start.restype = None
+    gc_sweep_start.argtypes = [ctypes.POINTER(struct_gc_ctx)]
+except AttributeError:
+    pass
+try:
+    gc_mark_live = _libraries['FIXME_STUB'].gc_mark_live
+    gc_mark_live.restype = None
+    gc_mark_live.argtypes = [ctypes.POINTER(struct_gc_ctx), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    gc_sweep_end = _libraries['FIXME_STUB'].gc_sweep_end
+    gc_sweep_end.restype = None
+    gc_sweep_end.argtypes = [ctypes.POINTER(struct_gc_ctx)]
+except AttributeError:
+    pass
+class struct_linear_ctx(Structure):
+    pass
+
+linear_ctx = struct_linear_ctx
+try:
+    linear_alloc_child = _libraries['FIXME_STUB'].linear_alloc_child
+    linear_alloc_child.restype = ctypes.POINTER(None)
+    linear_alloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
+except AttributeError:
+    pass
+class struct_c__SA_linear_opts(Structure):
+    pass
+
+struct_c__SA_linear_opts._pack_ = 1 # source:False
+struct_c__SA_linear_opts._fields_ = [
+    ('min_buffer_size', ctypes.c_uint32),
+]
+
+linear_opts = struct_c__SA_linear_opts
+try:
+    linear_context = _libraries['FIXME_STUB'].linear_context
+    linear_context.restype = ctypes.POINTER(struct_linear_ctx)
+    linear_context.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    linear_context_with_opts = _libraries['FIXME_STUB'].linear_context_with_opts
+    linear_context_with_opts.restype = ctypes.POINTER(struct_linear_ctx)
+    linear_context_with_opts.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_linear_opts)]
+except AttributeError:
+    pass
+try:
+    linear_zalloc_child = _libraries['FIXME_STUB'].linear_zalloc_child
+    linear_zalloc_child.restype = ctypes.POINTER(None)
+    linear_zalloc_child.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    linear_free_context = _libraries['FIXME_STUB'].linear_free_context
+    linear_free_context.restype = None
+    linear_free_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
+except AttributeError:
+    pass
+try:
+    ralloc_steal_linear_context = _libraries['FIXME_STUB'].ralloc_steal_linear_context
+    ralloc_steal_linear_context.restype = None
+    ralloc_steal_linear_context.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_linear_ctx)]
+except AttributeError:
+    pass
+try:
+    ralloc_parent_of_linear_context = _libraries['FIXME_STUB'].ralloc_parent_of_linear_context
+    ralloc_parent_of_linear_context.restype = ctypes.POINTER(None)
+    ralloc_parent_of_linear_context.argtypes = [ctypes.POINTER(struct_linear_ctx)]
+except AttributeError:
+    pass
+try:
+    linear_alloc_child_array = _libraries['FIXME_STUB'].linear_alloc_child_array
+    linear_alloc_child_array.restype = ctypes.POINTER(None)
+    linear_alloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    linear_zalloc_child_array = _libraries['FIXME_STUB'].linear_zalloc_child_array
+    linear_zalloc_child_array.restype = ctypes.POINTER(None)
+    linear_zalloc_child_array.argtypes = [ctypes.POINTER(struct_linear_ctx), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    linear_strdup = _libraries['FIXME_STUB'].linear_strdup
+    linear_strdup.restype = ctypes.POINTER(ctypes.c_char)
+    linear_strdup.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    linear_asprintf = _libraries['FIXME_STUB'].linear_asprintf
+    linear_asprintf.restype = ctypes.POINTER(ctypes.c_char)
+    linear_asprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    linear_vasprintf = _libraries['FIXME_STUB'].linear_vasprintf
+    linear_vasprintf.restype = ctypes.POINTER(ctypes.c_char)
+    linear_vasprintf.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    linear_asprintf_append = _libraries['FIXME_STUB'].linear_asprintf_append
+    linear_asprintf_append.restype = ctypes.c_bool
+    linear_asprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    linear_vasprintf_append = _libraries['FIXME_STUB'].linear_vasprintf_append
+    linear_vasprintf_append.restype = ctypes.c_bool
+    linear_vasprintf_append.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    linear_asprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_asprintf_rewrite_tail
+    linear_asprintf_rewrite_tail.restype = ctypes.c_bool
+    linear_asprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    linear_vasprintf_rewrite_tail = _libraries['FIXME_STUB'].linear_vasprintf_rewrite_tail
+    linear_vasprintf_rewrite_tail.restype = ctypes.c_bool
+    linear_vasprintf_rewrite_tail.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_char), va_list]
+except AttributeError:
+    pass
+try:
+    linear_strcat = _libraries['FIXME_STUB'].linear_strcat
+    linear_strcat.restype = ctypes.c_bool
+    linear_strcat.argtypes = [ctypes.POINTER(struct_linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+
+# values for enumeration 'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY'
+c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY__enumvalues = {
+    1: 'RALLOC_PRINT_INFO_SUMMARY_ONLY',
+}
+RALLOC_PRINT_INFO_SUMMARY_ONLY = 1
+c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY = ctypes.c_uint32 # enum
+class struct__IO_FILE(Structure):
+    pass
+
+class struct__IO_marker(Structure):
+    pass
+
+class struct__IO_codecvt(Structure):
+    pass
+
+class struct__IO_wide_data(Structure):
+    pass
+
+struct__IO_FILE._pack_ = 1 # source:False
+struct__IO_FILE._fields_ = [
+    ('_flags', ctypes.c_int32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('_IO_read_ptr', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_read_end', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_read_base', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_write_base', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_write_ptr', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_write_end', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_buf_base', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_buf_end', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_save_base', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_backup_base', ctypes.POINTER(ctypes.c_char)),
+    ('_IO_save_end', ctypes.POINTER(ctypes.c_char)),
+    ('_markers', ctypes.POINTER(struct__IO_marker)),
+    ('_chain', ctypes.POINTER(struct__IO_FILE)),
+    ('_fileno', ctypes.c_int32),
+    ('_flags2', ctypes.c_int32),
+    ('_old_offset', ctypes.c_int64),
+    ('_cur_column', ctypes.c_uint16),
+    ('_vtable_offset', ctypes.c_byte),
+    ('_shortbuf', ctypes.c_char * 1),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('_lock', ctypes.POINTER(None)),
+    ('_offset', ctypes.c_int64),
+    ('_codecvt', ctypes.POINTER(struct__IO_codecvt)),
+    ('_wide_data', ctypes.POINTER(struct__IO_wide_data)),
+    ('_freeres_list', ctypes.POINTER(struct__IO_FILE)),
+    ('_freeres_buf', ctypes.POINTER(None)),
+    ('__pad5', ctypes.c_uint64),
+    ('_mode', ctypes.c_int32),
+    ('_unused2', ctypes.c_char * 20),
+]
+
+try:
+    ralloc_print_info = _libraries['FIXME_STUB'].ralloc_print_info
+    ralloc_print_info.restype = None
+    ralloc_print_info.argtypes = [ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(None), ctypes.c_uint32]
+except AttributeError:
+    pass
 
 # values for enumeration 'c__EA_nir_lower_int64_options'
 c__EA_nir_lower_int64_options__enumvalues = {
@@ -3040,9 +3442,6 @@ struct_nir_shader_compiler_options._fields_ = [
     ('max_varying_expression_cost', ctypes.c_uint32),
     ('PADDING_6', ctypes.c_ubyte * 4),
 ]
-
-class struct_gc_ctx(Structure):
-    pass
 
 class struct_nir_xfb_info(Structure):
     pass
@@ -9168,53 +9567,6 @@ try:
     nir_function_impl_index_vars.argtypes = [ctypes.POINTER(struct_nir_function_impl)]
 except AttributeError:
     pass
-class struct__IO_FILE(Structure):
-    pass
-
-class struct__IO_marker(Structure):
-    pass
-
-class struct__IO_codecvt(Structure):
-    pass
-
-class struct__IO_wide_data(Structure):
-    pass
-
-struct__IO_FILE._pack_ = 1 # source:False
-struct__IO_FILE._fields_ = [
-    ('_flags', ctypes.c_int32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('_IO_read_ptr', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_read_end', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_read_base', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_write_base', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_write_ptr', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_write_end', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_buf_base', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_buf_end', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_save_base', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_backup_base', ctypes.POINTER(ctypes.c_char)),
-    ('_IO_save_end', ctypes.POINTER(ctypes.c_char)),
-    ('_markers', ctypes.POINTER(struct__IO_marker)),
-    ('_chain', ctypes.POINTER(struct__IO_FILE)),
-    ('_fileno', ctypes.c_int32),
-    ('_flags2', ctypes.c_int32),
-    ('_old_offset', ctypes.c_int64),
-    ('_cur_column', ctypes.c_uint16),
-    ('_vtable_offset', ctypes.c_byte),
-    ('_shortbuf', ctypes.c_char * 1),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('_lock', ctypes.POINTER(None)),
-    ('_offset', ctypes.c_int64),
-    ('_codecvt', ctypes.POINTER(struct__IO_codecvt)),
-    ('_wide_data', ctypes.POINTER(struct__IO_wide_data)),
-    ('_freeres_list', ctypes.POINTER(struct__IO_FILE)),
-    ('_freeres_buf', ctypes.POINTER(None)),
-    ('__pad5', ctypes.c_uint64),
-    ('_mode', ctypes.c_int32),
-    ('_unused2', ctypes.c_char * 20),
-]
-
 try:
     nir_print_shader = _libraries['FIXME_STUB'].nir_print_shader
     nir_print_shader.restype = None
@@ -10168,7 +10520,6 @@ try:
     nir_lower_vars_to_explicit_types.argtypes = [ctypes.POINTER(struct_nir_shader), nir_variable_mode, glsl_type_size_align_func]
 except AttributeError:
     pass
-size_t = ctypes.c_uint64
 try:
     nir_gather_explicit_io_initializers = _libraries['FIXME_STUB'].nir_gather_explicit_io_initializers
     nir_gather_explicit_io_initializers.restype = None
@@ -14259,7 +14610,8 @@ __all__ = \
     'PIPE_SHADER_FRAGMENT', 'PIPE_SHADER_GEOMETRY',
     'PIPE_SHADER_MESH', 'PIPE_SHADER_MESH_TYPES', 'PIPE_SHADER_TASK',
     'PIPE_SHADER_TESS_CTRL', 'PIPE_SHADER_TESS_EVAL',
-    'PIPE_SHADER_TYPES', 'PIPE_SHADER_VERTEX', 'SCOPE_DEVICE',
+    'PIPE_SHADER_TYPES', 'PIPE_SHADER_VERTEX',
+    'RALLOC_PRINT_INFO_SUMMARY_ONLY', 'SCOPE_DEVICE',
     'SCOPE_INVOCATION', 'SCOPE_NONE', 'SCOPE_QUEUE_FAMILY',
     'SCOPE_SHADER_CALL', 'SCOPE_SUBGROUP', 'SCOPE_WORKGROUP',
     'SUBGROUP_SIZE_API_CONSTANT', 'SUBGROUP_SIZE_FULL_SUBGROUPS',
@@ -14414,9 +14766,12 @@ __all__ = \
     'c__EA_nir_opt_varyings_progress', 'c__EA_nir_ray_query_value',
     'c__EA_nir_resource_data_intel', 'c__EA_nir_rounding_mode',
     'c__EA_nir_selection_control', 'c__EA_nir_var_declaration_type',
-    'c__EA_nir_variable_mode', 'c__Ea_GLSL_PRECISION_NONE', 'c_bool',
-    'c_uint64', 'compare_func', 'decode_type_from_blob',
-    'encode_type_to_blob', 'gl_access_qualifier',
+    'c__EA_nir_variable_mode', 'c__Ea_GLSL_PRECISION_NONE',
+    'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY', 'c_bool', 'c_uint64',
+    'compare_func', 'decode_type_from_blob', 'encode_type_to_blob',
+    'gc_alloc_size', 'gc_context', 'gc_ctx', 'gc_free',
+    'gc_get_context', 'gc_mark_live', 'gc_sweep_end',
+    'gc_sweep_start', 'gc_zalloc_size', 'gl_access_qualifier',
     'gl_derivative_group', 'gl_shader_stage',
     'gl_shader_stage__enumvalues', 'gl_subgroup_size',
     'gl_system_value', 'gl_system_value__enumvalues',
@@ -14515,11 +14870,17 @@ __all__ = \
     'glsl_uvec4_type', 'glsl_uvec_type', 'glsl_varying_count',
     'glsl_vec2_type', 'glsl_vec4_type', 'glsl_vec_type',
     'glsl_vector_type', 'glsl_void_type', 'glsl_without_array',
-    'glsl_without_array_or_matrix', 'int64_t', 'mesa_log_level',
-    'mesa_prim', 'mesa_scope', 'mesa_scope__enumvalues',
-    'nir_a_minus_bc', 'nir_add_inlinable_uniforms',
-    'nir_addition_might_overflow', 'nir_address_format',
-    'nir_address_format_2x32bit_global',
+    'glsl_without_array_or_matrix', 'int64_t', 'linear_alloc_child',
+    'linear_alloc_child_array', 'linear_asprintf',
+    'linear_asprintf_append', 'linear_asprintf_rewrite_tail',
+    'linear_context', 'linear_context_with_opts', 'linear_ctx',
+    'linear_free_context', 'linear_opts', 'linear_strcat',
+    'linear_strdup', 'linear_vasprintf', 'linear_vasprintf_append',
+    'linear_vasprintf_rewrite_tail', 'linear_zalloc_child',
+    'linear_zalloc_child_array', 'mesa_log_level', 'mesa_prim',
+    'mesa_scope', 'mesa_scope__enumvalues', 'nir_a_minus_bc',
+    'nir_add_inlinable_uniforms', 'nir_addition_might_overflow',
+    'nir_address_format', 'nir_address_format_2x32bit_global',
     'nir_address_format_32bit_global',
     'nir_address_format_32bit_index_offset',
     'nir_address_format_32bit_index_offset_pack64',
@@ -16018,13 +16379,26 @@ __all__ = \
     'nir_vector_insert_imm', 'nir_vectorize_cb',
     'nir_vectorize_tess_levels', 'nir_vertex_divergence_analysis',
     'nir_zero_initialize_shared_memory', 'pipe_format',
-    'pipe_shader_type', 'should_print_nir', 'should_skip_nir',
-    'size_t', 'struct__IO_FILE', 'struct__IO_codecvt',
-    'struct__IO_marker', 'struct__IO_wide_data', 'struct_blob',
-    'struct_blob_reader', 'struct_exec_list', 'struct_exec_node',
-    'struct_gc_ctx', 'struct_glsl_cmat_description',
-    'struct_glsl_struct_field', 'struct_glsl_struct_field_0_0',
-    'struct_glsl_type', 'struct_hash_entry', 'struct_hash_table',
+    'pipe_shader_type', 'ralloc_adopt', 'ralloc_array_size',
+    'ralloc_asprintf', 'ralloc_asprintf_append',
+    'ralloc_asprintf_rewrite_tail', 'ralloc_context', 'ralloc_free',
+    'ralloc_memdup', 'ralloc_parent',
+    'ralloc_parent_of_linear_context', 'ralloc_print_info',
+    'ralloc_set_destructor', 'ralloc_size', 'ralloc_steal',
+    'ralloc_steal_linear_context', 'ralloc_str_append',
+    'ralloc_strcat', 'ralloc_strdup', 'ralloc_strncat',
+    'ralloc_strndup', 'ralloc_total_size', 'ralloc_vasprintf',
+    'ralloc_vasprintf_append', 'ralloc_vasprintf_rewrite_tail',
+    'reralloc_array_size', 'reralloc_size', 'rerzalloc_array_size',
+    'rerzalloc_size', 'rzalloc_array_size', 'rzalloc_size',
+    'should_print_nir', 'should_skip_nir', 'size_t',
+    'struct__IO_FILE', 'struct__IO_codecvt', 'struct__IO_marker',
+    'struct__IO_wide_data', 'struct___va_list_tag', 'struct_blob',
+    'struct_blob_reader', 'struct_c__SA_linear_opts',
+    'struct_exec_list', 'struct_exec_node', 'struct_gc_ctx',
+    'struct_glsl_cmat_description', 'struct_glsl_struct_field',
+    'struct_glsl_struct_field_0_0', 'struct_glsl_type',
+    'struct_hash_entry', 'struct_hash_table', 'struct_linear_ctx',
     'struct_list_head', 'struct_nir_alu_instr', 'struct_nir_alu_src',
     'struct_nir_binding', 'struct_nir_block', 'struct_nir_builder',
     'struct_nir_call_instr', 'struct_nir_cf_node',
@@ -16085,5 +16459,5 @@ __all__ = \
     'union_glsl_struct_field_0', 'union_glsl_type_fields',
     'union_nir_cursor_0', 'union_nir_deref_instr_0',
     'union_nir_deref_instr_1', 'union_nir_parallel_copy_entry_dest',
-    'union_nir_variable_data_0', 'union_shader_info_0']
+    'union_nir_variable_data_0', 'union_shader_info_0', 'va_list']
 def __getattr__(nm): raise AttributeError() if nm.startswith('__') else RuntimeError(f'{nm} not found in {dll.path}, did you patch and install mesa?')

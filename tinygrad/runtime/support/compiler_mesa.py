@@ -9,6 +9,11 @@ import tinygrad.runtime.autogen.nak as nak
 try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
+def deserialize(lib, enc_src, opts):
+  blobreader = lib.struct_blob_reader()
+  lib.blob_reader_init(blobreader, src:=base64.b64decode(enc_src), len(src))
+  return lib.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(lib.nir_shader_compiler_options)), blobreader)
+
 class LVPCompiler(Compiler):
   def __init__(self, cache_key="lvp"):
     # FIXME: this is wrong if mesa is compiled using ORCJIT
@@ -18,38 +23,39 @@ class LVPCompiler(Compiler):
       "H4sIAAAAAAAAA5WMsREAIAwCnw0cwU1czdE9JbHwtJAiEEhAEjCnTGbCxIIUikvLTYmZZcmJi/WCqJfHxQV67K3t8KPbGIq2g3b4AAAA%"))))
     super().__init__(f"compile_{cache_key}")
 
+  def __del__(self): llvm.LLVMContextDispose(ctypes.cast(self.ctx.ref, llvm.LLVMContextRef))
+
   def compile(self, src) -> bytes:
-    # import os
-    # input(f"pid: {os.getpid()}")
-    blobreader = lvp.struct_blob_reader()
-    lvp.blob_reader_init(blobreader, real_src:=base64.b64decode(src), len(real_src))
-    shader = lvp.nir_deserialize(None, ctypes.cast(self.nir_options, ctypes.POINTER(lvp.nir_shader_compiler_options)), blobreader)
+    shader = deserialize(lvp, src, self.nir_options)
 
     gallivm = lvp.gallivm_create(None, self.ctx, None)
-    module = ctypes.cast(gallivm.contents.module, ctypes.POINTER(llvm.struct_LLVMOpaqueModule))
+    module = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef)
+    ctx, builder = ctypes.cast(gallivm.contents.context, llvm.LLVMContextRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
 
     params = lvp.struct_lp_build_tgsi_params(lvp.struct_lp_type(floating=True, sign=True, width=32, length=4),
       resources_type=lvp.lp_build_jit_resources_type(gallivm), mask=ctypes.pointer(lvp.struct_lp_build_mask_context()))
 
-    ctx = ctypes.cast(gallivm.contents.context, ctypes.POINTER(llvm.struct_LLVMOpaqueContext))
-    builder = ctypes.cast(gallivm.contents.builder, ctypes.POINTER(llvm.struct_LLVMOpaqueBuilder))
-    pt = llvm.LLVMPointerType(ctypes.cast(params.resources_type, ctypes.POINTER(llvm.struct_LLVMOpaqueType)), 0)
-    fn = llvm.LLVMAddFunction(module, b"aaa", llvm.LLVMFunctionType(llvm.LLVMVoidTypeInContext(ctx), pt, 1, 0))
+    pt = llvm.LLVMPointerType(ctypes.cast(params.resources_type, llvm.LLVMTypeRef), 0)
+    fn = llvm.LLVMAddFunction(module, shader.contents.info.name, llvm.LLVMFunctionType(llvm.LLVMVoidTypeInContext(ctx), pt, 1, 0))
     llvm.LLVMPositionBuilderAtEnd(builder, llvm.LLVMAppendBasicBlockInContext(ctx, fn, b"entry"))
 
     params.consts_ptr = lvp.lp_build_struct_get_ptr2(gallivm, params.resources_type,
-      ctypes.cast(llvm.LLVMGetParam(fn, 0), ctypes.POINTER(lvp.struct_LLVMOpaqueValue)), lvp.LP_JIT_RES_CONSTANTS, b"constants")
+      ctypes.cast(llvm.LLVMGetParam(fn, 0), lvp.LLVMValueRef), lvp.LP_JIT_RES_CONSTANTS, b"constants")
     lvp.lp_build_mask_begin(params.mask, gallivm, params.type, lvp.lp_build_one(gallivm, params.type))
     lvp.lp_build_mask_end(params.mask)
 
     lvp.lp_build_nir_soa(gallivm, shader, params, None)
     llvm.LLVMBuildRetVoid(builder)
-    lvp.gallivm_verify_function(gallivm, ctypes.cast(fn, ctypes.POINTER(lvp.struct_LLVMOpaqueValue)))
+    lvp.gallivm_verify_function(gallivm, ctypes.cast(fn, lvp.LLVMValueRef))
     lvp.gallivm_compile_module(gallivm)
-    t = llvm.LLVMGetExecutionEngineTargetMachine(ctypes.cast(gallivm.contents.engine, ctypes.POINTER(llvm.struct_LLVMOpaqueExecutionEngine)))
+    t = llvm.LLVMGetExecutionEngineTargetMachine(ctypes.cast(gallivm.contents.engine, llvm.LLVMExecutionEngineRef))
     obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(t, module, llvm.LLVMObjectFile, e:=cerr(),
                                                               ctypes.pointer(b:=llvm.LLVMMemoryBufferRef())), e, b)
-    return ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
+    ret = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
+    lvp.gallivm_destroy(gallivm)
+    llvm.LLVMDisposeMemoryBuffer(obj_buf)
+    lvp.ralloc_free(shader)
+    return ret
 
   def disassemble(self, lib:bytes): cpu_objdump(lib)
 
@@ -61,14 +67,17 @@ class NAKCompiler(Compiler):
     nak.glsl_type_singleton_init_or_ref()
     super().__init__(f"compile_{cache_key}_{dev.arch}")
 
-  def __del__(self): nak.glsl_type_singleton_decref()
+  def __del__(self):
+    nak.nak_compiler_destroy(self.cc)
+    nak.glsl_type_singleton_decref()
 
   def compile(self, src) -> bytes:
-    blobreader = nak.struct_blob_reader()
-    nak.blob_reader_init(blobreader, real_src:=base64.b64decode(src), len(real_src))
-    shader = nak.nir_deserialize(None, ctypes.cast(self.nir_options, ctypes.POINTER(nak.nir_shader_compiler_options)), blobreader)
+    shader = deserialize(nak, src, self.nir_options)
     nak.nak_preprocess_nir(shader, self.cc)
-    return nak.nak_compile_shader(shader, False, self.cc, 0, None).contents
+    ret = nak.nak_compile_shader(shader, False, self.cc, 0, None).contents
+    nak.ralloc_free(shader)
+    return ret
+
   def disassemble(self, lib: bytes):
     try:
       fn = (pathlib.Path(tempfile.gettempdir()) / f"tinynak_{hashlib.md5(lib).hexdigest()}").as_posix()

@@ -50,7 +50,7 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    if prg.LVP:
+    if isinstance(args_state, LVPArgsState):
       self.bind_args_state(args_state)
       return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
@@ -72,7 +72,6 @@ class CPUProgram(HCQProgram):
   except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
-    self.LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -88,7 +87,7 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if self.LVP:
+      if (LVP:=isinstance(dev.compiler, LVPCompiler)):
         from tinygrad.runtime.autogen import libc
         (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for ploc,tgt,r_type,r_addend in relocs:
@@ -112,7 +111,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if self.LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if self.LVP else 0)
+    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):

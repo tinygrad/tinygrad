@@ -1,38 +1,24 @@
-from typing import Callable, cast, Tuple
+from typing import Callable, cast
 from functools import partial
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
-from tinygrad.helpers import all_same
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 import tinygrad.runtime.autogen.nir as nir
 import base64, ctypes, struct
 
-s = nir.char_pointer_cast
 def g(s:str): return getattr(nir, s)
 def d(i) -> nir.nir_def: return getattr(i.contents, "def")
 
-def BITFIELD_BIT(b): return 1 << b
-def BITFIELD_MASK(b): return 0xFFFFFFFF if b == 32 else BITFIELD_BIT(b & 31) - 1
-
-def nir_mov_alu(b:nir.nir_builder, src:nir.nir_alu_src, num_components:int) -> nir.nir_def:
+def nchannel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def:
+  alu_src = nir.nir_alu_src(src=nir_src_for_ssa(src))
+  alu_src.swizzle[0] = c
   mov = nir.nir_alu_instr_create(b.shader, nir.nir_op_mov)
-  nir.nir_def_init(mov.contents.instr, d(mov), num_components, src.src.ssa.contents.bit_size)
+  nir.nir_def_init(mov.contents.instr, d(mov), 1, src.bit_size)
   mov.contents.exact, mov.contents.fp_fast_math = b.exact, b.fp_fast_math
-  ctypes.cast(mov.contents.src, ctypes.POINTER(nir.nir_alu_src))[0] = src
+  ctypes.cast(mov.contents.src, ctypes.POINTER(nir.nir_alu_src))[0] = alu_src
   nir.nir_builder_instr_insert(b, mov.contents.instr)
   return d(mov)
-
-def nir_swizzle(b:nir.nir_builder, src:nir.nir_def, swiz:list[int]) -> nir.nir_def:
-  alu_src, is_id = nir.nir_alu_src(), True
-  alu_src.src = nir_src_for_ssa(src)
-  for i, s in enumerate(swiz):
-    if i != s: is_id = False
-    alu_src.swizzle[i] = s
-  if len(swiz) == src.num_components and is_id: return src
-  return nir_mov_alu(b, alu_src, len(swiz))
-
-def nchannel(b:nir.nir_builder, src:nir.nir_def, c:int) -> nir.nir_def: return nir_swizzle(b, src, [c])
 
 def nimm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
   assert dtype.fmt
@@ -43,7 +29,7 @@ def nimm(b:nir.nir_builder, x, dtype:DType) -> nir.nir_def:
 
 def nir_src_for_ssa(d:nir.nir_def) -> nir.nir_src: return nir.nir_src(ssa=ctypes.pointer(d))
 def nir_intrinsic_set(typ, instr:nir.nir_intrinsic_instr, val:int):
-  info = nir.nir_intrinsic_infos.in_dll(nir._libraries['FIXME_STUB'], "nir_intrinsic_infos")[instr.contents.intrinsic]
+  info = nir.nir_intrinsic_infos.in_dll(nir.dll, "nir_intrinsic_infos")[instr.contents.intrinsic]
   assert info.index_map[typ] > 0
   instr.contents.const_index[info.index_map[typ] - 1] = val
 
@@ -53,13 +39,6 @@ def nalu(b:nir.nir_builder, op:str, *srcs:nir.nir_def) -> nir.nir_def:
   if len(srcs) == 3: return nir.nir_build_alu3(b, g(f"nir_op_{op}"), srcs[0], srcs[1], srcs[2]).contents
   return nir.nir_build_alu4(b, g(f"nir_op_{op}"), srcs[0], srcs[1], srcs[2], srcs[3]).contents
 
-def nphi(b:nir.nir_builder, srcs:list[Tuple[nir.nir_block, nir.nir_def]]) -> Tuple[nir.nir_phi_instr, nir.nir_def]:
-  assert all_same([src[1].num_components for src in srcs]) and all_same([src[1].bit_size for src in srcs])
-  phi = nir.nir_phi_instr_create(b.shader)
-  nir.nir_def_init(phi.contents.instr, d(phi), srcs[0][1].num_components, srcs[0][1].bit_size)
-  for (pred,src) in srcs: nir.nir_phi_instr_add_src(phi, pred, src)
-  return (phi.contents, d(phi))
-
 def nstore(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, value:nir.nir_def, dtype:DType):
   intrin = g(f"nir_intrinsic_store_{'global' if space == AddrSpace.GLOBAL else ('shared' if space == AddrSpace.LOCAL else 'deref')}")
   store = nir.nir_intrinsic_instr_create(b.shader, intrin)
@@ -67,10 +46,8 @@ def nstore(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, value:nir.nir_d
   arr = ctypes.cast(store.contents.src, ctypes.POINTER(nir.nir_src))
   if space == AddrSpace.REG: arr[1], arr[0] = nir_src_for_ssa(value), nir_src_for_ssa(addr)
   else: arr[0], arr[1] = nir_src_for_ssa(value), nir_src_for_ssa(addr)
-  nir_intrinsic_set(nir.NIR_INTRINSIC_WRITE_MASK, store, BITFIELD_MASK(value.num_components))
-  if space != AddrSpace.REG:
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, store, dtype.itemsize)
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, store, 0) # is setting to zero the default case?
+  nir_intrinsic_set(nir.NIR_INTRINSIC_WRITE_MASK, store, (1 << value.num_components) - 1)
+  if space != AddrSpace.REG: nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, store, dtype.itemsize)
   nir.nir_builder_instr_insert(b, store.contents.instr)
   return addr
 
@@ -79,9 +56,7 @@ def nload(b:nir.nir_builder, space:AddrSpace, addr:nir.nir_def, dtype:DType) -> 
   load = nir.nir_intrinsic_instr_create(b.shader, intrin)
   load.contents.num_components = dtype.count
   ctypes.cast(load.contents.src, ctypes.POINTER(nir.nir_src))[0] = nir_src_for_ssa(addr)
-  if space != AddrSpace.REG:
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, load, dtype.itemsize)
-    nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_OFFSET, load, 0)
+  if space != AddrSpace.REG: nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, load, dtype.itemsize)
   nir.nir_def_init(load.contents.instr, d(load), dtype.count, dtype.itemsize * 8 // dtype.count)
   nir.nir_builder_instr_insert(b, load.contents.instr)
   return d(load)
@@ -104,7 +79,6 @@ def deref_var(b:nir.nir_builder, var:nir.nir_variable) -> nir.nir_def:
   nir.nir_def_init(deref.contents.instr, d(deref), 1, 32)
   nir.nir_builder_instr_insert(b, deref.contents.instr)
   return d(deref)
-
 
 def nbarrier(b:nir.nir_builder):
   barrier = nir.nir_intrinsic_instr_create(b.shader, nir.nir_intrinsic_barrier)
@@ -147,7 +121,7 @@ def if_phi(b:nir.nir_builder, cond, then_fn, else_fn): return nir.nir_if_phi(b, 
 
 # this is a ridiculous hack, but I can't find a better way to grab the glsl_type objects
 glsl_base = {**{d:g(f"GLSL_TYPE_{'U' if d in dtypes.uints else ''}INT{d.itemsize*8 if d.itemsize != 4 else ''}") for d in dtypes.ints},
-             **{getattr(dtypes,d):g(f"GLSL_TYPE_{d.upper()}") for d in ['bool', 'double', 'float', 'float16']}}
+             **{getattr(dtypes,d):g(f"GLSL_TYPE_{d.upper()}") for d in ['double', 'float', 'float16']}, dtypes.bool: nir.GLSL_TYPE_UINT8}
 def glsl_type(t:DType) -> nir.struct_glsl_type:
   if isinstance(t, PtrDType): return nir.glsl_array_type(glsl_type(t.base), t.size, 0).contents
   return nir.glsl_get_base_glsl_type(nir.glsl_type(base_type=glsl_base[t])).contents
@@ -206,9 +180,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx.b, ctx.r[x.src[0]], x.src[0].dtype, x.dtype)),
     (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx.r[a]),
     (UPat(Ops.GEP, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: nchannel(ctx.b, ctx.r[a], x.arg[0])),
-    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:
-     nir.nir_local_variable_create(ctx.b.impl, glsl_type(dtypes.uint8.ptr(x.dtype.size) if x.dtype.base == dtypes.bool else x.dtype),
-                                   f"acc{x.arg[0]}".encode()).contents),
+    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: nir.nir_local_variable_create(ctx.b.impl, glsl_type(x.dtype), f"acc{x.arg[0]}".encode()).contents),
     (UPat(Ops.BARRIER), lambda ctx: ensure(nbarrier(ctx.b))),
     (UPat(Ops.IF, name="x"), lambda ctx,x: nir.nir_push_if(ctx.b, ctx.r[x.src[0]])),
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(nir.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
@@ -229,15 +201,10 @@ class NIRRenderer(Renderer):
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r, self.param_idx, ranges = {}, 0, []
 
-    # import os
-    # input(f"pid: {os.getpid()}")
     for u in uops:
-      # print(u)
-      # nir.nir_print_shader(self.b.shader, stdout)
       if u.op == Ops.NOOP: pass
       elif u.op == Ops.SINK:
-        # why do we care about setting this?
-        if u.arg is not None: self.b.shader.contents.info.name = s(u.arg.function_name)
+        if u.arg is not None: self.b.shader.contents.info.name = nir.char_pointer_cast(u.arg.function_name)
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()
@@ -255,10 +222,17 @@ class NIRRenderer(Renderer):
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         self.r[u] = cast(nir.nir_def, d)
+
     nir.nir_validate_shader(self.b.shader, b"after render")
     blob = nir.struct_blob()
     nir.nir_serialize(blob, self.b.shader, False)
-    return base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
+    ret = base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
+
+    nir.ralloc_free(self.b.shader)
+    ctypes.CDLL(ctypes.util.find_library('c')).free(blob.data)
+    del self.b, self.r
+
+    return ret
 
 class NAKRenderer(NIRRenderer):
   def __init__(self, dev, device="NV"): super().__init__(dev, device)
@@ -287,13 +261,12 @@ class LVPRenderer(NIRRenderer):
     arr = ctypes.cast(intrin.contents.src, ctypes.POINTER(nir.nir_src))
     arr[0], arr[1] = nir_src_for_ssa(nimm(self.b, 0, dtypes.int)), nir_src_for_ssa(nimm(self.b, self.param_idx, dtypes.int))
     nir_intrinsic_set(nir.NIR_INTRINSIC_ALIGN_MUL, intrin, sz)
-    nir_intrinsic_set(nir.NIR_INTRINSIC_RANGE, intrin, self.paramsz)
+    nir_intrinsic_set(nir.NIR_INTRINSIC_RANGE, intrin, self.param_sz)
     nir.nir_builder_instr_insert(self.b, intrin.contents.instr)
     self.param_idx += sz
     return d(intrin)
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
-    # TODO: does this do anything?
-    self.paramsz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
+    self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
 
