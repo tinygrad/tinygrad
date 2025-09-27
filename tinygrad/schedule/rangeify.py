@@ -387,14 +387,12 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
-def pre_assign(w_idx:UOp, r_idx:UOp, op:UOp, b:UOp, assign:UOp):
-  buf = w_idx.src[0]
-  assert buf.op is Ops.BUFFER, f"assign target isn't a buffer, it's {buf}"
+def pre_assign(assign:UOp, target:UOp, op:UOp):
   # TODO: can compute if the read and write index overlaps?
-  idxs = [x for x in op.toposort(gate=lambda u:u.op is not Ops.BUFFERIZE) if x.op is Ops.INDEX and x.src[0] is buf]
+  idxs = [x for x in op.src[0].toposort(gate=lambda u:u.op not in {Ops.BUFFERIZE, Ops.CONTIGUOUS}) if x.op is Ops.INDEX and x.src[0] is target]
   if len(idxs) <= 1: return None
-  new_op = r_idx.replace(src=(b.replace(src=(op.contiguous(),)+b.src[1:]),)+r_idx.src[1:])
-  return assign.replace(src=(w_idx, new_op)+assign.src[2:])
+  new_op = assign.src[1].replace(src=(op.replace(src=(op.src[0].contiguous(),)+op.src[1:]),)+assign.src[1].src[1:])
+  return assign.replace(src=(assign.src[0], new_op)+assign.src[2:])
 
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -408,9 +406,9 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
        and idx.src[0].op is not Ops.BUFFER_VIEW else None),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
-  # guard ASSIGN write after read
-  (UPat.var("w_idx").assign(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="op").f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                            .f(Ops.INDEX, allow_any_len=True, name="r_idx"), name="assign", allow_any_len=True), pre_assign),
+  # guard ASSIGN write after read, these bufferizes should not optimize away
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="target"),), allow_any_len=True),
+                         UPat(Ops.INDEX, src=(UPat(Ops.BUFFERIZE, name="op"),), allow_any_len=True)), allow_any_len=True, name="assign"), pre_assign),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
