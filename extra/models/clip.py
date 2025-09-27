@@ -9,6 +9,19 @@ from PIL import Image
 import numpy as np
 import re, gzip
 
+# Allow for monkeypatching for mlperf
+gelu = Tensor.gelu
+
+# to match behavior of mlperf v5.0 Stable Diffusion training clip tokenizer
+try:
+  import ftfy, html, regex
+  # from open_clip.tokenizer:
+  def basic_clean(text):
+    text = ftfy.fix_text(text)
+    text = html.unescape(html.unescape(text))
+    return text.strip()
+except ImportError: pass
+
 @lru_cache()
 def default_bpe():
   # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -53,8 +66,8 @@ class Tokenizer:
     cs = [chr(n) for n in cs]
     return dict(zip(bs, cs))
   class ClipTokenizer:
-    def __init__(self):
-      self.byte_encoder = Tokenizer.bytes_to_unicode()
+    def __init__(self, version=None):
+      self.byte_encoder, self.version = Tokenizer.bytes_to_unicode(), version
       merges = gzip.open(default_bpe()).read().decode("utf-8").split('\n')
       merges = merges[1:49152-256-2+1]
       merges = [tuple(merge.split()) for merge in merges]
@@ -62,11 +75,16 @@ class Tokenizer:
       vocab = vocab + [v+'</w>' for v in vocab]
       for merge in merges:
         vocab.append(''.join(merge))
-      vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+      if self.version == "sd_mlperf_v5_0":
+        vocab.extend(['<start_of_text>', '<end_of_text>'])
+        self.cache = {'<start_of_text>': '<start_of_text>', '<end_of_text>': '<end_of_text>'}
+        self.pat = regex.compile(r"""<start_of_text>|<end_of_text>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""", regex.IGNORECASE)
+      else:
+        vocab.extend(['<|startoftext|>', '<|endoftext|>'])
+        self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
+        self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
       self.encoder = dict(zip(vocab, range(len(vocab))))
       self.bpe_ranks = dict(zip(merges, range(len(merges))))
-      self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
-      self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[^\s]+""", re.IGNORECASE)
 
     def bpe(self, token):
       if token in self.cache:
@@ -110,8 +128,14 @@ class Tokenizer:
 
     def encode(self, text:str, pad_with_zeros:bool=False) -> List[int]:
       bpe_tokens: List[int] = []
-      text = Tokenizer.whitespace_clean(text.strip()).lower()
-      for token in re.findall(self.pat, text):
+      if self.version == "sd_mlperf_v5_0":
+        text = Tokenizer.whitespace_clean(basic_clean(text)).lower()
+        re_module = regex
+      else:
+        text = Tokenizer.whitespace_clean(text.strip()).lower()
+        re_module = re
+
+      for token in re_module.findall(self.pat, text):
         token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
         bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
       # Truncation, keeping two slots for start and end tokens.
@@ -252,10 +276,8 @@ class Open:
       q,k,v = [y.reshape(T, B*self.n_heads, self.d_head).transpose(0, 1).reshape(B, self.n_heads, T, self.d_head) for y in proj.chunk(3)]
 
       attn_output = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-      attn_output = attn_output.permute(2, 0, 1, 3).reshape(T*B, C)
-
+      attn_output = attn_output.permute(2, 0, 1, 3).reshape(T, B, C)
       attn_output = self.out_proj(attn_output)
-      attn_output = attn_output.reshape(T, B, C)
 
       return attn_output
 
@@ -265,7 +287,7 @@ class Open:
       self.c_proj = Linear(hidden_dims, dims)
 
     def __call__(self, x:Tensor) -> Tensor:
-      return x.sequential([self.c_fc, Tensor.gelu, self.c_proj])
+      return x.sequential([self.c_fc, gelu, self.c_proj])
 
   # https://github.com/mlfoundations/open_clip/blob/58e4e39aaabc6040839b0d2a7e8bf20979e4558a/src/open_clip/transformer.py#L210
   class ResidualAttentionBlock:
@@ -350,15 +372,15 @@ class Open:
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L396
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/encoders/modules.py#L498
 class FrozenOpenClipEmbedder(Embedder):
-  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool, ln_penultimate:bool=False):
-    self.tokenizer = Tokenizer.ClipTokenizer()
+  def __init__(self, dims:int, n_heads:int, layers:int, return_pooled:bool, ln_penultimate:bool=False, clip_tokenizer_version=None):
+    self.tokenizer = Tokenizer.ClipTokenizer(version=clip_tokenizer_version)
     self.model = Open.ClipTextTransformer(dims, n_heads, layers)
     self.return_pooled = return_pooled
     self.input_key = "txt"
     self.ln_penultimate = ln_penultimate
 
   def tokenize(self, text:str, device:Optional[str]=None) -> Tensor:
-    return Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int64, device=device).reshape(1,-1)
+    return Tensor(self.tokenizer.encode(text, pad_with_zeros=True), dtype=dtypes.int32, device=device).reshape(1,-1)
 
   def text_transformer_forward(self, x:Tensor, attn_mask:Optional[Tensor]=None):
     for r in self.model.transformer.resblocks:
@@ -449,7 +471,7 @@ class OpenClipEncoder:
     x = x + self.positional_embedding
     x = self.transformer(x, attn_mask=self.attn_mask)
     x = self.ln_final(x)
-    x = x[:, tokens.argmax(axis=-1)]
+    x = x[Tensor.arange(x.shape[0], device=x.device), tokens.argmax(axis=-1), :]
     x = x @ self.text_projection
     return x
 

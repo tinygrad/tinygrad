@@ -17,6 +17,10 @@ def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
   std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
   return std * rand_truncn(*shape, **kwargs)
 
+# Stable Diffusion v2 training uses default torch gelu, which doesn't use tanh approximation
+def gelu_erf(x:Tensor) -> Tensor:
+  return 0.5 * x * (1.0 + (x / 1.4142135623730951).erf())
+
 class Conv2dHeNormal(nn.Conv2d):
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
