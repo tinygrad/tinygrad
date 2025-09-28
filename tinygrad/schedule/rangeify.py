@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, Optional, cast
 import functools, operator
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -357,6 +357,47 @@ pm_rangeify = pm_mops+PatternMatcher([
   # assert if there's any index we didn't process
   (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
+
+# *****************
+# 3.2 Winograd
+
+def winoguard(redu):
+ if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL: return None
+ a, b = redu.src[0].src
+ three_axes = {ax for ax in redu.src[1:] if ax.op is Ops.RANGE and int(ax.vmax+1)==3}
+ oa, ob = [], []
+ def collect_pairs(x, three_axes, out):
+   if not three_axes: return
+   if x.op is Ops.ADD and len(x.src) == 2:
+       a, b = x.src
+       if a.op is Ops.RANGE and b.op is Ops.RANGE:
+           if a in three_axes and b.arg[1] is AxisType.LOOP:
+               three_axes.remove(a); out.append((b,a))
+           elif b in three_axes and a.arg[1] is AxisType.LOOP:
+               three_axes.remove(b); out.append((a,b))
+   if three_axes:
+       for s in x.src: collect_pairs(s, three_axes, out)
+ collect_pairs(a, set(three_axes), oa)
+ collect_pairs(b, set(three_axes), ob)
+ # decide which branch is weights vs activations and send the idx of the inpt
+ if len(oa) >= 2 and not ob: return (0, oa)
+ if len(ob) >= 2 and not oa: return (1, ob)
+ return None
+
+def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
+ # pick the activation branch (the one that depends on output spatial + (ky,kx))
+ axes = winoguard(redu)
+ if axes is None: return None
+ os = [axes[1][i][0].src[0].arg for i in range(len(axes[1]))]
+ ts = [(o+3)//4 for o in os]
+ print("AXES", ts)
+ #os = axes[1][0][0]
+
+ return None
+
+winograd_rewrite = PatternMatcher([
+ (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
+ ])
 
 # *****************
 # 3.5 cleanups
