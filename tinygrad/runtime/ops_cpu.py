@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue, struct
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le, i2u
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec, DMACPURef, CompilerPairT
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
@@ -92,7 +92,7 @@ class CPUProgram(HCQProgram):
         from tinygrad.runtime.autogen import libc
         (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for ploc,tgt,r_type,r_addend in relocs:
-          assert r_type == libc.R_X86_64_64
+          assert r_type == libc.R_X86_64_64 and self.rt_lib is not None
           image[ploc:ploc+8] = struct.pack("<Q", ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or \
                                                              self.rt_lib[tgt], ctypes.c_void_p).value if isinstance(tgt, str) else tgt+r_addend+addr)
         self.mem.write(image)

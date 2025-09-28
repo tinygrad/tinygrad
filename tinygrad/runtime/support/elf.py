@@ -60,5 +60,6 @@ def jit_loader(obj: bytes) -> bytes:
   image, _, relocs = elf_loader(obj)
   # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
   for ploc,tgt,r_type,r_addend in relocs:
+    if isinstance(tgt, str): raise RuntimeError(f'Attempting to relocate against an undefined symbol {tgt}')
     image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
   return bytes(image)
