@@ -358,7 +358,7 @@ class TestSchedule(unittest.TestCase):
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 2 if RANGEIFY else 4)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
-    assert len(reduceops) == (3 if RANGEIFY else 2)
+    assert len(reduceops) == 2
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
