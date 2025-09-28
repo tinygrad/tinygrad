@@ -92,9 +92,9 @@ class CPUProgram(HCQProgram):
         from tinygrad.runtime.autogen import libc
         (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for ploc,tgt,r_type,r_addend in relocs:
-          match r_type:
-            case libc.R_X86_64_64: image[ploc:ploc+8] = struct.pack("<Q", i2u(64, tgt+r_addend+addr))
-            case _: raise NotImplementedError(f"Encountered unknown relocation type {r_type}")
+          assert r_type == libc.R_X86_64_64
+          image[ploc:ploc+8] = struct.pack("<Q", ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or \
+                                                             self.rt_lib[tgt], ctypes.c_void_p).value if isinstance(tgt, str) else tgt+r_addend+addr)
         self.mem.write(image)
       else: self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
