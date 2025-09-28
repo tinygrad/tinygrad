@@ -5,7 +5,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from extra.models import clip
-from examples.mlperf.initializers import gelu_erf, init_stable_diffusion
+from examples.mlperf.initializers import gelu_erf, init_stable_diffusion, attn_f32_softmax
 from typing import Literal
 Device.DEFAULT="NULL"
 GPUS = [f"NULL:{i}" for i in range(8)]
@@ -75,6 +75,7 @@ class TestInitStableDiffusion(unittest.TestCase):
       self.assertEqual(model.cond_stage_model.tokenizer.version, 'sd_mlperf_v5_0')
       self.assertEqual(unet.out[0].num_groups, 16)
       self.assertEqual(unet.input_blocks[1][1].norm.eps, 1e-6)
+      self.assertEqual(unet.input_blocks[1][1].transformer_blocks[0].attn1.attn, attn_f32_softmax)
 
     with self.subTest("test loaded clip parameters"):
       sample = model.cond_stage_model.model.transformer.resblocks[8].mlp.c_fc.bias.flatten()[42:46].numpy()
@@ -96,6 +97,16 @@ class TestInitStableDiffusion(unittest.TestCase):
       np.testing.assert_allclose(sqrt_acp[[0,-1]].numpy(), expected, rtol=1e-7, atol=0, err_msg="sqrt_acp is incorrect")
       expected = np.array([0.029155133292078972, 0.9976672530174255], dtype=np.float32)
       np.testing.assert_allclose(sqrt_omacp[[0,-1]].numpy(), expected, rtol=1e-7, atol=0, err_msg="sqrt_omacp is incorrect")
+
+    with self.subTest("check mixed precision"):
+      out = unet.input_blocks[2][1].proj_in(Tensor.randn(320, dtype=dtypes.float32))
+      self.assertEqual(out.dtype, dtypes.bfloat16, "expected float32 to be downcast to bfloat16 by Linear")
+      out = unet.out[2](Tensor.randn(304,320,64,64, dtype=dtypes.float32))
+      self.assertEqual(out.dtype, dtypes.bfloat16, "expected float32 to be downcast to bfloat16 by Conv2d")
+      out = unet.input_blocks[1][1].transformer_blocks[0].norm1(Tensor.randn(320, dtype=dtypes.bfloat16))
+      self.assertEqual(out.dtype, dtypes.float32, "expected bfloat16 to be upcast to float32 by LayerNorm")
+      out = unet.input_blocks[5][0].in_layers[0](Tensor.randn(304, 640, dtype=dtypes.bfloat16))
+      self.assertEqual(out.dtype, dtypes.float32, "expected bfloat16 to be upcast to float32 by GroupNorm")
 
   def test_train_model(self):
     self.helper_test_init("v2-mlperf-train")
