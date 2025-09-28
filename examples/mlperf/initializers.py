@@ -164,29 +164,27 @@ def zero_module(module):
 def attn_f32_softmax(q:Tensor, k:Tensor, v:Tensor) -> Tensor:
   return (q.matmul(k.transpose(-2,-1), dtype=dtypes.float32) / math.sqrt(q.shape[-1])).softmax(-1).cast(q.dtype) @ v
 
-def init_stable_diffusion(version:str, pretrained:str, GPUS:list[str]):
+def init_stable_diffusion(version:str, pretrained:str, devices:list[str]):
   from examples.stable_diffusion import StableDiffusion
-  from tinygrad.helpers import getenv
   from tinygrad.nn.state import safe_load, safe_save, load_state_dict, get_state_dict
-  from pathlib import Path
+  from tempfile import TemporaryDirectory
   model = StableDiffusion(version=version, pretrained=pretrained)
   unet:UNetModel = model.model.diffusion_model
-  UNET_CKPTDIR = getenv("UNET_CKPTDIR", "./")
 
-  # this seems to prevent a lot of memory use somehow, allowing bigger BS
+  # this prevents extra consumption of memory, enabling much larger BS
   Tensor.realize(*get_parameters(unet))
-  safe_save(get_state_dict(unet), init_fn:=f"{UNET_CKPTDIR}/init_model.safetensors")
-  load_state_dict(unet, safe_load(init_fn))
-  Path(init_fn).unlink()
+  with TemporaryDirectory(prefix="unet_init") as tmp:
+    safe_save(get_state_dict(unet), init_fn:=f"{tmp}/init_model.safetensors")
+    load_state_dict(unet, safe_load(init_fn))
 
   sqrt_alphas_cumprod = model.alphas_cumprod.sqrt().realize()
   sqrt_one_minus_alphas_cumprod = (1 - model.alphas_cumprod).sqrt().realize()
 
-  if len(GPUS) > 1:
+  if len(devices) > 1:
     to_move = [sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod]
     if version == "v2-mlperf-train": to_move += get_parameters(unet) + get_parameters(model.cond_stage_model)
     for p in to_move:
-      p.to_(GPUS)
+      p.to_(devices)
     with Context(BEAM=0):
       Tensor.realize(*to_move)
 
