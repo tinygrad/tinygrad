@@ -1000,7 +1000,7 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     while stack:
-      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) >= 2000000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       try:
