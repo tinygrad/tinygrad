@@ -4241,8 +4241,8 @@ class Tensor(MathTrait):
   def ne(self, x) -> Tensor:
     return self._apply_broadcasted_uop(UOp.ne, x, False)
 
-  def __eq__(self, x) -> Tensor:
-    return self.eq(x)  # type: ignore[override]
+  def __eq__(self, x) -> Tensor:  # type: ignore[override]
+    return self.eq(x)
 
   # ***** functional nn ops *****
 
