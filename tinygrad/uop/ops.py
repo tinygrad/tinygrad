@@ -998,7 +998,7 @@ class RewriteContext:
     return ret
 
   def unified_rewrite(self, root:UOp) -> UOp:
-    stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
+    stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     while stack:
       if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
@@ -1039,7 +1039,7 @@ class RewriteContext:
           except KeyError: raise RewriteNotReady
       except RewriteNotReady:
         # retry this later
-        stack.insert(0, (n, stage, new_n))
+        stack.appendleft((n, stage, new_n))
     return self.replace[root]
 
 @track_matches
