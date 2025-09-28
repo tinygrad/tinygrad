@@ -22,8 +22,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-invalid_pat = UPat.const(dtypes.index, Invalid).named("i")
-invalid_gate = UPat.var("cond").where(UPat.var("x",dtype=dtypes.index), invalid_pat)
+invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
+invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
 propagate_invalid = PatternMatcher([
   # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -210,17 +210,6 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
-  # div is the smallest factor of the denominator (greater than 1) out of all "factors"
-  # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
-  # TODO: add same optimization for mod
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
-  return None
-
 def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
   # for mod we go further and take the remainder of all factors to reduce their size
@@ -237,6 +226,16 @@ def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   new_x = sum(rem)+x.const_like(0)
   if len(quo)==0 or new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
+
+def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # we try and nest the div and see if it allows the numerator to be simplified
+  if ((c := y.arg) < 0): return None
+  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
+  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
+  newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
+  if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
+  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
