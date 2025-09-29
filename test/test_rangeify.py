@@ -108,6 +108,13 @@ class TestRangeify(unittest.TestCase):
     w2 = Tensor.empty(12, 8, 3, 3)
     x.conv2d(w1).conv2d(w2).realize()
 
+  def test_xception_conv2d(self):
+    # NOTE: this fusion is bad, it's recomputing the inner many times
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 1, 1)
+    w2 = Tensor.empty(8, 1, 3, 3)
+    x.conv2d(w1).conv2d(w2, groups=8).realize()
+
   def test_conv_maxpool_contig(self): self.test_conv_maxpool(True)
   def test_conv_maxpool(self, contig=False):
     GlobalCounters.reset()

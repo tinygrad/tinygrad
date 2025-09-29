@@ -170,7 +170,10 @@ def map_expand(r:UOp, idx:UOp):
     else:
       ending_ranges.extend(axis_to_range)
       new_rngs.append(a.const_like(0))
-  ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
+  # if RANGEIFY >= 2, we are aggressive about not ending ranges
+  if RANGEIFY >= 2: ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
+  # if RANGEIFY=1, if it's ending at all we end it
+  else: ending_ranges = [x.arg for x in ending_ranges]
   if idx.arg is not None: ending_ranges.append(idx.arg)
   return r.src[0].index(*new_rngs, arg=min(ending_ranges) if ending_ranges else None)
 
