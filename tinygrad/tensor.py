@@ -16,6 +16,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
+from tinygrad.schedule.multi import get_multi_map
 from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
@@ -240,6 +241,10 @@ class Tensor(MathTrait):
 
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+
+    if RANGEIFY and any(isinstance(x._device, tuple) for x in big_sink.toposort()):
+      _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
+      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
 
     becomes_map = get_rangeify_map(big_sink) if RANGEIFY else get_kernelize_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
@@ -535,7 +540,7 @@ class Tensor(MathTrait):
         device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False)
     # increment rng counter for devices
-    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
+    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
     bits_count = Tensor._device_rng_counters[device] - num

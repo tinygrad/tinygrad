@@ -358,7 +358,7 @@ class TestSchedule(unittest.TestCase):
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 2 if RANGEIFY else 4)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
-    assert len(reduceops) == 2
+    assert len(reduceops) == (3 if RANGEIFY else 2)
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
@@ -1902,6 +1902,18 @@ class TestSchedule(unittest.TestCase):
     if RANGEIFY > 0:
       # NOTE: this is a bug on non rangeify
       np.testing.assert_equal(tst.numpy(), a.numpy())
+
+  def test_setitem_sched(self, transpose=False):
+    a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
+    a2 = a.T if transpose else a
+    expected = (a+a2).tolist()
+    a.assign(a+a2)
+    kcount = len(sched:=a.schedule())
+    run_schedule(sched)
+    self.assertListEqual(a.tolist(), expected)
+    self.assertEqual(kcount, 2 if transpose else 1)
+  @unittest.skipUnless(RANGEIFY>0, "this asserts on non rangeify")
+  def test_setitem_permuted_sched(self): self.test_setitem_sched(transpose=True)
 
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
