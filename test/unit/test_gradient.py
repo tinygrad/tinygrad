@@ -2,10 +2,11 @@ from typing import Callable
 import unittest, math
 import torch
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Device, Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.gradient import compute_gradient
+from tinygrad.helpers import CI
 
 class TestGradient(unittest.TestCase):
   def _cmp_nan_okay(self, x, y):
@@ -110,11 +111,28 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.sum().gradient(x)
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
+class TestTensorGradientHalfDType(unittest.TestCase):
   def test_max_gradient_half_precision(self):
-    t = Tensor.ones(70000, dtype="half", requires_grad=True).contiguous()
+    N = 70000
+    t = Tensor.ones(N, dtype="half", requires_grad=True).contiguous()
     t.max().backward()
-    expected_grad = [1.430511474609375e-05] * 10
-    self.assertListEqual(t.grad.tolist()[:10], expected_grad)
+    expected_grad = Tensor.full((10,), 1.0/N, dtype="half")
+    np.testing.assert_allclose(t.grad.numpy()[:10], expected_grad.numpy())
+
+  def test_max_gradient_double_precision(self):
+    if Device.DEFAULT == "METAL": return  # metal does not support double
+    N = 70000
+    t = Tensor.ones(N, dtype="double", requires_grad=True).contiguous()
+    t.max().backward()
+    expected_grad = Tensor.full((10,), 1.0/N, dtype="double")
+    np.testing.assert_allclose(t.grad.numpy()[:10], expected_grad.numpy())
+    # test large overflow
+    N = 2**24 + 2 # 16,777,218 elements, beyond float32's exact integer sum limit
+    u = Tensor.ones(N, dtype="float32", requires_grad=True).contiguous()
+    u.max().backward()
+    expected_grad_u = Tensor.full((10,), 1.0/N, dtype="float32")
+    np.testing.assert_allclose(u.grad.numpy()[:10], expected_grad_u.numpy())
+    
 
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):

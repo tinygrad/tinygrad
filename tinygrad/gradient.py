@@ -3,12 +3,14 @@ import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes
+from tinygrad.device import Device
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   def to_inp_shape(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   if ret.arg[0] == Ops.ADD: return (to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MAX:
-    max_is_1s = ret.src[0].eq(to_inp_shape(ret)).cast(dtypes.float32)
+    dtype = dtypes.float64 if Device.DEFAULT != "METAL" else dtypes.float32  # METAL does not support float64
+    max_is_1s = ret.src[0].eq(to_inp_shape(ret)).cast(dtype)
     div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1]))
     return ((max_is_1s/div).cast(ctx.dtype) * to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
