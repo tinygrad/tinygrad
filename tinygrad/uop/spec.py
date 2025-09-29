@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile
+from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile, RANGEIFY
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
@@ -254,7 +254,7 @@ ast_spec = PatternMatcher([
 
 # *** this spec should match all UOps ever created ***
 
-full_non_rangeify_spec = PatternMatcher([
+full_non_rangeify_spec = PatternMatcher([]) if RANGEIFY else PatternMatcher([
   # in non rangeify const can still have a View, and sometimes a FUSE while propagating
   (UPat((Ops.VIEW, Ops.FUSE)).f(Ops.CONST), lambda: True),
 ])
