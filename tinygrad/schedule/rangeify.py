@@ -591,12 +591,11 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
 
   # HACKS: handle multi with graph_rewrite_map in order to not have to add all the tag logic to multi
-  msink = graph_rewrite_map(tsink, multi_pm, name="multi")
-  multi_src = {v for k,v in msink.items() if v.op is Ops.MULTI}
-  tsink = msink[tsink]
-  tsink = UOp.sink(*tsink.src, *multi_src)
+  tsink = (mmap:=graph_rewrite_map(tsink, multi_pm, name="multi"))[tsink]
+  # reconstruct the SINK with all the tagged ops
+  tsink = UOp.sink(*tsink.src)
   graph_rewrite(tsink, PatternMatcher([]), name="Post Multi")
-  tsink = tsink.substitute({v:v.rtag(k.tag) for k,v in msink.items() if v.tag is None and k.tag is not None})
+  tsink = tsink.substitute({v:v.rtag(k.tag) for k,v in mmap.items() if v.tag is None and k.tag is not None}, name="apply mmap")
 
   tsink = graph_rewrite(tsink, earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
