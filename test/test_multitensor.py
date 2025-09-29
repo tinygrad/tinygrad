@@ -54,29 +54,16 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
-  def test_shard_alt(self):
-    t = Tensor.ones(4).contiguous().realize().shard(devices_2, 0)
-    r = t.reshape((2, 2)).realize()
+  def _test_shard_op(self, op, out, n=4):
+    t = Tensor.ones(n).contiguous().realize().shard(devices_2, 0)
+    r = op(t).realize()
     assert t.uop.is_realized, "shard didn't realize"
-    self.assertEqual(r.tolist(), [[1.,1.],[1.,1.]])
-
-  def test_shard_alt2(self):
-    t = Tensor.ones(4).contiguous().realize().shard(devices_2, 0)
-    r = (t+t).reshape((2, 2)).realize()
-    assert t.uop.is_realized, f"shard didn't realize {t.uop}"
-    self.assertEqual(r.tolist(), [[1.,1.],[1.,1.]])
-
-  def test_shard_alt3(self):
-    t = Tensor.ones(6).contiguous().realize().shard(devices_2, 0)
-    r = t.reshape(2, 3).sum(axis=1).realize()
-    self.assertListEqual(r.tolist(), [3.,3.])
-    assert r.uop.is_realized, f"didn't realize {r}"
-
-  def test_shard_alt4(self):
-    t = Tensor.ones(6).contiguous().realize().shard(devices_2, 0)
-    r = t.reshape(2, 3).sum(axis=0).realize()
-    self.assertListEqual(r.tolist(), [2.,2.,2.])
-    assert r.uop.is_realized, f"didn't realize {r}"
+    self.assertEqual(r.tolist(), out)
+  def test_shard_reshape(self): self._test_shard_op(lambda t:t.reshape(2, 2), [[1.,1.],[1.,1.]])
+  def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
+  def test_shard_reduce(self):
+    self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=1), [3.,3.], n=6)
+    self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=0), [2.,2.,2.], n=6)
 
   def test_shard_not_multiple(self):
     X = Tensor.ones(256).contiguous().realize()
