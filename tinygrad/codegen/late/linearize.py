@@ -158,7 +158,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
-  (UPat(Ops.SPECIAL, name="s"), lambda s: s)
+  (UPat(Ops.SPECIAL, name="s"), lambda s: s)  # we dont linearize the source of the special
 ])
 
 # ***** blockend merging ****
