@@ -13,6 +13,10 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
@@ -42,17 +46,12 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
+  # realize before assign if input permutes the target buffer
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), lambda a,b,assign: assign.replace(src=(a, b.contiguous())) \
+      if any(x.base is a.base and x is not a for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
+
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
-
-  # handle disk
-  # TODO: this doesn't need to use st.views
-  (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
-   lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
-       and x.device.startswith("DISK") else None),
-  (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
-   lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
-       and x.device.startswith("TINYFS") else None),
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
@@ -60,10 +59,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
 # *****************
 # 1. add realize where we have to
-
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -85,14 +80,10 @@ do_realize = PatternMatcher([
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
 
-
 class WrappedContig:
   def __init__(self, x): self.x = x
   def __repr__(self): return f"C({self.x})"
-add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All, name="x"),
-   lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx and not isinstance(x.tag, WrappedContig) else None),
-])
+add_contiguous = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx else None),])
 remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag.x) if isinstance(x.tag, WrappedContig) else None)])
 
 # *****************
@@ -404,12 +395,29 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
-  # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
-  #(UPat(Ops.DEVICE).f(Ops.CONST, name="c"), lambda c: c.replace(src=())),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+])
+
+def late_buffer_view(x, t, b):
+  if isinstance(t.device, str) and (t.device.startswith("DISK") or t.device.startswith("TINYFS")):
+    rngs = b.src[1:]
+    size = prod(shape := [int(r.vmax+1) for r in rngs])
+    if len(shape) == 0:
+      offset = x.src[1].arg
+    else:
+      idxs = x.src[1:]
+      offset = sum(idx.vmin for idx in idxs)
+
+    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+  return b
+to_bufferview = PatternMatcher([
+  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
+  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(GroupOp.All).f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
+    late_buffer_view),
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
 # *****************
@@ -459,7 +467,7 @@ def bufferize_to_store(x:UOp):
   # TODO: how is this unified?
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
-pm_add_buffers = pm_mops+PatternMatcher([
+pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
@@ -476,6 +484,7 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
   range:int = 0
+  parent_tags:list = field(default_factory=list)
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
@@ -536,16 +545,26 @@ rangeify_codegen = PatternMatcher([
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
 ])
 
+def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
+  if x.tag is None or x.tag == (): return None
+  ctx.parent_tags += list(x.tag)
+  return x.replace(tag=None)
+
+pm_remove_tags = PatternMatcher([
+  # remove all the tags
+  (UPat(GroupOp.All, name="x"), remove_metadata_tags),
+])
+
 def split_store(ctx:list[UOp], x:UOp):
   if len(x.ranges): return None
   if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
 
   # gather the metadata
-  metadatas = [ctx[y].metadata for x in ret.sparents if x.tag is not None for y in x.tag]
+  metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
