@@ -2,9 +2,9 @@ import json, multiprocessing
 from pathlib import Path
 
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import tqdm
+from tinygrad.helpers import tqdm, getenv
 
-raid_root = Path("/raid")
+raid_root = Path(getenv("RAID_ROOT", "/raid"))
 
 def fetch_file(item):
   path, info = item
