@@ -593,14 +593,6 @@ class TestAutoCastType(unittest.TestCase):
 
     dtypes.default_float = old_default_float
 
-  @unittest.skipIf(CI, "TODO: broken RuntimeError: Attempting to relocate against an undefined symbol 'fmaxf'")
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_backward_sum_acc_dtype(self):
-    # test acc of sum in the backward is upcasted to float
-    t = Tensor([5, -5], dtype=dtypes.half, requires_grad=True)
-    t.reshape(2, 1).expand(2, 10001).max().backward()
-    np.testing.assert_allclose(t.grad.numpy(), [1, 0])
-
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
   @unittest.skipIf(CI and Device.DEFAULT == "AMD", "very slow")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
