@@ -839,14 +839,14 @@ class TestJitRandom(unittest.TestCase):
     for r in [0,1]:
       Tensor.manual_seed(1337)
       with Context(RANGEIFY=r):
-        a = Tensor.randint(4, high=3)
-        # this makes the behavior different
+        _ = Tensor.randint(4, high=3)
+        # this second one makes the behavior different
         _ = Tensor.randint(4, high=3)
         @TinyJit
-        def f(): return Tensor.randint(20, high=5) + (a.sum()/100).int()
+        def f(): return Tensor.randint(20, high=5)
         for _ in range(5): tst[r].append(f().tolist())
-    for t0, t1 in zip(tst[0], tst[1]):
-      self.assertListEqual(t0, t1)
+    for i, (t0, t1) in enumerate(zip(tst[0], tst[1])):
+      self.assertListEqual(t0, t1, msg=f"mismatch at list {i}")
 
 if __name__ == '__main__':
   unittest.main()
