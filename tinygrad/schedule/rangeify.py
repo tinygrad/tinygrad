@@ -13,6 +13,10 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
@@ -42,6 +46,10 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
+  # realize before assign if input permutes the target buffer
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), lambda a,b,assign: assign.replace(src=(a, b.contiguous())) \
+      if any(x.base is a.base and x is not a for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
+
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
@@ -57,10 +65,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
 # *****************
 # 1. add realize where we have to
-
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
