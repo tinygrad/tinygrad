@@ -66,6 +66,10 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
+    if SPEC:
+      from tinygrad.uop.spec import full_spec
+      with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
+      if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
     return created
 
 # some uops map to other stuff
@@ -81,12 +85,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   arg:Any = None
   tag:Any = None
   children:set[weakref.ref[UOp]] = field(default_factory=set)
-  if SPEC:
-    def __post_init__(self):
-      if SPEC:
-        from tinygrad.uop.spec import full_spec
-        with Context(IGNORE_OOB=1): ret = full_spec.rewrite(self)
-        if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {self}")
   def __del__(self):
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try:
@@ -630,7 +628,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
-    with Context(TRACK_MATCH_STATS=0):
+    with Context(TRACK_MATCH_STATS=0, SPEC=0):
       ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
