@@ -63,7 +63,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_alt2(self):
     t = Tensor.ones(4).contiguous().realize().shard(devices_2, 0)
     r = (t+t).reshape((2, 2)).realize()
-    assert t.uop.is_realized, "shard didn't realize"
+    assert t.uop.is_realized, f"shard didn't realize {t.uop}"
     self.assertEqual(r.tolist(), [[1.,1.],[1.,1.]])
 
   def test_shard_alt3(self):
