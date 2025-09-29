@@ -2,7 +2,7 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, BottomUpGate
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import dedup, all_same, flatten, BLOCK_REORDER
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
