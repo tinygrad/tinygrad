@@ -414,7 +414,7 @@ def late_buffer_view(t:UOp, b:UOp):
     if len(shape) == 0: offset = x.src[1].arg
     else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, t.src, (size, offset), tag=t.tag),) + b.src[1:])
+    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
   return b
 to_bufferview = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
@@ -617,7 +617,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, to_bufferview, name="to bufferview", bottom_up=True)
   tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
