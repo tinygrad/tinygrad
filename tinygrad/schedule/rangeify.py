@@ -170,7 +170,10 @@ def map_expand(r:UOp, idx:UOp):
     else:
       ending_ranges.extend(axis_to_range)
       new_rngs.append(a.const_like(0))
-  ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
+  # if RANGEIFY >= 2, we are aggressive about not ending ranges
+  if RANGEIFY >= 2: ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
+  # if RANGEIFY=1, if it's ending at all we end it
+  else: ending_ranges = [x.arg for x in ending_ranges]
   if idx.arg is not None: ending_ranges.append(idx.arg)
   return r.src[0].index(*new_rngs, arg=min(ending_ranges) if ending_ranges else None)
 
@@ -401,22 +404,23 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
 ])
 
-def late_buffer_view(x, t, b):
-  if isinstance(t.device, str) and (t.device.startswith("DISK") or t.device.startswith("TINYFS")):
+def late_buffer_view(t:UOp, b:UOp):
+  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
-    if len(shape) == 0:
-      offset = x.src[1].arg
-    else:
-      idxs = x.src[1:]
-      offset = sum(idx.vmin for idx in idxs)
+
+    # walk up for the INDEX
+    x = t
+    while not any(u.op is Ops.INDEX for u in x.src): x = x.src[0]
+    x = next(u for u in x.src if u.op is Ops.INDEX)
+
+    if len(shape) == 0: offset = x.src[1].arg
+    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
     return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
   return b
 to_bufferview = PatternMatcher([
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(GroupOp.All).f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
-    late_buffer_view),
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
