@@ -15,6 +15,8 @@ class TestRangeifyAssign(unittest.TestCase):
     print(lst)
     print(lst2)
     print(lst3)
+    self.assertListEqual(lst, lst3)
+    self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
 N = 256
 
