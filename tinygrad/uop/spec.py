@@ -284,6 +284,8 @@ full_spec = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
   # copy on index
   (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
+  # assign on index. the third op is the shape
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX), UPat(), UPat(GroupOp.Movement))), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
@@ -299,16 +301,16 @@ full_spec = PatternMatcher([
   # linearizer: outputs + intermediate KERNELs
   (UPat((Ops.BLOCKSTART, Ops.BLOCK, Ops.BLOCKFINAL, Ops.BLOCKEND, Ops.KERNEL), dtype=dtypes.void), lambda: True),
 
+  # allow index dtype on a restricted set of UOps
+  (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
+         Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.index), lambda: True),
+
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
   # all ifs
   (UPat(Ops.IF), lambda: True),
-  # all assign
-  (UPat(Ops.ASSIGN), lambda: True),
   # all DEFINE_VAR to deal with the floats used in reduce collapse
   (UPat(Ops.DEFINE_VAR), lambda: True),
-  # allow index type
-  (UPat(GroupOp.All, dtype=dtypes.index), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
 ])+full_non_rangeify_spec+tensor_uop_spec+spec
