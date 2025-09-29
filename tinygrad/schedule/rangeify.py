@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.kernelize import Kernel
