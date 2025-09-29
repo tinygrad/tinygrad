@@ -273,19 +273,32 @@ full_spec = PatternMatcher([
   # all rewrite error are okay
   (UPat(Ops.REWRITE_ERROR), lambda: True),
 
-  # buffer view with index or load is okay
+  # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
+  # bufferize (must be on ranges)
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op is Ops.RANGE for y in x.src[1:])),
+  # realize with one src is fine
+  (UPat(Ops.REALIZE, src=(UPat(),)), lambda: True),
+  # intermediate index
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+  # copy on index
+  (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
 
-  # linearizer outputs + intermediate KERNELs
+  # expander: unroll/contract/gep/ptrcat/cat
+  (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
+  # GEP multi is supported here
+  (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
+  # PTRCAT is like VECTORIZE, but it functions on ptrs
+  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
+  # CAT is like VECTORIZE, but the srcs can be vectors
+  (UPat(Ops.CAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+  # vectorized index
+  (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
+
+  # linearizer: outputs + intermediate KERNELs
   (UPat((Ops.BLOCKSTART, Ops.BLOCK, Ops.BLOCKFINAL, Ops.BLOCKEND, Ops.KERNEL), dtype=dtypes.void), lambda: True),
-  # realize is fine
-  (UPat((Ops.REALIZE, Ops.BUFFERIZE)), lambda: True),
-  # expander: unroll/contract/gep
-  (UPat((Ops.UNROLL, Ops.CONTRACT, Ops.GEP, Ops.CAT, Ops.PTRCAT)), lambda: True),
-  # any vectorize is okay?
-  (UPat(Ops.VECTORIZE), lambda: True),
-  # index/copy op during RANGEIFY
-  (UPat((Ops.INDEX, Ops.COPY, Ops.REDUCE)), lambda: True),
+
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
   # all ifs
