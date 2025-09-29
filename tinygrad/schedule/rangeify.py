@@ -248,7 +248,7 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   # wait here until we have seen all the children
   if len(ctx.seen_children[c]) != x.arg[1]:
     ctx.progress += 1
-    if ctx.progress > 100000: raise RuntimeError("children not making progress")
+    if ctx.progress > 10000: raise RuntimeError("children not making progress")
     # NOTE: we mark this here
     ctx.seen_children[c][x.arg[0]] = idx
     raise RewriteNotReady
