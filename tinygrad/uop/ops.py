@@ -1090,7 +1090,7 @@ pm_lower_index_dtype = PatternMatcher([
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   (UPat(Ops.NOOP, src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
 ])
-def index_to_concrete_int(u:UOp): return graph_rewrite(u, pm_lower_index_dtype)
+def _index_to_concrete_int(u:UOp): return graph_rewrite(u, pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
