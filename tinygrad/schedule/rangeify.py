@@ -404,15 +404,16 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
 ])
 
 def late_buffer_view(x, t, b):
-  rngs = b.src[1:]
-  size = prod(shape := [int(r.vmax+1) for r in rngs])
-  if len(shape) == 0: offset = x.src[1].arg
-  else:
-    idxs = x.src[1:]
-    offset = sum(idx.vmin for idx in idxs)
-    print(t.dtype, offset)
-
   if isinstance(t.device, str) and t.device.startswith("DISK"):
+    rngs = b.src[1:]
+    size = prod(shape := [int(r.vmax+1) for r in rngs])
+    if len(shape) == 0:
+      offset = x.src[1].arg
+    else:
+      idxs = x.src[1:]
+      offset = sum(idx.vmin for idx in idxs)
+      print(t.dtype, offset)
+
     return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
   return b
 to_bufferview = PatternMatcher([
