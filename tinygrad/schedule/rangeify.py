@@ -23,10 +23,6 @@ double_reshape = PatternMatcher([
    lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
 
-def handle_permuted_assign(a:UOp, b:UOp, assign:UOp):
-  permuted_reads = [x for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS) if x.base is a.base and x is not a]
-  if permuted_reads: return assign.replace(src=(a, b.contiguous()))
-
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
   #(UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0] if x.src[0].shape == x.arg else None),
@@ -50,8 +46,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
-  # read from a copy if the input to assign permutes
-  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), handle_permuted_assign),
+  # realize before assign if input permutes the target buffer
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), lambda a,b,assign: assign.replace(src=(a, b.contiguous())) \
+      if any(x.base is a.base and x is not a for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
