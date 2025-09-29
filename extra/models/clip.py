@@ -12,16 +12,6 @@ import re, gzip
 # Allow for monkeypatching for mlperf.
 gelu = Tensor.gelu
 
-# to match behavior of mlperf v5.0 Stable Diffusion training clip tokenizer
-try:
-  import ftfy, html, regex
-  # from open_clip.tokenizer:
-  def basic_clean(text):
-    text = ftfy.fix_text(text)
-    text = html.unescape(html.unescape(text))
-    return text.strip()
-except ImportError: pass
-
 @lru_cache()
 def default_bpe():
   # Clip tokenizer, taken from https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py (MIT license)
@@ -76,6 +66,7 @@ class Tokenizer:
       for merge in merges:
         vocab.append(''.join(merge))
       if self.version == "sd_mlperf_v5_0":
+        import regex
         vocab.extend(['<start_of_text>', '<end_of_text>'])
         self.cache = {'<start_of_text>': '<start_of_text>', '<end_of_text>': '<end_of_text>'}
         self.pat = regex.compile(r"""<start_of_text>|<end_of_text>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""", regex.IGNORECASE)
@@ -129,7 +120,10 @@ class Tokenizer:
     def encode(self, text:str, pad_with_zeros:bool=False) -> List[int]:
       bpe_tokens: List[int] = []
       if self.version == "sd_mlperf_v5_0":
-        text = Tokenizer.whitespace_clean(basic_clean(text)).lower()
+        import regex, ftfy, html
+        text = ftfy.fix_text(text)
+        text = html.unescape(html.unescape(text)).strip()
+        text = Tokenizer.whitespace_clean(text).lower()
         re_module = regex
       else:
         text = Tokenizer.whitespace_clean(text.strip()).lower()
