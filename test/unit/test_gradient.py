@@ -110,6 +110,12 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.sum().gradient(x)
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
+  def test_max_gradient_half_precision(self):
+    t = Tensor.ones(70000, dtype="half", requires_grad=True).contiguous()
+    t.max().backward()
+    expected_grad = [1.430511474609375e-05] * 10
+    self.assertListEqual(t.grad.tolist()[:10], expected_grad)
+
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
