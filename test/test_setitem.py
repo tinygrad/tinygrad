@@ -2,7 +2,7 @@ import unittest
 import random
 from os import getenv
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, GlobalCounters
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -223,9 +223,13 @@ class TestWithGrad(unittest.TestCase):
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
+    GlobalCounters.reset()
     cmp = Tensor.empty(N)
     for i in range(N): cmp[i] = i
-    self.assertListEqual(Tensor.arange(N).tolist(), cmp.tolist())
+    result = cmp.tolist()  # This triggers kernel execution
+    kernel_count = GlobalCounters.kernel_count
+    self.assertListEqual(Tensor.arange(N).tolist(), result)
+    self.assertEqual(kernel_count, 1, f"Expected 1 kernel for setitem fusion, got {kernel_count} kernels")
 
 if __name__ == '__main__':
   unittest.main()
