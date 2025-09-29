@@ -401,22 +401,23 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
 ])
 
-def late_buffer_view(x, t, b):
-  if isinstance(t.device, str) and t.device.startswith("DISK"):
+def late_buffer_view(t:UOp, b:UOp):
+  if isinstance(b.device, str) and b.device.startswith("DISK"):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
-    if len(shape) == 0:
-      offset = x.src[1].arg
-    else:
-      idxs = x.src[1:]
-      offset = sum(idx.vmin for idx in idxs)
 
-    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+    # walk up for the INDEX
+    x = t
+    while not any(u.op is Ops.INDEX for u in x.src): x = x.src[0]
+    x = next(u for u in x.src if u.op is Ops.INDEX)
+
+    if len(shape) == 0: offset = x.src[1].arg
+    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+
+    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, t.src, (size, offset), tag=t.tag),) + b.src[1:])
   return b
 to_bufferview = PatternMatcher([
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(GroupOp.All).f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
-    late_buffer_view),
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
@@ -616,6 +617,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
+  tsink = graph_rewrite(tsink, to_bufferview, name="to bufferview", bottom_up=True)
   tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
