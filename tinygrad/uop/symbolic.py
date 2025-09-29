@@ -73,7 +73,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
-  (UPat(Ops.SUB, src=(UPat.var("x"), UPat.var("x"))), lambda x: x.const_like(0)), # x-x -> 0
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)) != UPat.var("x"),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
