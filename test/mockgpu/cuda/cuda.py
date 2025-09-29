@@ -51,6 +51,31 @@ def cuCtxCreate_v2(pctx, flags: int, dev: int) -> int:
   pctx._obj.value = ctx_id
   return orig_cuda.CUDA_SUCCESS
 
+def cuDevicePrimaryCtxRetain(pctx, dev: int) -> int:
+  if dev not in cuda_state.devices or "primary_ctx" not in cuda_state.devices[dev]:
+    ctx_id = cuda_state.next_context_id
+    cuda_state.next_context_id += 1
+    cuda_state.contexts[ctx_id] = {"device": dev}
+    cuda_state.devices.setdefault(dev, {"compute_capability": (3, 5)})
+    cuda_state.devices[dev].update({"primary_ctx": ctx_id, "primary_ctx_refcnt": 1})
+    pctx._obj.value = ctx_id
+  else:
+    cuda_state.devices[dev]["primary_ctx_refcnt"] += 1
+    pctx._obj.value = cuda_state.devices[dev]["primary_ctx"]
+  return orig_cuda.CUDA_SUCCESS
+
+def cuDevicePrimaryCtxRelease_v2(dev: int) -> int:
+  if dev not in cuda_state.devices: return orig_cuda.CUDA_ERROR_NOT_INITIALIZED
+  if "primary_ctx_refcnt" not in cuda_state.devices[dev]: return orig_cuda.CUDA_ERROR_INVALID_VALUE
+  if cuda_state.devices[dev]["primary_ctx_refcnt"] <= 0: return orig_cuda.CUDA_ERROR_INVALID_VALUE
+  cuda_state.devices[dev]["primary_ctx_refcnt"] -= 1
+  if cuda_state.devices[dev]["primary_ctx_refcnt"] == 0:
+    ctx_id = cuda_state.devices[dev]["primary_ctx"]
+    if ctx_id not in cuda_state.contexts: return orig_cuda.CUDA_ERROR_INVALID_CONTEXT
+    del cuda_state.contexts[ctx_id]
+    del cuda_state.devices[dev]["primary_ctx"], cuda_state.devices[dev]["primary_ctx_refcnt"]
+  return orig_cuda.CUDA_SUCCESS
+
 def cuCtxSetCurrent(context) -> int:
   if context.value not in cuda_state.contexts:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE

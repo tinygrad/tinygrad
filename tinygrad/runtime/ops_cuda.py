@@ -99,13 +99,7 @@ class CUDADevice(Compiled):
     check(cuda.cuInit(0))
     self.cu_device = init_c_var(cuda.CUdevice(), lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
     # Use the device primary context so events/streams interop with torch.cuda
-    if MOCKGPU:
-      # mock backend may not implement primary ctx APIs, keep previous behavior
-      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
-      self._uses_primary_ctx = False
-    else:
-      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuDevicePrimaryCtxRetain(ctypes.byref(x), self.cu_device)))
-      self._uses_primary_ctx = True
+    self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuDevicePrimaryCtxRetain(ctypes.byref(x), self.cu_device)))
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
 
     for dev in CUDADevice.devices:
@@ -138,9 +132,6 @@ class CUDADevice(Compiled):
 
   @suppress_finalizing
   def __del__(self):
-    try:
-      # drop our retain on the device primary context
-      if getattr(self, "_uses_primary_ctx", False): check(cuda.cuDevicePrimaryCtxRelease_v2(self.cu_device))
-      # destroy standalone context when using mock or fallback
-      else: check(cuda.cuCtxDestroy_v2(self.context))
+    # drop our retain on the device primary context
+    try: check(cuda.cuDevicePrimaryCtxRelease_v2(self.cu_device))
     except Exception: pass
