@@ -2,11 +2,9 @@ from typing import Any, cast
 import functools, operator
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, graph_rewrite_map
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
-from tinygrad.schedule.multi import multi_pm
-
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 
@@ -404,22 +402,23 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
 ])
 
-def late_buffer_view(x, t, b):
-  if isinstance(t.device, str) and t.device.startswith("DISK"):
+def late_buffer_view(t:UOp, b:UOp):
+  if isinstance(b.device, str) and b.device.startswith("DISK"):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
-    if len(shape) == 0:
-      offset = x.src[1].arg
-    else:
-      idxs = x.src[1:]
-      offset = sum(idx.vmin for idx in idxs)
+
+    # walk up for the INDEX
+    x = t
+    while not any(u.op is Ops.INDEX for u in x.src): x = x.src[0]
+    x = next(u for u in x.src if u.op is Ops.INDEX)
+
+    if len(shape) == 0: offset = x.src[1].arg
+    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
     return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
   return b
 to_bufferview = PatternMatcher([
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
-  (UPat(Ops.INDEX, name="x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(GroupOp.All).f(Ops.BUFFERIZE, allow_any_len=True, name="b"),
-    late_buffer_view),
+  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
@@ -592,10 +591,6 @@ add_tags = PatternMatcher([
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
-
-  # HACKS: handle multi with graph_rewrite_map in order to not have to add all the tag logic to multi
-  msink = graph_rewrite_map(tsink, multi_pm, name="multi")
-  tsink = msink[tsink].substitute({v:v.rtag(k.tag) for k,v in msink.items() if v.tag is None and k.tag is not None})
 
   tsink = graph_rewrite(tsink, earliest_rewrites, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}

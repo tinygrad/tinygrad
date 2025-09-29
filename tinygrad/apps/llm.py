@@ -118,7 +118,7 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    return self._feed_forward(self._attention(x, start_pos))
+    return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, max_context):
@@ -156,6 +156,8 @@ class Transformer:
                         n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+    for s in nn.state.get_parameters(model): s.replace(s.contiguous())
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
