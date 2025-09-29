@@ -19,7 +19,7 @@ from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, blo
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 @dataclass
 class RewriteStep:
@@ -76,7 +76,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
 
   # add locals
-  ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
+  ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
