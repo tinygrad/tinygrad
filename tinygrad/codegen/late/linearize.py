@@ -155,12 +155,10 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
-# we prevent the source of the SPECIAL from being linearized since its not part of the kernel
-def raise_bottom_up_gate(): raise BottomUpGate()
 
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
-  (UPat(Ops.SPECIAL), raise_bottom_up_gate)
+  (UPat(Ops.SPECIAL, name="s"), lambda s: s)
 ])
 
 # ***** blockend merging ****
