@@ -19,7 +19,7 @@ def fetch_file(item):
     print(f"error fetching {path}, {h}, {size}: {e}")
     raise
 
-  pt.uop.realized.deallocate()
+  pt.uop.buffer.deallocate()
 
 def fetch_mapping():
   mapping_tensor = Tensor(bytes.fromhex("d734f5e3be9f1e9d863bfaa4fc6c1ef2")).load(175866113).realize()
