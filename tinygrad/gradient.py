@@ -2,14 +2,15 @@ from typing import cast
 import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
+from tinygrad.dtype import dtypes
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   def to_inp_shape(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   if ret.arg[0] == Ops.ADD: return (to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MAX:
-    max_is_1s = ret.src[0].eq(to_inp_shape(ret)).cast(ctx.dtype)
+    max_is_1s = ret.src[0].eq(to_inp_shape(ret)).cast(dtypes.float32)
     div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1]))
-    return ((max_is_1s/div) * to_inp_shape(ctx),)
+    return ((max_is_1s/div).cast(ctx.dtype) * to_inp_shape(ctx),)
   if ret.arg[0] == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
 
 # ctx is grad_output
