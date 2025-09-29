@@ -242,7 +242,7 @@ class Tensor(MathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
-    if RANGEIFY and any(x.op is Ops.MULTI or (x.op in {Ops.BUFFER, Ops.COPY} and isinstance(x.device,tuple)) for x in big_sink.toposort()):
+    if RANGEIFY and any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
 
