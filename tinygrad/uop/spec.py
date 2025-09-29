@@ -254,6 +254,11 @@ ast_spec = PatternMatcher([
 
 # *** this spec should match all UOps ever created ***
 
+full_non_rangeify_spec = PatternMatcher([
+  # in non rangeify const can still have a View, and sometimes a FUSE while propagating
+  (UPat((Ops.VIEW, Ops.FUSE)).f(Ops.CONST), lambda: True),
+])
+
 full_spec = PatternMatcher([
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
@@ -265,8 +270,11 @@ full_spec = PatternMatcher([
   # child must have CHILDREN parent
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN),)), lambda: True),
 
-  # in non rangeify const can still have a View
-  (UPat(Ops.VIEW).f(Ops.CONST), lambda: True),
+  # all rewrite error are okay
+  (UPat(Ops.REWRITE_ERROR), lambda: True),
+
+  # buffer view with index or load is okay
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
 
   # linearizer outputs + intermediate KERNELs
   (UPat((Ops.BLOCKSTART, Ops.BLOCK, Ops.BLOCKFINAL, Ops.BLOCKEND, Ops.KERNEL), dtype=dtypes.void), lambda: True),
@@ -284,11 +292,13 @@ full_spec = PatternMatcher([
   (UPat(Ops.IF), lambda: True),
   # all assign
   (UPat(Ops.ASSIGN), lambda: True),
+  # all DEFINE_VAR to deal with the floats used in reduce collapse
+  (UPat(Ops.DEFINE_VAR), lambda: True),
   # allow index type
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
-])+tensor_uop_spec+spec
+])+full_non_rangeify_spec+tensor_uop_spec+spec
 
 # ***** uop helpers *****
 
