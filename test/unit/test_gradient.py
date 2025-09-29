@@ -6,7 +6,7 @@ from tinygrad import Device, Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.gradient import compute_gradient
-from tinygrad.helpers import CI
+from tinygrad.device import is_dtype_supported
 
 class TestGradient(unittest.TestCase):
   def _cmp_nan_okay(self, x, y):
@@ -113,6 +113,7 @@ class TestTensorGradient(unittest.TestCase):
 
 class TestTensorGradientHalfDType(unittest.TestCase):
   def test_max_gradient_half_precision(self):
+    if not is_dtype_supported(dtypes.float16, Device.DEFAULT): return
     N = 70000
     t = Tensor.ones(N, dtype="half", requires_grad=True).contiguous()
     t.max().backward()
@@ -121,12 +122,12 @@ class TestTensorGradientHalfDType(unittest.TestCase):
 
   def test_max_gradient_double_precision(self):
     # test large overflow
-    N = 2**30 # beyond float32's exact integer sum limit
-    u = Tensor.ones(N, dtype="float32", requires_grad=True).contiguous()
+    N = 2**25 # beyond float32's exact integer sum limit
+    u = Tensor.ones(N, dtype="float", requires_grad=True).contiguous()
     u.max().backward()
-    expected_grad_u = Tensor.full((10,), 1.0/N, dtype="float32")
+    expected_grad_u = Tensor.full((10,), 1.0/N, dtype="float")
     np.testing.assert_allclose(u.grad.numpy()[:10], expected_grad_u.numpy(), atol=1e-12)
-    if Device.DEFAULT == "METAL": return  # metal does not support double
+    if not is_dtype_supported(dtypes.float64, Device.DEFAULT): return
     N = 70000
     t = Tensor.ones(N, dtype="double", requires_grad=True).contiguous()
     t.max().backward()
