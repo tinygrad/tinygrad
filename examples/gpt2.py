@@ -64,7 +64,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
     h = x + self.attn(self.ln_1(x), start_pos, mask).float()
-    return (h + self.mlp(self.ln_2(h)))
+    return (h + self.mlp(self.ln_2(h))).contiguous()
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
