@@ -86,6 +86,7 @@ do_realize = PatternMatcher([
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
 
+
 class WrappedContig:
   def __init__(self, x): self.x = x
   def __repr__(self): return f"C({self.x})"
