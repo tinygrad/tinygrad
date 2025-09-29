@@ -8,7 +8,7 @@ import functools
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
 
-from tinygrad import nn, dtypes, Device, Tensor
+from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -1950,6 +1950,19 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
+  def test_limit_bufs_with_var(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor([1]*10).contiguous().realize() for i in range(N)]
+
+    vi = Variable("i", 0, 9).bind(1)
+    vj = Variable("j", 0, 9).bind(2)
+    root = bufs[0][vi] + bufs[0][vj]
+    for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
+    self.assertEqual(root.item(), N * 2)
+
 def swizzle_cnt(u:UOp) -> int:
   return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
 
@@ -2108,7 +2121,6 @@ class TestView(unittest.TestCase):
   # a*VIEW(x), where VIEW(x) = 0
   # x+2
   # as long as one child realizes, x does not collapse
-  @expect_rangeify_fails
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
     b = Tensor.arange(3).contiguous()
@@ -2216,6 +2228,15 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     b = schedule_graph_rewrite(b)
     self.assertIs(b.base, a.base)
+
+  def test_copy_to_same_device_sched(self):
+    a = Tensor.ones(4).contiguous().realize().uop.as_buf()
+    t = Tensor(a.copy_to_device(a.device))
+    sched = t.schedule()
+    assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
+    run_schedule(sched)
+    assert t.uop.is_realized, f"didn't realize Tensor {t}"
+    self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
   def test_clone(self):
     a = Tensor.empty(4)

@@ -1,5 +1,5 @@
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
-from tinygrad.uop.symbolic import symbolic_flat, sym
+from tinygrad.uop.symbolic import symbolic_flat, sym, invalid_pat
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
@@ -40,18 +40,18 @@ pm_simplify_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
   if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  if not no_range(red.src[0]): return None
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
       ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
-
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
@@ -74,12 +74,12 @@ pm_reduce_collapse = PatternMatcher([
    lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
   # WHERE on LOAD (works on max too)
   (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate).load()),
+   lambda buf,idx,gate: buf.index(idx.valid(gate)).load()),
   (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
+   lambda buf,idx,gate: buf.index(idx.valid(gate.logical_not())).load()),
   # INDEX on RANGE / gated RANGE
-  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
-   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
+  (UPat.var("buf").index(UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), invalid_pat)),
+   lambda buf,r,idx,expr,i: buf.index(expr.substitute({r:idx.cast(r.dtype)}).valid((idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])))),
   # AND on WHERE
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -98,8 +98,7 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
+  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None

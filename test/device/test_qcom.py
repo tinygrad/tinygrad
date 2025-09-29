@@ -10,10 +10,11 @@ class TestQcom(unittest.TestCase):
 
     def __validate(imgdt, expected_pitch):
       img = dev.allocator.alloc(imgdt.shape[0] * imgdt.shape[1] * 16, options:=BufferSpec(image=imgdt))
-      pitch = (img.descriptor[2] & 0x1fffff80) >> 7
+      pitch = img.texture_info.pitch
       assert pitch == expected_pitch, f"Failed pitch for image: {imgdt}. Got 0x{pitch:X}, expected 0x{expected_pitch:X}"
       dev.allocator.free(img, imgdt.shape[0] * imgdt.shape[1] * 16, options)
 
+    # Match opencl pitches for perf
     __validate(dtypes.imageh((1, 201)), 0x680)
     __validate(dtypes.imageh((16, 216)), 0x700)
     __validate(dtypes.imageh((16, 9)), 0x80)
