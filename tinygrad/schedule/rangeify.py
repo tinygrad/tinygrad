@@ -302,29 +302,6 @@ def might_end_axis(idx:UOp):
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
-def _too_many_bufs_limit_bufs(root:UOp) -> bool:
-  DEVICE_MAX_BUFS = {"METAL":30, "WEBGPU":8} # TODO: METAL: 31 max - 1 for jit contsts?
-
-  if root._device is None: return False
-  device = root.device if isinstance(root.device, str) else root.device[0].split(":")[0]
-  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return False
-
-  bufs: set[UOp] = set()
-  def gate_input(u:UOp):
-    if (is_load:=(u.op in {Ops.REALIZE, Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
-    return not is_load
-  root.toposort(gate=gate_input)
-
-  return len(bufs) > MAX_BUFS - 1 # NOTE: this -1 is for the output buffer
-
-def limit_bufs(root:UOp):
-  if _too_many_bufs_limit_bufs(root):
-    return root.replace(src=tuple(s.contiguous().realize() if s.op in set.union(GroupOp.Binary, GroupOp.Ternary) else s for s in root.src))
-
-pm_limit_bufs = PatternMatcher([
-  (UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs),
-])
-
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
@@ -389,8 +366,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it's user contiguous, we never remove it
   if src.op is Ops.CONTIGUOUS: return None
 
-  # TODO: think of buffer count here...
-
   # here is where we compute the cost
   # for now just no REDUCE, COPY, or ASSIGN
   ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
@@ -446,6 +421,27 @@ to_bufferview = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
+
+DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
+def limit_bufs(root:UOp):
+  if (device:=root._device) is None: return None # no device, index related calulcations
+  device = device if isinstance(device, str) else device[0].split(":")[0]
+  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
+
+  bufs: set[UOp] = set()
+  def gate_input(u:UOp):
+    # TODO: add cache to fix n^2
+    if (is_load:=(u.op in {Ops.BUFFERIZE, Ops.BUFFER, Ops.DEFINE_VAR})): bufs.add(u)
+    return not is_load
+  root.toposort(gate=gate_input)
+
+  if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
+    # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
+    orig_ranges, end_ranges = root.ranges, [x.replace(arg=(x.arg[0], AxisType.LOOP)) if x.arg[1] == AxisType.REDUCE else x for x in root.ranges]
+    root = root.substitute(dict(zip(root.ranges, end_ranges)))
+    srcs = [s.bufferize(*end_ranges, arg=BufferizeOpts(device=device)).index(*orig_ranges) if s.op in GroupOp.Elementwise else s for s in root.src]
+    return root.replace(src=tuple(srcs))
+pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs)])
 
 # *****************
 # 4. put in buffers for bufferize
@@ -626,11 +622,11 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
   # rangeify
-  tsink = graph_rewrite(tsink, pm_limit_bufs, bottom_up=True, name="limit buffers") # TODO: opt with ctx?
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+  tsink = graph_rewrite(tsink, pm_limit_bufs, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
