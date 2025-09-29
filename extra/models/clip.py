@@ -466,7 +466,7 @@ class OpenClipEncoder:
     x = x + self.positional_embedding
     x = self.transformer(x, attn_mask=self.attn_mask)
     x = self.ln_final(x)
-    x = x[Tensor.arange(x.shape[0], device=x.device), tokens.argmax(axis=-1), :]
+    x = x[Tensor.arange(x.shape[0], device=x.device), tokens.argmax(axis=-1)]
     x = x @ self.text_projection
     return x
 
