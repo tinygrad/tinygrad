@@ -14,11 +14,19 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE),), name="x"),
    lambda x: x.replace(src=(x.src[0].src[0],), tag=((x.src[0].tag or ())+(x.tag or ())) or None)),
 ])
+
+def handle_permuted_assign(a:UOp, b:UOp, assign:UOp):
+  permuted_reads = [x for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS) if x.base is a.base and x is not a]
+  if permuted_reads: return assign.replace(src=(a, b.contiguous()))
 
 earliest_rewrites = double_reshape+PatternMatcher([
   # non shape changing RESHAPE is NOOP
@@ -43,6 +51,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.NOOP, tag=assign.tag) if target.base.op is not Ops.BUFFER else None),
 
+  # read from a copy if the input to assign permutes
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), handle_permuted_assign),
+
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
@@ -58,10 +69,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
 # *****************
 # 1. add realize where we have to
-
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
-                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -82,7 +89,6 @@ do_realize = PatternMatcher([
   # realize input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
-
 
 class WrappedContig:
   def __init__(self, x): self.x = x
@@ -402,13 +408,6 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
-def pre_assign(assign:UOp, target:UOp, op:UOp):
-  # TODO: can compute if the read and write index overlaps?
-  idxs = [x for x in op.src[0].toposort(gate=lambda u:u.op not in {Ops.BUFFERIZE, Ops.CONTIGUOUS}) if x.op is Ops.INDEX and x.src[0] is target]
-  if len(idxs) <= 1: return None
-  new_op = assign.src[1].replace(src=(op.replace(src=(op.src[0].contiguous(),)+op.src[1:]),)+assign.src[1].src[1:])
-  return assign.replace(src=(assign.src[0], new_op)+assign.src[2:])
-
 pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -421,9 +420,6 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
        and idx.src[0].op is not Ops.BUFFER_VIEW else None),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
-  # guard ASSIGN write after read, these bufferizes should not optimize away
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX, src=(UPat(Ops.BUFFER, name="target"),), allow_any_len=True),
-                         UPat(Ops.INDEX, src=(UPat(Ops.BUFFERIZE, name="op"),), allow_any_len=True)), allow_any_len=True, name="assign"), pre_assign),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # if any CONST with DEVICE make it here (symbolic/copy issue), remove it
