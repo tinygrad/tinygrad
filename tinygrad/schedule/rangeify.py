@@ -471,6 +471,7 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
   range:int = 0
+  parent_tags:list = field(default_factory=list)
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
@@ -531,16 +532,26 @@ rangeify_codegen = PatternMatcher([
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
 ])
 
+def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
+  if x.tag is None or x.tag == (): return None
+  ctx.parent_tags += list(x.tag)
+  return x.replace(tag=None)
+
+pm_remove_tags = PatternMatcher([
+  # remove all the tags
+  (UPat(GroupOp.All, name="x"), remove_metadata_tags),
+])
+
 def split_store(ctx:list[UOp], x:UOp):
   if len(x.ranges): return None
   if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
 
   # gather the metadata
-  metadatas = [ctx[y].metadata for x in ret.sparents if x.tag is not None for y in x.tag]
+  metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
