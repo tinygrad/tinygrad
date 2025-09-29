@@ -89,10 +89,7 @@ do_realize = PatternMatcher([
 class WrappedContig:
   def __init__(self, x): self.x = x
   def __repr__(self): return f"C({self.x})"
-add_contiguous = PatternMatcher([
-  (UPat(GroupOp.All, name="x"),
-   lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx and not isinstance(x.tag, WrappedContig) else None),
-])
+add_contiguous = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda ctx,x: x.replace(tag=WrappedContig(x.tag)).realize() if x in ctx else None),])
 remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=x.tag.x) if isinstance(x.tag, WrappedContig) else None)])
 
 # *****************
