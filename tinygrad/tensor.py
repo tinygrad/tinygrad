@@ -437,14 +437,15 @@ class Tensor(MathTrait):
     tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
     data, level_chunks = h, 0
     for i in reversed(range(tree_depth + 1)):
+      data = data.to("tinyfs:load")
+
       # if not last level, its still hashes
       if i > 0 or tree_depth == 0:
         level_chunks = max(1, math.ceil(base_chunks / (Tensor.CHUNK_SIZE // 16)**(i-1)))
         pad_amt = 16 * level_chunks
       else: pad_amt = Tensor.CHUNK_SIZE * level_chunks
-
       if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
-      data = data.to("tinyfs:load")[:pad_amt].contiguous()
+      data = data[:pad_amt].contiguous()
       if i != 0: data = data.to(self.device)
 
     return data[:size]
@@ -471,7 +472,7 @@ class Tensor(MathTrait):
       if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
       level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
 
-    return data[:16]
+    return data[:16].contiguous()
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:

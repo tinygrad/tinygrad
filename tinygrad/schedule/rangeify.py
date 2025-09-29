@@ -50,6 +50,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
    lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
        and x.device.startswith("DISK") else None),
+  (UPat.var("x").f((Ops.BITCAST, Ops.CONTIGUOUS), name="t"),
+   lambda x,t: UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (t.size, x.st.views[0].offset), tag=t.tag).reshape(t.shape) if isinstance(x.device, str) \
+       and x.device.startswith("TINYFS") else None),
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
