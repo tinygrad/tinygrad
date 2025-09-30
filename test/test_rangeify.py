@@ -43,7 +43,7 @@ class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
     x = nn.GroupNorm(32, 128)
-    x(Tensor.empty(1, 128, 512, 512)).realize()
+    x(Tensor.empty(1, 128, 64, 64)).realize()
 
   def test_expand_children(self):
     A = Tensor.empty(N, N).sum(axis=1)
