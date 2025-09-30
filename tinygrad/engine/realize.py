@@ -1,8 +1,25 @@
 from typing import cast, Generator, Callable
-import time, pprint, random, itertools, math
+import time, pprint, random, itertools, math, ctypes, sys
+try:
+  import numpy as np
+except ImportError:  # pragma: no cover
+  np = None  # type: ignore[assignment]
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import (
+  DEVECTORIZE,
+  time_to_str,
+  VALIDATE_WITH_CPU,
+  getenv,
+  cpu_profile,
+  PROFILE,
+  ProfilePointEvent,
+  cpu_events,
+  prod,
+  Context,
+  unwrap,
+)
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -141,6 +158,103 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: dict[tuple[str, type, bytes, tuple[int, ...], bool], CompiledRunner] = {}
+_vdsp_handle:ctypes.CDLL|None = None
+
+def _get_vdsp() -> ctypes.CDLL|None:
+  global _vdsp_handle
+  if _vdsp_handle is not None: return _vdsp_handle
+  if sys.platform != "darwin": return None
+  try:
+    lib = ctypes.cdll.LoadLibrary('/System/Library/Frameworks/Accelerate.framework/Accelerate')
+  except OSError:
+    return None
+  lib.vDSP_sve.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_int, ctypes.POINTER(ctypes.c_float), ctypes.c_size_t]
+  lib.vDSP_sve.restype = None
+  _vdsp_handle = lib
+  return _vdsp_handle
+
+def _contiguous_reduce_block(shape:tuple[int, ...], strides:tuple[int, ...], reduce_axes:tuple[int, ...]) -> bool:
+  if len(reduce_axes) == 0: return False
+  expected = tuple(range(len(shape)-len(reduce_axes), len(shape)))
+  if reduce_axes != expected: return False
+  acc = 1
+  for axis in reversed(reduce_axes):
+    if strides[axis] != acc: return False
+    acc *= shape[axis]
+  return True
+
+def _match_cpu_fast_sum(ast:UOp):
+  if sys.platform != "darwin" or _get_vdsp() is None and np is None: return None
+  if ast.op is not Ops.SINK or len(ast.src) != 1: return None
+  store = ast.src[0]
+  if store.op is not Ops.STORE or len(store.src) != 2: return None
+  dest_view, red = store.src
+  if dest_view.op is not Ops.VIEW or red.op is not Ops.REDUCE_AXIS: return None
+  if red.arg[0] is not Ops.ADD or red.dtype != dtypes.float32: return None
+
+  dest_base = dest_view.src[0]
+  if dest_base.op is Ops.VIEW or dest_base.op is not Ops.DEFINE_GLOBAL: return None
+  dest_id = dest_base.arg
+
+  src_uop = red.src[0]
+  if src_uop.op is Ops.LOAD and src_uop.src[0].op is Ops.DEFINE_GLOBAL:
+    src_id = src_uop.src[0].arg
+    src_view = src_uop.view(src_uop.st_arg) if src_uop.st is not None else src_uop
+  elif src_uop.op is Ops.VIEW and src_uop.src[0].op is Ops.DEFINE_GLOBAL:
+    src_id = src_uop.src[0].arg
+    src_view = src_uop
+  elif src_uop.op is Ops.VIEW and src_uop.src[0].op is Ops.LOAD and src_uop.src[0].src[0].op is Ops.DEFINE_GLOBAL:
+    src_id = src_uop.src[0].src[0].arg
+    src_view = src_uop
+  else:
+    return None
+
+  if src_view.st is None: return None
+  src_st = unwrap(src_view.st)
+  if any(v.mask is not None for v in src_st.views): return None
+  try:
+    shape = tuple(int(sym_infer(s, {})) for s in src_st.shape)
+    stride_vals = src_st.real_strides(ignore_valid=True)
+    strides = []
+    for s in stride_vals:
+      if isinstance(s, UOp): strides.append(int(sym_infer(s, {})))
+      elif s is None: strides.append(None)
+      else: strides.append(int(s))
+    strides = tuple(0 if s is None else s for s in strides)
+  except Exception:
+    return None
+  if any(s == 0 for s in strides[-len(red.arg[1]):]): return None
+  if not _contiguous_reduce_block(shape, strides, red.arg[1]): return None
+
+  dest_st = unwrap(dest_view.st)
+  if any(v.mask is not None for v in dest_st.views): return None
+  try:
+    dest_shape = tuple(int(sym_infer(s, {})) for s in dest_st.shape)
+    dest_stride_vals = dest_st.real_strides(ignore_valid=True)
+    dest_strides = []
+    for s in dest_stride_vals:
+      if isinstance(s, UOp): dest_strides.append(int(sym_infer(s, {})))
+      elif s is None: dest_strides.append(0)
+      else: dest_strides.append(int(s))
+  except Exception:
+    return None
+
+  reduce_axes:tuple[int, ...] = red.arg[1]
+  reduce_size = math.prod(shape[a] for a in reduce_axes)
+  outer_axes = [i for i in range(len(shape)) if i not in reduce_axes]
+  outer_shape = [shape[i] for i in outer_axes]
+
+  return {
+    "src_id": src_id,
+    "dest_id": dest_id,
+    "shape": shape,
+    "strides": strides,
+    "dest_shape": dest_shape,
+    "dest_strides": tuple(dest_strides),
+    "reduce_axes": reduce_axes,
+    "reduce_size": reduce_size,
+    "outer_shape": outer_shape,
+  }
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
@@ -150,6 +264,11 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
+    fast_info = _match_cpu_fast_sum(ast) if device.split(":")[0] == "CPU" else None
+    if fast_info is not None:
+      runner = FastSumRunner(device, fast_info, ast)
+      method_cache[ckey] = method_cache[bkey] = runner
+      return runner
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
@@ -231,3 +350,63 @@ def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None,
       np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)
+
+class FastSumRunner(Runner):
+  def __init__(self, device:str, info:dict, ast:UOp):
+    super().__init__("fast_sum", device, Estimates())
+    self.info = info
+    self.vdsp = _get_vdsp()
+    self.dtype_size = 4
+    self.src_ptr_type = ctypes.POINTER(ctypes.c_float)
+    self.dest_ptr_type = ctypes.POINTER(ctypes.c_float)
+    self.size_c = ctypes.c_size_t(info["reduce_size"])
+    self.p = ProgramSpec(f"fast_sum_{info['dest_id']}_{info['src_id']}", "", device, ast, None,
+                         globals=[info['dest_id'], info['src_id']], outs=[info['dest_id']], ins=[info['src_id']])
+
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
+    dest_buf, src_buf = rawbufs
+    dest = dest_buf.ensure_allocated()._buf
+    src = src_buf.ensure_allocated()._buf
+    src_base = src.va_addr
+    dest_base = dest.va_addr
+
+    reduce_size = self.info["reduce_size"]
+    strides = self.info["strides"]
+    dest_shape = self.info["dest_shape"]
+    dest_strides = self.info["dest_strides"]
+    reduce_axes = self.info["reduce_axes"]
+    outer_shape = self.info["outer_shape"]
+
+    st = time.perf_counter() if wait else None
+
+    outer_elems = math.prod(outer_shape) if outer_shape else 1
+
+    if not outer_shape:
+      if self.vdsp is not None:
+        ptr = ctypes.cast(src_base, self.src_ptr_type)
+        dest_ptr = ctypes.cast(dest_base, self.dest_ptr_type)
+        self.vdsp.vDSP_sve(ptr, 1, dest_ptr, self.size_c)
+      elif np is not None:
+        src_arr = np.ctypeslib.as_array((ctypes.c_float * src_buf.size).from_address(src_base))
+        total = float(src_arr.sum(dtype=np.float64))
+        ctypes.cast(dest_base, self.dest_ptr_type)[0] = total
+      else:
+        raise RuntimeError("no backend available for CPU fast sum")
+      GlobalCounters.global_ops += reduce_size
+      GlobalCounters.global_mem += reduce_size * self.dtype_size + self.dtype_size
+    else:
+      if np is None:
+        raise RuntimeError("numpy is required for strided CPU fast sums")
+      src_arr = np.ctypeslib.as_array((ctypes.c_float * src_buf.size).from_address(src_base))
+      view = np.lib.stride_tricks.as_strided(src_arr, shape=self.info["shape"],
+                                            strides=tuple(s*self.dtype_size for s in strides))
+      summed = view.sum(axis=reduce_axes, keepdims=True)
+      dest_arr = np.ctypeslib.as_array((ctypes.c_float * dest_buf.size).from_address(dest_base))
+      dest_view = np.lib.stride_tricks.as_strided(dest_arr, shape=dest_shape,
+                                                 strides=tuple(s*self.dtype_size for s in dest_strides))
+      dest_view[...] = summed.astype(np.float32)
+      GlobalCounters.global_ops += reduce_size * outer_elems
+      GlobalCounters.global_mem += (reduce_size * outer_elems + outer_elems) * self.dtype_size
+
+    if wait and st is not None: return (time.perf_counter() - st) * 1000.0
+    return None
