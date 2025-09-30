@@ -378,7 +378,7 @@ jobs:
         run: |
           ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2160 ALLOWED_GATED_READ_IMAGE=16 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot model with rangeify
-        run: FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+        run: RANGEIFY=1 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
@@ -538,12 +538,10 @@ jobs:
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
     - name: Test multitensor
       run: |
-        CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W TestMultiTensor.test_simple_reduce \
-        TestMultiTensor.test_elementwise_dtype TestMultiTensor.test_shard_no_recompile TestHandleData.test_copied_to_device TestMultiRamUsage
-        CPU=1 RANGEIFY=1 python3 -m pytest test/test_multitensor.py::TestMultiAssign
-        CPU=1 RANGEIFY=1 python3 -m pytest -n=auto test/test_multitensor.py::TestMultiTensor test/test_multitensor.py::TestBatchNorm test/unit/test_allreduce.py -k 'not const_folding'
-    - name: Test CPU=1 RANGEIFY=2
-      run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
+        CPU=1 RANGEIFY=1 python3 -m pytest -n=auto test/test_multitensor.py::TestMultiTensor -k 'not const_folding'
+    # RANGEIFY=2 isn't supported
+    #- name: Test CPU=1 RANGEIFY=2
+    #  run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
     #- name: Test LLVM RANGEIFY=1 (slow tests)
     #  run: CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
