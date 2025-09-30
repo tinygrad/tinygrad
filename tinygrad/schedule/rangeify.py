@@ -590,12 +590,28 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND}.union(GroupOp.Movement), name="x"), tag_uop),
 ])
 
+# support for using a contiguous permuted view instead of the parent view if one exists
+# modified from kernelize.py to not use ShapeTracker
+
+def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
+  x = src
+  while x is not src.base:
+    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.arg))
+    elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
+    else: return None
+    x = x.src[0]
+  ctx[src.base] = contig
+replace_contiguous = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
+  (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
+])
+
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
 
-  tsink = graph_rewrite(tsink, earliest_rewrites, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
   realize_map: dict[UOp, UOp] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
   # NOTE: we don't use contiguous here, contiguous is a user op
