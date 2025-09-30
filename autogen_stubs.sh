@@ -443,8 +443,11 @@ generate_libusb() {
 }
 
 generate_mesa() {
-  MESA_TAG="mesa-25.1.0"
+  MESA_TAG="mesa-25.2.3"
   MESA_SRC=/tmp/mesa-$MESA_TAG
+  TINYMESA_COMMIT_HASH=f1f4463
+  TINYMESA_DIR=/tmp/tinymesa-$MESA_TAG-$TINYMESA_COMMIT_HASH/
+  TINYMESA_SO=$TINYMESA_DIR/libtinymesa_cpu.so
   if [ ! -d "$MESA_SRC" ]; then
     git clone --depth 1 --branch $MESA_TAG https://gitlab.freedesktop.org/mesa/mesa.git $MESA_SRC
     pushd .
@@ -465,16 +468,10 @@ generate_mesa() {
     popd
   fi
 
-  clang2py -k cdefstu \
-    $MESA_SRC/src/nouveau/headers/nv_device_info.h \
-    $MESA_SRC/src/nouveau/compiler/nak.h \
-    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
-    $MESA_SRC/src/compiler/nir/nir_serialize.h \
-    $MESA_SRC/src/util/blob.h \
-    $MESA_SRC/src/compiler/glsl_types.h \
-    $MESA_SRC/src/util/ralloc.h \
-    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
-    -o $BASE/nak.py
+  if [ ! -d "$TINYMESA_DIR" ]; then
+    mkdir $TINYMESA_DIR
+    curl -L https://github.com/sirhcm/tinymesa/releases/download/$MESA_TAG-$TINYMESA_COMMIT_HASH/libtinymesa_cpu.so -o $TINYMESA_SO
+  fi
 
   clang2py -k cdefstu \
     $MESA_SRC/src/compiler/nir/nir.h \
@@ -482,12 +479,8 @@ generate_mesa() {
     $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
     $MESA_SRC/src/compiler/nir/nir_serialize.h \
     $MESA_SRC/gen/nir_intrinsics.h \
-    $MESA_SRC/src/compiler/glsl_types.h \
-    $MESA_SRC/src/util/ralloc.h \
-    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/gen" \
-    -o $BASE/nir.py
-
-  clang2py -k cdefstu \
+    $MESA_SRC/src/nouveau/headers/nv_device_info.h \
+    $MESA_SRC/src/nouveau/compiler/nak.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_type.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_init.h \
@@ -496,29 +489,26 @@ generate_mesa() {
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_jit_types.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_flow.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_const.h \
-    $MESA_SRC/src/compiler/nir/nir_shader_compiler_options.h \
-    $MESA_SRC/src/compiler/nir/nir_serialize.h \
+    $MESA_SRC/src/compiler/glsl_types.h \
     $MESA_SRC/src/util/blob.h \
     $MESA_SRC/src/util/ralloc.h \
-    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include -I$(llvm-config-14 --includedir)" \
-    -o $BASE/lvp.py
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include -I$(llvm-config-20 --includedir)" \
+    -l $TINYMESA_SO \
+    -o $BASE/mesa.py
 
-  fixup $BASE/nir.py
-  fixup $BASE/nak.py
-  fixup $BASE/lvp.py
-  sed -i "s\AttributeError\(AttributeError, RuntimeError)\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
-  for nm in nak nir lvp; do
-    sed -i "/import ctypes/a from tinygrad.runtime.support.mesa import $nm as dll" $BASE/$nm.py
-    echo "def __getattr__(nm): raise AttributeError() if nm.startswith('__') else dll.error" >> $BASE/$nm.py
-  done
-  sed -i "s\FunctionFactoryStub()\dll\g" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
-  sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/nak.py $BASE/nir.py $BASE/lvp.py
+  fixup $BASE/mesa.py
+  sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
+  sed -i "s/AttributeError/(AttributeError,FileNotFoundError)/" $BASE/mesa.py
+  sed -i "/import ctypes/a import tinygrad.runtime.support.mesa as mesa" $BASE/mesa.py
+  sed -i "s/ctypes.CDLL('.\+')/mesa/g" $BASE/mesa.py
+  echo "def __getattr__(nm): raise mesa.error if mesa.error else AttributeError(f'{nm} not found in {mesa.path}' + ('' if 'cpu' in mesa.path else ', you may need to install libtinymesa_cpu.so'))" >> $BASE/mesa.py
+  sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py
   # bitfield bug in clang2py
-  sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/nir.py
-  sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/nir.py
-  sed -i "s/\([0-9]\+\)()/\1/" $BASE/nir.py
-  sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/nir.py
-  python3 -c "import tinygrad.runtime.autogen.nak, tinygrad.runtime.autogen.nir, tinygrad.runtime.autogen.lvp"
+  sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/mesa.py
+  sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/mesa.py
+  sed -i "s/\([0-9]\+\)()/\1/" $BASE/mesa.py
+  sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/mesa.py
+  python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
