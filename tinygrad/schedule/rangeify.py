@@ -258,7 +258,9 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
     rngs_valids = []
     for valid_rngs in all_rngs:
       rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
-      rngs_valids.append((rngs, valids, all_same([x for x in rngs if x.op is not Ops.CONST])))
+      # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
+      same_rngs = [x if x.op is not Ops.RANGE or resolve(x.src[0] != 1) else UOp.const(dtypes.index, 0) for x in rngs]
+      rngs_valids.append((rngs, valids, all_same(same_rngs)))
     all_all_same = all(same_rngs for _,_,same_rngs in rngs_valids)
     for i,(rngs,valids,same_rngs) in enumerate(rngs_valids):
       # we compare the ranges without their valids
