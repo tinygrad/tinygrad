@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 import socket, uuid, json, asyncio, threading
+from contextlib import asynccontextmanager
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import Tensor
@@ -48,6 +48,7 @@ class TinyFSDevice(Compiled):
   def _start_thread(self):
     self.loop = asyncio.new_event_loop()
     asyncio.set_event_loop(self.loop)
+
     self.start_event.set()
     self.loop.run_forever()
     self.loop.close()
@@ -115,8 +116,6 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     async def _worker(item):
       i, loc, h = item
       async with self.dev.connection(loc) as (reader, writer):
-        loop = asyncio.get_running_loop()
-
         ptr = i * Tensor.CHUNK_SIZE
         size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
 
@@ -127,7 +126,7 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
         chunk = await reader.readexactly(size)
 
         view = dest[ptr:ptr+len(chunk)]
-        f = await loop.run_in_executor(None, lambda: view.__setitem__(slice(None), chunk))
+        f = await asyncio.to_thread(lambda: view.__setitem__(slice(None), chunk))
         del view, f
 
     workers = [asyncio.create_task(_worker(item)) for item in src.copyout_queue]
