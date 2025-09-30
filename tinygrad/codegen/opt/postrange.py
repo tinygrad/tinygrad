@@ -72,8 +72,11 @@ class Scheduler:
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
     # filter any not in reduces
+    # TODO: reenable this
+    """
     reduce_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.REDUCE]
     for ls in reduce_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
+    """
 
     return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.LOOP] if store_rngs else []
 
