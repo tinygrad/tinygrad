@@ -390,15 +390,27 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it's user contiguous, we never remove it
   if src.op is Ops.CONTIGUOUS: return None
 
+  # *** here is where we compute the cost ***
+  # if we return None, the bufferize is kept
+
+  accessed_buffers = []
+  def red_gate(x):
+    if x.op is Ops.INDEX:
+      accessed_buffers.append(x)
+      return False
+    return True
+  ran = src.toposort(gate=red_gate)
+
+  # if this is generated from multiple buffers, don't remove this buffer
+  if len(accessed_buffers) > 1: return None
+
   # const reduce is okay
   def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.COPY} for y in x.sparents)
 
-  # here is where we compute the cost
-  # for now just no REDUCE, COPY, or ASSIGN
-  ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
   # we don't want to bufferize threefry, also causes problems because not all platforms support long
   if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.BUFFER_VIEW, Ops.ASSIGN} and not okay_reduce(x) for x in ran) and src.op is not Ops.THREEFRY: return None
 
+  # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
 
