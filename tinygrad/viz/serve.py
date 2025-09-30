@@ -83,6 +83,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
       elif len(rngs:=u.ranges):
         label += f"\n({','.join([colored(str(x.arg[0]), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+      if u.op is Ops.INDEX:
+        label += f"\n{u.render()}"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
