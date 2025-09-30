@@ -573,7 +573,7 @@ def split_store(ctx:list[UOp], x:UOp):
 
   # NOTE: the hack for COPY is here
   ret = ret.sink() if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
-  kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None]))))
+  kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   return x.as_buf().assign(kernel)
 
