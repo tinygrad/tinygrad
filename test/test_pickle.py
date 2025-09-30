@@ -70,14 +70,14 @@ class TestPickle(unittest.TestCase):
   def test_pickle_buffer_uop(self):
     t = Tensor.arange(4).realize()
     a = t.uop
-    assert a.op is Ops.BUFFER
-    self.assertIsNotNone(buffer:=a.realized)
+    assert a.is_realized
+    self.assertIsNotNone(buffer:=a.base.realized)
     s = pickle.dumps(a)
     # free buffers
     del a
     del buffer
     a2:UOp = pickle.loads(s)
-    self.assertListEqual(a2.realized.as_buffer().cast("I").tolist(), [0, 1, 2, 3])
+    self.assertListEqual(a2.base.realized.as_buffer().cast("I").tolist(), [0, 1, 2, 3])
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
