@@ -2,7 +2,7 @@ import unittest
 from tinygrad import dtypes, Device
 from tinygrad.device import is_dtype_supported
 
-@unittest.skipUnless(Device.DEFAULT=="NULL")
+@unittest.skipUnless(Device.DEFAULT=="NULL", "Don't run when testing non-NULL backends")
 class TestNULLSupportsDTypes(unittest.TestCase):
   def test_null_supports_ints_floats_bool(self):
     dts = dtypes.ints + dtypes.floats + (dtypes.bool,)
