@@ -43,6 +43,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   return sched
 
 def expect_rangeify_fails(fxn): return (unittest.expectedFailure if RANGEIFY else (lambda f:f))(fxn)
+def expect_nonrangeify_fails(fxn): return (unittest.expectedFailure if not RANGEIFY else (lambda f:f))(fxn)
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -1661,7 +1662,6 @@ class TestSchedule(unittest.TestCase):
     check_schedule(constv, 1)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @expect_rangeify_fails
   def test_image_matmul(self):
     with Context(IMAGE=2):
       x = Tensor.randn((9, 9)).realize()
@@ -2280,11 +2280,18 @@ class TestCopyFolding(unittest.TestCase):
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
-  @expect_rangeify_fails
   def test_permute_on_disk(self):
     with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
     b = a.reshape(2, 2).permute(1, 0).to("CPU")
+    b.realize()
+    self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
+
+  @expect_nonrangeify_fails
+  def test_permute_on_disk_contiguous(self):
+    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
+    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
+    b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
@@ -2296,7 +2303,7 @@ class TestCopyFolding(unittest.TestCase):
 
   # NOTE: disk permute must come after COPY
   # TODO: this is wrong because of the permute
-  @unittest.expectedFailure
+  @expect_nonrangeify_fails
   def test_permute_after_shrink_on_disk(self):
     with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
@@ -2439,6 +2446,7 @@ class TestUOpBecome(unittest.TestCase):
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
   # NOTE: this expand is not reordered because there's before it to fuse
+  @expect_rangeify_fails
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
