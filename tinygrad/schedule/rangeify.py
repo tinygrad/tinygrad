@@ -465,7 +465,7 @@ to_bufferview = PatternMatcher([
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
 def limit_bufs(ctx:RangeifyContext, root:UOp):
-  if (device:=root._device) is None: return None # no device, index related calulcations
+  if (device:=root._device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
 
