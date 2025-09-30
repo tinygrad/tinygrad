@@ -42,7 +42,7 @@ class TestWinograd(unittest.TestCase):
     out = Tensor.conv2d(x,w, padding=1)
     out.mean().backward()
     backward_schedule = Tensor.schedule(x.grad, w.grad)
-    self.assertEqual(len(backward_schedule), 6 if RANGEIFY else 9)
+    self.assertEqual(len(backward_schedule), 4 if RANGEIFY else 9)
 
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
