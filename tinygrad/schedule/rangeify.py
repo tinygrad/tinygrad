@@ -38,7 +38,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # COPY and source size need to match
   # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
+   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if (b:=r.base).op is not Ops.CONST and r.size != b.size else None),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -400,6 +400,8 @@ pm_cleanups = double_reshape+pm_mops+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # mstack on CONST is CONST
+  (UPat(Ops.MSTACK, name="ms", src=(UPat.var(),), allow_any_len=True), lambda ms: ms.const_like(ms.src[0].arg) if ms.src[0].base.op is Ops.CONST else None),
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
