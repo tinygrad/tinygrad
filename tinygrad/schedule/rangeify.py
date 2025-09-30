@@ -13,7 +13,7 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
 
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
@@ -47,6 +47,9 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
+
+  # make inputs to mstack contiguous
+  (UPat(Ops.MSTACK, name="ms"), lambda ms: ms.replace(src=tuple(s if s.op in ALWAYS_CONTIGUOUS else s.contiguous() for s in ms.src))),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -340,7 +343,8 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # handle assign
   (UPat(Ops.INDEX, src=(UPat(Ops.ASSIGN, name="assign"),), allow_any_len=True, name="x"),
-    lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],))),
+    lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],)) \
+        if assign.src[1].op is not Ops.KERNEL else None),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
@@ -355,10 +359,12 @@ pm_rangeify = pm_mops+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN}
+
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
-  # if it's user contiguous or assigned to something, we don't touch it
-  if b.src[0].op in {Ops.CONTIGUOUS, Ops.ASSIGN}: return None
+  # don't optimize ALWAYS_RUN_OPS
+  if b.src[0].op in ALWAYS_RUN_OPS: return None
 
   new_rng = []
   hit = False
@@ -384,17 +390,32 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert all(x.op is Ops.RANGE for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
-  if src.op is Ops.CONTIGUOUS: return None
+  if src.op in ALWAYS_RUN_OPS: return None
 
-  # here is where we compute the cost
-  # for now just no REDUCE, COPY, or ASSIGN
-  ran = src.toposort(gate=lambda x: x.op not in {Ops.INDEX})
   # we don't want to bufferize threefry, also causes problems because not all platforms support long
-  if any(x.op in {Ops.REDUCE, Ops.COPY, Ops.BUFFER_VIEW, Ops.ASSIGN} for x in ran) and src.op is not Ops.THREEFRY: return None
+  if src.op is not Ops.THREEFRY:
+    # *** here is where we compute the cost ***
+    # if we return None, the bufferize is kept
 
-  # simple, matching old behavior
-  #if src.op is not Ops.INDEX: return None
+    accessed_buffers = []
+    def red_gate(x):
+      if x.op is Ops.INDEX:
+        accessed_buffers.append(x)
+        return False
+      return True
+    ran = src.toposort(gate=red_gate)
 
+    # if this is generated from multiple buffers, don't remove this buffer
+    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
+
+    # const reduce is okay
+    # TODO: move the reduce folder to before this to prevent the need for this
+    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.COPY} for y in x.sparents)
+
+    # always run this list of ops
+    if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
+
+  # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
 
