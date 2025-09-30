@@ -3,7 +3,7 @@ import ctypes, ctypes.util, threading, weakref
 from collections import deque
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Deque, Optional, Dict, Tuple, Callable, TYPE_CHECKING, cast
+from typing import Any, Deque, Optional, Dict, Tuple, Callable, TYPE_CHECKING, cast, BinaryIO
 from tinygrad.helpers import init_c_var
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes, to_dtype
@@ -254,17 +254,21 @@ class CuvidLibrary:
   def decode_picture(self, decoder: ctypes.c_void_p, params: CUVIDPICPARAMS):
     check_cuvid(self._lib.cuvidDecodePicture(decoder, ctypes.byref(params)))
 
-  def map_video_frame(self, decoder: ctypes.c_void_p, pic_idx: int, proc_params: ctypes.c_void_p) -> tuple[int, int]:
+  def map_video_frame(self, decoder: ctypes.c_void_p, pic_idx: int,
+                      proc_params: CUVIDPROCPARAMS | ctypes.c_void_p | None = None) -> tuple[int, int]:
     dev_ptr = ctypes.c_void_p()
     pitch = ctypes.c_uint()
     if proc_params is None:
-      proc_ptr = None
+      proc_ptr = ctypes.c_void_p()
     elif isinstance(proc_params, ctypes.c_void_p):
       proc_ptr = proc_params
     else:
-      proc_ptr = ctypes.byref(proc_params)
+      proc_ptr = ctypes.cast(ctypes.pointer(proc_params), ctypes.c_void_p)
     check_cuvid(self._lib.cuvidMapVideoFrame(decoder, pic_idx, ctypes.byref(dev_ptr), ctypes.byref(pitch), proc_ptr))
-    return dev_ptr.value, pitch.value
+    dev_value = dev_ptr.value
+    if dev_value is None:
+      raise CuvidError("cuvidMapVideoFrame returned null device pointer")
+    return int(dev_value), int(pitch.value)
 
   def unmap_video_frame(self, decoder: ctypes.c_void_p, dev_ptr: int):
     check_cuvid(self._lib.cuvidUnmapVideoFrame(decoder, ctypes.c_void_p(dev_ptr)))
@@ -376,7 +380,7 @@ _NV12_KERNEL_CONFIGS: Dict[object, Dict[str, object]] = {
 }
 
 
-def _as_cu_ptr(ptr: int) -> cuda.CUdeviceptr:
+def _as_cu_ptr(ptr: int | cuda.CUdeviceptr | cuda.CUdeviceptr_v2) -> cuda.CUdeviceptr | cuda.CUdeviceptr_v2:
   if isinstance(ptr, (cuda.CUdeviceptr, cuda.CUdeviceptr_v2)):
     return ptr
   return cuda.CUdeviceptr_v2(int(ptr))
@@ -389,7 +393,7 @@ class _NV12ToRGBKernel:
     if dtype not in _NV12_KERNEL_CONFIGS:
       raise NotImplementedError(f"Unsupported NV12 conversion dtype {dtype}")
     self.dtype = dtype
-    self._program = None
+    self._program: Optional[Callable[..., Any]] = None
     self._kernel_name = f"nv12_to_rgb_{_NV12_KERNEL_CONFIGS[self.dtype]['suffix']}"
 
   def _ensure_program(self):
@@ -408,6 +412,9 @@ class _NV12ToRGBKernel:
   def launch(self, y_plane: NV12Plane, uv_plane: NV12Plane, out_ptr: int | cuda.CUdeviceptr,
        width: int, height: int, normalize: bool, coeffs: Tuple[float, float, float, float]):
     self._ensure_program()
+    program = self._program
+    if program is None:
+      raise RuntimeError("NV12 conversion kernel program failed to compile")
     block_x, block_y = 16, 16
     grid_x = (width + block_x - 1) // block_x
     grid_y = (height + block_y - 1) // block_y
@@ -416,7 +423,7 @@ class _NV12ToRGBKernel:
       return ctypes.c_int.from_buffer_copy(ctypes.c_float(val)).value
     coeff_bits = tuple(_pack(c) for c in coeffs)
     vals = (width, height, y_plane.pitch, uv_plane.pitch, width * 3, 1 if normalize else 0, *coeff_bits)
-    self._program(*args, global_size=(grid_x, grid_y, 1), local_size=(block_x, block_y, 1), vals=vals)
+    program(*args, global_size=(grid_x, grid_y, 1), local_size=(block_x, block_y, 1), vals=vals)
 
 
 _nv12_kernel_cache: Dict[Tuple[str, object], _NV12ToRGBKernel] = {}
@@ -607,28 +614,29 @@ class NVVideoDecoder:
   @staticmethod
   def _from_user_data(user_data: ctypes.c_void_p) -> "NVVideoDecoder":
     if isinstance(user_data, int):
-      token = user_data
+      token_val: Optional[int] = user_data
     else:
-      token = ctypes.cast(user_data, ctypes.c_void_p).value
-    if token is None:
+      token_val = ctypes.cast(user_data, ctypes.c_void_p).value
+    if token_val is None:
       raise CuvidError("Missing decoder context")
+    token = int(token_val)
     decoder = NVVideoDecoder._registry.get(token)
     if decoder is None:
       raise CuvidError("Decoder context expired")
     return decoder
 
   @staticmethod
-  def _sequence_trampoline(user_data: ctypes.c_void_p, format_ptr: ctypes.POINTER(CUVIDEOFORMAT)) -> int:
+  def _sequence_trampoline(user_data: ctypes.c_void_p, format_ptr: ctypes.c_void_p) -> int:
     decoder = NVVideoDecoder._from_user_data(user_data)
     return decoder._handle_sequence(ctypes.cast(format_ptr, ctypes.POINTER(CUVIDEOFORMAT)).contents)
 
   @staticmethod
-  def _decode_trampoline(user_data: ctypes.c_void_p, pic_ptr: ctypes.POINTER(CUVIDPICPARAMS)) -> int:
+  def _decode_trampoline(user_data: ctypes.c_void_p, pic_ptr: ctypes.c_void_p) -> int:
     decoder = NVVideoDecoder._from_user_data(user_data)
     return decoder._handle_decode(ctypes.cast(pic_ptr, ctypes.POINTER(CUVIDPICPARAMS)).contents)
 
   @staticmethod
-  def _display_trampoline(user_data: ctypes.c_void_p, disp_ptr: ctypes.POINTER(CUVIDPARSERDISPINFO)) -> int:
+  def _display_trampoline(user_data: ctypes.c_void_p, disp_ptr: ctypes.c_void_p) -> int:
     decoder = NVVideoDecoder._from_user_data(user_data)
     return decoder._handle_display(ctypes.cast(disp_ptr, ctypes.POINTER(CUVIDPARSERDISPINFO)).contents)
 
@@ -705,7 +713,14 @@ class NVVideoDecoder:
     if isinstance(source, Iterable) and not isinstance(source, (bytes, bytearray, memoryview)):
       nalu_iter = iter(source)
     else:
-      nalu_iter = iter_annexb_nalus(source, chunk_size=chunk_size)
+      binary_source: BinaryIO | bytes | bytearray | memoryview
+      if isinstance(source, (bytes, bytearray, memoryview)):
+        binary_source = source
+      else:
+        if not hasattr(source, "read"):
+          raise TypeError("source must be iterable or support read() for Annex B parsing")
+        binary_source = cast(BinaryIO, source)
+      nalu_iter = iter_annexb_nalus(binary_source, chunk_size=chunk_size)
     for nalu in nalu_iter:
       is_vcl, first_slice = _nal_flags(nalu)
       if is_vcl:
@@ -805,7 +820,14 @@ class NVVideoDecoder:
       if isinstance(source, Iterable) and not isinstance(source, (bytes, bytearray, memoryview)):
         nalu_iter = iter(source)
       else:
-        nalu_iter = iter_annexb_nalus(source, chunk_size=chunk_size)
+        binary_source: BinaryIO | bytes | bytearray | memoryview
+        if isinstance(source, (bytes, bytearray, memoryview)):
+          binary_source = source
+        else:
+          if not hasattr(source, "read"):
+            raise TypeError("source must be iterable or support read() for Annex B parsing")
+          binary_source = cast(BinaryIO, source)
+        nalu_iter = iter_annexb_nalus(binary_source, chunk_size=chunk_size)
       for nalu in nalu_iter:
         is_vcl, first_slice = _nal_flags(nalu)
         if is_vcl:
@@ -912,10 +934,10 @@ def decode_annexb_iter(source: bytes | bytearray | memoryview | Iterable[bytes] 
                        long_start_code: bool = False, end_of_stream: bool = True,
                        color_space: str | Tuple[float, float, float, float] = "bt709",
                        fallback: Optional[Callable[[CuvidUnavailable], object]] = None,
-                       decoder_kwargs: Optional[Dict[str, object]] = None) -> object:
-  decoder_kwargs = dict(decoder_kwargs or {})
+                       decoder_kwargs: Optional[Dict[str, Any]] = None) -> object:
+  decoder_options: dict[str, Any] = dict(decoder_kwargs or {})
   try:
-    decoder = NVVideoDecoder(**decoder_kwargs)
+    decoder = NVVideoDecoder(**decoder_options)
   except CuvidUnavailable as err:
     if fallback is not None:
       return fallback(err)
