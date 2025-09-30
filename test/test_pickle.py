@@ -2,7 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context
-from tinygrad.uop.ops import PatternMatcher, UPat, UOp, Ops
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -45,10 +45,9 @@ class TestPickle(unittest.TestCase):
     t_values = t.numpy()
     del t # free buffers
     print("** post pickle")
-    init = GlobalCounters.kernel_count
     t2:Tensor = pickle.loads(st)
+    assert t2.uop.is_realized
     np.testing.assert_equal(t_values, t2.numpy())
-    self.assertEqual(GlobalCounters.kernel_count-init, 0)
 
   def test_pickle_realized_tensor_alt2(self):
     print("** init")
