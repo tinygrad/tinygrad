@@ -709,8 +709,6 @@ jobs:
         run: |
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
-      - name: Run RANGEIFY=1 test_ops
-        run: RANGEIFY=1 python3 -m pytest -n=auto test/test_ops.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
