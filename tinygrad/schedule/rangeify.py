@@ -392,7 +392,7 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
-pm_cleanups = double_reshape+pm_mops+PatternMatcher([
+pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
