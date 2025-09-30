@@ -57,5 +57,4 @@ class LambdaLR(LR_Scheduler):
     self.step()
 
   def get_lr(self):
-    ret = self.base_lr * self.lr_lambda(self.epoch_counter - 1)
-    return ret.to(self.optimizer.device)
+    return self.base_lr * self.lr_lambda(self.epoch_counter - 1)
