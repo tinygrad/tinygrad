@@ -20,6 +20,24 @@ class TestRangeifyAssign(unittest.TestCase):
 
 N = 256
 
+class TestRangeifyOpt(unittest.TestCase):
+  def test_randperm(self):
+    Tensor.randperm(10000).realize()
+
+  def test_one_getitem(self):
+    X = Tensor.empty(10000)
+    sel = Tensor.arange(1000).contiguous().realize()
+    Xsel = X[sel]
+    Tensor.realize(Xsel)
+
+  def test_two_getitem(self):
+    # this is splitting on the child even when it really shouldn't
+    X = Tensor.empty(10000)
+    Y = Tensor.empty(10000)
+    sel = Tensor.arange(1000).contiguous().realize()
+    Xsel, Ysel = X[sel], Y[sel]
+    Tensor.realize(Xsel, Ysel)
+
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_expand_children(self):
