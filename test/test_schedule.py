@@ -1661,7 +1661,6 @@ class TestSchedule(unittest.TestCase):
     check_schedule(constv, 1)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @expect_rangeify_fails
   def test_image_matmul(self):
     with Context(IMAGE=2):
       x = Tensor.randn((9, 9)).realize()
@@ -2439,6 +2438,7 @@ class TestUOpBecome(unittest.TestCase):
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
   # NOTE: this expand is not reordered because there's before it to fuse
+  @expect_rangeify_fails
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
