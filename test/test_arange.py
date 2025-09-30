@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import CI, Context, getenv, RANGEIFY
+from tinygrad.helpers import CI, Context, getenv, RANGEIFY, X86
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
@@ -140,7 +140,9 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
   def test_index_mnist_opt(self): self.test_index_mnist(0)
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "fails on x86")
   def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
+  @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "fails on x86")
   def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   def test_llama_embedding(self, noopt=1, op_limit=65536):

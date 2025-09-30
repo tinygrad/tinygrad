@@ -4,6 +4,7 @@ import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.muop import MUOp
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.codegen.opt.tc import TensorCore
@@ -47,7 +48,7 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+      elif u.op is Ops.LOAD and u.src[0].op != Ops.CONST and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
         lds += u.dtype.itemsize * mults
       elif u.op is Ops.STORE and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
         lds += u.src[1].dtype.itemsize * mults
@@ -58,7 +59,7 @@ class Estimates:
 @dataclass
 class ProgramSpec:
   name:str
-  src:str
+  src:str|list[MUOp]
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
@@ -111,6 +112,7 @@ class Renderer:
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
+  max_vec_sz: int = 0
   has_local: bool = True
   has_threads: bool = False
   has_shared: bool = True
@@ -121,7 +123,9 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
+  isel_matcher: PatternMatcher|None = None
+  extra_spec: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, uops:list[UOp]) -> str|list[MUOp]: raise NotImplementedError("needs a renderer")
