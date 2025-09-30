@@ -349,8 +349,8 @@ pm_rangeify = pm_mops+PatternMatcher([
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
-  # if it's user contiguous, we don't touch it
-  if b.src[0].op is Ops.CONTIGUOUS: return None
+  # if it's user contiguous or assigned to something, we don't touch it
+  if b.src[0].op in {Ops.CONTIGUOUS, Ops.ASSIGN}: return None
 
   new_rng = []
   hit = False
