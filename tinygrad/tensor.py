@@ -4100,7 +4100,7 @@ class Tensor(MathTrait):
     R = self.clone()
     Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m)).contiguous()
     for i in range(min(m, n)):
-      x = R[..., i:m, i]
+      x = R[..., i:m, i].contiguous()  # TODO: without contigous this can silently be wrong, should at least assert
       s = -x[..., 0].sign()
       u1 = x[..., 0] - s * x.square().sum(-1).sqrt()
       w = x.unsqueeze(-1) / u1.reshape(b_shape + (1, 1))
