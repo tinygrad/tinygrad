@@ -447,7 +447,7 @@ to_bufferview = PatternMatcher([
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
-def limit_bufs(ctx, root:UOp):
+def limit_bufs(ctx:RangeifyContext, root:UOp):
   if (device:=root._device) is None: return None # no device, index related calulcations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
@@ -460,10 +460,13 @@ def limit_bufs(ctx, root:UOp):
   root.toposort(gate=gate_input)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
-    # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
-    orig_ranges, end_ranges = root.ranges, [x.replace(arg=(x.arg[0], AxisType.LOOP)) if x.op == Ops.RANGE else x for x in root.ranges]
-    root = root.substitute(dict(zip(root.ranges, end_ranges)))
-    srcs = [s.bufferize(*end_ranges, arg=BufferizeOpts(device=device)).index(*orig_ranges) if s.op in GroupOp.Elementwise else s for s in root.src]
+    srcs = []
+    for s in root.src:
+      if s.op in GroupOp.Elementwise:
+        # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
+        orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
+        s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=device)).index(*orig_ranges)
+      srcs.append(s)
     return root.replace(src=tuple(srcs))
 pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs)])
 
