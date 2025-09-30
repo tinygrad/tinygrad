@@ -259,7 +259,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-12
-        pydeps: "pillow"
+        pydeps: "pillow numpy ftfy regex"
         deps: testing_unit
     - name: Run unit tests
       run: python -m pytest -n=auto test/unit/ --durations=20
@@ -267,6 +267,8 @@ jobs:
       run: NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
     - name: Run SDXL on NULL backend
       run: MAX_BUFFER_SIZE=0 NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    - name: Run Clip tests for SD MLPerf on NULL backend
+      run: MAX_BUFFER_SIZE=0 NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
