@@ -7,8 +7,6 @@ from tinygrad.nn.state import get_parameters
 from extra.models import clip
 from examples.mlperf.initializers import gelu_erf, init_stable_diffusion, attn_f32_softmax
 from typing import Literal
-Device.DEFAULT="NULL"
-GPUS = [f"NULL:{i}" for i in range(8)]
 
 clip_params = {"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True, "clip_tokenizer_version": "sd_mlperf_v5_0"}
 def get_cond_stage_model(GPUS:list[str]|None=None) -> clip.FrozenOpenClipEmbedder:
@@ -34,6 +32,7 @@ class TestOpenClip(unittest.TestCase):
 
   def test_multigpu_clip_embed(self):
     BS = 304
+    GPUS = [f"{Device.DEFAULT}:{i}" for i in range(8)]
     model = get_cond_stage_model(GPUS)
     tokens = get_tokens(BS)
     embeds = model.embed_tokens(tokens.shard(GPUS, axis=0)).realize()
@@ -42,6 +41,7 @@ class TestOpenClip(unittest.TestCase):
 
   def test_multigpu_clip_score(self):
     BS = 240
+    GPUS = [f"{Device.DEFAULT}:{i}" for i in range(8)]
     vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
     text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
     clip.gelu = gelu_erf
@@ -55,12 +55,8 @@ class TestOpenClip(unittest.TestCase):
 
 class TestInitStableDiffusion(unittest.TestCase):
   def setUp(self):
-    Device.DEFAULT="CPU"
     # NOTE: set env variable based on where checkpoints are on the system
     self.CKPTDIR = Path(getenv("CKPTDIR", "/raid/weights/stable_diffusion"))
-
-  def tearDown(self):
-    Device.DEFAULT="NULL"
 
   def helper_test_init(self, version:Literal["v2-mlperf-train", "v2-mlperf-eval"]):
     model, unet, sqrt_acp, sqrt_omacp = init_stable_diffusion(version, self.CKPTDIR / "sd" / "512-base-ema.ckpt", ["CPU"])
