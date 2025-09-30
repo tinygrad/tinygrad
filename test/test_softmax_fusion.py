@@ -44,6 +44,7 @@ class TestFuse(unittest.TestCase):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a / a.mean(axis=1), a)
 
+  @unittest.skipIf(0<RANGEIFY<2, "needs RANGEIFY>1")
   def test_fuse_argmax(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.argmax(axis=-1), a)

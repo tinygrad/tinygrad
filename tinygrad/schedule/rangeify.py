@@ -7,6 +7,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
+from tinygrad.codegen.simplify import pm_flatten_range
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -587,6 +588,9 @@ to_define_global = PatternMatcher([
   # this is only needed if you are using symbolic
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
+  # remove RANGE with 0 size
+  (UPat(Ops.RANGE, name="r"), lambda r: UOp.const(dtypes.index, 0) if r.vmax == 0 else None),
+
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
@@ -629,7 +633,7 @@ def split_store(ctx:list[UOp], x:UOp):
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
 
   # gather the metadata
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]

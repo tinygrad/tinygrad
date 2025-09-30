@@ -123,6 +123,7 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  @unittest.skip("this is handled at higher level now")
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
 
