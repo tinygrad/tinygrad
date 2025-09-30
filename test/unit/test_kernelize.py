@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.uop import Ops
+from tinygrad.helpers import RANGEIFY
 
 class TestKernelize(unittest.TestCase):
   def test_add_reshaped(self):
@@ -13,11 +14,14 @@ class TestKernelize(unittest.TestCase):
     self.assertIs(ret_reshaped_1.uop.src[0], ret_reshaped_2.uop.src[0])
 
   def test_two_reduce(self):
-    a = Tensor.ones(16,16).contiguous()
+    a = Tensor.ones(16,16).contiguous().realize()
     a1 = a.sum(axis=1)
     a0 = a1.sum(axis=0)
     a0.kernelize()
-    self.assertIs(a1.uop.base.op, Ops.ASSIGN)
+    self.assertEqual(len([s for s in a0.uop.toposort() if s.op is Ops.KERNEL]), 1 if RANGEIFY else 2)
+    self.assertIs(a1.uop.base.op, Ops.REDUCE_AXIS if RANGEIFY else Ops.ASSIGN)
+    # input Tensor always kernelizes
+    self.assertIs(a0.uop.base.op, Ops.ASSIGN)
 
   def test_two_reduce_w_add(self):
     a = Tensor.ones(16,16).contiguous()
