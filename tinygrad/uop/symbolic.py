@@ -118,6 +118,17 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  # ** ops folding **
+  # copy/nop on CONST is CONST
+  (UPat((Ops.COPY, Ops.NOOP), src=(UPat.cvar("x"),), name="root", allow_any_len=True), lambda root,x: root.const_like(x.arg)),
+  # mstack on CONST is CONST
+  (UPat(Ops.MSTACK, name="ms", src=(UPat.var(),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
+   lambda ms: UOp.const(ms.dtype, ms.src[0].base.arg) if ms.src[0].base.op is Ops.CONST else None),
+  # CONST (or DEFINE_VAR) can't have axes. remove INDEX when we get here
+  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
+  # no buffers for const
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
+  (UPat(GroupOp.Movement, name="mov").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda mov,b: b.const_like(c.arg).rtag(b.tag) if (c:=mov.base).op is Ops.CONST else None),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
