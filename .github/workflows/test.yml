@@ -743,6 +743,9 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Run CUDA NV12 unit tests
+        if: matrix.backend == 'ptx'
+        run: python -m pytest test/unit/test_nv12_to_rgb.py --durations=20
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20

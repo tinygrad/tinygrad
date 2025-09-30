@@ -14,6 +14,38 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [WEBGPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_webgpu.py) | Runs on GPU using the Dawn WebGPU engine (used in Google Chrome) | - | Dawn library installed and discoverable. Binaries: [pydawn v0.3.0](https://github.com/wpmed92/pydawn/releases/tag/v0.3.0) |
 
 
+## NVDEC video decoding
+
+tinygrad ships an optional NVIDIA NVDEC pipeline for HEVC Annex-B streams inside `tinygrad.runtime.cuvid`. Two helper functions
+cover the common workflows:
+
+* `decode_annexb_iter` lazily yields tensors as frames become available and automatically closes the decoder when the iterator
+	is exhausted. Provide a `fallback` callback to surface an alternate path (for example, a software decoder) when NVDEC is not
+	present.
+* `decode_annexb_to_tensors_auto` consumes the iterator eagerly and returns a list. When the fallback is triggered, the
+	callback's return value is passed through unchanged.
+
+The conversion kernel supports `float32`, `float16`, and `uint8` outputs. Use `normalize=True` to scale into the `[0, 1]` range
+for floating-point outputs, or `normalize=False` to keep `0–255` values (required when requesting `uint8`). Select the
+YUV-to-RGB matrix via the `color_space` argument (supported keys: `bt601`, `bt709`, `bt2020`, or a custom coefficient tuple).
+Example:
+
+```python
+from tinygrad.runtime.cuvid import decode_annexb_iter, decode_annexb_to_tensors_auto
+from tinygrad.dtype import dtypes
+
+with open("sample.hevc", "rb") as fh:
+	stream = fh.read()
+
+for timestamp, tensor in decode_annexb_iter(stream, dtype=dtypes.float16, normalize=True, color_space="bt2020"):
+	frame_cpu = tensor.to("CPU").numpy()
+	consume_frame(timestamp, frame_cpu)
+
+frames = decode_annexb_to_tensors_auto(stream, dtype=dtypes.uint8, normalize=False,
+																			 fallback=lambda err: software_decode(stream))
+```
+
+
 ## Interoperability
 
 tinygrad provides interoperability with OpenCL and PyTorch, allowing efficient tensor data sharing between frameworks through the `Tensor.from_blob` API. This enables zero-copy operations by working directly with external memory pointers.
