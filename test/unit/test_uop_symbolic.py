@@ -246,7 +246,7 @@ class TestSymbolic(unittest.TestCase):
   def test_range_mod_its_symbolic_bound(self):
     a = Variable("a", 1, 10, dtypes.index)
     ridx = UOp.range(a+2, 0)
-    self.helper_test_variable(ridx%(a+2), 0, 11, "ridx0")
+    self.helper_test_variable(ridx%(a+2), 0, 11, "r0")
 
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 2, 7) // 2, 1, 3, "(a//2)")
