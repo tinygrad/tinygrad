@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
@@ -55,7 +55,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 
   if optimize:
     # view pushing
-    ret.extend(rewrites_for_views)
+    if not RANGEIFY: ret.extend(rewrites_for_views)
 
     # lowerer first
     if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
