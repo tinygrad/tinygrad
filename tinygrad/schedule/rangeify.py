@@ -309,7 +309,8 @@ def might_end_axis(idx:UOp):
   if all(x.op not in {Ops.REDUCE_AXIS} for x in idx.toposort()): return None
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
-    if any(x.arg > idx.arg for x in a.toposort() if x.op is Ops.RANGE):
+    # in RANGEIFY=1, always realize
+    if not (RANGEIFY > 1) or any(x.arg > idx.arg for x in a.toposort() if x.op is Ops.RANGE):
       to_end_axis.append(i)
   if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
