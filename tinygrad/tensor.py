@@ -7,8 +7,9 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, RANGEIFY, FUSE_ATTENTION
+from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, MathTrait, identity_element, all_metadata, index_to_concrete_int, sint_to_uop, \
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, MathTrait, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, \
   srender
 from tinygrad.uop.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, Buffer
@@ -16,6 +17,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
+from tinygrad.schedule.multi import get_multi_map
 from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
@@ -142,7 +144,7 @@ class Tensor(MathTrait):
     if isinstance(data, UOp):
       assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
-      if data.dtype==dtypes.index: data = index_to_concrete_int(data)
+      if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
       if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
         var, val = data.unbind()  # type: ignore
         # give the bound constant a device
@@ -179,9 +181,9 @@ class Tensor(MathTrait):
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
-  def __del__(self):
-    try: all_tensors.pop(weakref.ref(self), None)
-    except Exception: pass
+
+  @suppress_finalizing
+  def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
@@ -240,6 +242,10 @@ class Tensor(MathTrait):
 
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+
+    if RANGEIFY and any(isinstance(x._device, tuple) for x in big_sink.toposort()):
+      _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
+      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
 
     becomes_map = get_rangeify_map(big_sink) if RANGEIFY else get_kernelize_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
@@ -535,7 +541,7 @@ class Tensor(MathTrait):
         device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False)
     # increment rng counter for devices
-    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
+    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
     bits_count = Tensor._device_rng_counters[device] - num
@@ -4085,24 +4091,24 @@ class Tensor(MathTrait):
     """
     assert self.ndim > 1, "NS only works for two or more dims"
     G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
-    G = G.transpose(-2, -1) if self.shape[-2] > self.shape[-1] else G
+    if (swap := self.shape[-2] > self.shape[-1]): G = G.transpose(-2, -1)
     for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G) for i,p in enumerate(params))
-    return G.transpose(-2, -1) if self.shape[-2] > self.shape[-1] else G
+    return G.transpose(-2, -1) if swap else G
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    b_shape, m, n = self.shape[0:self.ndim - 2], int(R.shape[-2]), int(R.shape[-1])
-    Q = Tensor.eye(m, dtype = self.dtype).reshape((1,) * (len(self.shape) - 2) + 2 * (m,)).expand(b_shape + 2 * (m,)).contiguous()
-    for i in range(int(min(m, n))):
-      x = R[..., i:m, i]
+    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m)).contiguous()
+    for i in range(min(m, n)):
+      x = R[..., i:m, i].contiguous()  # TODO: without contigous this can silently be wrong, should at least assert
       s = -x[..., 0].sign()
       u1 = x[..., 0] - s * x.square().sum(-1).sqrt()
-      w = x.unsqueeze(-1) / u1.reshape(b_shape + 2 * (1,))
+      w = x.unsqueeze(-1) / u1.reshape(b_shape + (1, 1))
       w[..., 0, 0] = 1
-      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + 2 * (1,)).expand(w.shape)
+      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + (1, 1))
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
-      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau.transpose(-2, -1) * w.transpose(-2, -1))
+      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
     return Q,R
 
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
@@ -4110,14 +4116,14 @@ class Tensor(MathTrait):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
-    Q, R = (Tensor.qr(self) if m >= n else Tensor.qr(self.transpose(-2, -1)))
-    num, q_num = int(min(m, n)), int(max(m, n))
-    U = R.shrink(tuple([(0, self.shape[i]) for i in range(self.ndim - 2)] + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype = self.dtype).reshape((1,) * (self.ndim - 2) + (num, num)).expand(b_shape + 2 * (num,)).contiguous()
+    Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
+    num, q_num = min(m, n), max(m, n)
+    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
+    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype = dtypes.int), Tensor.zeros(num, dtype = dtypes.int).contiguous()
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int).contiguous()
     permute[num//2:num] = permute[num//2:num].flip(0)
-    inverse_permute[permute] = Tensor.arange(num, dtype = dtypes.int)
+    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
     def one_round_jacobi(U, V,permute,inverse_permute):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
@@ -4141,15 +4147,15 @@ class Tensor(MathTrait):
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
       inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
       return U, V, permute, inverse_permute
-    max_iterations, iterations_per_round = 1, int((num) * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
+    max_iterations, iterations_per_round = 1, int(num * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
     for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
-    new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + 2 * (num,)).contiguous()
-    new_indices[..., :num] = indices.reshape(b_shape + (1,) + (num,)).expand(b_shape + 2 * (num,))
-    U,V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num]).realize()
+    new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + (num, num)).contiguous()
+    new_indices[..., :num] = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
+    U, V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num]).realize()
 
-    padded_u = Tensor.eye(q_num, dtype = U.dtype).reshape((1,) * (self.ndim - 2) + 2 * (q_num,)).expand(b_shape + 2 * (q_num,)).contiguous()
+    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
