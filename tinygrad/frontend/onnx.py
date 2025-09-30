@@ -6,7 +6,7 @@ from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate
-from tinygrad.device import is_dtype_supported, Device
+from tinygrad.device import dtype_fallback, Device
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
@@ -34,13 +34,6 @@ class OnnxDataType(enum.IntEnum):
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
   def to_dtype(self) -> DType: return dtypes.fields()[self.name.lower()]
-
-def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
-  if is_dtype_supported(dtype): return dtype
-  default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-  warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
-  assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
-  return default_dtype
 
 # ***** onnx spec definitions *****
 class Domain(enum.Enum):

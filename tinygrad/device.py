@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
+import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, warnings
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
 from tinygrad.helpers import unwrap_class_type
@@ -342,6 +342,13 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "CL") and device != "REMOTE" and not OSX
   return True
+
+def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
+  if is_dtype_supported(dtype): return dtype
+  default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
+  warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
+  assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
+  return default_dtype
 
 if PROFILE:
   @atexit.register
