@@ -930,7 +930,7 @@ impl<'a> Thread<'a> {
 
             let op = ((instr >> 16) & 0x3ff) as u32;
             match op {
-                764 | 765 | 288 | 289 | 290 | 766 | 768 | 769 => {
+                764 | 765 | 288 | 289 | 290 | 766 | 767 | 768 | 769 => {
                     let vdst = (instr & 0xff) as usize;
                     let sdst = ((instr >> 8) & 0x7f) as usize;
                     let f = |i: u32| -> usize { ((instr >> i) & 0x1ff) as usize };
@@ -944,6 +944,16 @@ impl<'a> Thread<'a> {
                     assert_eq!(clmp, 0);
 
                     let vcc = match op {
+                        767 => {
+                            let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
+                            let (mul_result, overflow_mul) = (s0 as i64).overflowing_mul(s1 as i64);
+                            let (ret, overflow_add) = mul_result.overflowing_add(s2 as i64);
+                            let overflowed = overflow_mul || overflow_add;
+                            if self.exec.read() {
+                                self.vec_reg.write64(vdst, ret as u64);
+                            }
+                            overflowed
+                        },
                         766 => {
                             let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
                             let (mul_result, overflow_mul) = (s0 as u64).overflowing_mul(s1 as u64);
