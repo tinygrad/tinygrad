@@ -148,10 +148,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
-  for splits in [4]:
-    # TODO: somehow this never hits a reduce
-    if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
-      k.apply_opt(Opt(OptOps.UPCAST, k.upcastable_dims[-1], splits))
+  if not k.upcasted and k.upcastable_dims:
+    if (store := next((u for u in k.ast.toposort() if u.op is Ops.STORE), None)) is not None:
+      out_idx = store.src[0].src[1].get_idx()
+      for splits in [4]:
+        # TODO: somehow this never hits a reduce
+        cands = [i for i in k.upcastable_dims if k.full_shape[i] % splits == 0 and any(t is k.rngs[i] for t in out_idx.split_uop(Ops.ADD))]
+        if cands: k.apply_opt(Opt(OptOps.UPCAST, cands[-1], splits))
 
   # **** local groups ****
 
