@@ -135,5 +135,4 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     src.copyout_queue.clear()
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
-    assert offset == 0, f"only offset 0 supported, found offset {offset}"
     return TinyFSBuffer(buf.device, size, offset, buf.request_id, buf.copyout_queue)
