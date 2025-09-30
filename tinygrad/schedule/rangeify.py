@@ -357,10 +357,15 @@ pm_rangeify = pm_mops+PatternMatcher([
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
+  # if it's user contiguous or assigned to something, we don't touch it
+  if b.src[0].op in {Ops.CONTIGUOUS, Ops.ASSIGN}: return None
+
   new_rng = []
   hit = False
   reshape: list[sint] = []
   for s,rng in zip(b.shape, b.src[1:]):
+    # skip for symbolic. TODO: fix this
+    if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     if rng not in b.src[0].sparents and rng.op is Ops.RANGE:
       reshape.append(1)
       hit = True
@@ -368,7 +373,8 @@ def cleanup_dead_axes(b:UOp):
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
+    # move the tag to the expand
+    return b.replace(src=b.src[0:1]+tuple(new_rng), tag=None).reshape(tuple(reshape)).expand(b.shape).replace(tag=b.tag)
 
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
@@ -396,8 +402,8 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
-pm_cleanups = double_reshape+pm_mops+PatternMatcher([
-  #(UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
+pm_cleanups = pm_mops+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
