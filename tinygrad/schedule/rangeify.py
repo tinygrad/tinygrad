@@ -35,6 +35,14 @@ earliest_rewrites = double_reshape+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
+  # remove contiguous on movement ops on disk
+  (UPat(GroupOp.Movement-{Ops.SHRINK}, name="x").f(Ops.CONTIGUOUS),
+   lambda x: x if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  # push copy past movement ops to disk
+  (UPat(GroupOp.Movement-{Ops.SHRINK}, name="x").f(Ops.COPY, allow_any_len=True, name="copy"),
+   lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:], tag=copy.tag) \
+      if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+
   # COPY and source size need to match
   # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
@@ -50,11 +58,6 @@ earliest_rewrites = double_reshape+PatternMatcher([
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
-
-  # push copy past movement ops to disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, allow_any_len=True, name="copy"),
-   lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:], tag=copy.tag) \
-      if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
