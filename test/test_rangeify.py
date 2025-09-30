@@ -40,6 +40,11 @@ class TestRangeifyOpt(unittest.TestCase):
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
+  def test_groupnorm(self):
+    # ranges 1 and 3 are merging
+    x = nn.GroupNorm(32, 128)
+    x(Tensor.empty(1, 128, 512, 512)).realize()
+
   def test_expand_children(self):
     A = Tensor.empty(N, N).sum(axis=1)
     ba = A.expand(N, N)
