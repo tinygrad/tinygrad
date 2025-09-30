@@ -97,6 +97,11 @@ class TestRangeify(unittest.TestCase):
     w1 = Tensor.empty(8, 4, 3, 3)
     x.conv2d(w1).realize()
 
+  def test_conv2d_elu(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    x.conv2d(w1).elu().realize()
+
   def test_conv2d_t(self):
     x = Tensor.empty(1, 4, 32, 32)
     w1 = Tensor.empty(8, 4, 3, 3)
