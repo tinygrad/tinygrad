@@ -63,6 +63,7 @@ if __name__ == "__main__":
     views_to_valid_uop.cache_clear()
 
     new_uops = uops_allocated()
+    print_uops()
     gc.collect()
     new_uops_gc = uops_allocated()
     print(f"{t.__name__:30s}: {new_uops:3d} -> {new_uops_gc:3d}")
