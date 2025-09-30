@@ -587,6 +587,14 @@ class TestUOpGraph(unittest.TestCase):
       ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<64)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
+  def test_bounds_with_loaded_bool(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+    glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(8), (), 0)
+    gidx0 = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
+    ld0 = glbl0.index(gidx0).load()
+    ld1 = glbl1.index(gidx0.valid(ld0)).load()
+    with self.assertRaises(RuntimeError): to_uops_list([ld1])
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
