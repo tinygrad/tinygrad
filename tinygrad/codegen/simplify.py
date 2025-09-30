@@ -29,7 +29,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         # do the merge
         new_range = r0.replace(src=(s0*s1,))
         nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                            name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
         if count_divmod(nidx) <= count_divmod(u):
