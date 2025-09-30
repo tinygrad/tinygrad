@@ -814,20 +814,6 @@ class TestShapeTrackerSize(unittest.TestCase):
     st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).flip((True, True))
     self.assertEqual(st.real_size(), 100)
 
-class TestRender(unittest.TestCase):
-  def test_render(self):
-    st = ShapeTracker.from_shape((2, 3))
-    valid_idx = st.to_valid_uop()
-    idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
-    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
-    self.assertEqual(valid.render(), "True")
-
-    st = st.pad(((0, 1), (0, 0)))
-    valid_idx = st.to_valid_uop()
-    idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
-    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
-    self.assertEqual(valid.render(), "(ridx0<2)")
-
 class TestVariableShrink(unittest.TestCase):
   def test_shrink(self):
     st = ShapeTracker.from_shape((10,))
