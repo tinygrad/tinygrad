@@ -46,7 +46,7 @@ earliest_rewrites = double_reshape+PatternMatcher([
   # COPY and source size need to match
   # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
-   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if (b:=r.base).op is not Ops.CONST and r.size != b.size else None),
+   lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -329,6 +329,9 @@ pm_rangeify = pm_mops+PatternMatcher([
   # if we come across this, remove it. it was a CHILD unused in an INDEX
   (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, src=(UPat.var("x"),)),)), lambda x: x),
 
+  # CONST (or DEFINE_VAR) can't have axes. remove INDEX when we get here
+  (UPat(Ops.INDEX, src=(UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"),)), lambda c: c.replace(src=())),
+
   # handle arg on any op with weight. old endrange stuff
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union({Ops.REDUCE_AXIS})),), allow_any_len=True, name="idx"), might_end_axis),
 
@@ -346,7 +349,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
 
   # assert if there's any index we didn't process
-  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT, Ops.CONST}).f(Ops.INDEX, name="x"), unprocessed_index),
+  (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT}).f(Ops.INDEX, name="x"), unprocessed_index),
 ])
 
 # *****************
@@ -411,6 +414,10 @@ pm_cleanups = pm_mops+PatternMatcher([
        and idx.src[0].op is not Ops.BUFFER_VIEW else None),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  # no buffers for const
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
+  # copy on CONST is CONST
+  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
   # mstack on CONST is CONST

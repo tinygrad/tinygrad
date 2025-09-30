@@ -269,15 +269,8 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t * 1).numpy(), np.arange(16))
 
     _check_ast_count(0, t ** 0)
+    _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
-
-  def test_multi_const_folding_reduceops(self):
-    ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
-    one = Tensor.ones(16).to(ds).realize()
-
-    #_check_ast_count(0, t ** 1)
-    _check_ast_count(0, t ** one)
 
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
@@ -296,6 +289,7 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t * zero).numpy(), [0] * 16)
     np.testing.assert_equal((t * one).numpy(), np.arange(16))
     _check_ast_count(0, t ** zero)
+    _check_ast_count(0, t ** one)
     _check_ast_count(0, one ** t)
     np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
     np.testing.assert_equal((t ** one).numpy(), np.arange(16))
