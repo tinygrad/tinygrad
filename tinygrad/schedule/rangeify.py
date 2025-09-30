@@ -320,6 +320,9 @@ def might_end_axis(idx:UOp):
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
 
 pm_rangeify = pm_mops+PatternMatcher([
+  # move upcast after realize
+  (UPat(Ops.CAST, name="x").f(Ops.REALIZE), lambda x: x.src[0].realize().cast(x.dtype) if x.dtype.itemsize > x.src[0].dtype.itemsize else None),
+
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
   # if there's an INDEX it can support partial contig
