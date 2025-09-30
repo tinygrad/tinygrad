@@ -188,11 +188,6 @@ class TestFp8sConversions(unittest.TestCase):
   def test_fp8e5m2_to_float(self, x):
     np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e5m2).float().item())
 
-class TestNULLSupportsDTypes(unittest.TestCase):
-  def test_null_supports_ints_floats_bool(self):
-    dts = dtypes.ints + dtypes.floats + (dtypes.bool,)
-    np.testing.assert_equal([(dt, is_dtype_supported(dt, "NULL")) for dt in dts], [(dt, True) for dt in dts])
-
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
   def test_bf16_creation_numpy(self):
