@@ -245,7 +245,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
 
-@unittest.skipIf(not_support_multi_device(), "no multi")
+@unittest.skipIf(not_support_multi_device() or RANGEIFY, "no multi, RANGEIFY doesn't support multi const folding")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
