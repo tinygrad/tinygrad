@@ -349,7 +349,9 @@ pm_rangeify = pm_mops+PatternMatcher([
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
+  # if it's user contiguous, we don't touch it
   if b.src[0].op is Ops.CONTIGUOUS: return None
+
   new_rng = []
   hit = False
   reshape: list[sint] = []
@@ -361,7 +363,8 @@ def cleanup_dead_axes(b:UOp):
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
+    # move the tag to the expand
+    return b.replace(src=b.src[0:1]+tuple(new_rng), tag=None).reshape(tuple(reshape)).expand(b.shape).replace(tag=b.tag)
 
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
