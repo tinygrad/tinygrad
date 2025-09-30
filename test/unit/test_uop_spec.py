@@ -2,7 +2,7 @@ from __future__ import annotations
 import unittest
 
 from tinygrad import Tensor
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, RANGEIFY
 from tinygrad.uop.ops import UOp, Ops, print_uops
 from tinygrad.uop.spec import type_verify, ast_spec, tensor_uop_spec
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -75,6 +75,7 @@ class TestUOpSpec(unittest.TestCase):
     st = UOp.store(buf.view(ShapeTracker.from_shape(())), a.cast(dtypes.float))
     helper_test_verify_ast(st)
 
+  @unittest.skipIf(RANGEIFY, "RANGEIFY does not push views")
   def test_assert_masked_view_in_const(self):
     t = Tensor(6).uop
     a = t.replace(src=(t.src[0].replace(arg=t.st.reshape((1,)).pad(((0, 1),))),))

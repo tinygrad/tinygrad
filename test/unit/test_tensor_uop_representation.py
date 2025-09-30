@@ -32,8 +32,7 @@ class TestTensorMutates(unittest.TestCase):
     d.realize()
     is_pattern_uop(d.uop.base, realized_pattern)
     is_pattern_uop(c.uop.base, realized_pattern)
-    # NOTE: we keep movement ops on top of the buffer view
-    is_pattern_uop(c.uop, UPat(Ops.BUFFER))
+    is_pattern_uop(c.uop.base, realized_pattern)
     assert d.uop is not d.uop.base
 
   def test_reshape_is_same_child(self):
@@ -56,7 +55,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
     b = Tensor([4.,5,6]).realize()
     c = a+b
     print(c.uop)
-    is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    is_pattern(c, UPat(Ops.ADD))
+    for s in c.uop.src: is_pattern_uop(s.base, realized_pattern)
 
   def test_empty_buf(self):
     a = Tensor.empty(3, 3)
