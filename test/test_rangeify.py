@@ -77,6 +77,14 @@ class TestRangeify(unittest.TestCase):
     C = Tensor.empty(N, N)
     (((A@B).exp()@C).exp()).realize()
 
+  def test_double_gemm_exp_child(self):
+    A = Tensor.empty(N, N)
+    B = Tensor.empty(N, N)
+    C = Tensor.empty(N, N)
+    # A@B is used with exp, and also on the sum. this is two kernels now, is this right?
+    ret = A@B
+    ((ret.exp()@C)+ret).realize()
+
   def test_double_gemm_relu(self):
     A = Tensor.empty(N, N)
     B = Tensor.empty(N, N)
