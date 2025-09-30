@@ -54,6 +54,17 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def _test_shard_op(self, op, out, n=4):
+    t = Tensor.ones(n).contiguous().realize().shard(devices_2, 0)
+    r = op(t).realize()
+    assert t.uop.is_realized, "shard didn't realize"
+    self.assertEqual(r.tolist(), out)
+  def test_shard_reshape(self): self._test_shard_op(lambda t:t.reshape(2, 2), [[1.,1.],[1.,1.]])
+  def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
+  def test_shard_reduce(self):
+    self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=1), [3.,3.], n=6)
+    self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=0), [2.,2.,2.], n=6)
+
   def test_shard_not_multiple(self):
     X = Tensor.ones(256).contiguous().realize()
     with self.assertRaises(RuntimeError):
@@ -782,6 +793,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
+  @unittest.skipIf(RANGEIFY, "RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
       a = Tensor.arange(3).realize()
