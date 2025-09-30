@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, cast, Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
@@ -134,7 +134,7 @@ class RangeifyContext:
   progress: int = 0
 
   # create ranges
-  range_idx = itertools.count(0)
+  range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP): return UOp.range(s, next(self.range_idx), axistype)
 
 def map_reshape(idx:UOp, r:UOp):
