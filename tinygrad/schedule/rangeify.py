@@ -402,7 +402,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   ran = src.toposort(gate=red_gate)
 
   # if this is generated from multiple buffers, don't remove this buffer
-  if len(accessed_buffers) > 1: return None
+  if len(dedup([x.src[0] for x in accessed_buffers])) > 1: return None
 
   # const reduce is okay
   def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.COPY} for y in x.sparents)
