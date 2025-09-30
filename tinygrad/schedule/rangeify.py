@@ -455,7 +455,7 @@ def limit_bufs(ctx:RangeifyContext, root:UOp):
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     # TODO: add cache to fix n^2
-    if (is_load:=(u.op in {Ops.BUFFERIZE, Ops.BUFFER, Ops.DEFINE_VAR, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
+    if (is_load:=(u.op in {Ops.BUFFERIZE, Ops.BUFFER, Ops.DEFINE_VAR})): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
 
