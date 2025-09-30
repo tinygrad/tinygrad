@@ -241,4 +241,4 @@ multi_pm = PatternMatcher([
 ])+replace_allreduce
 
 @track_rewrites()
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return graph_rewrite_map(big_sink, multi_pm)
+def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]: return graph_rewrite_map(big_sink, multi_pm, name="multi_pm")
