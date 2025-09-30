@@ -146,7 +146,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -1959,7 +1958,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):

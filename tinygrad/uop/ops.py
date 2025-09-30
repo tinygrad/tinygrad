@@ -217,8 +217,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # determine what ranges this is in
   @functools.cached_property
-  def ranges(self) -> dict[UOp, None]:
-    if self.op is Ops.RANGE: return {self:None}
+  def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     if self.op in range_start.keys():
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
@@ -227,6 +226,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     else:
       for s in self.src: ret.update(s.ranges)
     return ret
+
+  @property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None}
+    return self._ranges
 
   # *** uop evaluation ***
 
