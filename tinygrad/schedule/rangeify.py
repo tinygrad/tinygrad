@@ -308,8 +308,7 @@ def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
 def might_end_axis(idx:UOp):
   if idx.arg is None: return None
   # TODO: write a proper cost function here
-  if all(x.op not in {Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE} for x in idx.toposort()): return None
-  if all(x.op not in {Ops.REDUCE_AXIS} for x in idx.toposort()): return None
+  if all(x.op not in {Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE, Ops.REDUCE_AXIS} for x in idx.sparents): return None
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
     # in RANGEIFY=1, always realize
