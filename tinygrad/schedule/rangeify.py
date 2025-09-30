@@ -13,7 +13,7 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD}
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
 
 double_reshape = PatternMatcher([
   # RESHAPE on RESHAPE is the second reshape
@@ -343,7 +343,8 @@ pm_rangeify = pm_mops+PatternMatcher([
 
   # handle assign
   (UPat(Ops.INDEX, src=(UPat(Ops.ASSIGN, name="assign"),), allow_any_len=True, name="x"),
-    lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],))),
+    lambda x,assign: assign.replace(src=tuple([s.index(*x.src[1:]) for s in assign.src])+(assign.src[0],)) \
+        if assign.src[1].op is not Ops.KERNEL else None),
 
   # move MAP through elementwise ALU / reduce. these are the items with cost
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise.union(
