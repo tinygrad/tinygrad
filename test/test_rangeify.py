@@ -38,8 +38,20 @@ class TestRangeifyOpt(unittest.TestCase):
     Xsel, Ysel = X[sel], Y[sel]
     Tensor.realize(Xsel, Ysel)
 
+  def test_resnetconv(self):
+    conv1 = nn.Conv2d(3, 8, kernel_size=7, stride=2, bias=False, padding=3)
+    conv1.weight.replace(conv1.weight.empty_like())
+    x = Tensor.empty(1, 3, 56, 56)
+    x = conv1(x).pad([1,1,1,1])+1
+    x.realize()
+
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
+  def test_groupnorm(self):
+    # ranges 1 and 3 are merging
+    x = nn.GroupNorm(32, 128)
+    x(Tensor.empty(1, 128, 64, 64)).realize()
+
   def test_expand_children(self):
     A = Tensor.empty(N, N).sum(axis=1)
     ba = A.expand(N, N)

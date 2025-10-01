@@ -156,7 +156,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
-                                                   Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
+                                                   Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
@@ -217,8 +217,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # determine what ranges this is in
   @functools.cached_property
-  def ranges(self) -> dict[UOp, None]:
-    if self.op is Ops.RANGE: return {self:None}
+  def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     if self.op in range_start.keys():
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
@@ -227,6 +226,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     else:
       for s in self.src: ret.update(s.ranges)
     return ret
+
+  @property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None}
+    return self._ranges
 
   # *** uop evaluation ***
 
