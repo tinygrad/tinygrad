@@ -38,6 +38,13 @@ class TestRangeifyOpt(unittest.TestCase):
     Xsel, Ysel = X[sel], Y[sel]
     Tensor.realize(Xsel, Ysel)
 
+  def test_resnetconv(self):
+    self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
+    self.conv1.weight.realize()
+    x = Tensor.empty(1, 3, 224, 224)
+    x = self.conv1(x).pad([1,1,1,1]).max_pool2d((3,3), 2)
+    x.realize()
+
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
