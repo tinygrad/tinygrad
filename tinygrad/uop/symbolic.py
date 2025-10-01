@@ -509,7 +509,7 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("c").where(UPat(), invalid_pat)).or_casted(),), allow_any_len=True,
     name="l").or_casted(), UPat.var("a")), lambda c,l,a,i: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[1:]).cast(a.dtype)),
   (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("c").logical_not().where(UPat(), invalid_pat)).or_casted(),),
-    allow_any_len=True, name="l").or_casted()), lambda c,l,a,i: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[1:])),
+    allow_any_len=True, name="l").or_casted()), lambda c,l,a,i: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[1:]).cast(a.dtype)),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
