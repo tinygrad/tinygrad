@@ -410,14 +410,13 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
 def pre_assign(a:UOp, b:UOp, assign:UOp):
   if b.src[0].op is Ops.CONTIGUOUS: return None
   idxs = [assign.src[0]]  # write index
-  for s in b.src[0].toposort(gate=lambda s:s.op is not Ops.BUFFERIZE):
+  for s in b.src[0].substitute(dict(zip(b.src[1:], assign.src[1].src[1:]))).toposort(gate=lambda s:s.op is not Ops.BUFFERIZE):
     if s.op is Ops.INDEX and s.src[0] is a: idxs.append(s) # read(s) index
   # TODO: something here that checks if the index doesn't overlap?
   idxs = dedup(idxs)
   hit = False
   for i in idxs: print(i.render())
-  if len(idxs) > 1: hit = True # wrong
-  hit = False
+  if len(idxs) > 1: hit = True # sometimes too much
   if hit:
     nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
     return assign.replace(src=(assign.src[0], assign.src[1].replace(src=(nb,)+assign.src[1].src[1:]))+assign.src[2:])

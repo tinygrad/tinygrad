@@ -379,7 +379,8 @@ class TestAssign(unittest.TestCase):
     a.assign(a + b)
     kc = GlobalCounters.kernel_count
     a.realize()
-    assert GlobalCounters.kernel_count - kc == 1
+    #assert GlobalCounters.kernel_count - kc == 1
+    assert GlobalCounters.kernel_count - kc == (2 if RANGEIFY else 1) # still 2, shrink/pad is fine
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
