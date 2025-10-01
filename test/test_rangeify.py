@@ -192,10 +192,10 @@ class TestRangeify(unittest.TestCase):
     out.realize()
 
   def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+    #BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+    BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
 
     # llama 8B
     #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
@@ -203,15 +203,17 @@ class TestRangeify(unittest.TestCase):
     def fa():
       Tensor.manual_seed(1337)
       with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      return q.scaled_dot_product_attention(k, v).realize()
+      return q.scaled_dot_product_attention(k, v)
 
+    from tinygrad.codegen.opt import OptOps, Opt
     with Context(DEBUG=4):
       GlobalCounters.reset()
-      ret = fa()
+      opts = (Opt(OptOps.UPCAST,0,4),)
+      ret = fa().contiguous(arg=opts).realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
         GlobalCounters.reset()
-        cmp = fa()
+        cmp = fa().realize()
       with Context(DEBUG=0):
         mse = ((cmp-ret)**2).sum().item()
     print(f"mse: {mse}")
