@@ -540,6 +540,10 @@ jobs:
     - name: Test CPU=1 CPU_LLVM=1 RANGEIFY=1
       run: |
         CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_edgecases.py
+    - name: Test Docs RANGEIFY=1 
+      run: |
+        RANGEIFY=1 python docs/abstractions2.py
+        RANGEIFY=1 python docs/abstractions3.py
     - name: Test const folding
       run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding"
     # RANGEIFY=2 isn't supported
