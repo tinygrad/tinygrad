@@ -68,12 +68,14 @@ def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+  # if it's a kernel, we don't realize it
+  if a.src[1].op is not Ops.KERNEL: ctx[a] = None
 
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize ASSIGN/COPY/BUFFER_VIEW/CONTIGUOUS
-  (UPat({Ops.ASSIGN, Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
   # realize parents of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
   # realize input to assign (might be optimized out)
