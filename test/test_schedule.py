@@ -1898,17 +1898,18 @@ class TestSchedule(unittest.TestCase):
       # NOTE: this is a bug on non rangeify
       np.testing.assert_equal(tst.numpy(), a.numpy())
 
-  def test_setitem_sched(self, transpose=False):
+  def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
     a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
-    a2 = a.T if transpose else a
+    a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
     kcount = len(sched:=a.schedule())
     run_schedule(sched)
     self.assertListEqual(a.tolist(), expected)
-    self.assertEqual(kcount, 2 if transpose else 1)
+    self.assertEqual(kcount, expected_kcount)
   @unittest.skipUnless(RANGEIFY>0, "this asserts on non rangeify")
-  def test_setitem_permuted_sched(self): self.test_setitem_sched(transpose=True)
+  def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
+  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
