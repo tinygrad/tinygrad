@@ -93,7 +93,7 @@ class TestTensorUOp(unittest.TestCase):
     out.realize()
     self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
-reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat((Ops.REDUCE_AXIS, Ops.REDUCE))))))
+reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, allow_any_len=True, src=(UPat(), UPat((Ops.REDUCE_AXIS, Ops.REDUCE))))))
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
     a = Tensor.rand(4, 4).realize()
