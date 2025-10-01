@@ -39,9 +39,9 @@ class TestRangeifyOpt(unittest.TestCase):
     Tensor.realize(Xsel, Ysel)
 
   def test_resnetconv(self):
-    conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
+    conv1 = nn.Conv2d(3, 8, kernel_size=7, stride=2, bias=False, padding=3)
     conv1.weight.replace(conv1.weight.empty_like())
-    x = Tensor.empty(1, 3, 224, 224)
+    x = Tensor.empty(1, 3, 56, 56)
     x = conv1(x).pad([1,1,1,1])+1
     x.realize()
 
