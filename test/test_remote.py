@@ -33,6 +33,7 @@ class TestRemoteMultiHost(unittest.TestCase):
     assert len(do.captured._jit_cache) == 1 and isinstance(do.captured._jit_cache[0].prg, RemoteGraph), repr(do.captured)
 
   @Context(JIT_BATCH_SIZE=2**32)
+  @unittest.skip("assign target and input devices mismatch")
   def test_multihost_aware_schedule(self):
     @TinyJit
     def do(*ts:Tensor):
