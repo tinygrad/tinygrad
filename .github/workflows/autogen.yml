@@ -91,6 +91,9 @@ jobs:
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
     - name: Verify mesa autogen
       run: |
+        python -m venv .venv
+        . .venv/bin/activate
+        python -m pip install pyyaml mako
         cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         ./autogen_stubs.sh mesa
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
