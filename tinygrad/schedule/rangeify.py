@@ -20,8 +20,8 @@ def find_permutes(a:UOp, b:UOp, assign:UOp):
   if not (permutes:=[s for s in b.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)
                      if s.op in GroupOp.Movement and s.op not in {Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK}]): return
   target = a.base
-  if any(s is target for s in p.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER}) for p in permutes):
-    return assign.replace(src=(a, b.contiguous()))
+  for p in permutes:
+    if any(s is target for s in p.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})): return assign.replace(src=(a, b.contiguous()))
 
 earliest_rewrites = PatternMatcher([
   # just removing it works...
