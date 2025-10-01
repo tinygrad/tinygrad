@@ -58,7 +58,8 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
   angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
-  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype), angles.sin().reshape(1, 1, T, half).cast(x.dtype)
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
   x_pairs = x.reshape(B, H, T, half, 2)
   return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
                       x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
