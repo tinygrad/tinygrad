@@ -47,6 +47,12 @@ class TestMultiTensor(unittest.TestCase):
     grad = X.sum().gradient(X)[0]
     grad.realize()
 
+  def test_acc(self):
+    acc = Tensor.zeros(1)
+    ss = [Tensor.ones(32).shard(devices_2, 0) for _ in range(2)]
+    for s in ss: acc += s.sum()
+    self.assertEqual(acc.to("CPU").item(), 32*2)
+
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
