@@ -47,8 +47,9 @@ earliest_rewrites = PatternMatcher([
        not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
 
   # realize before assign if input permutes the target buffer
-  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), lambda a,b,assign: assign.replace(src=(a, b.contiguous())) \
-      if any(x.base is a.base and x is not a for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
+  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"),
+   lambda a,b,assign: assign.replace(src=(a, b.contiguous())) if any(x.base is a.base and x.op not in {Ops.RESHAPE, Ops.EXPAND, Ops.SHRINK, Ops.PAD}
+                                                                     for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
