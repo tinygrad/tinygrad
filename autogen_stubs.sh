@@ -499,7 +499,7 @@ generate_mesa() {
   LVP_NIR_OPTIONS=$(./extra/mesa/lvp_nir_options.sh $MESA_SRC)
 
   fixup $BASE/mesa.py
-  echo "lvp_nir_options = ctypes.pointer(nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))))" >> $BASE/mesa.py
+  echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
   sed -i "s/AttributeError/(AttributeError,FileNotFoundError)/" $BASE/mesa.py
   sed -i "s/import ctypes/import ctypes, gzip, base64, tinygrad.runtime.support.mesa as mesa/" $BASE/mesa.py

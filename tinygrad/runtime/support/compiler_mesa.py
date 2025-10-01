@@ -48,12 +48,12 @@ class LVPCompiler(Compiler):
   def disassemble(self, lib:bytes): cpu_objdump(lib)
 
 class NAKCompiler(Compiler):
-  def __init__(self, dev, cache_key="nak"):
-    self.arch = dev.arch
-    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(dev.arch[3:]), max_warps_per_mp=dev.max_warps_per_sm))
-    self.nir_options = ctypes.cast(mesa.nak_nir_options(self.cc), ctypes.POINTER(mesa.nir_shader_compiler_options))
+  def __init__(self, arch, warps_per_sm, cache_key="nak"):
+    self.arch, self.warps_per_sm = arch, warps_per_sm
+    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps_per_sm))
+    self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     mesa.glsl_type_singleton_init_or_ref()
-    super().__init__(f"compile_{cache_key}_{dev.arch}")
+    super().__init__(f"compile_{cache_key}_{arch}")
 
   def __del__(self):
     mesa.nak_compiler_destroy(self.cc)
@@ -73,6 +73,8 @@ class NAKCompiler(Compiler):
       with open(fn, "wb") as f: f.write(parse_nak_shader(lib)[0])
       print(subprocess.check_output(['nvdisasm', "-b", f"SM{self.arch[3:]}", fn]).decode('utf-8'))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
+
+  def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
 
 def parse_nak_shader(shader:bytes) -> Tuple[memoryview, int, int, int]:
   info = mesa.struct_nak_shader_info.from_buffer(shader)

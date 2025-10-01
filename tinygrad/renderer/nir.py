@@ -82,11 +82,7 @@ def deref_var(b:mesa.nir_builder, var:mesa.nir_variable) -> mesa.nir_def:
 
 def nbarrier(b:mesa.nir_builder):
   barrier = mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_barrier)
-  # TODO: what are the right values here?
   nir_intrinsic_set(mesa.NIR_INTRINSIC_EXECUTION_SCOPE, barrier, mesa.SCOPE_WORKGROUP)
-  nir_intrinsic_set(mesa.NIR_INTRINSIC_MEMORY_SCOPE, barrier, 0)
-  nir_intrinsic_set(mesa.NIR_INTRINSIC_MEMORY_SEMANTICS, barrier, 0)
-  nir_intrinsic_set(mesa.NIR_INTRINSIC_MEMORY_MODES, barrier, 0)
   mesa.nir_builder_instr_insert(b, barrier.contents.instr)
 
 # alu ops, aop[<dtype>][<op>]
@@ -194,7 +190,8 @@ class NIRRenderer(Renderer):
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")
   def param(self, dtype:DType, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
-  def prerender(self, uops:list[UOp]): self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, self.nir_options, None)
+  def prerender(self, uops:list[UOp]):
+    self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
 
   def render(self, uops:list[UOp]):
     self.prerender(uops)
@@ -238,12 +235,20 @@ class NIRRenderer(Renderer):
     return ret
 
 class NAKRenderer(NIRRenderer):
-  def __init__(self, dev, device="NV"):
-    self.dev = dev
+  def __init__(self, dev=None, nir_options=None, device="NV"):
+    if dev: self.dev = dev
+    else: self.__dict__['nir_options'] = nir_options
     super().__init__(device)
 
+  @classmethod
+  def with_opts(cls, opts): return cls(nir_options=opts)
+
+  def __reduce__(self): return NAKRenderer.with_opts, (self.nir_options,)
+
   @property
-  def nir_options(self): return self.dev.compiler.nir_options
+  def nir_options(self):
+    self.__dict__['nir_options'] = self.dev.compiler.nir_options
+    return self.__dict__['nir_options']
 
   def param(self, dtype:DType, sz:int) -> mesa.nir_def:
     intrin = mesa.nir_intrinsic_instr_create(self.b.shader, mesa.nir_intrinsic_ldc_nv)

@@ -538,7 +538,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     compilers:list[CompilerPairT] = [(functools.partial(NVRenderer, self.arch),functools.partial(CUDACompiler if MOCKGPU else NVCompiler, self.arch)),
       (functools.partial(PTXRenderer, self.arch, device="NV"), functools.partial(PTXCompiler if MOCKGPU else NVPTXCompiler, self.arch)),
-      (functools.partial(NAKRenderer, self), functools.partial(NAKCompiler, self))]
+      (functools.partial(NAKRenderer, dev=self), functools.partial(NAKCompiler, self.arch, self.max_warps_per_sm))]
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
