@@ -2,12 +2,13 @@ from typing import Any, cast, Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.codegen.simplify import pm_flatten_range
+from tinygrad.codegen.opt import Opt
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -555,6 +556,7 @@ class LocalAddBufferContext:
   vars:dict = field(default_factory=dict)
   range:int = 0
   parent_tags:list = field(default_factory=list)
+  opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
@@ -596,10 +598,16 @@ to_define_global = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
 
+def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
+  if isinstance(x.arg, tuple) and all(isinstance(y, Opt) for y in x.arg): ctx.opts = x.arg
+  return x.src[0]
+
 rangeify_codegen = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, name="x"), get_contiguous),
+
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
-  (UPat((Ops.NOOP, Ops.CONTIGUOUS), name="x"), lambda x: x.src[0]),
+  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
 
   # strip the arg from store
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
@@ -640,7 +648,8 @@ def split_store(ctx:list[UOp], x:UOp):
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
-  ret = ret.sink() if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
+  ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None) \
+    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   return x.as_buf().assign(kernel)
