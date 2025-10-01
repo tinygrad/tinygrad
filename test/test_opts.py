@@ -1,10 +1,9 @@
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.helpers import RANGEIFY, CPU_LLVM, CPU_LVP
+from tinygrad.helpers import CPU_LLVM, CPU_LVP
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
 
-@unittest.skipIf(RANGEIFY>0, "arg is partial contig in rangeify")
 class TestOpts(unittest.TestCase):
   def test_opt_upcast(self):
     opts = (Opt(OptOps.UPCAST, 0, 4),)

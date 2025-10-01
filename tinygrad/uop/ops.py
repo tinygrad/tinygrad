@@ -134,6 +134,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
+  def op_in_parents(self, *ops:Ops): return any(x.op in ops for x in self.toposort())
+
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
     ret: dict[UOp, dict[UOp, None]] = {}
@@ -156,7 +158,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
-                                                   Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
+                                                   Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
