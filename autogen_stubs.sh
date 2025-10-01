@@ -445,7 +445,7 @@ generate_libusb() {
 generate_mesa() {
   MESA_TAG="mesa-25.2.3"
   MESA_SRC=/tmp/mesa-$MESA_TAG
-  TINYMESA_COMMIT_HASH=f1f4463
+  TINYMESA_COMMIT_HASH=3cb1b80
   TINYMESA_DIR=/tmp/tinymesa-$MESA_TAG-$TINYMESA_COMMIT_HASH/
   TINYMESA_SO=$TINYMESA_DIR/libtinymesa_cpu.so
   if [ ! -d "$MESA_SRC" ]; then
