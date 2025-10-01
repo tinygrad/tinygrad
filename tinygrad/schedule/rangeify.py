@@ -497,7 +497,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp):
+def bufferize_to_store(x:UOp, allow_locals=True):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
@@ -530,6 +530,7 @@ def bufferize_to_store(x:UOp):
     return ret.replace(tag=x.tag)
 
   # handle locals
+  if not allow_locals: return None
   tag = x.arg.device
   if tag is None: tag = UOp.unique().arg # TODO: hack
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
@@ -537,13 +538,21 @@ def bufferize_to_store(x:UOp):
   # TODO: how is this unified?
   return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
 
-pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
+_pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0] for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
 ])
+
+pm_add_buffers_nolocals = PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
+])+_pm_add_buffers
+
+# all local bufferization should happen later
+pm_add_buffers = PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+])+_pm_add_buffers
 
 # *****************
 # 5. split into kernels
@@ -710,7 +719,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers_nolocals, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
