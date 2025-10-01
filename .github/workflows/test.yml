@@ -160,8 +160,10 @@ jobs:
       with:
         key: be-minimal
         deps: testing_minimal
-    - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+    - name: Test dtype with Python emulator (with RANGEIFY)
+      run: |
+        RANGEIFY=0 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+        RANGEIFY=1 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
       run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
     - name: Test uops with Python emulator
@@ -1037,3 +1039,9 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+      - name: Run pytest (${{ matrix.backend }}) with RANGEIFY
+        if: matrix.backend=='webgpu'
+        env:
+          RANGEIFY: 1
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
