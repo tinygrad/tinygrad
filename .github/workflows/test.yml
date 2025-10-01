@@ -160,8 +160,10 @@ jobs:
       with:
         key: be-minimal
         deps: testing_minimal
-    - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+    - name: Test dtype with Python emulator (with RANGEIFY)
+      run: |
+        RANGEIFY=0 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+        RANGEIFY=1 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
       run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
     - name: Test uops with Python emulator
@@ -261,8 +263,10 @@ jobs:
         key: unittest-12
         pydeps: "pillow numpy ftfy regex"
         deps: testing_unit
+    - name: Check Device.DEFAULT
+      run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
-      run: python -m pytest -n=auto test/unit/ --durations=20
+      run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     - name: Run SDXL on NULL backend
@@ -376,9 +380,10 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2160 ALLOWED_GATED_READ_IMAGE=16 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2160 ALLOWED_GATED_READ_IMAGE=16 RANGEIFY=0 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot model with rangeify
-        run: RANGEIFY=1 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+        run: |
+          ALLOWED_KERNEL_COUNT=190 ALLOWED_READ_IMAGE=2041 ALLOWED_GATED_READ_IMAGE=33 RANGEIFY=1 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
@@ -534,11 +539,16 @@ jobs:
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
           test/test_setitem.py test/test_assign.py test/test_multitensor.py
+    - name: Test CPU=1 DEVECTORIZE=0 (RANGEIFY=1)
+      run: CPU=1 CPU_LLVM=0 RANGEIFY=1 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test CPU=1 CPU_LLVM=1 RANGEIFY=1
       run: |
         CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_edgecases.py
+    - name: Test Docs RANGEIFY=1
+      run: |
+        RANGEIFY=1 python docs/abstractions2.py
     - name: Test const folding
-      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding"
+      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded"
     # RANGEIFY=2 isn't supported
     #- name: Test CPU=1 RANGEIFY=2
     #  run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
@@ -586,7 +596,7 @@ jobs:
     - name: some unit tests
       run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/unit/test_winograd.py test/unit/test_linalg.py --durations=20
     - name: Test METAL=1 RANGEIFY=1
-      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py --durations=20
+      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -1031,3 +1041,9 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+      - name: Run pytest (${{ matrix.backend }}) with RANGEIFY
+        if: matrix.backend=='webgpu'
+        env:
+          RANGEIFY: 1
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
