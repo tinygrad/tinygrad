@@ -216,6 +216,8 @@ class ClangRenderer(CStyleLanguage):
   def render_vector_prefix(self, dt:DType) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
     alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) else 1
+    if dt.scalar().itemsize == 1: # boolean is an invalid vector element type
+      return f"typedef unsigned char {self.render_dtype(dt)} __attribute__((aligned({alignment}),vector_size({dt.itemsize})));"
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),vector_size({dt.itemsize})));"
 
   def _render_defines(self, uops) -> list[str]:

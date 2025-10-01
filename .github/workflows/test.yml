@@ -534,6 +534,8 @@ jobs:
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
           test/test_setitem.py test/test_assign.py test/test_multitensor.py
+    - name: Test CPU=1 DEVECTORIZE=0 (RANGEIFY=1)
+      run: CPU=1 CPU_LLVM=0 RANGEIFY=1 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test CPU=1 CPU_LLVM=1 RANGEIFY=1
       run: |
         CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_edgecases.py
