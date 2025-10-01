@@ -98,8 +98,7 @@ s = UOp(Ops.SINK, dtypes.void, (out,))
 becomes_map = get_rangeify_map(s) if RANGEIFY else get_kernelize_map(s)
 
 # the compute maps to an assign
-assign = becomes_map[a+b]
-if RANGEIFY: assign = assign.src[0] # RANGEIFY wrap with a RESHAPE
+assign = becomes_map[a+b].base
 
 # the first source is the output buffer (data)
 assert assign.src[0].op is Ops.BUFFER
